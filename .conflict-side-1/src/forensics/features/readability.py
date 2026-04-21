@@ -1,0 +1,30 @@
+"""Readability scores (Phase 4)."""
+
+from __future__ import annotations
+
+import textstat
+
+
+def extract_readability_features(text: str) -> dict[str, float]:
+    """Flesch–Kincaid grade, Coleman–Liau, Gunning Fog, SMOG (textstat)."""
+    if not text or not text.strip():
+        return {
+            "flesch_kincaid": float("nan"),
+            "coleman_liau": float("nan"),
+            "gunning_fog": float("nan"),
+            "smog": float("nan"),
+        }
+    try:
+        return {
+            "flesch_kincaid": float(textstat.flesch_kincaid_grade(text)),
+            "coleman_liau": float(textstat.coleman_liau_index(text)),
+            "gunning_fog": float(textstat.gunning_fog(text)),
+            "smog": float(textstat.smog_index(text)),
+        }
+    except Exception:
+        return {
+            "flesch_kincaid": float("nan"),
+            "coleman_liau": float("nan"),
+            "gunning_fog": float("nan"),
+            "smog": float("nan"),
+        }
