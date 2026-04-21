@@ -48,6 +48,12 @@ class FeatureVector(BaseModel):
     days_since_last_article: float = 0.0
     rolling_7d_count: int = 0
     rolling_30d_count: int = 0
+    pos_bigram_top30: dict[str, float] = Field(default_factory=dict)
+    clause_initial_entropy: float = 0.0
+    clause_initial_top10: dict[str, float] = Field(default_factory=dict)
+    dep_depth_mean: float = 0.0
+    dep_depth_std: float = 0.0
+    dep_depth_max: float = 0.0
 
 
 class EmbeddingRecord(BaseModel):
@@ -57,5 +63,6 @@ class EmbeddingRecord(BaseModel):
     author_id: str
     timestamp: datetime
     model_name: str
+    model_version: str
     embedding_path: str
     embedding_dim: int

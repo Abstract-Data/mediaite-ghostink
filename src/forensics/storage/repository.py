@@ -193,6 +193,44 @@ class Repository:
             archive_url=row["archive_url"],
         )
 
+    def get_author_by_slug(self, slug: str) -> Author | None:
+        with _db_session(self._db_path) as conn:
+            row = conn.execute("SELECT * FROM authors WHERE slug = ?", (slug,)).fetchone()
+        if row is None:
+            return None
+        return Author(
+            id=row["id"],
+            name=row["name"],
+            slug=row["slug"],
+            outlet=row["outlet"],
+            role=row["role"],
+            baseline_start=date.fromisoformat(str(row["baseline_start"])),
+            baseline_end=date.fromisoformat(str(row["baseline_end"])),
+            archive_url=row["archive_url"],
+        )
+
+    def list_articles_for_extraction(self, *, author_id: str | None = None) -> list[Article]:
+        """Return articles eligible for feature extraction (Phase 4 selection rules)."""
+        parts = [
+            "length(trim(a.clean_text)) > 0",
+            "instr(a.clean_text, '[REDIRECT:') != 1",
+            "a.is_duplicate = 0",
+            "a.word_count >= 50",
+        ]
+        params: tuple[str, ...] = ()
+        if author_id is not None:
+            parts.append("a.author_id = ?")
+            params = (author_id,)
+        where_sql = " AND ".join(parts)
+        sql = f"SELECT a.* FROM articles a WHERE {where_sql} ORDER BY a.published_date"
+        with _db_session(self._db_path) as conn:
+            rows = (
+                conn.execute(sql, params).fetchall()
+                if params
+                else conn.execute(sql).fetchall()
+            )
+        return [_row_to_article(row) for row in rows]
+
     def upsert_author(self, author: Author) -> None:
         with _db_session(self._db_path) as conn:
             conn.execute(
