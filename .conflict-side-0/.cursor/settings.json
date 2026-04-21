@@ -1,0 +1,22 @@
+{
+  "plugins": {
+    "notion-workspace": {
+      "enabled": true
+    },
+    "cloudflare": {
+      "enabled": true
+    },
+    "docs-canvas": {
+      "enabled": true
+    },
+    "cursor-team-kit": {
+      "enabled": true
+    },
+    "context7-plugin": {
+      "enabled": true
+    },
+    "continual-learning": {
+      "enabled": true
+    }
+  }
+}

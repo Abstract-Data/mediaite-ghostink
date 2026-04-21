@@ -1,0 +1,30 @@
+{
+  "family": "phase8-report-and-deployment",
+  "current_version": "0.3.0",
+  "versions": [
+    {
+      "version": "0.1.0",
+      "date": "2026-04-20",
+      "status": "superseded",
+      "model": "gpt-5-3-codex",
+      "file": "v0.1.0.md",
+      "changelog_entry": "Initial spec: 7 Jupyter notebooks, Plotly chart theme, Quarto config, Makefile, Git LFS, Cloudflare Pages deployment."
+    },
+    {
+      "version": "0.2.0",
+      "date": "2026-04-20",
+      "status": "superseded",
+      "model": "gpt-5-3-codex",
+      "file": "v0.2.0.md",
+      "changelog_entry": "feat: add expert-witness-grade methodology appendix, FindingStrength confidence taxonomy for non-technical readers, pre-registration document template"
+    },
+    {
+      "version": "0.3.0",
+      "date": "2026-04-20",
+      "status": "active",
+      "model": "gpt-5-3-codex",
+      "file": "v0.3.0.md",
+      "changelog_entry": "feat: expand from 7 to 10 notebooks with forensic layout rules — add 00_power_analysis (pre-registration), 02_corpus_audit (chain of custody), 08_control_comparison (confound elimination); mandatory header cells with provenance metadata; Quarto book format with parts; narrative-first cell ordering pattern"
+    }
+  ]
+}
