@@ -366,26 +366,26 @@ def run_drift_analysis(
     author_slug: str | None = None,
 ) -> None:
     """Compute drift metrics for configured authors and write ``data/analysis/*`` outputs."""
+    from forensics.analysis.utils import resolve_author_rows
+
     init_db(db_path)
     root = project_root or get_project_root()
     embed_root = root / "data" / "embeddings"
     analysis_dir = root / "data" / "analysis"
-    slugs = [author_slug] if author_slug else [a.slug for a in settings.authors]
     centroids_by_author: dict[str, list[tuple[str, np.ndarray]]] = {}
 
     with Repository(db_path) as repo:
-        for slug in slugs:
+        author_rows = resolve_author_rows(repo, settings, author_slug=author_slug)
+        for author in author_rows:
             try:
-                article_embs = load_article_embeddings(slug, embed_root, db_path, project_root=root)
+                article_embs = load_article_embeddings(
+                    author.slug, embed_root, db_path, project_root=root
+                )
             except ValueError as exc:
-                logger.warning("drift: skip slug=%s (%s)", slug, exc)
-                continue
-            author = repo.get_author_by_slug(slug)
-            if author is None:
-                logger.warning("drift: author row missing for slug=%s", slug)
+                logger.warning("drift: skip slug=%s (%s)", author.slug, exc)
                 continue
             res = compute_author_drift_pipeline(
-                slug,
+                author.slug,
                 author.id,
                 article_embs,
                 settings,
@@ -393,11 +393,11 @@ def run_drift_analysis(
                 analysis_dir=analysis_dir,
             )
             if res is None:
-                logger.warning("drift: insufficient embeddings for %s", slug)
+                logger.warning("drift: insufficient embeddings for %s", author.slug)
                 continue
             monthly, _drift, _umap, _bc, _vel, _ai = res
-            centroids_by_author[slug] = monthly
-            logger.info("drift: wrote analysis artifacts for %s", slug)
+            centroids_by_author[author.slug] = monthly
+            logger.info("drift: wrote analysis artifacts for %s", author.slug)
 
     if len(centroids_by_author) > 1:
         combined = generate_umap_projection(

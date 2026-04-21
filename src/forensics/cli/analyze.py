@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
@@ -18,20 +17,6 @@ from forensics.config.settings import ForensicsSettings
 from forensics.storage.repository import insert_analysis_run
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True)
-class AnalyzeFlags:
-    """Boolean flags for ``run_analyze`` routing."""
-
-    changepoint: bool = False
-    timeseries: bool = False
-    drift: bool = False
-    convergence: bool = False
-    compare: bool = False
-    ai_baseline: bool = False
-    skip_generation: bool = False
-    verify_corpus: bool = False
 
 
 def _write_run_metadata(
@@ -71,17 +56,18 @@ def _run_compare_only_flow(
     logger.info("analyze: compare-only complete author=%s", author or "all")
 
 
-def _resolve_mode_flags(flags: AnalyzeFlags) -> tuple[bool, bool, bool, bool]:
-    explicit = (
-        flags.changepoint
-        or flags.timeseries
-        or flags.drift
-        or flags.ai_baseline
-        or flags.convergence
-        or flags.compare
-    )
+def _resolve_mode_flags(
+    *,
+    changepoint: bool,
+    timeseries: bool,
+    drift: bool,
+    convergence: bool,
+    compare: bool,
+    ai_baseline: bool,
+) -> tuple[bool, bool, bool, bool]:
+    explicit = changepoint or timeseries or drift or ai_baseline or convergence or compare
     if explicit:
-        return flags.changepoint, flags.timeseries, flags.drift, flags.convergence
+        return changepoint, timeseries, drift, convergence
     return False, True, False, True
 
 
@@ -188,24 +174,13 @@ def run_analyze(
     Kept separate from the Typer ``analyze`` callback so the `forensics all`
     orchestrator can call this without fighting Typer's option defaults.
     """
-    flags = AnalyzeFlags(
-        changepoint=changepoint,
-        timeseries=timeseries,
-        drift=drift,
-        convergence=convergence,
-        compare=compare,
-        ai_baseline=ai_baseline,
-        skip_generation=skip_generation,
-        verify_corpus=verify_corpus,
-    )
-
     settings = get_settings()
     root = get_project_root()
     db_path = root / "data" / "articles.db"
     analysis_dir = root / "data" / "analysis"
     analysis_dir.mkdir(parents=True, exist_ok=True)
 
-    if flags.verify_corpus:
+    if verify_corpus:
         from forensics.utils.provenance import verify_corpus_hash
 
         ok, message = verify_corpus_hash(db_path, analysis_dir)
@@ -214,17 +189,18 @@ def run_analyze(
             raise typer.Exit(code=1)
         logger.info("corpus hash verified (%s)", message)
 
-    if flags.compare and not (
-        flags.changepoint
-        or flags.timeseries
-        or flags.drift
-        or flags.ai_baseline
-        or flags.convergence
-    ):
+    if compare and not (changepoint or timeseries or drift or ai_baseline or convergence):
         _run_compare_only_flow(db_path, settings, root=root, author=author)
         return
 
-    do_changepoint, do_timeseries, do_drift, do_full_analysis = _resolve_mode_flags(flags)
+    do_changepoint, do_timeseries, do_drift, do_full_analysis = _resolve_mode_flags(
+        changepoint=changepoint,
+        timeseries=timeseries,
+        drift=drift,
+        convergence=convergence,
+        compare=compare,
+        ai_baseline=ai_baseline,
+    )
 
     rid = insert_analysis_run(
         db_path,
@@ -251,13 +227,13 @@ def run_analyze(
         _run_drift_stage(db_path, settings, root=root, author=author)
     if do_full_analysis:
         _run_full_analysis_stage(db_path, settings, root=root, author=author)
-    if flags.ai_baseline:
+    if ai_baseline:
         _run_ai_baseline_stage(
             db_path,
             settings,
             root=root,
             author=author,
-            skip_generation=flags.skip_generation,
+            skip_generation=skip_generation,
             articles_per_cell=articles_per_cell,
             baseline_model=baseline_model,
         )
@@ -268,7 +244,7 @@ def run_analyze(
         do_timeseries,
         do_drift,
         do_full_analysis,
-        flags.ai_baseline,
+        ai_baseline,
         author or "all",
     )
 

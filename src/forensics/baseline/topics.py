@@ -9,6 +9,7 @@ from pathlib import Path
 from sklearn.decomposition import LatentDirichletAllocation
 from sklearn.feature_extraction.text import TfidfVectorizer
 
+from forensics.config.settings import ForensicsSettings
 from forensics.storage.repository import Repository
 
 
@@ -53,11 +54,21 @@ def sample_topic_keywords(
     db_path: Path,
     author_slug: str,
     *,
-    num_topics: int = 20,
-    n_keywords: int = 10,
+    settings: ForensicsSettings | None = None,
+    num_topics: int | None = None,
+    n_keywords: int | None = None,
     random_state: int = 42,
 ) -> list[list[str]]:
-    """Return one keyword-list per LDA topic for this author's corpus."""
+    """Return one keyword-list per LDA topic for this author's corpus.
+
+    ``num_topics`` / ``n_keywords`` are resolved from ``settings.analysis`` when omitted.
+    """
+    if settings is None:
+        from forensics.config import get_settings
+
+        settings = get_settings()
+    n_topics = num_topics if num_topics is not None else settings.analysis.lda_num_topics
+    n_kw = n_keywords if n_keywords is not None else settings.analysis.lda_n_keywords
     with Repository(db_path) as repo:
         author = repo.get_author_by_slug(author_slug)
         if author is None:
@@ -68,8 +79,8 @@ def sample_topic_keywords(
         raise ValueError(f"Need ≥5 articles for LDA topics (got {len(texts)} for {author_slug})")
     topics = extract_lda_topic_keywords(
         texts,
-        num_topics=num_topics,
-        n_keywords=n_keywords,
+        num_topics=n_topics,
+        n_keywords=n_kw,
         random_state=random_state,
     )
     return [keywords for _idx, keywords, _summary in topics]

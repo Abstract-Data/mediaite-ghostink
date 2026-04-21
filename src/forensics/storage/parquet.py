@@ -43,12 +43,16 @@ def read_features(path: Path) -> pl.DataFrame:
 
 
 def load_feature_frame_sorted(features_path: Path) -> pl.DataFrame:
-    """Load features Parquet, require ``timestamp``, return rows sorted by time."""
-    df = read_features(features_path)
-    if "timestamp" not in df.columns:
+    """Load features Parquet, require ``timestamp``, return rows sorted by time.
+
+    Uses a ``LazyFrame`` scan so the planner can push the sort down and defer the
+    materialization — callers that filter/slice downstream get the benefit.
+    """
+    lf = pl.scan_parquet(features_path)
+    if "timestamp" not in lf.collect_schema().names():
         msg = f"features parquet missing timestamp: {features_path}"
         raise ValueError(msg)
-    return df.sort("timestamp")
+    return lf.sort("timestamp").collect()
 
 
 def write_embeddings_manifest(records: list[EmbeddingRecord], path: Path) -> None:
