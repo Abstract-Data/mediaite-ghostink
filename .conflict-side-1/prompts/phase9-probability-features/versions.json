@@ -1,0 +1,14 @@
+{
+  "family": "phase9-probability-features",
+  "current_version": "0.1.0",
+  "versions": [
+    {
+      "version": "0.1.0",
+      "date": "2026-04-20",
+      "status": "active",
+      "model": "gpt-5-3-codex",
+      "file": "v0.1.0.md",
+      "changelog_entry": "Initial prompt — perplexity, burstiness, and Binoculars score computation. Pipeline C for convergence framework."
+    }
+  ]
+}

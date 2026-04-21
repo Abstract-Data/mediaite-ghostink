@@ -1,0 +1,14 @@
+{
+  "family": "phase6-analysis-embedding-drift",
+  "current_version": "0.1.0",
+  "versions": [
+    {
+      "version": "0.1.0",
+      "date": "2026-04-20",
+      "status": "active",
+      "model": "gpt-5-3-codex",
+      "file": "v0.1.0.md",
+      "changelog_entry": "Initial spec: monthly centroid tracking, cosine similarity decay, AI baseline generation protocol, UMAP projection, intra-period variance."
+    }
+  ]
+}
