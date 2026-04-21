@@ -1,4 +1,4 @@
-.PHONY: help install lint format test coverage clean pipeline scrape extract analyze report
+.PHONY: help install lint format test coverage clean pipeline scrape extract analyze report quarto-build deploy clean-generated all
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -6,14 +6,14 @@ help: ## Show this help
 install: ## Install dependencies
 	uv sync
 
-lint: ## Run linter
-	uv run ruff check .
+lint: ## Run linter (Python sources only; notebooks are executed via Quarto)
+	uv run ruff check src tests scripts
 
 format: ## Format code
-	uv run ruff format .
+	uv run ruff format src tests scripts
 
 format-check: ## Check formatting without changes
-	uv run ruff format --check .
+	uv run ruff format --check src tests scripts
 
 test: ## Run all tests
 	uv run pytest tests/ -v
@@ -39,8 +39,22 @@ analyze: ## Run analysis stage
 report: ## Generate report
 	uv run forensics report
 
-pipeline: ## Run full pipeline
+pipeline: ## Run full pipeline (scrape → extract → analyze → report)
 	uv run forensics all
+
+all: pipeline ## Alias for full pipeline including Quarto report
+
+quarto-build: ## Render Quarto book to data/reports
+	quarto render --output-dir data/reports
+
+deploy: quarto-build ## Publish HTML book to Cloudflare Pages
+	npx wrangler pages deploy data/reports --project-name=ai-writing-forensics
+
+clean-generated: ## Remove extracted features, embeddings, analysis JSON, reports
+	rm -rf data/features/*.parquet
+	rm -rf data/embeddings/*.npy
+	rm -rf data/analysis/*.json
+	rm -rf data/reports/*
 
 # Quality gates
 check: lint format-check test ## Run all quality checks

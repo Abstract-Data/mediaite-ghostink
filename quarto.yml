@@ -1,0 +1,46 @@
+project:
+  type: book
+  output-dir: data/reports
+
+book:
+  title: "AI Writing Forensics: Mediaite Investigation"
+  author: "Abstract Data LLC"
+  date: today
+  chapters:
+    - index.qmd
+    - notebooks/00_power_analysis.ipynb
+    - part: "Data Collection & Audit"
+      chapters:
+        - notebooks/01_scraping.ipynb
+        - notebooks/02_corpus_audit.ipynb
+    - part: "Exploration & Features"
+      chapters:
+        - notebooks/03_exploration.ipynb
+        - notebooks/04_feature_analysis.ipynb
+    - part: "Analysis"
+      chapters:
+        - notebooks/05_change_point_detection.ipynb
+        - notebooks/06_embedding_drift.ipynb
+    - part: "Evidence & Conclusions"
+      chapters:
+        - notebooks/07_statistical_evidence.ipynb
+        - notebooks/08_control_comparison.ipynb
+        - notebooks/09_full_report.ipynb
+
+execute:
+  freeze: auto
+  echo: false
+  warning: false
+
+format:
+  html:
+    theme: cosmo
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    code-fold: true
+    code-summary: "Show code"
+  pdf:
+    toc: true
+    number-sections: true
+    documentclass: report

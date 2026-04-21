@@ -81,57 +81,57 @@ def deduplicate_articles(db_path: Path, *, hamming_threshold: int = _NEAR_DUP_HA
     per component. Returns IDs that are marked duplicate (excluding canonical rows).
     """
     init_db(db_path)
-    repo = Repository(db_path)
-    pool: list[Article] = [
-        a
-        for a in repo.get_all_articles()
-        if a.clean_text and not a.clean_text.startswith("[REDIRECT:")
-    ]
-    if not pool:
-        return []
+    with Repository(db_path) as repo:
+        pool: list[Article] = [
+            a
+            for a in repo.get_all_articles()
+            if a.clean_text and not a.clean_text.startswith("[REDIRECT:")
+        ]
+        if not pool:
+            return []
 
-    indices = list(range(len(pool)))
-    parent = list(indices)
-    fingerprints = [simhash(a.clean_text) for a in pool]
+        indices = list(range(len(pool)))
+        parent = list(indices)
+        fingerprints = [simhash(a.clean_text) for a in pool]
 
-    if len(pool) > 500:
-        logger.info(
-            "dedup: banded simhash over %d articles (Hamming <= %s)",
-            len(pool),
-            hamming_threshold,
-        )
+        if len(pool) > 500:
+            logger.info(
+                "dedup: banded simhash over %d articles (Hamming <= %s)",
+                len(pool),
+                hamming_threshold,
+            )
 
-    if hamming_threshold <= 3:
-        candidates = _band_candidate_pairs(fingerprints)
-        for i, j in candidates:
-            if simhash_hamming(fingerprints[i], fingerprints[j]) <= hamming_threshold:
-                _union(parent, i, j)
-    else:
-        for i in indices:
-            for j in range(i + 1, len(pool)):
+        if hamming_threshold <= 3:
+            candidates = _band_candidate_pairs(fingerprints)
+            for i, j in candidates:
                 if simhash_hamming(fingerprints[i], fingerprints[j]) <= hamming_threshold:
                     _union(parent, i, j)
+        else:
+            for i in indices:
+                for j in range(i + 1, len(pool)):
+                    if simhash_hamming(fingerprints[i], fingerprints[j]) <= hamming_threshold:
+                        _union(parent, i, j)
 
-    groups: dict[int, list[int]] = defaultdict(list)
-    for i in indices:
-        groups[_find(parent, i)].append(i)
+        groups: dict[int, list[int]] = defaultdict(list)
+        for i in indices:
+            groups[_find(parent, i)].append(i)
 
-    duplicate_ids: list[str] = []
-    for members in groups.values():
-        canonical_i = min(members, key=lambda i: pool[i].published_date)
-        can = pool[canonical_i]
-        for i in members:
-            art = pool[i]
-            art.is_duplicate = i != canonical_i
-            repo.upsert_article(art)
-            if art.is_duplicate:
-                logger.info(
-                    "DUPLICATE: '%s' (%s) ≈ '%s' (%s)",
-                    art.title,
-                    art.published_date.date().isoformat(),
-                    can.title,
-                    can.published_date.date().isoformat(),
-                )
-                duplicate_ids.append(art.id)
+        duplicate_ids: list[str] = []
+        for members in groups.values():
+            canonical_i = min(members, key=lambda i: pool[i].published_date)
+            can = pool[canonical_i]
+            for i in members:
+                art = pool[i]
+                art.is_duplicate = i != canonical_i
+                repo.upsert_article(art)
+                if art.is_duplicate:
+                    logger.info(
+                        "DUPLICATE: '%s' (%s) ≈ '%s' (%s)",
+                        art.title,
+                        art.published_date.date().isoformat(),
+                        can.title,
+                        can.published_date.date().isoformat(),
+                    )
+                    duplicate_ids.append(art.id)
 
-    return duplicate_ids
+        return duplicate_ids

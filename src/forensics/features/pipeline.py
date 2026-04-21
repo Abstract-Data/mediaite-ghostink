@@ -22,6 +22,7 @@ from forensics.features import (
     readability,
     structural,
 )
+from forensics.features.assembler import build_feature_vector_from_extractors
 from forensics.models.article import Article
 from forensics.models.features import EmbeddingRecord, FeatureVector
 from forensics.storage.parquet import write_embeddings_manifest, write_features
@@ -105,118 +106,131 @@ def extract_all_features(
     if not skip_embeddings:
         _archive_embeddings_if_mismatch(embed_root, model_name, model_version)
 
-    repo = Repository(db_path)
-    author_id_filter: str | None = None
-    if author_slug:
-        au = repo.get_author_by_slug(author_slug)
-        if au is None:
-            msg = f"Unknown author slug: {author_slug}"
-            raise ValueError(msg)
-        author_id_filter = au.id
+    max_fail_ratio = settings.analysis.feature_extraction_max_failure_ratio
 
-    articles = repo.list_articles_for_extraction(author_id=author_id_filter)
-    if not articles:
-        logger.info("No articles eligible for feature extraction.")
-        return 0
+    with Repository(db_path) as repo:
+        from forensics.analysis.utils import resolve_author_rows
 
-    by_author: dict[str, list[Article]] = defaultdict(list)
-    for a in articles:
-        by_author[a.author_id].append(a)
-    for aid in by_author:
-        by_author[aid].sort(key=lambda x: x.published_date)
+        author_rows = resolve_author_rows(repo, settings, author_slug=author_slug)
+        author_id_filter: str | None = None
+        if author_slug and author_rows:
+            author_id_filter = author_rows[0].id
 
-    try:
-        import spacy
+        articles = repo.list_articles_for_extraction(author_id=author_id_filter)
+        if not articles:
+            logger.info("No articles eligible for feature extraction.")
+            return 0
 
-        nlp = spacy.load("en_core_web_md")
-    except OSError as exc:
-        logger.error("spaCy model en_core_web_md is required: %s", exc)
-        raise
+        by_author: dict[str, list[Article]] = defaultdict(list)
+        for a in articles:
+            by_author[a.author_id].append(a)
+        for aid in by_author:
+            by_author[aid].sort(key=lambda x: x.published_date)
 
-    processed = 0
-    manifest_records: list[EmbeddingRecord] = []
+        try:
+            import spacy
 
-    for author_id, seq in by_author.items():
-        author = repo.get_author(author_id)
-        slug = author.slug if author else author_id
-        author_name = author.name if author else author_id
-        out_features: list[FeatureVector] = []
-        embed_dir_author = embed_root / slug
-        if not skip_embeddings:
-            embed_dir_author.mkdir(parents=True, exist_ok=True)
+            nlp = spacy.load("en_core_web_md")
+        except OSError as exc:
+            logger.error("spaCy model en_core_web_md is required: %s", exc)
+            raise
 
-        for idx, article in enumerate(seq):
-            if processed and processed % 50 == 0:
-                logger.info(
-                    "Extracting features: %d articles (%s)",
-                    processed,
-                    author_name,
-                )
-            try:
-                doc = nlp(article.clean_text)
-                lex = lexical.extract_lexical_features(article.clean_text, doc)
-                pos = pos_patterns.extract_pos_pattern_features(doc)
-                struct = structural.extract_structural_features(article.clean_text, doc)
-                recent30 = _recent_peer_texts(seq, idx, 30)
-                recent90 = _recent_peer_texts(seq, idx, 90)
-                cont = content.extract_content_features(
-                    article.clean_text,
-                    doc,
-                    recent30,
-                    recent90,
-                )
-                prior_tuples = [(a.published_date, a.word_count) for a in seq[:idx]]
-                prod = productivity.extract_productivity_features(
-                    article.published_date,
-                    article.word_count,
-                    prior_tuples,
-                )
-                read = readability.extract_readability_features(article.clean_text)
+        processed = 0
+        failed = 0
+        manifest_records: list[EmbeddingRecord] = []
 
-                fv = FeatureVector(
-                    article_id=article.id,
-                    author_id=article.author_id,
-                    timestamp=article.published_date,
-                    **lex,
-                    **struct,
-                    **cont,
-                    **prod,
-                    **read,
-                    pos_bigram_top30=pos["pos_bigram_top30"],
-                    clause_initial_entropy=pos["clause_initial_entropy"],
-                    clause_initial_top10=pos["clause_initial_top10"],
-                    dep_depth_mean=pos["dep_depth_mean"],
-                    dep_depth_std=pos["dep_depth_std"],
-                    dep_depth_max=pos["dep_depth_max"],
-                )
-                out_features.append(fv)
+        for author_id, seq in by_author.items():
+            author = repo.get_author(author_id)
+            slug = author.slug if author else author_id
+            author_name = author.name if author else author_id
+            out_features: list[FeatureVector] = []
+            embed_dir_author = embed_root / slug
+            if not skip_embeddings:
+                embed_dir_author.mkdir(parents=True, exist_ok=True)
 
-                if not skip_embeddings:
-                    vec = embeddings.compute_embedding(article.clean_text, model_name)
-                    rel_path = Path("data") / "embeddings" / slug / f"{article.id}.npy"
-                    abs_path = root / rel_path
-                    abs_path.parent.mkdir(parents=True, exist_ok=True)
-                    np.save(abs_path, vec)
-                    manifest_records.append(
-                        EmbeddingRecord(
-                            article_id=article.id,
-                            author_id=article.author_id,
-                            timestamp=article.published_date,
-                            model_name=model_name,
-                            model_version=model_version,
-                            embedding_path=str(rel_path),
-                            embedding_dim=int(vec.shape[0]),
-                        )
+            batch = len(seq)
+            batch_failed = 0
+
+            for idx, article in enumerate(seq):
+                if processed and processed % 50 == 0:
+                    logger.info(
+                        "Extracting features: %d articles (%s)",
+                        processed,
+                        author_name,
                     )
-                processed += 1
-            except Exception:
-                logger.exception("Feature extraction failed for article %s", article.id)
+                try:
+                    doc = nlp(article.clean_text)
+                    lex = lexical.extract_lexical_features(article.clean_text, doc)
+                    pos = pos_patterns.extract_pos_pattern_features(doc)
+                    struct = structural.extract_structural_features(article.clean_text, doc)
+                    recent30 = _recent_peer_texts(seq, idx, 30)
+                    recent90 = _recent_peer_texts(seq, idx, 90)
+                    cont = content.extract_content_features(
+                        article.clean_text,
+                        doc,
+                        recent30,
+                        recent90,
+                    )
+                    prior_tuples = [(a.published_date, a.word_count) for a in seq[:idx]]
+                    prod = productivity.extract_productivity_features(
+                        article.published_date,
+                        article.word_count,
+                        prior_tuples,
+                    )
+                    read = readability.extract_readability_features(article.clean_text)
 
-        if out_features:
-            write_features(out_features, features_dir / f"{slug}.parquet")
+                    fv = build_feature_vector_from_extractors(
+                        article,
+                        lex=lex,
+                        struct=struct,
+                        cont=cont,
+                        prod=prod,
+                        read=read,
+                        pos=pos,
+                    )
+                    out_features.append(fv)
 
-    if not skip_embeddings:
-        write_embeddings_manifest(manifest_records, embed_root / "manifest.jsonl")
+                    if not skip_embeddings:
+                        vec = embeddings.compute_embedding(article.clean_text, model_name)
+                        rel_path = Path("data") / "embeddings" / slug / f"{article.id}.npy"
+                        abs_path = root / rel_path
+                        abs_path.parent.mkdir(parents=True, exist_ok=True)
+                        np.save(abs_path, vec)
+                        manifest_records.append(
+                            EmbeddingRecord(
+                                article_id=article.id,
+                                author_id=article.author_id,
+                                timestamp=article.published_date,
+                                model_name=model_name,
+                                model_version=model_version,
+                                embedding_path=str(rel_path),
+                                embedding_dim=int(vec.shape[0]),
+                            )
+                        )
+                    processed += 1
+                except Exception as exc:
+                    batch_failed += 1
+                    failed += 1
+                    logger.exception(
+                        "Feature extraction failed for article %s (%s: %s)",
+                        article.id,
+                        type(exc).__name__,
+                        exc,
+                    )
+                    if batch and (batch_failed / batch) > max_fail_ratio:
+                        msg = (
+                            f"Feature extraction abort: >{max_fail_ratio:.0%} failures in author "
+                            f"batch slug={slug} ({batch_failed}/{batch})"
+                        )
+                        raise RuntimeError(msg) from exc
+
+            if out_features:
+                write_features(out_features, features_dir / f"{slug}.parquet")
+
+        if not skip_embeddings:
+            write_embeddings_manifest(manifest_records, embed_root / "manifest.jsonl")
 
     logger.info("Feature extraction finished: %d article(s) processed.", processed)
+    if failed:
+        logger.warning("Feature extraction: %d article(s) failed", failed)
     return processed

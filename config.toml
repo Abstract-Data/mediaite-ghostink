@@ -38,6 +38,35 @@ embedding_model = "sentence-transformers/all-MiniLM-L6-v2"
 embedding_model_version = "v2.0"
 changepoint_methods = ["pelt", "bocpd"]
 
+[probability]
+# Phase 9 — token-level probability features (perplexity, burstiness, Binoculars).
+# Requires the `probability` optional-extra:  uv sync --extra probability
+reference_model = "gpt2"
+reference_model_revision = "e7da7f2"
+binoculars_model_base = "tiiuae/falcon-7b"
+binoculars_model_instruct = "tiiuae/falcon-7b-instruct"
+binoculars_enabled = false
+max_sequence_length = 1024
+sliding_window_stride = 512
+batch_size = 16
+device = "auto"
+low_ppl_threshold = 20.0
+
+[baseline]
+# Phase 10 — AI baseline generation via local Ollama models.
+# Requires the `baseline` optional-extra:  uv sync --extra baseline
+ollama_base_url = "http://localhost:11434"
+models = ["llama3.1:8b", "mistral:7b", "gemma2:9b"]
+temperatures = [0.0, 0.8]
+articles_per_cell = 30
+max_tokens = 1500
+request_timeout = 120
+
+[chain_of_custody]
+verify_corpus_hash = true
+verify_raw_archives = true
+log_all_generations = true
+
 [report]
 title = "Writing Forensics Analysis"
 output_format = "both"

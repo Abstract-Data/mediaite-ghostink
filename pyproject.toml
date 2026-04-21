@@ -5,6 +5,7 @@ description = "Forensic pipeline for scrape -> extract -> analyze -> report work
 readme = "README.md"
 requires-python = ">=3.13,<3.14"
 dependencies = [
+  "typer>=0.15.0",
   "httpx>=0.28.1",
   "beautifulsoup4>=4.13.4",
   "lxml>=5.4.0",
@@ -23,9 +24,25 @@ dependencies = [
   "plotly>=5.22.0",
   "umap-learn>=0.5.6",
   "textstat>=0.7.4",
+  "ipython>=8.31.0",
+  "ipykernel>=6.29.0",
+  "typer>=0.15.0",
 ]
 
 [project.optional-dependencies]
+probability = [
+  "torch>=2.0",
+  "transformers>=4.40",
+  "accelerate>=0.30",
+]
+baseline = [
+  "pydantic-ai-slim[openai]>=1.0",
+  "pydantic-evals>=1.0",
+]
+baseline = [
+  "pydantic-ai>=1.0",
+  "pydantic-evals>=1.0",
+]
 dev = [
   "pytest>=8.3.5",
   "pytest-asyncio>=0.26.0",
@@ -49,7 +66,10 @@ packages = ["src/forensics"]
 minversion = "8.0"
 testpaths = ["tests"]
 pythonpath = ["src"]
-addopts = "-ra -q --strict-markers --cov=forensics --cov-report=term-missing"
+addopts = "-ra -q --strict-markers --cov=forensics --cov-report=term-missing -m 'not slow'"
+markers = [
+  "slow: test requires loading large models / downloading external artifacts",
+]
 
 [tool.ruff]
 line-length = 100
@@ -72,6 +92,10 @@ omit = [
   "*/forensics/features/*",
   "*/forensics/storage/parquet.py",
   "*/forensics/storage/duckdb_queries.py",
+  # Phase 10 baseline orchestration requires a live Ollama server + the baseline
+  # optional-extra. Covered via manual smoke runs, not CI.
+  "*/forensics/baseline/orchestrator.py",
+  "*/forensics/baseline/agent.py",
 ]
 
 [tool.coverage.report]

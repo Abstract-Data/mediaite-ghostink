@@ -161,6 +161,7 @@ def test_analysis_stub_modules_importable() -> None:
     import forensics.analysis.comparison  # noqa: F401
     import forensics.analysis.convergence  # noqa: F401
     import forensics.analysis.drift  # noqa: F401
+    import forensics.analysis.orchestrator  # noqa: F401
     import forensics.analysis.statistics  # noqa: F401
 
 
@@ -304,7 +305,7 @@ def test_drift_scores_assembly() -> None:
 
 
 def test_extract_lda_topic_keywords_runs() -> None:
-    from forensics.analysis.drift import extract_lda_topic_keywords
+    from forensics.baseline.topics import extract_lda_topic_keywords
 
     texts = [
         "The senate voted today on climate policy and energy reform.",

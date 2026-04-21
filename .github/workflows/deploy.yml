@@ -1,0 +1,29 @@
+name: Deploy Report
+on:
+  push:
+    branches: [main]
+    paths:
+      - "notebooks/**"
+      - "src/**"
+      - "quarto.yml"
+      - "index.qmd"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+      - uses: astral-sh/setup-uv@v5
+      - name: Sync Python env
+        run: uv sync
+      - uses: quarto-dev/quarto-actions/setup@v2
+      - name: Render Quarto book
+        run: quarto render --output-dir data/reports
+      - uses: cloudflare/pages-action@v1
+        with:
+          apiToken: ${{ secrets.CF_API_TOKEN }}
+          accountId: ${{ secrets.CF_ACCOUNT_ID }}
+          projectName: ai-writing-forensics
+          directory: data/reports

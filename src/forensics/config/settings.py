@@ -8,7 +8,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field, field_validator
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -66,14 +66,78 @@ class AnalysisConfig(BaseModel):
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     embedding_model_version: str = "v2.0"
     changepoint_methods: list[str] = Field(default_factory=lambda: ["pelt", "bocpd"])
+    effect_size_threshold: float = 0.5
+    pelt_penalty: float = 3.0
+    bocpd_hazard_rate: float = 1 / 250.0
+    bocpd_threshold: float = 0.5
+    baseline_embedding_count: int = 20
+    convergence_window_days: int = 90
+    convergence_min_feature_ratio: float = 0.6
+    convergence_perplexity_drop_ratio: float = 0.92
+    convergence_burstiness_drop_ratio: float = 0.94
+    intra_variance_pairwise_max: int = 20
+    ai_baseline_llm_temperature: float = 0.7
+    feature_extraction_max_failure_ratio: float = 0.25
+    lda_num_topics: int = 20
+    lda_n_keywords: int = 10
+
+
+class ProbabilityConfig(BaseModel):
+    """Phase 9 — token-level probability feature settings."""
+
+    reference_model: str = "gpt2"
+    reference_model_revision: str = "e7da7f2"
+    binoculars_model_base: str = "tiiuae/falcon-7b"
+    binoculars_model_instruct: str = "tiiuae/falcon-7b-instruct"
+    binoculars_enabled: bool = False
+    max_sequence_length: int = 1024
+    sliding_window_stride: int = 512
+    batch_size: int = 16
+    device: Literal["auto", "cpu", "cuda"] = "auto"
+    low_ppl_threshold: float = 20.0
+
+
+class BaselineConfig(BaseModel):
+    """Phase 10 — AI baseline generation via local Ollama models."""
+
+    ollama_base_url: str = "http://localhost:11434"
+    models: list[str] = Field(default_factory=lambda: ["llama3.1:8b", "mistral:7b", "gemma2:9b"])
+    temperatures: list[float] = Field(default_factory=lambda: [0.0, 0.8])
+    articles_per_cell: int = 30
+    max_tokens: int = 1500
+    request_timeout: float = 120.0
+
+
+class ChainOfCustodyConfig(BaseModel):
+    """Phase 10 — chain-of-custody enforcement flags."""
+
+    verify_corpus_hash: bool = True
+    verify_raw_archives: bool = True
+    log_all_generations: bool = True
 
 
 class ReportConfig(BaseModel):
     title: str = "Writing Forensics Analysis"
     output_format: Literal["html", "pdf", "both"] = "both"
     include_sections: list[str] = Field(default_factory=list)
-    chart_theme: str = "plotly_white"
+    chart_theme: Literal["plotly_white", "forensics"] = "forensics"
     cloudflare_deploy: bool = False
+
+    @field_validator("include_sections")
+    @classmethod
+    def _sections_known(cls, v: list[str]) -> list[str]:
+        allowed = {
+            "executive",
+            "methodology",
+            "evidence",
+            "controls",
+            "appendix",
+        }
+        bad = [s for s in v if s not in allowed]
+        if bad:
+            msg = f"Unknown report sections: {bad}; allowed={sorted(allowed)}"
+            raise ValueError(msg)
+        return v
 
 
 class ForensicsSettings(BaseSettings):
@@ -84,7 +148,16 @@ class ForensicsSettings(BaseSettings):
     authors: list[AuthorConfig]
     scraping: ScrapingConfig = Field(default_factory=ScrapingConfig)
     analysis: AnalysisConfig = Field(default_factory=AnalysisConfig)
+    probability: ProbabilityConfig = Field(default_factory=ProbabilityConfig)
+    baseline: BaselineConfig = Field(default_factory=BaselineConfig)
+    chain_of_custody: ChainOfCustodyConfig = Field(default_factory=ChainOfCustodyConfig)
     report: ReportConfig = Field(default_factory=ReportConfig)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def db_path(self) -> Path:
+        """Default SQLite corpus path under the project root."""
+        return _project_root() / "data" / "articles.db"
 
     @classmethod
     def settings_customise_sources(

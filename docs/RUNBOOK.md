@@ -56,11 +56,71 @@ uv run python scripts/generate_baseline.py --preflight
 
 Hardware: M1 Mac with 32GB unified memory runs all three 7-9B models comfortably (one at a time, ~5GB each). Ollama keeps the last-used model in memory; expect ~10-15s cold load when switching.
 
+### Running baseline generation
+
+```
+uv sync --extra baseline                     # install pydantic-ai + pydantic-evals
+uv run python scripts/generate_baseline.py --preflight
+uv run python scripts/generate_baseline.py --author <slug> --dry-run
+uv run python scripts/generate_baseline.py --author <slug> --articles-per-cell 5
+uv run python scripts/generate_baseline.py --all
+
+# Via the analyze CLI:
+uv run forensics analyze --ai-baseline --author <slug>
+uv run forensics analyze --ai-baseline --skip-generation --author <slug>
+uv run forensics analyze --verify-corpus
+```
+
+Artifacts land under `data/ai_baseline/{slug}/{model}/{mode}_{temp}/*.json`
+plus a top-level `generation_manifest.json` and per-cell `embeddings/`.
+
+### Quality-gate evals
+
+```
+uv sync --extra baseline
+uv run python evals/baseline_quality.py --model llama3.1:8b
+uv run python evals/baseline_quality.py --all-models --output /tmp/reports.json
+```
+
+The `PerplexityRangeCheck` evaluator silently passes when the Phase 9 extra
+(`probability`) is not installed — install both extras together for the full
+gate: `uv sync --extra probability --extra baseline`.
+
 ## Model Downloads (Phase 9)
 
 - GPT-2 reference model: ~500MB (auto-downloads on first `--probability` run)
 - Falcon-7B pair (Binoculars, optional): ~28GB full / ~8GB quantized
 - Embedding model (all-MiniLM-L6-v2): ~80MB (auto-downloads on first embedding run)
+
+Throughput expectations:
+
+- Article-level perplexity only: ~10 articles/min on CPU with GPT-2.
+- Sentence-level perplexity (computed alongside) is ~5× slower because each
+  sentence triggers its own forward pass; budget ~2 articles/min on CPU for
+  a full `compute_perplexity` run. GPU throughput is ~50 articles/min.
+- Binoculars (Falcon-7B pair) is GPU-only for practical runs; on CPU plan for
+  ~1 article/min.
+
+### Running probability features
+
+```
+uv sync --extra probability            # install torch + transformers + accelerate
+uv run forensics extract --probability --author <slug>
+uv run forensics extract --probability --no-binoculars --device cpu
+cat data/probability/model_card.json   # pinned model revisions + digest
+```
+
+Artifacts: `data/probability/{author_slug}.parquet` + `data/probability/model_card.json`.
+
+### Running tests with the slow gate
+
+The default `uv run pytest` run skips tests marked `@pytest.mark.slow` (real
+GPT-2 load + inference). To run them explicitly:
+
+```
+uv run pytest -m slow tests/test_probability.py -v
+uv run pytest -m "not slow" tests/ -v       # default behavior
+```
 
 ## Common Issues
 

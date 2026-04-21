@@ -158,12 +158,12 @@ async def test_retry_on_5xx_then_success(tmp_path: Path) -> None:
 
 
 def test_article_url_exists_and_duplicate_skip(tmp_db, sample_author, sample_article) -> None:
-    repo = Repository(tmp_db)
-    repo.upsert_author(sample_author)
-    assert not repo.article_url_exists(str(sample_article.url))
-    repo.upsert_article(sample_article)
-    assert repo.article_url_exists(str(sample_article.url))
-    arts = repo.get_all_articles()
+    with Repository(tmp_db) as repo:
+        repo.upsert_author(sample_author)
+        assert not repo.article_url_exists(str(sample_article.url))
+        repo.upsert_article(sample_article)
+        assert repo.article_url_exists(str(sample_article.url))
+        arts = repo.get_all_articles()
     assert len(arts) == 1
 
 
@@ -215,20 +215,18 @@ def test_simhash_distinct_texts() -> None:
 
 
 def test_list_unfetched_resumability(tmp_db, sample_author, sample_article) -> None:
-    repo = Repository(tmp_db)
-    repo.upsert_author(sample_author)
-    repo.upsert_article(sample_article)
-    assert len(repo.list_unfetched_for_fetch()) == 1
-    filled = sample_article.model_copy(
-        update={"clean_text": "fetched body text here", "word_count": 4, "content_hash": "abc"}
-    )
-    repo.upsert_article(filled)
-    assert repo.list_unfetched_for_fetch() == []
+    with Repository(tmp_db) as repo:
+        repo.upsert_author(sample_author)
+        repo.upsert_article(sample_article)
+        assert len(repo.list_unfetched_for_fetch()) == 1
+        filled = sample_article.model_copy(
+            update={"clean_text": "fetched body text here", "word_count": 4, "content_hash": "abc"}
+        )
+        repo.upsert_article(filled)
+        assert repo.list_unfetched_for_fetch() == []
 
 
 def test_deduplicate_articles_marks_second(tmp_db, sample_author) -> None:
-    repo = Repository(tmp_db)
-    repo.upsert_author(sample_author)
     body = "national politics coverage continues with detailed reporting " * 30
 
     u1 = "https://www.mediaite.com/2020/01/01/a/"
@@ -253,18 +251,19 @@ def test_deduplicate_articles_marks_second(tmp_db, sample_author) -> None:
         word_count=50,
         content_hash="h2",
     )
-    repo.upsert_article(a1)
-    repo.upsert_article(a2)
+    with Repository(tmp_db) as repo:
+        repo.upsert_author(sample_author)
+        repo.upsert_article(a1)
+        repo.upsert_article(a2)
     dup_ids = deduplicate_articles(tmp_db)
     assert len(dup_ids) == 1
-    arts = {a.id: a for a in repo.get_all_articles()}
+    with Repository(tmp_db) as repo:
+        arts = {a.id: a for a in repo.get_all_articles()}
     assert arts[a1.id].is_duplicate is False
     assert arts[a2.id].is_duplicate is True
 
 
 def test_stable_article_id_upsert_same_url(tmp_db, sample_author) -> None:
-    repo = Repository(tmp_db)
-    repo.upsert_author(sample_author)
     post = {
         "id": 1,
         "link": "https://www.mediaite.com/2024/01/02/x/",
@@ -274,6 +273,8 @@ def test_stable_article_id_upsert_same_url(tmp_db, sample_author) -> None:
     a1 = wp_post_to_article(post, sample_author.id)
     a2 = wp_post_to_article(post, sample_author.id)
     assert a1.id == a2.id == stable_article_id(str(post["link"]))
-    repo.upsert_article(a1)
-    repo.upsert_article(a2)
-    assert len(repo.get_all_articles()) == 1
+    with Repository(tmp_db) as repo:
+        repo.upsert_author(sample_author)
+        repo.upsert_article(a1)
+        repo.upsert_article(a2)
+        assert len(repo.get_all_articles()) == 1
