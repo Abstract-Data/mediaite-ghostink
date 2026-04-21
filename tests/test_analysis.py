@@ -35,6 +35,77 @@ def _minimal_settings(methods: list[str]) -> ForensicsSettings:
     )
 
 
+def _detect_bocpd_reference(
+    signal: np.ndarray,
+    hazard_rate: float = 1 / 250.0,
+    threshold: float = 0.5,
+) -> list[tuple[int, float]]:
+    """O(n^2) reference BOCPD implementation — exists solely to pin the vectorized rewrite."""
+    from scipy.special import logsumexp
+
+    x = np.asarray(signal, dtype=float).ravel()
+    n = len(x)
+    if n < 6:
+        return []
+    sigma2 = float(np.var(x[: min(80, n)]))
+    if sigma2 < 1e-12:
+        sigma2 = 1e-12
+    inv_sig2 = 1.0 / sigma2
+    mu0 = float(np.mean(x[: min(10, n)]))
+    v0 = sigma2 * 4.0
+    inv_v0 = 1.0 / v0
+    log_h = float(np.log(hazard_rate))
+    log_1mh = float(np.log(max(1e-12, 1.0 - hazard_rate)))
+
+    log_pi = np.array([0.0])
+    changepoints: list[tuple[int, float]] = []
+    for t in range(1, n):
+        xt = x[t]
+        max_s = t
+        if log_pi.size < max_s:
+            log_pi = np.concatenate([log_pi, np.full(max_s - log_pi.size, -np.inf)])
+        log_pred = np.full(max_s, -np.inf)
+        for s in range(1, max_s + 1):
+            seg = x[t - s : t]
+            sum_s = float(np.sum(seg))
+            inv_v = inv_v0 + s * inv_sig2
+            m = (inv_v0 * mu0 + inv_sig2 * sum_s) / inv_v
+            var_pred = 1.0 / inv_v + sigma2
+            log_pred[s - 1] = -0.5 * (np.log(2 * np.pi * var_pred) + (xt - m) ** 2 / var_pred)
+        log_evidence = logsumexp(log_pi[:max_s] + log_pred)
+        log_pi_new = np.full(t + 1, -np.inf)
+        log_pi_new[0] = log_h + log_evidence
+        for new_len in range(2, t + 2):
+            log_pi_new[new_len - 1] = log_1mh + log_pi[new_len - 2] + log_pred[new_len - 2]
+        log_pi_new -= logsumexp(log_pi_new)
+        log_pi = log_pi_new
+        p_cp = float(np.exp(log_pi_new[0]))
+        if p_cp >= threshold:
+            changepoints.append((t, p_cp))
+    return changepoints
+
+
+def test_bocpd_vectorized_matches_reference() -> None:
+    """Vectorized BOCPD must match the O(n^2) reference, on mean-shift AND flat signals."""
+    rng = np.random.default_rng(7)
+    before = rng.normal(0.0, 0.25, 60)
+    after = rng.normal(1.5, 0.25, 60)
+    signal = np.concatenate([before, after])
+
+    fast = detect_bocpd(signal, hazard_rate=1 / 100.0, threshold=0.1)
+    slow = _detect_bocpd_reference(signal, hazard_rate=1 / 100.0, threshold=0.1)
+
+    assert [t for t, _ in fast] == [t for t, _ in slow]
+    for (_tf, pf), (_ts, ps) in zip(fast, slow, strict=True):
+        assert pf == pytest.approx(ps, rel=1e-6, abs=1e-9)
+
+    # Flat signal: both implementations should agree (typically zero change points).
+    flat = rng.normal(0.0, 0.25, 80)
+    fast_flat = detect_bocpd(flat, hazard_rate=1 / 250.0, threshold=0.5)
+    slow_flat = _detect_bocpd_reference(flat, hazard_rate=1 / 250.0, threshold=0.5)
+    assert [t for t, _ in fast_flat] == [t for t, _ in slow_flat]
+
+
 def test_pelt_synthetic_mean_shift() -> None:
     rng = np.random.default_rng(42)
     before = rng.normal(0.0, 0.3, 100)
@@ -306,7 +377,7 @@ def test_drift_scores_assembly() -> None:
 
 
 def test_extract_lda_topic_keywords_runs() -> None:
-    from forensics.analysis.drift import extract_lda_topic_keywords
+    from forensics.baseline.topics import extract_lda_topic_keywords
 
     texts = [
         "The senate voted today on climate policy and energy reform.",
@@ -636,7 +707,6 @@ async def test_full_analysis_integration(tmp_path: Path) -> None:
 
     db_path = tmp_path / "articles.db"
     init_db(db_path)
-    repo = Repository(db_path)
     auth = Author(
         name="Test",
         slug="test-author",
@@ -646,7 +716,8 @@ async def test_full_analysis_integration(tmp_path: Path) -> None:
         baseline_end=date(2024, 1, 1),
         archive_url="https://example.com",
     )
-    repo.upsert_author(auth)
+    with Repository(db_path) as repo:
+        repo.upsert_author(auth)
 
     n = 50
     base = datetime(2024, 1, 1, tzinfo=UTC)
@@ -871,7 +942,6 @@ def test_compare_target_to_controls_minimal(tmp_path: Path) -> None:
 
     db = tmp_path / "db.sqlite"
     init_db(db)
-    repo = Repository(db)
     tgt = Author(
         name="T",
         slug="target-a",
@@ -890,8 +960,9 @@ def test_compare_target_to_controls_minimal(tmp_path: Path) -> None:
         baseline_end=date(2024, 1, 1),
         archive_url="https://example.com",
     )
-    repo.upsert_author(tgt)
-    repo.upsert_author(ctl)
+    with Repository(db) as repo:
+        repo.upsert_author(tgt)
+        repo.upsert_author(ctl)
 
     n = 30
     base = datetime(2024, 1, 1, tzinfo=UTC)

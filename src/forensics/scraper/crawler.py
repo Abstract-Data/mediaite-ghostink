@@ -261,6 +261,7 @@ async def collect_article_metadata(
     *,
     manifest_path: Path | None = None,
     errors_path: Path | None = None,
+    repo: Repository | None = None,
 ) -> int:
     """
     Upsert configured authors and their posts (metadata only) into SQLite.
@@ -276,25 +277,29 @@ async def collect_article_metadata(
         raise FileNotFoundError(msg)
 
     init_db(db_path)
-    repo = Repository(db_path)
     by_slug = load_authors_manifest(manifest)
     scraping = settings.scraping
     limiter = RateLimiter(scraping.rate_limit_seconds, scraping.rate_limit_jitter)
-    inserted = 0
 
-    async with create_scraping_client(scraping) as client:
-        for cfg in settings.authors:
-            inserted += await _ingest_author_posts(
-                client,
-                limiter,
-                scraping,
-                repo,
-                cfg,
-                by_slug,
-                errors,
-            )
+    async def _run(r: Repository) -> int:
+        ins = 0
+        async with create_scraping_client(scraping) as client:
+            for cfg in settings.authors:
+                ins += await _ingest_author_posts(
+                    client,
+                    limiter,
+                    scraping,
+                    r,
+                    cfg,
+                    by_slug,
+                    errors,
+                )
+        return ins
 
-    return inserted
+    if repo is not None:
+        return await _run(repo)
+    with Repository(db_path) as owned:
+        return await _run(owned)
 
 
 async def _ingest_author_posts(

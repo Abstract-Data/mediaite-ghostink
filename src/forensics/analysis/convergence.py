@@ -10,6 +10,7 @@ from datetime import date, datetime, timedelta
 import numpy as np
 
 from forensics.analysis.changepoint import PELT_FEATURE_COLUMNS
+from forensics.config.settings import ForensicsSettings
 from forensics.models.analysis import ChangePoint, ConvergenceWindow
 
 
@@ -48,6 +49,8 @@ def compute_probability_pipeline_score(
     window_start: date,
     window_end: date,
     prob: ProbabilityTrajectory,
+    *,
+    settings: ForensicsSettings | None = None,
 ) -> float:
     """Composite 0–1 from perplexity drop, burstiness flattening, optional Binoculars."""
     parts: list[float] = []
@@ -57,9 +60,10 @@ def compute_probability_pipeline_score(
         m0, m1 = _month_key_to_range(k)
         if _intervals_overlap(window_start, window_end, m0, m1):
             ppx.append(v)
+    ppx_drop = 0.92 if settings is None else settings.analysis.convergence_perplexity_drop_ratio
     if len(ppx) >= 2:
         first, last = float(np.mean(ppx[: len(ppx) // 2])), float(np.mean(ppx[len(ppx) // 2 :]))
-        if first > 1e-9 and last < first * 0.92:
+        if first > 1e-9 and last < first * ppx_drop:
             parts.append(1.0)
         elif first > 1e-9 and last < first:
             parts.append(0.5)
@@ -71,9 +75,10 @@ def compute_probability_pipeline_score(
         m0, m1 = _month_key_to_range(k)
         if _intervals_overlap(window_start, window_end, m0, m1):
             br.append(v)
+    br_drop = 0.94 if settings is None else settings.analysis.convergence_burstiness_drop_ratio
     if len(br) >= 2:
         first_b, last_b = float(np.mean(br[: len(br) // 2])), float(np.mean(br[len(br) // 2 :]))
-        if first_b > 1e-9 and last_b < first_b * 0.94:
+        if first_b > 1e-9 and last_b < first_b * br_drop:
             parts.append(1.0)
         elif first_b > 1e-9 and last_b < first_b:
             parts.append(0.5)
@@ -105,8 +110,12 @@ def compute_convergence_scores(
     total_feature_count: int | None = None,
     ai_convergence_curve: list[tuple[str, float]] | None = None,
     probability_trajectory: ProbabilityTrajectory | None = None,
+    settings: ForensicsSettings | None = None,
 ) -> list[ConvergenceWindow]:
     """Quantify agreement between Pipeline A (stylometry) and Pipeline B (embeddings)."""
+    if settings is not None:
+        window_days = settings.analysis.convergence_window_days
+        min_feature_ratio = settings.analysis.convergence_min_feature_ratio
     total = total_feature_count if total_feature_count is not None else len(PELT_FEATURE_COLUMNS)
     if total <= 0:
         return []
@@ -204,7 +213,12 @@ def compute_convergence_scores(
 
         pipeline_c: float | None = None
         if probability_trajectory is not None:
-            pipeline_c = compute_probability_pipeline_score(start_d, end_d, probability_trajectory)
+            pipeline_c = compute_probability_pipeline_score(
+                start_d,
+                end_d,
+                probability_trajectory,
+                settings=settings,
+            )
 
         passes_ratio = ratio >= min_feature_ratio
         passes_ab = pipeline_a_score > 0.5 and pipeline_b_score > 0.5

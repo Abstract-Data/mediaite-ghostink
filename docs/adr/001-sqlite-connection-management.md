@@ -7,7 +7,7 @@
 
 ## Context
 
-Every repository function in `src/forensics/storage/repository.py` currently opens a new `sqlite3.connect()` with `isolation_level=None` (autocommit) and closes it after a single operation. This pattern was expedient during early Phase 2–3 development but creates three compounding problems:
+Historically, each `Repository` method opened a new SQLite connection per call. As of 2026-04-21, `Repository` is a **context manager** that holds one connection for `with Repository(path) as repo:` blocks. The problems below motivated that change:
 
 1. **Data integrity risk.** Autocommit means each INSERT/UPDATE is its own transaction. A crash mid-batch (e.g., during `fetch_articles` writing 500 articles) leaves partial state with no rollback capability.
 2. **Performance overhead.** During `collect_article_metadata`, each `article_url_exists` check and `upsert_article` call opens and closes a connection — potentially 10,000+ connection cycles for a full scrape. This overhead will multiply as Phases 4–7 add feature writes, analysis reads, and report queries.

@@ -6,10 +6,10 @@ import logging
 import os
 import shutil
 import subprocess
-from argparse import Namespace
 from pathlib import Path
 
 from forensics.config import ForensicsSettings, get_project_root, get_settings
+from forensics.models.report_args import ReportArgs
 from forensics.utils.provenance import verify_corpus_hash
 
 logger = logging.getLogger(__name__)
@@ -43,7 +43,7 @@ def resolve_notebook_path(root: Path, nb: str) -> Path | None:
     return alt if alt.is_file() else None
 
 
-def run_report(args: Namespace) -> int:
+def run_report(args: ReportArgs) -> int:
     """Render the Quarto book (or a single notebook chapter)."""
     settings = get_settings()
     root = get_project_root()

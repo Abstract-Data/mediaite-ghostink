@@ -113,118 +113,117 @@ def extract_probability_features(
     device_cfg = device or (cfg.device if cfg.device != "auto" else None)
 
     init_db(db_path)
-    repo = Repository(db_path)
+    with Repository(db_path) as repo:
+        configured_slugs = [a.slug for a in settings.authors]
+        if author_slug:
+            if author_slug not in configured_slugs:
+                raise ValueError(f"No configured author with slug {author_slug!r}")
+            slugs = [author_slug]
+        else:
+            slugs = configured_slugs
 
-    configured_slugs = [a.slug for a in settings.authors]
-    if author_slug:
-        if author_slug not in configured_slugs:
-            raise ValueError(f"No configured author with slug {author_slug!r}")
-        slugs = [author_slug]
-    else:
-        slugs = configured_slugs
+        target_authors = []
+        for slug in slugs:
+            author = repo.get_author_by_slug(slug)
+            if author is None:
+                logger.warning(
+                    "probability: author %s not in articles.db (run `forensics scrape --discover`)",
+                    slug,
+                )
+                continue
+            target_authors.append(author)
 
-    target_authors = []
-    for slug in slugs:
-        author = repo.get_author_by_slug(slug)
-        if author is None:
-            logger.warning(
-                "probability: author %s not in articles.db (run `forensics scrape --discover`)",
-                slug,
-            )
-            continue
-        target_authors.append(author)
-
-    model, tokenizer = load_reference_model(
-        model_name=cfg.reference_model,
-        revision=cfg.reference_model_revision,
-        device=device_cfg,
-    )
-    resolved_device = str(next(model.parameters()).device)
-
-    binoc = None
-    if include_binoculars:
-        binoc = load_binoculars_models(
-            cfg.binoculars_model_base,
-            cfg.binoculars_model_instruct,
-            enabled=True,
+        model, tokenizer = load_reference_model(
+            model_name=cfg.reference_model,
+            revision=cfg.reference_model_revision,
             device=device_cfg,
         )
+        resolved_device = str(next(model.parameters()).device)
 
-    output_dir = get_project_root() / "data" / "probability"
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    total = 0
-    for author in target_authors:
-        articles = _filter_articles(repo.get_articles_by_author(author.id))
-        if not articles:
-            logger.info("probability: no eligible articles for author=%s", author.slug)
-            continue
-
-        rows: list[dict] = []
-        for idx, article in enumerate(articles, start=1):
-            ppl = compute_perplexity(
-                article.clean_text,
-                model,
-                tokenizer,
-                max_length=cfg.max_sequence_length,
-                stride=cfg.sliding_window_stride,
-                low_ppl_threshold=cfg.low_ppl_threshold,
+        binoc = None
+        if include_binoculars:
+            binoc = load_binoculars_models(
+                cfg.binoculars_model_base,
+                cfg.binoculars_model_instruct,
+                enabled=True,
+                device=device_cfg,
             )
-            bino: float | None = None
-            if binoc is not None:
-                model_base, model_inst, bino_tok = binoc
-                bino = compute_binoculars_score(
+
+        output_dir = get_project_root() / "data" / "probability"
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        total = 0
+        for author in target_authors:
+            articles = _filter_articles(repo.get_articles_by_author(author.id))
+            if not articles:
+                logger.info("probability: no eligible articles for author=%s", author.slug)
+                continue
+
+            rows: list[dict] = []
+            for idx, article in enumerate(articles, start=1):
+                ppl = compute_perplexity(
                     article.clean_text,
-                    model_base,
-                    model_inst,
-                    bino_tok,
-                    max_length=min(cfg.max_sequence_length, 512),
+                    model,
+                    tokenizer,
+                    max_length=cfg.max_sequence_length,
+                    stride=cfg.sliding_window_stride,
+                    low_ppl_threshold=cfg.low_ppl_threshold,
                 )
+                bino: float | None = None
+                if binoc is not None:
+                    model_base, model_inst, bino_tok = binoc
+                    bino = compute_binoculars_score(
+                        article.clean_text,
+                        model_base,
+                        model_inst,
+                        bino_tok,
+                        max_length=min(cfg.max_sequence_length, 512),
+                    )
 
-            rows.append(
-                {
-                    "article_id": article.id,
-                    "author_id": article.author_id,
-                    "publish_date": article.published_date.date(),
-                    "mean_perplexity": ppl["mean_perplexity"],
-                    "median_perplexity": ppl["median_perplexity"],
-                    "perplexity_variance": ppl["perplexity_variance"],
-                    "min_sentence_ppl": ppl["min_sentence_ppl"],
-                    "max_sentence_ppl": ppl["max_sentence_ppl"],
-                    "ppl_skewness": ppl["ppl_skewness"],
-                    "low_ppl_sentence_ratio": ppl["low_ppl_sentence_ratio"],
-                    "binoculars_score": bino,
-                }
+                rows.append(
+                    {
+                        "article_id": article.id,
+                        "author_id": article.author_id,
+                        "publish_date": article.published_date.date(),
+                        "mean_perplexity": ppl["mean_perplexity"],
+                        "median_perplexity": ppl["median_perplexity"],
+                        "perplexity_variance": ppl["perplexity_variance"],
+                        "min_sentence_ppl": ppl["min_sentence_ppl"],
+                        "max_sentence_ppl": ppl["max_sentence_ppl"],
+                        "ppl_skewness": ppl["ppl_skewness"],
+                        "low_ppl_sentence_ratio": ppl["low_ppl_sentence_ratio"],
+                        "binoculars_score": bino,
+                    }
+                )
+                if idx % 25 == 0:
+                    logger.info(
+                        "probability: %d/%d articles scored (%s)",
+                        idx,
+                        len(articles),
+                        author.slug,
+                    )
+
+            out_path = output_dir / f"{author.slug}.parquet"
+            pl.DataFrame(rows).write_parquet(out_path)
+            logger.info(
+                "probability: wrote %d rows to %s (binoculars=%s)",
+                len(rows),
+                out_path,
+                binoc is not None,
             )
-            if idx % 25 == 0:
-                logger.info(
-                    "probability: %d/%d articles scored (%s)",
-                    idx,
-                    len(articles),
-                    author.slug,
-                )
+            total += len(rows)
 
-        out_path = output_dir / f"{author.slug}.parquet"
-        pl.DataFrame(rows).write_parquet(out_path)
-        logger.info(
-            "probability: wrote %d rows to %s (binoculars=%s)",
-            len(rows),
-            out_path,
-            binoc is not None,
-        )
-        total += len(rows)
+        # Pin the run only after at least one author succeeded — writing the card
+        # up front would claim "scored_at = now" even on a total failure.
+        if total > 0:
+            _write_model_card(
+                output_dir,
+                _model_card_payload(
+                    settings,
+                    include_binoculars=bool(binoc),
+                    device=resolved_device,
+                    transformers_version=_transformers_version(),
+                ),
+            )
 
-    # Pin the run only after at least one author succeeded — writing the card
-    # up front would claim "scored_at = now" even on a total failure.
-    if total > 0:
-        _write_model_card(
-            output_dir,
-            _model_card_payload(
-                settings,
-                include_binoculars=bool(binoc),
-                device=resolved_device,
-                transformers_version=_transformers_version(),
-            ),
-        )
-
-    return total
+        return total

@@ -16,7 +16,8 @@ def append_jsonl(path: Path, record: dict[str, object]) -> None:
 
 def export_articles_jsonl(db_path: Path, output_path: Path) -> int:
     """Write all articles as JSON lines; returns number of records."""
-    articles = Repository(db_path).get_all_articles()
+    with Repository(db_path) as repo:
+        articles = repo.get_all_articles()
     output_path.parent.mkdir(parents=True, exist_ok=True)
     count = 0
     with output_path.open("w", encoding="utf-8") as handle:

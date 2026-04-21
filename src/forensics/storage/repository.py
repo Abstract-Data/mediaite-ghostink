@@ -5,10 +5,9 @@ from __future__ import annotations
 import json
 import sqlite3
 import uuid
-from collections.abc import Generator
-from contextlib import contextmanager
 from datetime import UTC, date, datetime
 from pathlib import Path
+from types import TracebackType
 from typing import NamedTuple
 
 from forensics.models.article import Article
@@ -80,21 +79,6 @@ def _connect(db_path: Path) -> sqlite3.Connection:
     return conn
 
 
-@contextmanager
-def _db_session(db_path: Path) -> Generator[sqlite3.Connection]:
-    """Yield a connection with Row factory; commit on success, rollback on error."""
-    conn = _connect(db_path)
-    conn.row_factory = sqlite3.Row
-    try:
-        yield conn
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.close()
-
-
 def _migrate_articles_columns(conn: sqlite3.Connection) -> None:
     """Add Phase 3 columns to existing databases (idempotent)."""
     rows = conn.execute("PRAGMA table_info(articles)").fetchall()
@@ -110,32 +94,6 @@ def _migrate_articles_columns(conn: sqlite3.Connection) -> None:
         alters.append("ALTER TABLE articles ADD COLUMN is_duplicate INTEGER NOT NULL DEFAULT 0;")
     for stmt in alters:
         conn.execute(stmt)
-
-
-def init_db(db_path: Path) -> None:
-    """Create database tables if they do not exist."""
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    with _db_session(db_path) as conn:
-        conn.executescript(_SCHEMA)
-        _migrate_articles_columns(conn)
-
-
-def insert_analysis_run(
-    db_path: Path,
-    *,
-    config_hash: str,
-    description: str = "",
-) -> str:
-    """Insert one row into ``analysis_runs`` (pipeline audit trail). Returns run id."""
-    init_db(db_path)
-    rid = str(uuid.uuid4())
-    ts = datetime.now(UTC).isoformat()
-    with _db_session(db_path) as conn:
-        conn.execute(
-            "INSERT INTO analysis_runs (id, timestamp, config_hash, description) VALUES (?,?,?,?)",
-            (rid, ts, config_hash, description),
-        )
-    return rid
 
 
 def _row_to_article(row: sqlite3.Row) -> Article:
@@ -166,20 +124,62 @@ def _row_to_article(row: sqlite3.Row) -> Article:
 
 
 class Repository:
-    """SQLite access for authors and articles (one connection + transaction per method)."""
+    """SQLite access for authors and articles.
 
-    __slots__ = ("_db_path",)
+    Use as a context manager to hold one connection for a batch of operations::
+
+        with Repository(db_path) as repo:
+            repo.upsert_article(...)
+    """
+
+    __slots__ = ("_db_path", "_conn")
 
     def __init__(self, db_path: Path) -> None:
-        self._db_path = db_path
+        self._db_path = Path(db_path)
+        self._conn: sqlite3.Connection | None = None
 
     @property
     def db_path(self) -> Path:
         return self._db_path
 
+    def __enter__(self) -> Repository:
+        self._db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._conn = _connect(self._db_path)
+        self._conn.row_factory = sqlite3.Row
+        self._conn.executescript(_SCHEMA)
+        _migrate_articles_columns(self._conn)
+        self._conn.commit()
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
+        if self._conn is not None:
+            if exc is not None:
+                self._conn.rollback()
+            else:
+                self._conn.commit()
+            self._conn.close()
+            self._conn = None
+
+    def _require_conn(self) -> sqlite3.Connection:
+        if self._conn is None:
+            msg = "Repository is not in an active session; use `with Repository(path) as repo:`"
+            raise RuntimeError(msg)
+        return self._conn
+
+    def ensure_schema(self) -> None:
+        """Create tables if missing (requires active ``with`` session)."""
+        conn = self._require_conn()
+        conn.executescript(_SCHEMA)
+        _migrate_articles_columns(conn)
+
     def get_author(self, author_id: str) -> Author | None:
-        with _db_session(self._db_path) as conn:
-            row = conn.execute("SELECT * FROM authors WHERE id = ?", (author_id,)).fetchone()
+        conn = self._require_conn()
+        row = conn.execute("SELECT * FROM authors WHERE id = ?", (author_id,)).fetchone()
         if row is None:
             return None
         return Author(
@@ -194,8 +194,8 @@ class Repository:
         )
 
     def get_author_by_slug(self, slug: str) -> Author | None:
-        with _db_session(self._db_path) as conn:
-            row = conn.execute("SELECT * FROM authors WHERE slug = ?", (slug,)).fetchone()
+        conn = self._require_conn()
+        row = conn.execute("SELECT * FROM authors WHERE slug = ?", (slug,)).fetchone()
         if row is None:
             return None
         return Author(
@@ -223,43 +223,43 @@ class Repository:
             params = (author_id,)
         where_sql = " AND ".join(parts)
         sql = f"SELECT a.* FROM articles a WHERE {where_sql} ORDER BY a.published_date"
-        with _db_session(self._db_path) as conn:
-            rows = conn.execute(sql, params).fetchall() if params else conn.execute(sql).fetchall()
+        conn = self._require_conn()
+        rows = conn.execute(sql, params).fetchall() if params else conn.execute(sql).fetchall()
         return [_row_to_article(row) for row in rows]
 
     def upsert_author(self, author: Author) -> None:
-        with _db_session(self._db_path) as conn:
-            conn.execute(
-                """
-                INSERT INTO authors (
-                    id, name, slug, outlet, role, baseline_start, baseline_end, archive_url
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(id) DO UPDATE SET
-                    name=excluded.name,
-                    slug=excluded.slug,
-                    outlet=excluded.outlet,
-                    role=excluded.role,
-                    baseline_start=excluded.baseline_start,
-                    baseline_end=excluded.baseline_end,
-                    archive_url=excluded.archive_url
-                """,
-                (
-                    author.id,
-                    author.name,
-                    author.slug,
-                    author.outlet,
-                    author.role,
-                    author.baseline_start.isoformat(),
-                    author.baseline_end.isoformat(),
-                    author.archive_url,
-                ),
+        conn = self._require_conn()
+        conn.execute(
+            """
+            INSERT INTO authors (
+                id, name, slug, outlet, role, baseline_start, baseline_end, archive_url
             )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                name=excluded.name,
+                slug=excluded.slug,
+                outlet=excluded.outlet,
+                role=excluded.role,
+                baseline_start=excluded.baseline_start,
+                baseline_end=excluded.baseline_end,
+                archive_url=excluded.archive_url
+            """,
+            (
+                author.id,
+                author.name,
+                author.slug,
+                author.outlet,
+                author.role,
+                author.baseline_start.isoformat(),
+                author.baseline_end.isoformat(),
+                author.archive_url,
+            ),
+        )
 
     def article_url_exists(self, url: str) -> bool:
         """Return True if an article with this canonical URL is already stored."""
-        with _db_session(self._db_path) as conn:
-            row = conn.execute("SELECT 1 FROM articles WHERE url = ?", (url,)).fetchone()
+        conn = self._require_conn()
+        row = conn.execute("SELECT 1 FROM articles WHERE url = ?", (url,)).fetchone()
         return row is not None
 
     def upsert_article(self, article: Article) -> None:
@@ -267,87 +267,87 @@ class Repository:
         metadata_json = json.dumps(payload.get("metadata") or {})
         modified = article.modified_date.isoformat() if article.modified_date else None
         scraped = article.scraped_at.isoformat() if article.scraped_at else None
-        with _db_session(self._db_path) as conn:
-            conn.execute(
-                """
-                INSERT INTO articles (
-                    id, author_id, url, title, published_date, raw_html_path,
-                    clean_text, word_count, metadata, content_hash,
-                    modified_date, modifier_user_id, scraped_at, is_duplicate
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(id) DO UPDATE SET
-                    author_id=excluded.author_id,
-                    url=excluded.url,
-                    title=excluded.title,
-                    published_date=excluded.published_date,
-                    raw_html_path=excluded.raw_html_path,
-                    clean_text=excluded.clean_text,
-                    word_count=excluded.word_count,
-                    metadata=excluded.metadata,
-                    content_hash=excluded.content_hash,
-                    modified_date=excluded.modified_date,
-                    modifier_user_id=excluded.modifier_user_id,
-                    scraped_at=excluded.scraped_at,
-                    is_duplicate=excluded.is_duplicate
-                """,
-                (
-                    article.id,
-                    article.author_id,
-                    str(article.url),
-                    article.title,
-                    article.published_date.isoformat(),
-                    article.raw_html_path or None,
-                    article.clean_text,
-                    article.word_count,
-                    metadata_json,
-                    article.content_hash,
-                    modified,
-                    article.modifier_user_id,
-                    scraped,
-                    1 if article.is_duplicate else 0,
-                ),
-            )
+        conn = self._require_conn()
+        conn.execute(
+            """
+            INSERT INTO articles (
+                id, author_id, url, title, published_date, raw_html_path,
+                clean_text, word_count, metadata, content_hash,
+                modified_date, modifier_user_id, scraped_at, is_duplicate
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                author_id=excluded.author_id,
+                url=excluded.url,
+                title=excluded.title,
+                published_date=excluded.published_date,
+                raw_html_path=excluded.raw_html_path,
+                clean_text=excluded.clean_text,
+                word_count=excluded.word_count,
+                metadata=excluded.metadata,
+                content_hash=excluded.content_hash,
+                modified_date=excluded.modified_date,
+                modifier_user_id=excluded.modifier_user_id,
+                scraped_at=excluded.scraped_at,
+                is_duplicate=excluded.is_duplicate
+            """,
+            (
+                article.id,
+                article.author_id,
+                str(article.url),
+                article.title,
+                article.published_date.isoformat(),
+                article.raw_html_path or None,
+                article.clean_text,
+                article.word_count,
+                metadata_json,
+                article.content_hash,
+                modified,
+                article.modifier_user_id,
+                scraped,
+                1 if article.is_duplicate else 0,
+            ),
+        )
 
     def get_article_by_id(self, article_id: str) -> Article | None:
-        with _db_session(self._db_path) as conn:
-            row = conn.execute("SELECT * FROM articles WHERE id = ?", (article_id,)).fetchone()
+        conn = self._require_conn()
+        row = conn.execute("SELECT * FROM articles WHERE id = ?", (article_id,)).fetchone()
         if row is None:
             return None
         return _row_to_article(row)
 
     def get_articles_by_author(self, author_id: str) -> list[Article]:
-        with _db_session(self._db_path) as conn:
-            rows = conn.execute(
-                "SELECT * FROM articles WHERE author_id = ? ORDER BY published_date",
-                (author_id,),
-            ).fetchall()
+        conn = self._require_conn()
+        rows = conn.execute(
+            "SELECT * FROM articles WHERE author_id = ? ORDER BY published_date",
+            (author_id,),
+        ).fetchall()
         return [_row_to_article(row) for row in rows]
 
     def get_all_articles(self) -> list[Article]:
-        with _db_session(self._db_path) as conn:
-            rows = conn.execute("SELECT * FROM articles ORDER BY published_date").fetchall()
+        conn = self._require_conn()
+        rows = conn.execute("SELECT * FROM articles ORDER BY published_date").fetchall()
         return [_row_to_article(row) for row in rows]
 
     def get_unfetched_urls(self) -> list[UnfetchedUrl]:
         """Return rows where body text has not been fetched yet."""
-        with _db_session(self._db_path) as conn:
-            rows = conn.execute(
-                "SELECT id, url FROM articles WHERE clean_text = '' OR clean_text IS NULL"
-            ).fetchall()
+        conn = self._require_conn()
+        rows = conn.execute(
+            "SELECT id, url FROM articles WHERE clean_text = '' OR clean_text IS NULL"
+        ).fetchall()
         return [UnfetchedUrl(str(r[0]), str(r[1])) for r in rows]
 
     def list_unfetched_for_fetch(self) -> list[UnfetchedArticle]:
         """Return unfetched articles with author name and publish date for fetch ordering."""
-        with _db_session(self._db_path) as conn:
-            rows = conn.execute(
-                """
-                SELECT a.id, a.url, au.name AS author_name, a.published_date
-                FROM articles a
-                JOIN authors au ON a.author_id = au.id
-                WHERE a.clean_text = '' OR a.clean_text IS NULL
-                ORDER BY a.published_date
-                """
-            ).fetchall()
+        conn = self._require_conn()
+        rows = conn.execute(
+            """
+            SELECT a.id, a.url, au.name AS author_name, a.published_date
+            FROM articles a
+            JOIN authors au ON a.author_id = au.id
+            WHERE a.clean_text = '' OR a.clean_text IS NULL
+            ORDER BY a.published_date
+            """
+        ).fetchall()
         return [
             UnfetchedArticle(
                 str(row["id"]),
@@ -359,23 +359,61 @@ class Repository:
         ]
 
     def rewrite_raw_paths_after_archive(self, year: int) -> int:
-        """Rewrite ``raw_html_path`` after year folder is archived to a tar member ref."""
+        """Rewrite ``raw_html_path`` after year folder is archived to a tar member ref.
+
+        Rejects rows whose tail contains path separators or ``..`` so the rewritten
+        reference cannot escape the ``raw/{year}.tar.gz:`` archive root even if the
+        stored path was tampered with.
+        """
+        if not isinstance(year, int) or year < 1000 or year > 9999:
+            msg = f"archive year must be 4-digit int: {year!r}"
+            raise ValueError(msg)
         prefix = f"raw/{year}/"
         archive_ref = f"raw/{year}.tar.gz"
-        with _db_session(self._db_path) as conn:
-            rows = conn.execute(
-                "SELECT id, raw_html_path FROM articles WHERE raw_html_path LIKE ?",
-                (f"{prefix}%",),
-            ).fetchall()
-            n = 0
-            for aid, old in rows:
-                if not old or not isinstance(old, str) or not old.startswith(prefix):
-                    continue
-                tail = old[len(prefix) :]
-                new_path = f"{archive_ref}:{tail}"
-                conn.execute(
-                    "UPDATE articles SET raw_html_path = ? WHERE id = ?",
-                    (new_path, aid),
-                )
-                n += 1
-            return n
+        conn = self._require_conn()
+        rows = conn.execute(
+            "SELECT id, raw_html_path FROM articles WHERE raw_html_path LIKE ?",
+            (f"{prefix}%",),
+        ).fetchall()
+        n = 0
+        for aid, old in rows:
+            if not old or not isinstance(old, str) or not old.startswith(prefix):
+                continue
+            tail = old[len(prefix) :]
+            if not tail or "/" in tail or "\\" in tail or tail.startswith(".."):
+                continue
+            new_path = f"{archive_ref}:{tail}"
+            conn.execute(
+                "UPDATE articles SET raw_html_path = ? WHERE id = ?",
+                (new_path, aid),
+            )
+            n += 1
+        return n
+
+    def insert_analysis_run_row(self, *, config_hash: str, description: str = "") -> str:
+        """Insert one ``analysis_runs`` row; returns new run id."""
+        rid = str(uuid.uuid4())
+        ts = datetime.now(UTC).isoformat()
+        conn = self._require_conn()
+        conn.execute(
+            "INSERT INTO analysis_runs (id, timestamp, config_hash, description) VALUES (?,?,?,?)",
+            (rid, ts, config_hash, description),
+        )
+        return rid
+
+
+def init_db(db_path: Path) -> None:
+    """Create database tables if they do not exist."""
+    with Repository(db_path):
+        pass
+
+
+def insert_analysis_run(
+    db_path: Path,
+    *,
+    config_hash: str,
+    description: str = "",
+) -> str:
+    """Insert one row into ``analysis_runs`` (pipeline audit trail). Returns run id."""
+    with Repository(db_path) as repo:
+        return repo.insert_analysis_run_row(config_hash=config_hash, description=description)

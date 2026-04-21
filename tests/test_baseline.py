@@ -92,7 +92,6 @@ def test_sample_word_counts_uses_corpus(tmp_path: Path) -> None:
 
     db_path = tmp_path / "articles.db"
     init_db(db_path)
-    repo = Repository(db_path)
     author = Author(
         id="aid",
         name="Fixture",
@@ -103,20 +102,21 @@ def test_sample_word_counts_uses_corpus(tmp_path: Path) -> None:
         baseline_end=date(2023, 12, 31),
         archive_url="https://www.mediaite.com/author/fixture-slug/",
     )
-    repo.upsert_author(author)
-    for i, wc in enumerate([400, 800, 1000]):
-        repo.upsert_article(
-            Article(
-                id=f"a-{i}",
-                author_id=author.id,
-                url=f"https://example.com/{i}",
-                title=f"t{i}",
-                published_date=datetime(2024, 1, i + 1, tzinfo=UTC),
-                clean_text="x" * 5,
-                word_count=wc,
-                content_hash=f"h{i}",
+    with Repository(db_path) as repo:
+        repo.upsert_author(author)
+        for i, wc in enumerate([400, 800, 1000]):
+            repo.upsert_article(
+                Article(
+                    id=f"a-{i}",
+                    author_id=author.id,
+                    url=f"https://example.com/{i}",
+                    title=f"t{i}",
+                    published_date=datetime(2024, 1, i + 1, tzinfo=UTC),
+                    clean_text="x" * 5,
+                    word_count=wc,
+                    content_hash=f"h{i}",
+                )
             )
-        )
     counts = topics_mod.sample_word_counts(db_path, "fixture-slug", 5, seed=7)
     assert len(counts) == 5
     assert all(c in {400, 800, 1000} for c in counts)
@@ -206,7 +206,6 @@ def test_corpus_hash_deterministic(tmp_path: Path) -> None:
 
     db_path = tmp_path / "articles.db"
     init_db(db_path)
-    repo = Repository(db_path)
     author = Author(
         id="aid",
         name="Fixture",
@@ -217,19 +216,20 @@ def test_corpus_hash_deterministic(tmp_path: Path) -> None:
         baseline_end=date(2023, 12, 31),
         archive_url="https://www.mediaite.com/author/fixture-author/",
     )
-    repo.upsert_author(author)
-    repo.upsert_article(
-        Article(
-            id="a-1",
-            author_id=author.id,
-            url="https://example.com/1",
-            title="t1",
-            published_date=datetime(2024, 1, 1, tzinfo=UTC),
-            clean_text="hello world",
-            word_count=2,
-            content_hash="abc123",
+    with Repository(db_path) as repo:
+        repo.upsert_author(author)
+        repo.upsert_article(
+            Article(
+                id="a-1",
+                author_id=author.id,
+                url="https://example.com/1",
+                title="t1",
+                published_date=datetime(2024, 1, 1, tzinfo=UTC),
+                clean_text="hello world",
+                word_count=2,
+                content_hash="abc123",
+            )
         )
-    )
     h1 = compute_corpus_hash(db_path)
     h2 = compute_corpus_hash(db_path)
     assert h1 == h2
@@ -241,7 +241,6 @@ def test_verify_corpus_hash_detects_mismatch(tmp_path: Path) -> None:
     db_path = tmp_path / "articles.db"
     analysis_dir = tmp_path / "analysis"
     init_db(db_path)
-    repo = Repository(db_path)
     author = Author(
         id="aid",
         name="Fixture",
@@ -252,19 +251,20 @@ def test_verify_corpus_hash_detects_mismatch(tmp_path: Path) -> None:
         baseline_end=date(2023, 12, 31),
         archive_url="https://www.mediaite.com/author/fixture-author/",
     )
-    repo.upsert_author(author)
-    repo.upsert_article(
-        Article(
-            id="a-1",
-            author_id=author.id,
-            url="https://example.com/1",
-            title="t1",
-            published_date=datetime(2024, 1, 1, tzinfo=UTC),
-            clean_text="hello world",
-            word_count=2,
-            content_hash="abc123",
+    with Repository(db_path) as repo:
+        repo.upsert_author(author)
+        repo.upsert_article(
+            Article(
+                id="a-1",
+                author_id=author.id,
+                url="https://example.com/1",
+                title="t1",
+                published_date=datetime(2024, 1, 1, tzinfo=UTC),
+                clean_text="hello world",
+                word_count=2,
+                content_hash="abc123",
+            )
         )
-    )
     analysis_dir.mkdir()
     (analysis_dir / "corpus_custody.json").write_text(
         json.dumps({"corpus_hash": "deadbeef", "recorded_at": "2026-01-01"}),
@@ -285,7 +285,6 @@ def _seed_baseline_corpus(tmp_path: Path, slug: str = "fixture-author") -> Path:
     db_path = tmp_path / "data" / "articles.db"
     db_path.parent.mkdir(parents=True, exist_ok=True)
     init_db(db_path)
-    repo = Repository(db_path)
     author = Author(
         id="author-1",
         name="Fixture",
@@ -296,7 +295,6 @@ def _seed_baseline_corpus(tmp_path: Path, slug: str = "fixture-author") -> Path:
         baseline_end=date(2023, 12, 31),
         archive_url=f"https://www.mediaite.com/author/{slug}/",
     )
-    repo.upsert_author(author)
     bodies = [
         "The candidate polled well among independents. "
         "Voter turnout in swing districts remained a key focus for the campaign. "
@@ -314,19 +312,21 @@ def _seed_baseline_corpus(tmp_path: Path, slug: str = "fixture-author") -> Path:
         "Commentators pointed to a sharp drop in cable viewership. "
         "Editors defended their wall-to-wall treatment of the story.",
     ]
-    for i, body in enumerate(bodies):
-        repo.upsert_article(
-            Article(
-                id=f"a-{i}",
-                author_id=author.id,
-                url=f"https://example.com/{i}",
-                title=f"t{i}",
-                published_date=datetime(2024, 1, i + 1, tzinfo=UTC),
-                clean_text=body,
-                word_count=len(body.split()),
-                content_hash=f"h{i}",
+    with Repository(db_path) as repo:
+        repo.upsert_author(author)
+        for i, body in enumerate(bodies):
+            repo.upsert_article(
+                Article(
+                    id=f"a-{i}",
+                    author_id=author.id,
+                    url=f"https://example.com/{i}",
+                    title=f"t{i}",
+                    published_date=datetime(2024, 1, i + 1, tzinfo=UTC),
+                    clean_text=body,
+                    word_count=len(body.split()),
+                    content_hash=f"h{i}",
+                )
             )
-        )
     return db_path
 
 

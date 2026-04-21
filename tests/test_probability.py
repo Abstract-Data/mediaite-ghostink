@@ -231,7 +231,6 @@ def test_extract_probability_features_writes_parquet_and_model_card(
     db_path = tmp_path / "data" / "articles.db"
     db_path.parent.mkdir(parents=True, exist_ok=True)
     init_db(db_path)
-    repo = Repository(db_path)
 
     author = Author(
         id="author-1",
@@ -243,27 +242,27 @@ def test_extract_probability_features_writes_parquet_and_model_card(
         baseline_end=date(2023, 12, 31),
         archive_url="https://www.mediaite.com/author/fixture-author/",
     )
-    repo.upsert_author(author)
-
     text = (
         "The quick brown fox jumps over the lazy dog. "
         "This second sentence is a bit longer and contains additional words. "
         "Here we have a third piece of prose to round out the corpus. "
     ) * 5
 
-    for i in range(3):
-        repo.upsert_article(
-            Article(
-                id=f"art-{i}",
-                author_id=author.id,
-                url=f"https://www.mediaite.com/2024/01/0{i + 1}/post-{i}/",
-                title=f"Post {i}",
-                published_date=datetime(2024, 1, i + 1, tzinfo=UTC),
-                clean_text=text,
-                word_count=len(text.split()),
-                content_hash=f"hash-{i}",
+    with Repository(db_path) as repo:
+        repo.upsert_author(author)
+        for i in range(3):
+            repo.upsert_article(
+                Article(
+                    id=f"art-{i}",
+                    author_id=author.id,
+                    url=f"https://www.mediaite.com/2024/01/0{i + 1}/post-{i}/",
+                    title=f"Post {i}",
+                    published_date=datetime(2024, 1, i + 1, tzinfo=UTC),
+                    clean_text=text,
+                    word_count=len(text.split()),
+                    content_hash=f"hash-{i}",
+                )
             )
-        )
 
     monkeypatch.setattr(pp, "load_reference_model", lambda **kw: (_FakeModel(), _FakeTokenizer()))
     monkeypatch.setattr(pp, "load_binoculars_models", lambda *a, **kw: None)

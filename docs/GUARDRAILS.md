@@ -82,11 +82,11 @@ Each Sign has:
 
 <!-- Agents: append new Signs here when you detect failure patterns (3+ consecutive identical errors, circular tool loops, or context pollution). Use the format above. -->
 
-**Sign: Connection-per-Call in Repository Functions**
-- Trigger: A new repository function opens its own `sqlite3.connect()` and closes it after a single operation, or a new caller passes `db_path` instead of a `Repository` instance.
-- Instruction: All database access must go through the `Repository` class (see ADR-001). Do not add new standalone functions that accept `db_path`. If you see existing code doing this, flag it for refactoring rather than copying the pattern.
-- Reason: Connection-per-call with autocommit prevents transactional grouping, multiplies connection overhead, and creates the `db_path` data clump across every function signature. This was the #1 finding across all three project review reports.
-- Provenance: Agent-learned — 2026-04-20 code review (P1-ARCH-1, RF-SMELL-001).
+**Sign: Repository Used Outside an Active Session**
+- Trigger: Code calls `Repository(db_path).upsert_*` without entering `with Repository(db_path) as repo:` (or passes `db_path` into ad-hoc `sqlite3.connect` helpers outside `repository.py`).
+- Instruction: Always use ``with Repository(path) as repo:`` for SQLite writes/reads. For scrape orchestration, prefer injecting the same `repo` into `collect_article_metadata` / `fetch_articles` when multiple operations should share one transaction. See ADR-001.
+- Reason: Session-scoped connections enable WAL + DEFERRED transactions and batch commits; using a closed or non-entered repository raises `RuntimeError` and prevents silent autocommit sprawl.
+- Provenance: Agent-learned — 2026-04-20 code review (P1-ARCH-1, RF-SMELL-001), updated 2026-04-21 after `Repository` context manager landed.
 
 **Sign: Stage Directly Imports Another Stage's Internals**
 - Trigger: A module in `scraper/` imports from `storage/repository.py` directly (e.g., `from forensics.storage.repository import upsert_article`), or any stage module imports internal functions from a different stage.

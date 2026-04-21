@@ -33,13 +33,26 @@ def _serialize_record(rec: dict[str, Any]) -> dict[str, Any]:
 def write_features(features: list[FeatureVector], output_path: Path) -> None:
     """Write feature vectors to Parquet (dict fields as JSON strings)."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    rows = [_serialize_record(f.model_dump(mode="json")) for f in features]
+    rows = [_serialize_record(f.to_flat_dict()) for f in features]
     pl.DataFrame(rows).write_parquet(output_path)
 
 
 def read_features(path: Path) -> pl.DataFrame:
     """Load a feature Parquet table."""
     return pl.read_parquet(path)
+
+
+def load_feature_frame_sorted(features_path: Path) -> pl.DataFrame:
+    """Load features Parquet, require ``timestamp``, return rows sorted by time.
+
+    Uses a ``LazyFrame`` scan so the planner can push the sort down and defer the
+    materialization — callers that filter/slice downstream get the benefit.
+    """
+    lf = pl.scan_parquet(features_path)
+    if "timestamp" not in lf.collect_schema().names():
+        msg = f"features parquet missing timestamp: {features_path}"
+        raise ValueError(msg)
+    return lf.sort("timestamp").collect()
 
 
 def write_embeddings_manifest(records: list[EmbeddingRecord], path: Path) -> None:
