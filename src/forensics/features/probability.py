@@ -11,10 +11,7 @@ from __future__ import annotations
 import logging
 import math
 import re
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:  # pragma: no cover - typing only
-    pass
+from typing import Any
 
 logger = logging.getLogger(__name__)
 

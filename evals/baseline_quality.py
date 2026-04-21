@@ -67,7 +67,9 @@ if _EVALS_AVAILABLE:
         max_repeated_ratio: float = 0.3
 
         def evaluate(self, ctx: EvaluatorContext[BaselineInput, BaselineOutput]) -> float:
-            sentences = [s.strip() for s in ctx.output.text.split(". ") if s.strip()]
+            from forensics.features.probability import split_sentences
+
+            sentences = split_sentences(ctx.output.text)
             if len(sentences) < 3:
                 return 1.0
             unique = len(set(sentences))

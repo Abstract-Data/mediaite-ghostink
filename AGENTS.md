@@ -33,6 +33,22 @@ Agents must not operate outside declared boundaries without human approval.
 
 ---
 
+## Working Rules
+
+Durable operating rules for every agent in this repo.
+
+- **Use `uv run` for every Python command.** Never invoke `python`, `pytest`, or `ruff` directly — it will hit the wrong interpreter.
+- **Preserve the stage boundary contract.** `scrape → extract → analyze → report` is load-bearing: do not merge stages, swap data models, or move files between stages without explicit approval.
+- **Data goes under `data/` only.** No writes outside `data/`, `src/`, `tests/`, `docs/`, `.claude/`, `prompts/`, or project config files.
+- **LazyFrame over DataFrame.** Use Polars `LazyFrame` and defer `.collect()` until the terminal step in a pipeline stage.
+- **Embedding model is pinned.** `sentence-transformers/all-MiniLM-L6-v2` (384-dim). Changes require a MAJOR version bump on the relevant prompt.
+- **Prompts are immutable once released.** Follow the versioning contract in `prompts/README.md` — new content = new `vX.Y.Z.md`; `current.md` is a copy of the latest release.
+- **Minimal diffs, small commits.** Ship fixes surgically; do not refactor adjacent code unless asked.
+- **Add tests for behavior changes.** TDD per `docs/TESTING.md`; property-based tests via Hypothesis for hashing/normalization utilities.
+- **Update session boundary files:** append a block to `HANDOFF.md` at the end of every multi-step task; log new operational knowledge in `docs/RUNBOOK.md`; append a Sign to `docs/GUARDRAILS.md` on any failure pattern that recurs 3+ times.
+
+---
+
 ## Commands
 
 ### Development

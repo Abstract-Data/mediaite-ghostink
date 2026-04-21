@@ -59,6 +59,8 @@ def make_baseline_agent(model_name: str, ollama_base_url: str) -> Any:
             "Baseline generation requires pydantic-ai. Install with: uv sync --extra baseline"
         ) from exc
 
+    # Ollama's OpenAI-compatible /v1 endpoint requires a non-empty api_key string
+    # but does not validate it — "ollama-local" is a placeholder, not a secret.
     ollama_model = OpenAIChatModel(
         model_name=model_name,
         provider=OpenAIProvider(

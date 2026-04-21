@@ -89,22 +89,10 @@ def run_all() -> None:
     db_path = root / "data" / "articles.db"
     extract_all_features(db_path, settings, author_slug=None, skip_embeddings=False)
 
-    from forensics.cli.analyze import analyze as analyze_cmd
+    from forensics.cli.analyze import run_analyze
 
     try:
-        analyze_cmd(
-            changepoint=False,
-            timeseries=True,
-            drift=False,
-            convergence=True,
-            compare=False,
-            ai_baseline=False,
-            skip_generation=False,
-            verify_corpus=False,
-            baseline_model=None,
-            articles_per_cell=None,
-            author=None,
-        )
+        run_analyze(timeseries=True, convergence=True)
     except typer.Exit as exc:
         if exc.exit_code:
             raise

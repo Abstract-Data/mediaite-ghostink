@@ -139,13 +139,6 @@ async def run_generation_matrix(
         )
         return manifest
 
-    try:
-        import httpx  # noqa: F401 - ensured present for pydantic-ai
-    except ImportError as exc:  # pragma: no cover
-        raise ImportError(
-            "httpx is required for Ollama generation; run `uv sync --extra baseline`"
-        ) from exc
-
     for model_name in target_models:
         digest = get_model_digest(model_name, ollama_base_url=cfg.ollama_base_url)
         model_entry = {"name": model_name, "digest": digest, "cells": []}

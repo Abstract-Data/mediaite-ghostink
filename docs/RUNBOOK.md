@@ -92,6 +92,15 @@ gate: `uv sync --extra probability --extra baseline`.
 - Falcon-7B pair (Binoculars, optional): ~28GB full / ~8GB quantized
 - Embedding model (all-MiniLM-L6-v2): ~80MB (auto-downloads on first embedding run)
 
+Throughput expectations:
+
+- Article-level perplexity only: ~10 articles/min on CPU with GPT-2.
+- Sentence-level perplexity (computed alongside) is ~5× slower because each
+  sentence triggers its own forward pass; budget ~2 articles/min on CPU for
+  a full `compute_perplexity` run. GPU throughput is ~50 articles/min.
+- Binoculars (Falcon-7B pair) is GPU-only for practical runs; on CPU plan for
+  ~1 article/min.
+
 ### Running probability features
 
 ```

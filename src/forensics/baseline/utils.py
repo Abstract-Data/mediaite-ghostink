@@ -20,15 +20,13 @@ def get_model_digest(model_name: str, *, ollama_base_url: str = "http://localhos
     Returns ``"unknown"`` if the Ollama server is unreachable or the model isn't
     pulled — we still want to record the attempt in the generation manifest.
     """
-    try:
-        import httpx
-    except ImportError:
-        return "unknown"
+    import httpx
+
     try:
         resp = httpx.get(f"{ollama_base_url}/api/tags", timeout=10.0)
         resp.raise_for_status()
         payload = resp.json()
-    except Exception as exc:  # noqa: BLE001
+    except (httpx.HTTPError, ValueError) as exc:
         logger.warning("Ollama digest lookup failed for %s: %s", model_name, exc)
         return "unknown"
     for entry in payload.get("models", []):

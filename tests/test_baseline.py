@@ -273,3 +273,198 @@ def test_verify_corpus_hash_detects_mismatch(tmp_path: Path) -> None:
     ok, msg = verify_corpus_hash(db_path, analysis_dir)
     assert ok is False
     assert "mismatch" in msg.lower()
+
+
+# --- orchestrator (dry-run + reembed, no Ollama) -----------------------------
+
+
+def _seed_baseline_corpus(tmp_path: Path, slug: str = "fixture-author") -> Path:
+    """Drop a small corpus under tmp_path/data/articles.db; returns db_path."""
+    from forensics.storage.repository import Repository, init_db
+
+    db_path = tmp_path / "data" / "articles.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    init_db(db_path)
+    repo = Repository(db_path)
+    author = Author(
+        id="author-1",
+        name="Fixture",
+        slug=slug,
+        outlet="mediaite.com",
+        role="target",
+        baseline_start=date(2020, 1, 1),
+        baseline_end=date(2023, 12, 31),
+        archive_url=f"https://www.mediaite.com/author/{slug}/",
+    )
+    repo.upsert_author(author)
+    bodies = [
+        "The candidate polled well among independents. "
+        "Voter turnout in swing districts remained a key focus for the campaign. "
+        "Reporters pressed aides for reactions in the spin room.",
+        "Cable news devoted the hour to media criticism. "
+        "Anchors sparred over the latest ratings, reflecting deeper outlet rivalries. "
+        "Guests complained about editorial slant.",
+        "The administration announced new policy. "
+        "The president defended the move in an afternoon briefing. "
+        "Opposition leaders promised to file legal challenges.",
+        "Polling showed a narrow margin in the governor's race. "
+        "Campaign strategists adjusted ad spend to final battleground media markets. "
+        "Debate prep continued behind the scenes.",
+        "An analyst argued the coverage was unbalanced. "
+        "Commentators pointed to a sharp drop in cable viewership. "
+        "Editors defended their wall-to-wall treatment of the story.",
+    ]
+    for i, body in enumerate(bodies):
+        repo.upsert_article(
+            Article(
+                id=f"a-{i}",
+                author_id=author.id,
+                url=f"https://example.com/{i}",
+                title=f"t{i}",
+                published_date=datetime(2024, 1, i + 1, tzinfo=UTC),
+                clean_text=body,
+                word_count=len(body.split()),
+                content_hash=f"h{i}",
+            )
+        )
+    return db_path
+
+
+def test_run_generation_matrix_dry_run_writes_plan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import asyncio
+
+    from forensics.baseline import orchestrator
+    from forensics.config import get_settings
+
+    db_path = _seed_baseline_corpus(tmp_path)
+    (tmp_path / "prompts" / "baseline_templates").mkdir(parents=True)
+    (tmp_path / "prompts" / "baseline_templates" / "raw_generation.txt").write_text(
+        "Write {word_count} words about {topic_keywords}", encoding="utf-8"
+    )
+    (tmp_path / "prompts" / "baseline_templates" / "style_mimicry.txt").write_text(
+        "Style: {word_count} words about {topic_keywords}", encoding="utf-8"
+    )
+
+    cfg = tmp_path / "config.toml"
+    cfg.write_text(
+        """
+[[authors]]
+name = "Fixture"
+slug = "fixture-author"
+outlet = "mediaite.com"
+role = "target"
+archive_url = "https://www.mediaite.com/author/fixture-author/"
+baseline_start = 2020-01-01
+baseline_end = 2023-12-31
+
+[baseline]
+models = ["llama3.1:8b"]
+temperatures = [0.0, 0.8]
+articles_per_cell = 2
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("FORENSICS_CONFIG_FILE", str(cfg))
+    get_settings.cache_clear()
+
+    manifest = asyncio.run(
+        orchestrator.run_generation_matrix(
+            "fixture-author",
+            get_settings(),
+            db_path=db_path,
+            project_root=tmp_path,
+            dry_run=True,
+        )
+    )
+    assert manifest["dry_run"] is True
+    # 1 model × 2 temperatures × 2 modes = 4 cells
+    assert len(manifest["planned_cells"]) == 4
+    manifest_path = (
+        tmp_path / "data" / "ai_baseline" / "fixture-author" / "generation_manifest.json"
+    )
+    assert manifest_path.exists()
+    get_settings.cache_clear()
+
+
+def test_reembed_existing_baseline_roundtrips(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from forensics.baseline import orchestrator
+    from forensics.config import get_settings
+    from forensics.features import embeddings as embed_mod
+
+    cfg = tmp_path / "config.toml"
+    cfg.write_text(
+        """
+[[authors]]
+name = "Fixture"
+slug = "fixture-author"
+outlet = "mediaite.com"
+role = "target"
+archive_url = "https://www.mediaite.com/author/fixture-author/"
+baseline_start = 2020-01-01
+baseline_end = 2023-12-31
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("FORENSICS_CONFIG_FILE", str(cfg))
+    get_settings.cache_clear()
+
+    # Seed one previously generated baseline article on disk.
+    cell_dir = tmp_path / "data" / "ai_baseline" / "fixture-author" / "llama3.1-8b" / "raw_t0.0"
+    cell_dir.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "article_id": "baseline_llama3.1-8b_raw_t0.0_001",
+        "text": "hello world " * 20,
+        "model": "llama3.1:8b",
+    }
+    (cell_dir / f"{payload['article_id']}.json").write_text(json.dumps(payload), encoding="utf-8")
+
+    # Bypass the real embedding model.
+    def _stub_embed(text: str, _model_name: str):
+        import numpy as np
+
+        return np.zeros(4, dtype=np.float32)
+
+    monkeypatch.setattr(embed_mod, "compute_embedding", _stub_embed)
+
+    n = orchestrator.reembed_existing_baseline(
+        "fixture-author", get_settings(), project_root=tmp_path
+    )
+    assert n == 1
+    assert (cell_dir / "embeddings" / f"{payload['article_id']}.npy").is_file()
+    get_settings.cache_clear()
+
+
+def test_reembed_existing_baseline_missing_dir_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from forensics.baseline import orchestrator
+    from forensics.config import get_settings
+
+    cfg = tmp_path / "config.toml"
+    cfg.write_text(
+        """
+[[authors]]
+name = "F"
+slug = "missing-author"
+outlet = "mediaite.com"
+role = "target"
+archive_url = "https://www.mediaite.com/author/missing-author/"
+baseline_start = 2020-01-01
+baseline_end = 2023-12-31
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("FORENSICS_CONFIG_FILE", str(cfg))
+    get_settings.cache_clear()
+    with pytest.raises(ValueError, match="No existing baseline"):
+        orchestrator.reembed_existing_baseline(
+            "missing-author", get_settings(), project_root=tmp_path
+        )
+    get_settings.cache_clear()

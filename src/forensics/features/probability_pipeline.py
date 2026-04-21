@@ -151,15 +151,7 @@ def extract_probability_features(
         )
 
     output_dir = get_project_root() / "data" / "probability"
-    _write_model_card(
-        output_dir,
-        _model_card_payload(
-            settings,
-            include_binoculars=bool(binoc),
-            device=resolved_device,
-            transformers_version=_transformers_version(),
-        ),
-    )
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     total = 0
     for author in target_authors:
@@ -221,5 +213,18 @@ def extract_probability_features(
             binoc is not None,
         )
         total += len(rows)
+
+    # Pin the run only after at least one author succeeded — writing the card
+    # up front would claim "scored_at = now" even on a total failure.
+    if total > 0:
+        _write_model_card(
+            output_dir,
+            _model_card_payload(
+                settings,
+                include_binoculars=bool(binoc),
+                device=resolved_device,
+                transformers_version=_transformers_version(),
+            ),
+        )
 
     return total
