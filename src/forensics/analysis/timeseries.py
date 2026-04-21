@@ -13,7 +13,7 @@ import polars as pl
 
 from forensics.analysis.changepoint import PELT_FEATURE_COLUMNS
 from forensics.config.settings import ForensicsSettings
-from forensics.storage.parquet import load_feature_frame_sorted
+from forensics.storage.parquet import read_features
 from forensics.storage.repository import Repository, init_db
 from forensics.utils.datetime import parse_datetime
 
@@ -200,7 +200,7 @@ def run_timeseries_analysis(
         if not feat_path.is_file():
             logger.warning("Skipping timeseries for %s: missing %s", author.slug, feat_path)
             continue
-        df = load_feature_frame_sorted(feat_path)
+        df = read_features(feat_path).sort("timestamp")
         df_a = df.filter(pl.col("author_id") == author.id)
         if df_a.is_empty():
             df_a = df
