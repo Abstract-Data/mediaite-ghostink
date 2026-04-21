@@ -1,6 +1,6 @@
 {
   "family": "phase4-feature-extraction",
-  "current_version": "0.2.0",
+  "current_version": "0.3.0",
   "versions": [
     {
       "version": "0.1.0",
@@ -13,10 +13,18 @@
     {
       "version": "0.2.0",
       "date": "2026-04-20",
-      "status": "active",
+      "status": "superseded",
       "model": "gpt-5-3-codex",
       "file": "v0.2.0.md",
       "changelog_entry": "feat: add POS bigram & phrase-pattern features (pos_patterns.py) — POS bigram frequency vectors, clause-initial entropy, dependency tree depth distribution"
+    },
+    {
+      "version": "0.3.0",
+      "date": "2026-04-20",
+      "status": "active",
+      "model": "gpt-5-3-codex",
+      "file": "v0.3.0.md",
+      "changelog_entry": "docs: align Phase 4 with Repository/Article/FeatureVector, selection rules, schema extensions, CLI wiring, ForensicsSettings"
     }
   ]
 }
