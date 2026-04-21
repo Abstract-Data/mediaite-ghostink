@@ -182,3 +182,39 @@ uv run pytest tests/ -v — 4/4 passed, 80.12% coverage
 #### Risks & Next Steps
 - Run Phase 11 after completing the current phase work to retool the CLI.
 - The migration is backward-compatible: `pyproject.toml` entry point and `__main__.py` import path don't change.
+
+---
+
+### Phase 11: Typer CLI migration (implemented)
+**Status:** Complete
+**Date:** 2026-04-21
+
+#### What Was Done
+- Replaced `src/forensics/cli.py` with a `src/forensics/cli/` Typer package (`__init__.py`, `_helpers.py`, `scrape.py`, `extract.py`, `analyze.py`, `report.py`, `pipeline.py`).
+- Preserved scrape `_dispatch` routing, full extract/analyze/report/all behavior, and `main() -> int` for scripts/tests.
+- Placeholder author guard now raises `typer.BadParameter` (integration test updated).
+- Added `typer>=0.15.0` to project dependencies (current Typer releases omit the `all` extra; Rich still comes in transitively for styled help); rewrote CLI integration tests for CliRunner + `_dispatch`.
+
+#### Files Modified
+- `pyproject.toml` — Typer dependency
+- `src/forensics/cli/**` — new package; removed monolithic `cli.py`
+- `tests/integration/test_cli.py`, `tests/integration/test_cli_scrape_dispatch.py`, `tests/evals/test_core_eval.py` — Typer-oriented tests
+- `AGENTS.md` — CLI stack note
+- `HANDOFF.md` — this block
+
+#### Verification Evidence
+```
+uv sync
+uv run ruff check .
+uv run pytest tests/ -v
+uv run forensics --help
+```
+
+#### Decisions Made
+- Kept real analyze/extract/report implementations from the pre-migration CLI instead of regressing to phase-stub behavior, while adopting the Phase 11 module layout and Typer wiring.
+
+#### Unresolved Questions
+- None.
+
+#### Risks & Next Steps
+- None beyond normal CI after merge.

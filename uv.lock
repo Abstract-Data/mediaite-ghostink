@@ -1570,6 +1570,7 @@ dependencies = [
     { name = "sentence-transformers" },
     { name = "spacy" },
     { name = "textstat" },
+    { name = "typer" },
     { name = "umap-learn" },
 ]
 
@@ -1634,6 +1635,7 @@ requires-dist = [
     { name = "torch", marker = "extra == 'probability'", specifier = ">=2.0" },
     { name = "transformers", marker = "extra == 'dev'", specifier = ">=4.40" },
     { name = "transformers", marker = "extra == 'probability'", specifier = ">=4.40" },
+    { name = "typer", specifier = ">=0.15.0" },
     { name = "umap-learn", specifier = ">=0.5.6" },
 ]
 provides-extras = ["probability", "baseline", "dev"]
