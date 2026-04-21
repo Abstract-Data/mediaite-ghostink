@@ -22,11 +22,11 @@ from forensics.scraper.crawler import (
     user_dict_to_manifest,
     wp_post_to_article,
 )
-from forensics.utils.datetime import parse_wp_datetime
 from forensics.scraper.dedup import deduplicate_articles
 from forensics.scraper.fetcher import RateLimiter, _is_mediaite_host, request_with_retry
 from forensics.scraper.parser import extract_article_text, extract_metadata, looks_coauthored
 from forensics.storage.repository import Repository
+from forensics.utils.datetime import parse_wp_datetime
 from forensics.utils.hashing import simhash, simhash_hamming
 from forensics.utils.text import word_count
 

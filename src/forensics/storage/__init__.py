@@ -6,6 +6,7 @@ from forensics.storage.repository import (
     UnfetchedArticle,
     UnfetchedUrl,
     init_db,
+    insert_analysis_run,
 )
 
 __all__ = [
@@ -15,4 +16,5 @@ __all__ = [
     "append_jsonl",
     "export_articles_jsonl",
     "init_db",
+    "insert_analysis_run",
 ]

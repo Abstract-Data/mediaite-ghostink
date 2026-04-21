@@ -9,6 +9,7 @@ import random
 import shutil
 import tarfile
 import time
+import weakref
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -28,7 +29,19 @@ from forensics.utils.text import word_count
 
 logger = logging.getLogger(__name__)
 
-_error_lock = asyncio.Lock()
+# One lock per running event loop (safe across repeated asyncio.run() in tests).
+_loop_error_locks: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Lock] = (
+    weakref.WeakKeyDictionary()
+)
+
+
+def _error_lock_for_current_loop() -> asyncio.Lock:
+    loop = asyncio.get_running_loop()
+    lock = _loop_error_locks.get(loop)
+    if lock is None:
+        lock = asyncio.Lock()
+        _loop_error_locks[loop] = lock
+    return lock
 
 
 class RateLimiter:
@@ -60,7 +73,7 @@ async def append_scrape_error(path: Path, record: dict[str, Any]) -> None:
         with path.open("a", encoding="utf-8") as fh:
             fh.write(line)
 
-    async with _error_lock:
+    async with _error_lock_for_current_loop():
         await asyncio.to_thread(_write)
 
 
