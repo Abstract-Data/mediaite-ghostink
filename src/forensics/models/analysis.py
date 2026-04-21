@@ -26,6 +26,7 @@ class ConvergenceWindow(BaseModel):
     convergence_ratio: float
     pipeline_a_score: float
     pipeline_b_score: float
+    pipeline_c_score: float | None = None
 
 
 class DriftScores(BaseModel):

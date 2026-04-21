@@ -93,7 +93,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="With discovery: overwrite authors_manifest.jsonl if it exists",
     )
 
-<<<<<<< New base: Phase 4 implementation
     extract_p = subparsers.add_parser("extract", help="Run feature extraction pipeline")
     extract_p.add_argument(
         "--author",
@@ -125,6 +124,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Run embedding drift analysis (Phase 6: centroids, velocities, UMAP)",
     )
     analyze_p.add_argument(
+        "--convergence",
+        action="store_true",
+        help="Run Phase 7 synthesis: convergence, hypothesis tests, AnalysisResult JSON",
+    )
+    analyze_p.add_argument(
+        "--compare",
+        action="store_true",
+        help="Target vs control comparison only (reads/writes comparison_report.json)",
+    )
+    analyze_p.add_argument(
         "--ai-baseline",
         action="store_true",
         help="Generate or refresh synthetic AI baseline articles + embeddings (needs API key)",
@@ -152,25 +161,25 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="SLUG",
         help="Limit analysis to one configured author slug",
     )
-||||||| Common ancestor
-    subparsers.add_parser("extract", help="Run feature extraction pipeline")
-    subparsers.add_parser("analyze", help="Run analysis (change-point, drift, comparison)")
-=======
-    extract_p = subparsers.add_parser("extract", help="Run feature extraction pipeline")
-    extract_p.add_argument(
-        "--author",
+    report_p = subparsers.add_parser("report", help="Render Quarto forensic book")
+    report_p.add_argument(
+        "--notebook",
         default=None,
-        metavar="SLUG",
-        help="Limit extraction to one configured author slug",
+        metavar="NN",
+        help="Render one chapter by number (e.g. 05) or notebook filename",
     )
-    extract_p.add_argument(
-        "--skip-embeddings",
+    report_p.add_argument(
+        "--format",
+        dest="report_format",
+        choices=["html", "pdf", "both"],
+        default="both",
+        help="Output format for quarto render",
+    )
+    report_p.add_argument(
+        "--verify",
         action="store_true",
-        help="Skip sentence-transformer embeddings (faster for tests)",
+        help="Require corpus hash to match data/analysis/corpus_custody.json",
     )
-    subparsers.add_parser("analyze", help="Run analysis (change-point, drift, comparison)")
->>>>>>> Current commit: Phase 4 implementation
-    subparsers.add_parser("report", help="Generate notebook outputs")
     subparsers.add_parser("all", help="Full pipeline end-to-end")
     return parser
 
@@ -351,10 +360,12 @@ async def _async_scrape(args: argparse.Namespace) -> int:
     return 1
 
 
-<<<<<<< New base: Phase 4 implementation
 def _run_analyze(args: argparse.Namespace) -> int:
+    import asyncio
+
     from forensics.analysis.changepoint import run_changepoint_analysis
     from forensics.analysis.drift import run_ai_baseline_command, run_drift_analysis
+    from forensics.analysis.orchestrator import run_compare_only, run_full_analysis
     from forensics.analysis.timeseries import run_timeseries_analysis
 
     settings = get_settings()
@@ -367,17 +378,44 @@ def _run_analyze(args: argparse.Namespace) -> int:
     want_ts = bool(getattr(args, "timeseries", False))
     want_drift = bool(getattr(args, "drift", False))
     want_ai = bool(getattr(args, "ai_baseline", False))
-    explicit = want_cp or want_ts or want_drift or want_ai
+    want_conv = bool(getattr(args, "convergence", False))
+    want_cmp = bool(getattr(args, "compare", False))
+    explicit = want_cp or want_ts or want_drift or want_ai or want_conv or want_cmp
+
+    author_slug = getattr(args, "author", None)
+
+    if want_cmp and not (want_cp or want_ts or want_drift or want_ai or want_conv):
+        rid = insert_analysis_run(
+            db_path,
+            config_hash=_config_fingerprint(),
+            description="forensics analyze --compare",
+        )
+        meta = {
+            "run_id": rid,
+            "run_timestamp": datetime.now(UTC).isoformat(),
+            "config_hash": _config_fingerprint(),
+            "compare_only": True,
+            "author": author_slug,
+        }
+        (analysis_dir / "run_metadata.json").write_text(
+            json.dumps(meta, indent=2),
+            encoding="utf-8",
+        )
+        run_compare_only(settings, project_root=root, db_path=db_path, author_slug=author_slug)
+        logger.info("analyze: compare-only complete author=%s", author_slug or "all")
+        return 0
+
     if explicit:
         do_changepoint = want_cp
         do_timeseries = want_ts
         do_drift = want_drift
+        do_full_analysis = want_conv
     else:
-        do_changepoint = True
+        do_changepoint = False
         do_timeseries = True
         do_drift = False
+        do_full_analysis = True
 
-    author_slug = getattr(args, "author", None)
     rid = insert_analysis_run(
         db_path,
         config_hash=_config_fingerprint(),
@@ -390,6 +428,7 @@ def _run_analyze(args: argparse.Namespace) -> int:
         "changepoint": do_changepoint,
         "timeseries": do_timeseries,
         "drift": do_drift,
+        "convergence_full": do_full_analysis,
         "author": author_slug,
     }
     (analysis_dir / "run_metadata.json").write_text(
@@ -418,6 +457,17 @@ def _run_analyze(args: argparse.Namespace) -> int:
             project_root=root,
             author_slug=author_slug,
         )
+    if do_full_analysis:
+        asyncio.run(
+            run_full_analysis(
+                db_path,
+                root / "data" / "features",
+                root / "data" / "embeddings",
+                settings,
+                project_root=root,
+                author_slug=author_slug,
+            )
+        )
     if want_ai:
         run_ai_baseline_command(
             db_path,
@@ -429,16 +479,65 @@ def _run_analyze(args: argparse.Namespace) -> int:
             llm_model=str(getattr(args, "llm_model", "gpt-4o")),
         )
     logger.info(
-        "analyze: completed (changepoint=%s, timeseries=%s, drift=%s, ai_baseline=%s, author=%s)",
+        "analyze: completed (changepoint=%s, timeseries=%s, drift=%s, "
+        "full_analysis=%s, ai_baseline=%s, author=%s)",
         do_changepoint,
         do_timeseries,
         do_drift,
+        do_full_analysis,
         want_ai,
         author_slug or "all",
     )
     return 0
 
 
+async def _run_all_pipeline() -> int:
+    """scrape → extract → analyze → report."""
+    from forensics.reporting import run_report
+
+    scrape_ns = argparse.Namespace(
+        discover=False,
+        metadata=False,
+        fetch=False,
+        dedup=False,
+        archive=False,
+        dry_run=False,
+        force_refresh=False,
+    )
+    code = await _async_scrape(scrape_ns)
+    if code != 0:
+        return code
+
+    extract_ns = argparse.Namespace(author=None, skip_embeddings=False)
+    code = _run_extract(extract_ns)
+    if code != 0:
+        return code
+
+    analyze_ns = argparse.Namespace(
+        changepoint=False,
+        timeseries=True,
+        drift=False,
+        convergence=True,
+        compare=False,
+        ai_baseline=False,
+        skip_generation=False,
+        openai_key=None,
+        llm_model="gpt-4o",
+        author=None,
+    )
+    code = _run_analyze(analyze_ns)
+    if code != 0:
+        return code
+
+    settings = get_settings()
+    report_ns = argparse.Namespace(
+        verify=False,
+        report_format=settings.report.output_format,
+        notebook=None,
+    )
+    return run_report(report_ns)
+
+
 def _run_extract(args: argparse.Namespace) -> int:
     from forensics.features.pipeline import extract_all_features
 
@@ -457,27 +556,6 @@ def _run_extract(args: argparse.Namespace) -> int:
     return 0
 
 
-||||||| Common ancestor
-=======
-def _run_extract(args: argparse.Namespace) -> int:
-    from forensics.features.pipeline import extract_all_features
-
-    settings = get_settings()
-    root = get_project_root()
-    db_path = root / "data" / "articles.db"
-    author_slug = getattr(args, "author", None)
-    skip_embeddings = bool(getattr(args, "skip_embeddings", False))
-    n = extract_all_features(
-        db_path,
-        settings,
-        author_slug=author_slug,
-        skip_embeddings=skip_embeddings,
-    )
-    logger.info("extract: processed %d article(s)", n)
-    return 0
-
-
->>>>>>> Current commit: Phase 4 implementation
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     parser = build_parser()
@@ -486,7 +564,6 @@ def main() -> int:
     if args.command == "scrape":
         return asyncio.run(_async_scrape(args))
 
-<<<<<<< New base: Phase 4 implementation
     if args.command == "extract":
         try:
             return _run_extract(args)
@@ -501,18 +578,24 @@ def main() -> int:
             logger.error("%s", exc)
             return 1
 
-||||||| Common ancestor
-=======
-    if args.command == "extract":
+    if args.command == "report":
+        from forensics.reporting import run_report
+
         try:
-            return _run_extract(args)
+            return run_report(args)
         except ValueError as exc:
             logger.error("%s", exc)
             return 1
 
->>>>>>> Current commit: Phase 4 implementation
-    logger.warning("Phase not yet implemented")
-    return 0
+    if args.command == "all":
+        try:
+            return asyncio.run(_run_all_pipeline())
+        except ValueError as exc:
+            logger.error("%s", exc)
+            return 1
+
+    logger.warning("Unknown command")
+    return 1
 
 
 if __name__ == "__main__":

@@ -1,4 +1,8 @@
 # Git LFS tracking for large data files
+data/raw/**/*.tar.gz filter=lfs diff=lfs merge=lfs -text
+data/articles.db filter=lfs diff=lfs merge=lfs -text
+data/features/**/*.parquet filter=lfs diff=lfs merge=lfs -text
+data/embeddings/**/*.npy filter=lfs diff=lfs merge=lfs -text
 *.parquet filter=lfs diff=lfs merge=lfs -text
 *.pkl filter=lfs diff=lfs merge=lfs -text
 *.h5 filter=lfs diff=lfs merge=lfs -text

@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
+from pathlib import Path
 
 import numpy as np
 import polars as pl
@@ -161,6 +162,7 @@ def test_analysis_stub_modules_importable() -> None:
     import forensics.analysis.comparison  # noqa: F401
     import forensics.analysis.convergence  # noqa: F401
     import forensics.analysis.drift  # noqa: F401
+    import forensics.analysis.orchestrator  # noqa: F401
     import forensics.analysis.statistics  # noqa: F401
 
 
@@ -319,3 +321,685 @@ def test_extract_lda_topic_keywords_runs() -> None:
     topics = extract_lda_topic_keywords(texts, num_topics=4, n_keywords=5, random_state=0)
     assert topics
     assert all(len(kws) == 5 for _tid, kws, _s in topics)
+
+
+# --- Phase 7: convergence, statistics, comparison ---
+
+
+def test_convergence_scoring() -> None:
+    from forensics.analysis.convergence import compute_convergence_scores
+    from forensics.models.analysis import ChangePoint
+
+    base = datetime(2024, 1, 10, tzinfo=UTC)
+    names = [f"f{i}" for i in range(5)]
+    cps = [
+        ChangePoint(
+            feature_name=names[i],
+            author_id="a1",
+            timestamp=base + timedelta(days=i * 3),
+            confidence=0.9,
+            method="pelt",
+            effect_size_cohens_d=0.9,
+            direction="increase",
+        )
+        for i in range(4)
+    ]
+    vels = [(f"2024-0{i}", 0.5 + i * 0.4) for i in range(1, 5)]
+    sim_curve = [(base + timedelta(days=d), 1.0 - 0.02 * d) for d in range(0, 120, 7)]
+    wins = compute_convergence_scores(
+        cps,
+        vels,
+        sim_curve,
+        window_days=90,
+        min_feature_ratio=0.6,
+        total_feature_count=5,
+    )
+    assert wins, "expected convergence window when 4/5 features align"
+
+
+def test_convergence_below_threshold() -> None:
+    from forensics.analysis.convergence import compute_convergence_scores
+    from forensics.models.analysis import ChangePoint
+
+    base = datetime(2024, 1, 10, tzinfo=UTC)
+    names = [f"f{i}" for i in range(5)]
+    cps = [
+        ChangePoint(
+            feature_name=names[i],
+            author_id="a1",
+            timestamp=base + timedelta(days=i * 3),
+            confidence=0.5,
+            method="pelt",
+            effect_size_cohens_d=0.2,
+            direction="increase",
+        )
+        for i in range(2)
+    ]
+    wins = compute_convergence_scores(
+        cps,
+        [],
+        [],
+        window_days=90,
+        min_feature_ratio=0.6,
+        total_feature_count=5,
+    )
+    assert wins == []
+
+
+def test_welch_t_significant() -> None:
+    from scipy import stats
+
+    rng = np.random.default_rng(11)
+    pre = rng.normal(0.0, 0.4, 60)
+    post = rng.normal(2.5, 0.4, 60)
+    t_stat, p_val = stats.ttest_ind(pre, post, equal_var=False)
+    assert p_val < 0.05
+    assert abs(float(t_stat)) > 1.0
+
+
+def test_welch_t_null() -> None:
+    from scipy import stats
+
+    rng = np.random.default_rng(12)
+    pre = rng.normal(0.0, 1.0, 80)
+    post = rng.normal(0.05, 1.0, 80)
+    _t, p_val = stats.ttest_ind(pre, post, equal_var=False)
+    assert p_val > 0.05
+
+
+def test_cohens_d_large() -> None:
+    from forensics.analysis.statistics import cohens_d
+
+    rng = np.random.default_rng(13)
+    d = cohens_d(rng.normal(0, 0.2, 100).tolist(), rng.normal(3.0, 0.2, 100).tolist())
+    assert d > 0.8
+
+
+def test_cohens_d_negligible() -> None:
+    from forensics.analysis.statistics import cohens_d
+
+    rng = np.random.default_rng(14)
+    x = rng.normal(1.0, 0.5, 200)
+    d = cohens_d(x.tolist(), (x + 0.02).tolist())
+    assert abs(d) < 0.2
+
+
+def test_bootstrap_ci_contains_true_diff() -> None:
+    from forensics.analysis.statistics import bootstrap_ci
+
+    rng = np.random.default_rng(15)
+    g1 = rng.normal(0.0, 0.3, 80)
+    g2 = rng.normal(2.0, 0.3, 80)
+    lo, hi = bootstrap_ci(g1.tolist(), g2.tolist(), n_bootstrap=800, seed=0)
+    true_diff = 2.0
+    assert lo <= true_diff <= hi
+
+
+def test_bonferroni_correction() -> None:
+    from forensics.analysis.statistics import apply_correction
+    from forensics.models.analysis import HypothesisTest
+
+    tests = [
+        HypothesisTest(
+            test_name=f"t{i}",
+            feature_name="f",
+            author_id="a",
+            raw_p_value=0.0004,
+            corrected_p_value=0.0004,
+            effect_size_cohens_d=1.0,
+            confidence_interval_95=(0.0, 0.0),
+            significant=False,
+        )
+        for i in range(100)
+    ]
+    apply_correction(tests, method="bonferroni", alpha=0.05)
+    assert tests[0].corrected_p_value < 0.05
+    tests2 = [
+        HypothesisTest(
+            test_name=f"t{i}",
+            feature_name="f",
+            author_id="a",
+            raw_p_value=0.0006,
+            corrected_p_value=0.0006,
+            effect_size_cohens_d=1.0,
+            confidence_interval_95=(0.0, 0.0),
+            significant=False,
+        )
+        for i in range(100)
+    ]
+    apply_correction(tests2, method="bonferroni", alpha=0.05)
+    assert tests2[0].corrected_p_value > 0.05
+
+
+def test_benjamini_hochberg() -> None:
+    from forensics.analysis.statistics import apply_correction
+    from forensics.models.analysis import HypothesisTest
+
+    raw_ps = [0.01, 0.02, 0.06, 0.04]
+    tests = [
+        HypothesisTest(
+            test_name=f"t{i}",
+            feature_name="f",
+            author_id="a",
+            raw_p_value=p,
+            corrected_p_value=p,
+            effect_size_cohens_d=0.6,
+            confidence_interval_95=(0.0, 0.0),
+            significant=False,
+        )
+        for i, p in enumerate(raw_ps)
+    ]
+    apply_correction(tests, method="benjamini_hochberg", alpha=0.05)
+    assert all(t.corrected_p_value >= t.raw_p_value for t in tests)
+
+
+def test_control_comparison_editorial() -> None:
+    from datetime import date
+
+    from forensics.analysis.comparison import compute_signal_attribution
+    from forensics.models.analysis import ConvergenceWindow
+
+    tw = [
+        ConvergenceWindow(
+            start_date=date(2024, 1, 1),
+            end_date=date(2024, 3, 1),
+            features_converging=["a"],
+            convergence_ratio=0.7,
+            pipeline_a_score=0.8,
+            pipeline_b_score=0.8,
+        )
+    ]
+    cw = {
+        "c1": [
+            ConvergenceWindow(
+                start_date=date(2024, 1, 15),
+                end_date=date(2024, 2, 15),
+                features_converging=["a"],
+                convergence_ratio=0.7,
+                pipeline_a_score=0.8,
+                pipeline_b_score=0.8,
+            )
+        ],
+        "c2": [
+            ConvergenceWindow(
+                start_date=date(2024, 1, 20),
+                end_date=date(2024, 2, 20),
+                features_converging=["a"],
+                convergence_ratio=0.7,
+                pipeline_a_score=0.8,
+                pipeline_b_score=0.8,
+            )
+        ],
+    }
+    s = compute_signal_attribution(tw, cw)
+    assert s < 0.4
+
+
+def test_control_comparison_author_specific() -> None:
+    from datetime import date
+
+    from forensics.analysis.comparison import compute_signal_attribution
+    from forensics.models.analysis import ConvergenceWindow
+
+    tw = [
+        ConvergenceWindow(
+            start_date=date(2024, 6, 1),
+            end_date=date(2024, 8, 1),
+            features_converging=["a"],
+            convergence_ratio=0.7,
+            pipeline_a_score=0.8,
+            pipeline_b_score=0.8,
+        )
+    ]
+    cw = {
+        "c1": [
+            ConvergenceWindow(
+                start_date=date(2024, 1, 1),
+                end_date=date(2024, 1, 31),
+                features_converging=["b"],
+                convergence_ratio=0.2,
+                pipeline_a_score=0.1,
+                pipeline_b_score=0.1,
+            )
+        ],
+    }
+    s = compute_signal_attribution(tw, cw)
+    assert s > 0.7
+
+
+def test_analysis_result_serialization() -> None:
+    from datetime import date
+
+    from forensics.models.analysis import (
+        AnalysisResult,
+        ChangePoint,
+        ConvergenceWindow,
+        HypothesisTest,
+    )
+
+    cp = ChangePoint(
+        feature_name="ttr",
+        author_id="aid",
+        timestamp=datetime(2024, 1, 1, tzinfo=UTC),
+        confidence=0.5,
+        method="pelt",
+        effect_size_cohens_d=0.5,
+        direction="increase",
+    )
+    win = ConvergenceWindow(
+        start_date=date(2024, 1, 1),
+        end_date=date(2024, 3, 1),
+        features_converging=["ttr"],
+        convergence_ratio=0.2,
+        pipeline_a_score=0.3,
+        pipeline_b_score=0.4,
+        pipeline_c_score=None,
+    )
+    ht = HypothesisTest(
+        test_name="welch_t_ttr",
+        feature_name="ttr",
+        author_id="aid",
+        raw_p_value=0.01,
+        corrected_p_value=0.02,
+        effect_size_cohens_d=0.6,
+        confidence_interval_95=(-0.1, 0.5),
+        significant=True,
+    )
+    ar = AnalysisResult(
+        author_id="aid",
+        run_timestamp=datetime.now(UTC),
+        config_hash="abc123",
+        change_points=[cp],
+        convergence_windows=[win],
+        drift_scores=None,
+        hypothesis_tests=[ht],
+    )
+    raw = ar.model_dump(mode="json")
+    ar2 = AnalysisResult.model_validate(raw)
+    assert ar2.author_id == ar.author_id
+    assert len(ar2.hypothesis_tests) == 1
+
+
+@pytest.mark.asyncio
+async def test_full_analysis_integration(tmp_path: Path) -> None:
+    import polars as pl
+
+    from forensics.analysis.orchestrator import run_full_analysis
+    from forensics.config.settings import (
+        AnalysisConfig,
+        AuthorConfig,
+        ForensicsSettings,
+        ScrapingConfig,
+    )
+    from forensics.models.author import Author
+    from forensics.storage.repository import Repository, init_db
+
+    db_path = tmp_path / "articles.db"
+    init_db(db_path)
+    repo = Repository(db_path)
+    auth = Author(
+        name="Test",
+        slug="test-author",
+        outlet="x",
+        role="target",
+        baseline_start=date(2020, 1, 1),
+        baseline_end=date(2024, 1, 1),
+        archive_url="https://example.com",
+    )
+    repo.upsert_author(auth)
+
+    n = 50
+    base = datetime(2024, 1, 1, tzinfo=UTC)
+    rows: dict = {
+        "article_id": [f"a{i}" for i in range(n)],
+        "author_id": [auth.id] * n,
+        "timestamp": [base + timedelta(days=i) for i in range(n)],
+    }
+    for col in PELT_FEATURE_COLUMNS:
+        rows[col] = np.linspace(0.0, 1.0, n) + np.random.default_rng(20).normal(0, 0.05, n)
+    feat_dir = tmp_path / "features"
+    feat_dir.mkdir()
+    pl.DataFrame(rows).write_parquet(feat_dir / f"{auth.slug}.parquet")
+
+    settings = ForensicsSettings(
+        authors=[
+            AuthorConfig(
+                name=auth.name,
+                slug=auth.slug,
+                role="target",
+                archive_url=auth.archive_url,
+                baseline_start=auth.baseline_start,
+                baseline_end=auth.baseline_end,
+            )
+        ],
+        scraping=ScrapingConfig(),
+        analysis=AnalysisConfig(changepoint_methods=["pelt"]),
+    )
+
+    out = await run_full_analysis(
+        db_path,
+        feat_dir,
+        tmp_path / "embeddings",
+        settings,
+        project_root=tmp_path,
+        author_slug=auth.slug,
+    )
+    assert auth.slug in out
+    assert (tmp_path / "data" / "analysis" / f"{auth.slug}_result.json").is_file()
+
+
+def test_effect_size_filter() -> None:
+    from forensics.analysis.statistics import apply_correction, filter_by_effect_size
+    from forensics.models.analysis import HypothesisTest
+
+    t = HypothesisTest(
+        test_name="welch_t_x",
+        feature_name="x",
+        author_id="a",
+        raw_p_value=0.01,
+        corrected_p_value=0.01,
+        effect_size_cohens_d=0.3,
+        confidence_interval_95=(0.0, 0.0),
+        significant=False,
+    )
+    apply_correction([t], method="bonferroni", alpha=0.05)
+    filter_by_effect_size([t], min_d=0.5, alpha=0.05)
+    assert not t.significant
+
+
+def test_finding_strength_strong() -> None:
+    from datetime import date
+
+    from forensics.models.analysis import ConvergenceWindow, HypothesisTest
+    from forensics.models.report import FindingStrength, classify_finding_strength
+
+    win = ConvergenceWindow(
+        start_date=date(2024, 1, 1),
+        end_date=date(2024, 3, 1),
+        features_converging=["a", "b", "c"],
+        convergence_ratio=0.8,
+        pipeline_a_score=0.9,
+        pipeline_b_score=0.9,
+        pipeline_c_score=0.6,
+    )
+    tests = [
+        HypothesisTest(
+            test_name=f"w{i}",
+            feature_name=f"f{i}",
+            author_id="a",
+            raw_p_value=0.001,
+            corrected_p_value=0.005,
+            effect_size_cohens_d=0.9,
+            confidence_interval_95=(0.0, 0.0),
+            significant=True,
+        )
+        for i in range(3)
+    ]
+    ctrl = {"editorial_vs_author_signal": 0.85}
+    assert classify_finding_strength(win, tests, ctrl) == FindingStrength.STRONG
+
+
+def test_finding_strength_moderate() -> None:
+    from datetime import date
+
+    from forensics.models.analysis import ConvergenceWindow, HypothesisTest
+    from forensics.models.report import FindingStrength, classify_finding_strength
+
+    win = ConvergenceWindow(
+        start_date=date(2024, 1, 1),
+        end_date=date(2024, 3, 1),
+        features_converging=["a", "b"],
+        convergence_ratio=0.5,
+        pipeline_a_score=0.4,
+        pipeline_b_score=0.4,
+    )
+    tests = [
+        HypothesisTest(
+            test_name="w1",
+            feature_name="f1",
+            author_id="a",
+            raw_p_value=0.02,
+            corrected_p_value=0.03,
+            effect_size_cohens_d=0.6,
+            confidence_interval_95=(0.0, 0.0),
+            significant=True,
+        ),
+        HypothesisTest(
+            test_name="w2",
+            feature_name="f2",
+            author_id="a",
+            raw_p_value=0.02,
+            corrected_p_value=0.03,
+            effect_size_cohens_d=0.55,
+            confidence_interval_95=(0.0, 0.0),
+            significant=True,
+        ),
+    ]
+    assert (
+        classify_finding_strength(win, tests, {"editorial_vs_author_signal": 0.1})
+        == FindingStrength.MODERATE
+    )
+
+
+def test_finding_strength_weak() -> None:
+    from datetime import date
+
+    from forensics.models.analysis import ConvergenceWindow, HypothesisTest
+    from forensics.models.report import FindingStrength, classify_finding_strength
+
+    win = ConvergenceWindow(
+        start_date=date(2024, 1, 1),
+        end_date=date(2024, 3, 1),
+        features_converging=["a"],
+        convergence_ratio=0.2,
+        pipeline_a_score=0.2,
+        pipeline_b_score=0.2,
+    )
+    tests = [
+        HypothesisTest(
+            test_name="w1",
+            feature_name="f1",
+            author_id="a",
+            raw_p_value=0.02,
+            corrected_p_value=0.03,
+            effect_size_cohens_d=0.6,
+            confidence_interval_95=(0.0, 0.0),
+            significant=True,
+        ),
+    ]
+    assert classify_finding_strength(win, tests, {}) == FindingStrength.WEAK
+
+
+def test_finding_strength_none() -> None:
+    from datetime import date
+
+    from forensics.models.analysis import ConvergenceWindow, HypothesisTest
+    from forensics.models.report import FindingStrength, classify_finding_strength
+
+    win = ConvergenceWindow(
+        start_date=date(2024, 1, 1),
+        end_date=date(2024, 3, 1),
+        features_converging=[],
+        convergence_ratio=0.0,
+        pipeline_a_score=0.0,
+        pipeline_b_score=0.0,
+    )
+    tests = [
+        HypothesisTest(
+            test_name="w1",
+            feature_name="f1",
+            author_id="a",
+            raw_p_value=0.5,
+            corrected_p_value=0.9,
+            effect_size_cohens_d=0.1,
+            confidence_interval_95=(0.0, 0.0),
+            significant=False,
+        ),
+    ]
+    assert classify_finding_strength(win, tests, {}) == FindingStrength.NONE
+
+
+def test_apply_correction_empty_and_bad_method() -> None:
+    from forensics.analysis.statistics import apply_correction
+    from forensics.models.analysis import HypothesisTest
+
+    assert apply_correction([], method="benjamini_hochberg") == []
+    t = HypothesisTest(
+        test_name="x",
+        feature_name="f",
+        author_id="a",
+        raw_p_value=0.1,
+        corrected_p_value=0.1,
+        effect_size_cohens_d=0.0,
+        confidence_interval_95=(0.0, 0.0),
+        significant=False,
+    )
+    with pytest.raises(ValueError, match="Unknown correction"):
+        apply_correction([t], method="not_a_method")  # type: ignore[arg-type]
+
+
+def test_compare_target_to_controls_minimal(tmp_path: Path) -> None:
+    from forensics.analysis.comparison import compare_target_to_controls
+    from forensics.config.settings import (
+        AnalysisConfig,
+        AuthorConfig,
+        ForensicsSettings,
+        ScrapingConfig,
+    )
+    from forensics.models.author import Author
+    from forensics.storage.repository import Repository, init_db
+
+    db = tmp_path / "db.sqlite"
+    init_db(db)
+    repo = Repository(db)
+    tgt = Author(
+        name="T",
+        slug="target-a",
+        outlet="o",
+        role="target",
+        baseline_start=date(2020, 1, 1),
+        baseline_end=date(2024, 1, 1),
+        archive_url="https://example.com",
+    )
+    ctl = Author(
+        name="C",
+        slug="control-a",
+        outlet="o",
+        role="control",
+        baseline_start=date(2020, 1, 1),
+        baseline_end=date(2024, 1, 1),
+        archive_url="https://example.com",
+    )
+    repo.upsert_author(tgt)
+    repo.upsert_author(ctl)
+
+    n = 30
+    base = datetime(2024, 1, 1, tzinfo=UTC)
+    feat_dir = tmp_path / "features"
+    feat_dir.mkdir()
+    rows_t = {
+        "article_id": [f"t{i}" for i in range(n)],
+        "author_id": [tgt.id] * n,
+        "timestamp": [base + timedelta(days=i) for i in range(n)],
+    }
+    rows_c = {
+        "article_id": [f"c{i}" for i in range(n)],
+        "author_id": [ctl.id] * n,
+        "timestamp": [base + timedelta(days=i) for i in range(n)],
+    }
+    for col in ("ttr", "mattr", "hapax_ratio"):
+        rows_t[col] = np.random.default_rng(1).normal(1.0, 0.1, n)
+        rows_c[col] = np.random.default_rng(2).normal(0.5, 0.1, n)
+    pl.DataFrame(rows_t).write_parquet(feat_dir / f"{tgt.slug}.parquet")
+    pl.DataFrame(rows_c).write_parquet(feat_dir / f"{ctl.slug}.parquet")
+
+    analysis_dir = tmp_path / "analysis"
+    analysis_dir.mkdir()
+    settings = ForensicsSettings(
+        authors=[
+            AuthorConfig(
+                name=tgt.name,
+                slug=tgt.slug,
+                role="target",
+                archive_url=tgt.archive_url,
+                baseline_start=tgt.baseline_start,
+                baseline_end=tgt.baseline_end,
+            ),
+            AuthorConfig(
+                name=ctl.name,
+                slug=ctl.slug,
+                role="control",
+                archive_url=ctl.archive_url,
+                baseline_start=ctl.baseline_start,
+                baseline_end=ctl.baseline_end,
+            ),
+        ],
+        scraping=ScrapingConfig(),
+        analysis=AnalysisConfig(changepoint_methods=["pelt"]),
+    )
+    out = compare_target_to_controls(
+        tgt.slug,
+        [ctl.slug],
+        feat_dir,
+        db,
+        settings=settings,
+        analysis_dir=analysis_dir,
+        embeddings_dir=tmp_path / "emb",
+        project_root=tmp_path,
+    )
+    assert "feature_comparisons" in out
+    assert "editorial_vs_author_signal" in out
+
+
+def test_pipeline_c_integration() -> None:
+
+    from forensics.analysis.convergence import ProbabilityTrajectory, compute_convergence_scores
+    from forensics.models.analysis import ChangePoint, HypothesisTest
+    from forensics.models.report import FindingStrength, classify_finding_strength
+
+    base = datetime(2024, 2, 1, tzinfo=UTC)
+    cps = [
+        ChangePoint(
+            feature_name="ttr",
+            author_id="a",
+            timestamp=base,
+            confidence=0.95,
+            method="pelt",
+            effect_size_cohens_d=1.0,
+            direction="increase",
+        )
+    ]
+    traj = ProbabilityTrajectory(
+        monthly_perplexity=[("2024-01", 50.0), ("2024-02", 35.0), ("2024-03", 30.0)],
+        monthly_burstiness=[("2024-01", 2.0), ("2024-02", 1.0), ("2024-03", 0.8)],
+        monthly_binoculars=None,
+    )
+    wins = compute_convergence_scores(
+        cps,
+        [("2024-02", 0.9), ("2024-03", 0.95)],
+        [(base + timedelta(days=i), 1.0 - 0.01 * i) for i in range(40)],
+        probability_trajectory=traj,
+        total_feature_count=1,
+        min_feature_ratio=0.5,
+    )
+    assert wins and wins[0].pipeline_c_score is not None and wins[0].pipeline_c_score > 0
+    strong_tests = [
+        HypothesisTest(
+            test_name=f"w{i}",
+            feature_name=f"f{i}",
+            author_id="a",
+            raw_p_value=0.001,
+            corrected_p_value=0.005,
+            effect_size_cohens_d=0.9,
+            confidence_interval_95=(0.0, 0.0),
+            significant=True,
+        )
+        for i in range(3)
+    ]
+    st = classify_finding_strength(
+        wins[0],
+        strong_tests,
+        {"editorial_vs_author_signal": 0.9},
+        probability_features_available=True,
+    )
+    assert st == FindingStrength.STRONG
