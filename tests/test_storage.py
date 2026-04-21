@@ -7,8 +7,25 @@ from pathlib import Path
 
 from forensics.models import Article
 from forensics.storage.export import export_articles_jsonl
-from forensics.storage.repository import Repository, init_db
+from forensics.storage.repository import Repository, init_db, insert_analysis_run
 from forensics.utils import clean_text, content_hash, simhash, word_count
+
+
+def test_insert_analysis_run_persists_row(tmp_path: Path) -> None:
+    import sqlite3
+    from contextlib import closing
+
+    db_path = tmp_path / "articles.db"
+    rid = insert_analysis_run(db_path, config_hash="abc123", description="unit test")
+    assert len(rid) == 36
+    with closing(sqlite3.connect(db_path)) as conn:
+        row = conn.execute(
+            "SELECT id, config_hash, description FROM analysis_runs WHERE id = ?",
+            (rid,),
+        ).fetchone()
+    assert row is not None
+    assert row[1] == "abc123"
+    assert row[2] == "unit test"
 
 
 def test_init_db_creates_tables(tmp_path: Path) -> None:
