@@ -1,0 +1,30 @@
+{
+  "family": "phase10-ai-baseline-generation",
+  "current_version": "0.3.0",
+  "versions": [
+    {
+      "version": "0.1.0",
+      "date": "2026-04-20",
+      "status": "superseded",
+      "model": "gpt-5-3-codex",
+      "file": "v0.1.0.md",
+      "changelog_entry": "Initial prompt — multi-model, multi-temperature, topic-stratified AI baseline generation protocol with chain-of-custody measures."
+    },
+    {
+      "version": "0.2.0",
+      "date": "2026-04-20",
+      "status": "superseded",
+      "model": "gpt-5-3-codex",
+      "file": "v0.2.0.md",
+      "changelog_entry": "Replaced commercial API models (GPT-4o, Claude, Gemini) with local Ollama models (Llama 3.1 8B, Mistral 7B, Gemma 2 9B). Added Ollama API integration, preflight check, model digest pinning, and M1 Mac hardware guidance."
+    },
+    {
+      "version": "0.3.0",
+      "date": "2026-04-20",
+      "status": "active",
+      "model": "gpt-5-3-codex",
+      "file": "v0.3.0.md",
+      "changelog_entry": "Replaced raw httpx Ollama integration with PydanticAI agent architecture (typed deps, structured output, ModelRetry). Added pydantic-evals quality gate with 4 custom evaluators. Added agent tests using TestModel."
+    }
+  ]
+}
