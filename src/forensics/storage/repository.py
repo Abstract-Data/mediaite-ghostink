@@ -224,11 +224,7 @@ class Repository:
         where_sql = " AND ".join(parts)
         sql = f"SELECT a.* FROM articles a WHERE {where_sql} ORDER BY a.published_date"
         with _db_session(self._db_path) as conn:
-            rows = (
-                conn.execute(sql, params).fetchall()
-                if params
-                else conn.execute(sql).fetchall()
-            )
+            rows = conn.execute(sql, params).fetchall() if params else conn.execute(sql).fetchall()
         return [_row_to_article(row) for row in rows]
 
     def upsert_author(self, author: Author) -> None:

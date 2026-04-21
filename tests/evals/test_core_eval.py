@@ -1,9 +1,6 @@
 """Lightweight eval-style checks for Phase 1 contracts."""
 
-import logging
 from datetime import date
-
-import pytest
 
 from forensics.cli import build_parser, main
 from forensics.config import ForensicsSettings, get_settings
@@ -39,8 +36,11 @@ def test_eval_cli_stage_command_regression() -> None:
         assert parsed.command == command
 
 
-def test_eval_cli_main_stub(monkeypatch, caplog: pytest.LogCaptureFixture) -> None:
+def test_eval_cli_main_all_runs_pipeline(monkeypatch) -> None:
     monkeypatch.setattr("sys.argv", ["forensics", "all"])
-    with caplog.at_level(logging.WARNING, logger="forensics.cli"):
-        assert main() == 0
-    assert "Phase not yet implemented" in caplog.text
+
+    async def _stub_all() -> int:
+        return 0
+
+    monkeypatch.setattr("forensics.cli._run_all_pipeline", _stub_all)
+    assert main() == 0

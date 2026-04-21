@@ -124,7 +124,7 @@ def test_passive_voice_detection(nlp) -> None:
 def test_punctuation_profile(nlp) -> None:
     from forensics.features import structural
 
-    text = "Hi; there: (yes)! — \"wow\"..."
+    text = 'Hi; there: (yes)! — "wow"...'
     doc = nlp(text)
     out = structural.extract_structural_features(text, doc)
     assert out["punctuation_profile"][";"] > 0
@@ -266,7 +266,7 @@ def test_feature_pipeline_isolation(
 
     monkeypatch.setattr(lex_mod, "extract_lexical_features", flaky)
     for i in range(3):
-        url = f"https://www.mediaite.com/2024/02/{i+1:02d}/p/"
+        url = f"https://www.mediaite.com/2024/02/{i + 1:02d}/p/"
         a = Article(
             id=f"art-{i}",
             author_id=sample_author.id,

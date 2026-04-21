@@ -40,9 +40,7 @@ def extract_structural_features(text: str, doc: Doc) -> dict[str, Any]:
     mean_sc = sum(sent_counts) / n_sents if n_sents else float("nan")
     med_sc = float(median(sent_counts)) if sent_counts else float("nan")
     std_sc = (
-        math.sqrt(sum((x - mean_sc) ** 2 for x in sent_counts) / n_sents)
-        if n_sents > 1
-        else 0.0
+        math.sqrt(sum((x - mean_sc) ** 2 for x in sent_counts) / n_sents) if n_sents > 1 else 0.0
     )
     sk = float(skew(sent_counts)) if n_sents >= 3 else 0.0
 

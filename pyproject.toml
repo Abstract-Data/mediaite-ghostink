@@ -23,6 +23,8 @@ dependencies = [
   "plotly>=5.22.0",
   "umap-learn>=0.5.6",
   "textstat>=0.7.4",
+  "ipython>=8.31.0",
+  "ipykernel>=6.29.0",
 ]
 
 [project.optional-dependencies]

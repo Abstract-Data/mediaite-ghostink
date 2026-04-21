@@ -8,7 +8,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field, field_validator
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -66,14 +66,31 @@ class AnalysisConfig(BaseModel):
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     embedding_model_version: str = "v2.0"
     changepoint_methods: list[str] = Field(default_factory=lambda: ["pelt", "bocpd"])
+    effect_size_threshold: float = 0.5
 
 
 class ReportConfig(BaseModel):
     title: str = "Writing Forensics Analysis"
     output_format: Literal["html", "pdf", "both"] = "both"
     include_sections: list[str] = Field(default_factory=list)
-    chart_theme: str = "plotly_white"
+    chart_theme: Literal["plotly_white", "forensics"] = "forensics"
     cloudflare_deploy: bool = False
+
+    @field_validator("include_sections")
+    @classmethod
+    def _sections_known(cls, v: list[str]) -> list[str]:
+        allowed = {
+            "executive",
+            "methodology",
+            "evidence",
+            "controls",
+            "appendix",
+        }
+        bad = [s for s in v if s not in allowed]
+        if bad:
+            msg = f"Unknown report sections: {bad}; allowed={sorted(allowed)}"
+            raise ValueError(msg)
+        return v
 
 
 class ForensicsSettings(BaseSettings):
@@ -85,6 +102,12 @@ class ForensicsSettings(BaseSettings):
     scraping: ScrapingConfig = Field(default_factory=ScrapingConfig)
     analysis: AnalysisConfig = Field(default_factory=AnalysisConfig)
     report: ReportConfig = Field(default_factory=ReportConfig)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def db_path(self) -> Path:
+        """Default SQLite corpus path under the project root."""
+        return _project_root() / "data" / "articles.db"
 
     @classmethod
     def settings_customise_sources(

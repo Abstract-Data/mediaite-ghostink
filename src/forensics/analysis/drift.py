@@ -194,9 +194,7 @@ def compute_drift_scores(
     intra_variance_trend: list[tuple[str, float]],
 ) -> DriftScores:
     """Bundle drift metrics into ``DriftScores``."""
-    last_baseline = (
-        float(baseline_similarity_curve[-1][1]) if baseline_similarity_curve else 0.0
-    )
+    last_baseline = float(baseline_similarity_curve[-1][1]) if baseline_similarity_curve else 0.0
     last_ai = float(ai_convergence[-1][1]) if ai_convergence else 0.0
     return DriftScores(
         author_id=author_id,
@@ -279,7 +277,7 @@ def extract_lda_topic_keywords(
     names = vectorizer.get_feature_names_out()
     topics: list[tuple[int, list[str], str]] = []
     for topic_idx, topic in enumerate(lda.components_):
-        top_ix = topic.argsort()[:-n_keywords - 1 : -1]
+        top_ix = topic.argsort()[: -n_keywords - 1 : -1]
         kws = [str(names[i]) for i in top_ix]
         summary = ", ".join(kws[:5])
         topics.append((topic_idx, kws, summary))
