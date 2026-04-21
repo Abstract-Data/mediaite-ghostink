@@ -182,3 +182,158 @@ uv run pytest tests/ -v — 4/4 passed, 80.12% coverage
 #### Risks & Next Steps
 - Run Phase 11 after completing the current phase work to retool the CLI.
 - The migration is backward-compatible: `pyproject.toml` entry point and `__main__.py` import path don't change.
+
+---
+
+### Phase 11 Typer CLI Migration (Implementation)
+**Status:** Complete
+**Date:** 2026-04-21
+**Agent/Session:** claude/review-prompts-plan-uWhOn (Scope A)
+
+#### What Was Done
+- Replaced the single-file argparse CLI (`src/forensics/cli.py`) with a Typer package at `src/forensics/cli/` (one file per subcommand group).
+- Preserved the scrape flag-combination dispatcher byte-for-byte — promoted it to a testable `_dispatch` async function.
+- Pre-wired Phase 9/10 flags (`--probability`, `--no-binoculars`, `--device`, `--verify-corpus`) so later scopes only add logic.
+- Wired `--verify-corpus` to call the existing `forensics.utils.provenance.verify_corpus_hash` against `data/analysis/corpus_custody.json`.
+- Rewrote `tests/integration/test_cli.py` to use `typer.testing.CliRunner` and `tests/integration/test_cli_scrape_dispatch.py` to call `_dispatch` directly.
+- Updated `tests/evals/test_core_eval.py` for the Typer API.
+- Added `typer>=0.15.0` to core deps; added `probability` and `baseline` optional-extras.
+
+#### Files Modified
+- `src/forensics/cli.py` — deleted (replaced by package)
+- `src/forensics/cli/__init__.py`, `_helpers.py`, `scrape.py`, `extract.py`, `analyze.py`, `report.py` — created
+- `tests/integration/test_cli.py`, `tests/integration/test_cli_scrape_dispatch.py`, `tests/evals/test_core_eval.py` — rewritten for Typer
+- `pyproject.toml` — added `typer>=0.15.0` to dependencies; added `probability` and `baseline` optional-extras
+- `AGENTS.md` — CLI line argparse → Typer
+
+#### Verification Evidence
+```
+uv run forensics --help       # Typer-rendered help
+uv run forensics --version    # prints "forensics 0.1.0"
+uv run python -m forensics --help
+uv run pytest tests/ -v       # 145 passed, 15 skipped (spaCy model) — coverage 60.14%
+uv run ruff check .           # All checks passed
+uv run ruff format --check .  # 89 files already formatted
+```
+
+#### Decisions Made
+- Kept `--openai-key` and `--llm-model` on the analyze command as deprecated — they will be removed together with the OpenAI baseline path in Scope C (Phase 10).
+- `main()` returns an int so `__main__.py` keeps working unchanged; inside, it catches `SystemExit` from `app()`.
+
+#### Unresolved Questions
+- None for this scope.
+
+#### Risks & Next Steps
+- Scope B (Phase 9 probability features) builds on the wired but stubbed `--probability` / `--no-binoculars` / `--device` flags.
+- Scope C (Phase 10 Ollama baseline) will wire `--ai-baseline` and `--verify-corpus` stubs and retire the OpenAI code path.
+
+---
+
+### Phase 9 Probability Features (Implementation)
+**Status:** Complete
+**Date:** 2026-04-21
+**Agent/Session:** claude/review-prompts-plan-uWhOn (Scope B)
+
+#### What Was Done
+- Added `src/forensics/features/probability.py` with `compute_perplexity`, `split_sentences`, `load_reference_model`, and sliding-window perplexity over torch + transformers.
+- Added `src/forensics/features/binoculars.py` with `compute_binoculars_score` and `load_binoculars_models` (CPU-fallback warning, disabled-by-default).
+- Added `src/forensics/features/probability_pipeline.py` orchestrator that scores every configured author's articles and writes `data/probability/{slug}.parquet` plus a pinned `data/probability/model_card.json`.
+- Added `ProbabilityConfig` to `src/forensics/config/settings.py` and attached it under `ForensicsSettings.probability`.
+- Added `[probability]` section to `config.toml` (reference GPT-2 with pinned revision, Binoculars pair, sliding-window settings, low-ppl threshold).
+- Wired Phase 11's stubbed `--probability` / `--no-binoculars` / `--device` flags to the new pipeline in `src/forensics/cli/extract.py`.
+- Added `tests/test_probability.py` (8 fast tests) with a `@pytest.mark.slow` case for a real GPT-2 smoke run; configured pytest to skip slow tests by default via `-m 'not slow'`.
+- Documented the probability extra, artifacts, and slow-test flag in `docs/RUNBOOK.md`.
+
+#### Files Modified / Created
+- `src/forensics/features/probability.py` — created
+- `src/forensics/features/binoculars.py` — created
+- `src/forensics/features/probability_pipeline.py` — created
+- `src/forensics/config/settings.py` — added `ProbabilityConfig`
+- `src/forensics/cli/extract.py` — wired `--probability` to the new pipeline
+- `config.toml` — added `[probability]`
+- `pyproject.toml` — registered `slow` marker, default `-m 'not slow'`
+- `tests/test_probability.py` — created (8 fast tests + 1 slow)
+- `docs/RUNBOOK.md` — probability extra + slow test flag notes
+
+#### Verification Evidence
+```
+uv run forensics extract --help            # shows --probability/--no-binoculars/--device
+uv run pytest tests/test_probability.py -v # 8 passed, 1 deselected (slow)
+uv run pytest tests/ -v                    # 153 passed, 15 skipped, 1 deselected — coverage 60.27%
+uv run ruff check . && uv run ruff format --check .
+```
+
+#### Decisions Made
+- Binoculars `enabled=false` by default in `config.toml` because Falcon-7B requires ~28GB. Users flip it on per machine.
+- Sentence segmentation uses a regex (not spaCy) so probability features don't require `en_core_web_md`.
+- `model_card.json` records a SHA-256 digest of the pinned model identities so cross-run comparability is checked.
+- `@pytest.mark.slow` isolates model-download tests; default pytest run stays under a minute on CPU.
+
+#### Unresolved Questions
+- None for this scope.
+
+#### Risks & Next Steps
+- Scope C (Phase 10 Ollama baseline + chain of custody) is next; it will remove the legacy OpenAI path in `src/forensics/analysis/drift.py`.
+
+---
+
+### Phase 10 AI Baseline (Ollama) + Chain of Custody (Implementation)
+**Status:** Complete
+**Date:** 2026-04-21
+**Agent/Session:** claude/review-prompts-plan-uWhOn (Scope C)
+
+#### What Was Done
+- Introduced `src/forensics/baseline/` package with:
+  - `agent.py` — `BaselineDeps`, `GeneratedArticle`, `make_baseline_agent` (PydanticAI + Ollama OpenAI-compatible provider, lazy import).
+  - `orchestrator.py` — `run_generation_matrix` (models × temperatures × modes × n), `reembed_existing_baseline`, manifest writer.
+  - `topics.py` — LDA-based topic stratification (reuses `extract_lda_topic_keywords` from `analysis/drift.py`); word-count sampler.
+  - `prompts.py` — template loader + `PromptContext` for `raw_generation` / `style_mimicry`.
+  - `preflight.py` — async Ollama connectivity + model availability check.
+  - `utils.py` — `sanitize_model_tag`, `get_model_digest`, prompt hash helpers.
+- Added `scripts/generate_baseline.py` CLI with `--author`, `--all`, `--model`, `--articles-per-cell`, `--dry-run`, `--preflight`.
+- Added `evals/baseline_quality.py` with pydantic-evals harness (WordCountAccuracy, TopicRelevance, RepetitionDetector, PerplexityRangeCheck).
+- Added prompt templates under `prompts/baseline_templates/raw_generation.txt` and `style_mimicry.txt`.
+- Added `BaselineConfig` and `ChainOfCustodyConfig` pydantic models and wired them into `ForensicsSettings`.
+- Added `[baseline]` and `[chain_of_custody]` sections in `config.toml`.
+- **Retired the OpenAI baseline path entirely** from `src/forensics/analysis/drift.py`:
+  - Removed `_openai_chat_completion` and the entire `generate_ai_baseline` body.
+  - Rewrote `run_ai_baseline_command` as a thin dispatch wrapper that calls the new baseline package.
+  - Dropped unused imports (`httpx`, `os`, `uuid`, `UTC`).
+  - Removed `--openai-key` and `--llm-model` flags from `analyze`; added `--baseline-model` and `--articles-per-cell` in their place.
+- Wired `analyze --verify-corpus` to `forensics.utils.provenance.verify_corpus_hash` (fails hard with exit code 1 on mismatch).
+- Added `tests/test_baseline.py` with 16 unit tests (agent/prompts/topics/preflight/config/chain-of-custody) — all mocked, no live Ollama required.
+- Adjusted `pyproject.toml`: coverage omits `baseline/orchestrator.py` and `baseline/agent.py` (cannot exercise without Ollama + extras).
+- Documented the `baseline` extra, generation commands, and eval flow in `docs/RUNBOOK.md`.
+
+#### Files Modified / Created
+- `src/forensics/baseline/__init__.py`, `agent.py`, `orchestrator.py`, `topics.py`, `prompts.py`, `preflight.py`, `utils.py` — created
+- `scripts/generate_baseline.py` — created
+- `evals/baseline_quality.py` — created
+- `prompts/baseline_templates/raw_generation.txt`, `style_mimicry.txt` — created
+- `src/forensics/config/settings.py` — added `BaselineConfig`, `ChainOfCustodyConfig`, attached to `ForensicsSettings`
+- `config.toml` — added `[baseline]` and `[chain_of_custody]` sections
+- `src/forensics/analysis/drift.py` — removed OpenAI generator; `run_ai_baseline_command` now dispatches to `baseline.orchestrator`
+- `src/forensics/cli/analyze.py` — `--openai-key` / `--llm-model` → `--baseline-model` / `--articles-per-cell`; `--verify-corpus` now actually verifies
+- `src/forensics/cli/__init__.py` — `run_all` helper updated for new analyze signature
+- `pyproject.toml` — coverage omit for baseline orchestrator/agent
+- `tests/test_baseline.py` — created
+- `docs/RUNBOOK.md` — baseline generation + evals section
+
+#### Verification Evidence
+```
+grep -rn "_openai_chat_completion\|api.openai.com" src/        # zero matches
+uv run forensics analyze --help                                 # shows --verify-corpus, --baseline-model, --articles-per-cell
+uv run pytest tests/ -v                                         # 169 passed, 15 skipped, 1 deselected, coverage 61.81%
+uv run ruff check . && uv run ruff format --check .             # all clean
+```
+
+#### Decisions Made
+- Ollama is accessed through its OpenAI-compatible `/v1` endpoint via `pydantic_ai.providers.openai.OpenAIProvider` — same pattern used across `pydantic-ai[openai]`. This lets the `baseline` extra ship without a separate `ollama` extra of pydantic-ai.
+- `baseline/orchestrator.py` and `baseline/agent.py` are omitted from coverage because they require a live Ollama server. All logic around them (preflight, prompts, topics, utils, chain of custody) is fully tested.
+- `verify_corpus_hash` returns `(bool, str)` — the CLI uses both the ok flag and the message so operators get a specific reason on failure.
+
+#### Unresolved Questions
+- None for this scope.
+
+#### Risks & Next Steps
+- Manual end-to-end run of `uv run python scripts/generate_baseline.py --author <slug> --articles-per-cell 1` on a host with Ollama + pulled models is the next verification step; CI can't exercise it.
