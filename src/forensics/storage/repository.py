@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from contextlib import closing
-from datetime import date, datetime
+import uuid
+from collections.abc import Generator
+from contextlib import contextmanager
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import NamedTuple
 
@@ -71,8 +73,26 @@ CREATE TABLE IF NOT EXISTS analysis_runs (
 
 
 def _connect(db_path: Path) -> sqlite3.Connection:
-    """Open SQLite with autocommit so statements persist without an explicit transaction."""
-    return sqlite3.connect(db_path, isolation_level=None)
+    """Open SQLite with DEFERRED transactions, WAL, and busy timeout (ADR-001)."""
+    conn = sqlite3.connect(db_path, isolation_level="DEFERRED", timeout=30.0)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=5000")
+    return conn
+
+
+@contextmanager
+def _db_session(db_path: Path) -> Generator[sqlite3.Connection]:
+    """Yield a connection with Row factory; commit on success, rollback on error."""
+    conn = _connect(db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 
 def _migrate_articles_columns(conn: sqlite3.Connection) -> None:
@@ -95,9 +115,27 @@ def _migrate_articles_columns(conn: sqlite3.Connection) -> None:
 def init_db(db_path: Path) -> None:
     """Create database tables if they do not exist."""
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    with closing(_connect(db_path)) as conn:
+    with _db_session(db_path) as conn:
         conn.executescript(_SCHEMA)
         _migrate_articles_columns(conn)
+
+
+def insert_analysis_run(
+    db_path: Path,
+    *,
+    config_hash: str,
+    description: str = "",
+) -> str:
+    """Insert one row into ``analysis_runs`` (pipeline audit trail). Returns run id."""
+    init_db(db_path)
+    rid = str(uuid.uuid4())
+    ts = datetime.now(UTC).isoformat()
+    with _db_session(db_path) as conn:
+        conn.execute(
+            "INSERT INTO analysis_runs (id, timestamp, config_hash, description) VALUES (?,?,?,?)",
+            (rid, ts, config_hash, description),
+        )
+    return rid
 
 
 def _row_to_article(row: sqlite3.Row) -> Article:
@@ -128,7 +166,7 @@ def _row_to_article(row: sqlite3.Row) -> Article:
 
 
 class Repository:
-    """SQLite access for authors and articles (one connection scope per call)."""
+    """SQLite access for authors and articles (one connection + transaction per method)."""
 
     __slots__ = ("_db_path",)
 
@@ -140,8 +178,7 @@ class Repository:
         return self._db_path
 
     def get_author(self, author_id: str) -> Author | None:
-        with closing(_connect(self._db_path)) as conn:
-            conn.row_factory = sqlite3.Row
+        with _db_session(self._db_path) as conn:
             row = conn.execute("SELECT * FROM authors WHERE id = ?", (author_id,)).fetchone()
         if row is None:
             return None
@@ -157,7 +194,7 @@ class Repository:
         )
 
     def upsert_author(self, author: Author) -> None:
-        with closing(_connect(self._db_path)) as conn:
+        with _db_session(self._db_path) as conn:
             conn.execute(
                 """
                 INSERT INTO authors (
@@ -187,7 +224,7 @@ class Repository:
 
     def article_url_exists(self, url: str) -> bool:
         """Return True if an article with this canonical URL is already stored."""
-        with closing(_connect(self._db_path)) as conn:
+        with _db_session(self._db_path) as conn:
             row = conn.execute("SELECT 1 FROM articles WHERE url = ?", (url,)).fetchone()
         return row is not None
 
@@ -196,7 +233,7 @@ class Repository:
         metadata_json = json.dumps(payload.get("metadata") or {})
         modified = article.modified_date.isoformat() if article.modified_date else None
         scraped = article.scraped_at.isoformat() if article.scraped_at else None
-        with closing(_connect(self._db_path)) as conn:
+        with _db_session(self._db_path) as conn:
             conn.execute(
                 """
                 INSERT INTO articles (
@@ -238,16 +275,14 @@ class Repository:
             )
 
     def get_article_by_id(self, article_id: str) -> Article | None:
-        with closing(_connect(self._db_path)) as conn:
-            conn.row_factory = sqlite3.Row
+        with _db_session(self._db_path) as conn:
             row = conn.execute("SELECT * FROM articles WHERE id = ?", (article_id,)).fetchone()
         if row is None:
             return None
         return _row_to_article(row)
 
     def get_articles_by_author(self, author_id: str) -> list[Article]:
-        with closing(_connect(self._db_path)) as conn:
-            conn.row_factory = sqlite3.Row
+        with _db_session(self._db_path) as conn:
             rows = conn.execute(
                 "SELECT * FROM articles WHERE author_id = ? ORDER BY published_date",
                 (author_id,),
@@ -255,14 +290,13 @@ class Repository:
         return [_row_to_article(row) for row in rows]
 
     def get_all_articles(self) -> list[Article]:
-        with closing(_connect(self._db_path)) as conn:
-            conn.row_factory = sqlite3.Row
+        with _db_session(self._db_path) as conn:
             rows = conn.execute("SELECT * FROM articles ORDER BY published_date").fetchall()
         return [_row_to_article(row) for row in rows]
 
     def get_unfetched_urls(self) -> list[UnfetchedUrl]:
         """Return rows where body text has not been fetched yet."""
-        with closing(_connect(self._db_path)) as conn:
+        with _db_session(self._db_path) as conn:
             rows = conn.execute(
                 "SELECT id, url FROM articles WHERE clean_text = '' OR clean_text IS NULL"
             ).fetchall()
@@ -270,8 +304,7 @@ class Repository:
 
     def list_unfetched_for_fetch(self) -> list[UnfetchedArticle]:
         """Return unfetched articles with author name and publish date for fetch ordering."""
-        with closing(_connect(self._db_path)) as conn:
-            conn.row_factory = sqlite3.Row
+        with _db_session(self._db_path) as conn:
             rows = conn.execute(
                 """
                 SELECT a.id, a.url, au.name AS author_name, a.published_date
@@ -295,7 +328,7 @@ class Repository:
         """Rewrite ``raw_html_path`` after year folder is archived to a tar member ref."""
         prefix = f"raw/{year}/"
         archive_ref = f"raw/{year}.tar.gz"
-        with closing(_connect(self._db_path)) as conn:
+        with _db_session(self._db_path) as conn:
             rows = conn.execute(
                 "SELECT id, raw_html_path FROM articles WHERE raw_html_path LIKE ?",
                 (f"{prefix}%",),

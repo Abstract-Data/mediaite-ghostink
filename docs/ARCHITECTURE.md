@@ -110,6 +110,18 @@ Markdown/Notebooks (reports) ← Plotly charts + Quarto rendering
 - Bootstrapped 95% confidence intervals (1000 resamples)
 - Benjamini-Hochberg multiple comparison correction
 
+## Design Pattern Guidance for Phases 4–7
+
+The implemented codebase (Phases 1–3) follows a deliberate pattern: Pydantic models for data contracts, classes for stateful services (`Repository`, `RateLimiter`), and pure functions for everything else. Phases 4–7 should preserve this balance but will likely need more classes due to the nature of the work.
+
+**Feature extraction (Phase 4):** Individual feature functions (e.g., `compute_ttr(text) -> float`) should remain pure functions. However, consider a `FeatureExtractor` class if the extraction pipeline needs to hold configuration state (model references, tokenizer caches, feature toggles) across a batch of articles. The sentence-transformers embedding model in particular should be loaded once and held in an instance — not reloaded per article.
+
+**Analysis (Phases 5–6):** Change-point detection and drift analysis are strong candidates for stateful classes. A `ChangePointDetector` could encapsulate the algorithm backend (PELT, BOCPD, Chow, CUSUM) via a strategy pattern, hold configuration (penalty, min_size), and expose a consistent `detect(timeseries) -> list[ChangePoint]` interface. Similarly, a `DriftAnalyzer` could hold the baseline embedding centroid and compute drift metrics incrementally. These classes make it easy to swap algorithms and test each one in isolation.
+
+**Reporting (Phase 7):** A `ReportBuilder` class that accumulates sections and renders to markdown/notebook would be cleaner than passing a growing dict of results through a chain of functions.
+
+**Rule of thumb:** If a module needs to load an expensive resource (ML model, baseline data), maintain state across calls (running statistics, centroids), or support multiple interchangeable backends (detection algorithms), use a class. If it's a pure transformation with no state, keep it as a function.
+
 ## Architectural Constraints
 
 - Use `uv run` for Python execution.
