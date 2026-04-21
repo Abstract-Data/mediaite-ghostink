@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import logging
-import sys
+import os
 from pathlib import Path
 
 from forensics.config import get_project_root, get_settings
@@ -14,6 +15,33 @@ from forensics.scraper.crawler import collect_article_metadata, discover_authors
 from forensics.scraper.dedup import deduplicate_articles
 from forensics.scraper.fetcher import archive_raw_year_dirs, fetch_articles
 from forensics.storage.export import export_articles_jsonl
+from forensics.storage.repository import insert_analysis_run
+
+logger = logging.getLogger(__name__)
+
+_PLACEHOLDER_SLUGS = frozenset({"placeholder-target", "placeholder-control"})
+
+
+def _config_fingerprint() -> str:
+    """Short hash of the active TOML config file for ``analysis_runs``."""
+    raw = os.environ.get("FORENSICS_CONFIG_FILE", "").strip()
+    candidates = [Path(raw).expanduser()] if raw else []
+    candidates.append(get_project_root() / "config.toml")
+    for path in candidates:
+        if path.is_file():
+            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+            return digest[:48]
+    return "no_config_file"
+
+
+def _guard_placeholder_authors(settings: ForensicsSettings) -> None:
+    """Reject template slugs before any live scrape stage (P3-SEC-3)."""
+    if any(a.slug in _PLACEHOLDER_SLUGS for a in settings.authors):
+        msg = (
+            "config.toml still uses template authors (slug placeholder-target / "
+            "placeholder-control). Replace them with real author rows before scraping."
+        )
+        raise ValueError(msg)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -78,22 +106,25 @@ def _export_jsonl(db_path: Path, root: Path) -> int:
 
 async def _scrape_archive_only(root: Path, db_path: Path) -> int:
     n = archive_raw_year_dirs(root, db_path)
-    print(f"archive: compressed {n} year directory(ies) under data/raw/")
+    logger.info("archive: compressed %d year directory(ies) under data/raw/", n)
     return 0
 
 
 async def _scrape_dedup_only(db_path: Path) -> int:
     dup_ids = deduplicate_articles(db_path)
-    print(f"dedup: marked {len(dup_ids)} article(s) as near-duplicates")
+    logger.info("dedup: marked %d article(s) as near-duplicates", len(dup_ids))
     return 0
 
 
-async def _scrape_fetch_only(
-    db_path: Path, settings: ForensicsSettings, *, dry_run: bool
-) -> int:
+async def _scrape_fetch_only(db_path: Path, settings: ForensicsSettings, *, dry_run: bool) -> int:
     n = await fetch_articles(db_path, settings, dry_run=dry_run)
     suffix = " (dry-run)" if dry_run else ""
-    print(f"fetch: {'would fetch' if dry_run else 'processed'} {n} article(s){suffix}")
+    logger.info(
+        "fetch: %s %d article(s)%s",
+        "would fetch" if dry_run else "processed",
+        n,
+        suffix,
+    )
     return 0
 
 
@@ -101,12 +132,12 @@ async def _scrape_fetch_dedup_export(
     db_path: Path, root: Path, settings: ForensicsSettings, *, dry_run: bool
 ) -> int:
     n = await fetch_articles(db_path, settings, dry_run=dry_run)
-    print(f"fetch: processed {n} article(s)" + (" (dry-run)" if dry_run else ""))
+    logger.info("fetch: processed %d article(s)%s", n, " (dry-run)" if dry_run else "")
     if not dry_run:
         dup_ids = deduplicate_articles(db_path)
-        print(f"dedup: marked {len(dup_ids)} article(s) as near-duplicates")
+        logger.info("dedup: marked %d article(s) as near-duplicates", len(dup_ids))
         ex = _export_jsonl(db_path, root)
-        print(f"export: wrote {ex} article(s) to data/articles.jsonl")
+        logger.info("export: wrote %d article(s) to data/articles.jsonl", ex)
     return 0
 
 
@@ -115,11 +146,11 @@ async def _scrape_discover_only(
 ) -> int:
     n = await discover_authors(settings, force_refresh=force_refresh)
     if n:
-        print(f"discover: wrote {n} author(s) to {manifest_path}")
+        logger.info("discover: wrote %d author(s) to %s", n, manifest_path)
     else:
-        print(
-            f"discover: skipped (manifest exists). "
-            f"Use --force-refresh to overwrite. path={manifest_path}"
+        logger.info(
+            "discover: skipped (manifest exists). Use --force-refresh to overwrite. path=%s",
+            manifest_path,
         )
     return 0
 
@@ -128,14 +159,13 @@ async def _scrape_metadata_only(
     db_path: Path, settings: ForensicsSettings, manifest_path: Path
 ) -> int:
     if not manifest_path.is_file():
-        print(
-            f"error: author manifest not found: {manifest_path} "
-            "(run `forensics scrape --discover` first)",
-            file=sys.stderr,
+        logger.error(
+            "author manifest not found: %s (run `forensics scrape --discover` first)",
+            manifest_path,
         )
         return 1
     inserted = await collect_article_metadata(db_path, settings)
-    print(f"metadata: inserted {inserted} new article row(s) into {db_path}")
+    logger.info("metadata: inserted %d new article row(s) into %s", inserted, db_path)
     return 0
 
 
@@ -144,17 +174,14 @@ async def _scrape_discover_and_metadata(
 ) -> int:
     n_authors = await discover_authors(settings, force_refresh=force_refresh)
     if n_authors:
-        print(f"discover: wrote {n_authors} author(s) to {manifest_path}")
+        logger.info("discover: wrote %d author(s) to %s", n_authors, manifest_path)
     else:
-        print(f"discover: skipped or unchanged ({manifest_path})")
+        logger.info("discover: skipped or unchanged (%s)", manifest_path)
     if not manifest_path.is_file():
-        print(
-            f"error: author manifest missing after discover: {manifest_path}",
-            file=sys.stderr,
-        )
+        logger.error("author manifest missing after discover: %s", manifest_path)
         return 1
     inserted = await collect_article_metadata(db_path, settings)
-    print(f"metadata: inserted {inserted} new article row(s) into {db_path}")
+    logger.info("metadata: inserted %d new article row(s) into %s", inserted, db_path)
     return 0
 
 
@@ -168,23 +195,20 @@ async def _scrape_full_pipeline(
 ) -> int:
     n_authors = await discover_authors(settings, force_refresh=force_refresh)
     if n_authors:
-        print(f"discover: wrote {n_authors} author(s) to {manifest_path}")
+        logger.info("discover: wrote %d author(s) to %s", n_authors, manifest_path)
     else:
-        print(f"discover: skipped or unchanged ({manifest_path})")
+        logger.info("discover: skipped or unchanged (%s)", manifest_path)
     if not manifest_path.is_file():
-        print(
-            f"error: author manifest missing after discover: {manifest_path}",
-            file=sys.stderr,
-        )
+        logger.error("author manifest missing after discover: %s", manifest_path)
         return 1
     inserted = await collect_article_metadata(db_path, settings)
-    print(f"metadata: inserted {inserted} new article row(s) into {db_path}")
+    logger.info("metadata: inserted %d new article row(s) into %s", inserted, db_path)
     fetched = await fetch_articles(db_path, settings, dry_run=False)
-    print(f"fetch: processed {fetched} article(s)")
+    logger.info("fetch: processed %d article(s)", fetched)
     dup_ids = deduplicate_articles(db_path)
-    print(f"dedup: marked {len(dup_ids)} article(s) as near-duplicates")
+    logger.info("dedup: marked %d article(s) as near-duplicates", len(dup_ids))
     ex = _export_jsonl(db_path, root)
-    print(f"export: wrote {ex} article(s) to data/articles.jsonl")
+    logger.info("export: wrote %d article(s) to data/articles.jsonl", ex)
     return 0
 
 
@@ -203,8 +227,24 @@ async def _async_scrape(args: argparse.Namespace) -> int:
     force_refresh = bool(args.force_refresh)
 
     if dry and not f:
-        print("error: --dry-run is only valid with --fetch", file=sys.stderr)
+        logger.error("--dry-run is only valid with --fetch")
         return 1
+
+    try:
+        if d or m or f or not (d or m or f or ded or arch):
+            _guard_placeholder_authors(settings)
+    except ValueError as exc:
+        logger.error("%s", exc)
+        return 1
+
+    try:
+        insert_analysis_run(
+            db_path,
+            config_hash=_config_fingerprint(),
+            description="forensics scrape",
+        )
+    except OSError as exc:
+        logger.warning("Could not record analysis_runs row: %s", exc)
 
     if arch and not d and not m and not f and not ded:
         return await _scrape_archive_only(root, db_path)
@@ -227,10 +267,9 @@ async def _async_scrape(args: argparse.Namespace) -> int:
             db_path, root, settings, manifest_path, force_refresh=force_refresh
         )
 
-    print(
-        "error: unsupported flag combination for scrape "
-        "(try individual --discover, --metadata, --fetch, --dedup, --archive)",
-        file=sys.stderr,
+    logger.error(
+        "unsupported flag combination for scrape "
+        "(try individual --discover, --metadata, --fetch, --dedup, --archive)"
     )
     return 1
 
@@ -243,7 +282,7 @@ def main() -> int:
     if args.command == "scrape":
         return asyncio.run(_async_scrape(args))
 
-    print("Phase not yet implemented")
+    logger.warning("Phase not yet implemented")
     return 0
 
 

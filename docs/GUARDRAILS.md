@@ -16,6 +16,10 @@
 - Never expose author PII (email addresses, phone numbers) in reports or logs.
 - Scrape only public content; respect robots.txt and rate limits.
 
+### Stored raw HTML (P2-SEC-1)
+
+Raw HTML is written under `data/raw/` for reproducibility and parsed locally with BeautifulSoup. Treat these files as **untrusted data at rest**: do not serve them over HTTP without a dedicated sanitizer, do not `eval` or embed them in rich clients, and keep the dataset off shared drives without access controls. Text extraction strips tags for `clean_text`, but the on-disk HTML is unchanged from the origin server.
+
 ## PII Handling
 
 - Author names are public data (bylines) — acceptable in analysis and reports.
