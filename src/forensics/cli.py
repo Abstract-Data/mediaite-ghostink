@@ -353,6 +353,7 @@ async def _async_scrape(args: argparse.Namespace) -> int:
 
 def _run_analyze(args: argparse.Namespace) -> int:
     from forensics.analysis.changepoint import run_changepoint_analysis
+    from forensics.analysis.drift import run_ai_baseline_command, run_drift_analysis
     from forensics.analysis.timeseries import run_timeseries_analysis
 
     settings = get_settings()
@@ -363,8 +364,17 @@ def _run_analyze(args: argparse.Namespace) -> int:
 
     want_cp = bool(getattr(args, "changepoint", False))
     want_ts = bool(getattr(args, "timeseries", False))
-    do_changepoint = want_cp or (not want_cp and not want_ts)
-    do_timeseries = want_ts or (not want_cp and not want_ts)
+    want_drift = bool(getattr(args, "drift", False))
+    want_ai = bool(getattr(args, "ai_baseline", False))
+    explicit = want_cp or want_ts or want_drift or want_ai
+    if explicit:
+        do_changepoint = want_cp
+        do_timeseries = want_ts
+        do_drift = want_drift
+    else:
+        do_changepoint = True
+        do_timeseries = True
+        do_drift = False
 
 <<<<<<< New base: Phase 4 implementation
 def _run_analyze(args: argparse.Namespace) -> int:
@@ -425,6 +435,23 @@ def _run_analyze(args: argparse.Namespace) -> int:
             settings,
             project_root=root,
             author_slug=author_slug,
+        )
+    if do_drift:
+        run_drift_analysis(
+            db_path,
+            settings,
+            project_root=root,
+            author_slug=author_slug,
+        )
+    if want_ai:
+        run_ai_baseline_command(
+            db_path,
+            settings,
+            project_root=root,
+            author_slug=author_slug,
+            skip_generation=bool(getattr(args, "skip_generation", False)),
+            openai_key=getattr(args, "openai_key", None),
+            llm_model=str(getattr(args, "llm_model", "gpt-4o")),
         )
     if do_drift:
         run_drift_analysis(
