@@ -16,7 +16,7 @@ from scipy.special import logsumexp
 from forensics.analysis.statistics import cohens_d
 from forensics.config.settings import ForensicsSettings
 from forensics.models.analysis import ChangePoint, ConvergenceWindow
-from forensics.storage.parquet import load_feature_frame_sorted
+from forensics.storage.parquet import read_features
 from forensics.storage.repository import Repository, init_db
 from forensics.utils.datetime import parse_datetime
 
@@ -245,6 +245,14 @@ def find_convergence_windows(
     return windows
 
 
+def _load_feature_frame(features_path: Path) -> pl.DataFrame:
+    df = read_features(features_path)
+    if "timestamp" not in df.columns:
+        msg = f"features parquet missing timestamp: {features_path}"
+        raise ValueError(msg)
+    return df.sort("timestamp")
+
+
 def analyze_author_feature_changepoints(
     df: pl.DataFrame,
     *,
@@ -309,7 +317,7 @@ def run_changepoint_analysis(
         if not feat_path.is_file():
             logger.warning("Skipping author %s: missing %s", author.slug, feat_path)
             continue
-        df = load_feature_frame_sorted(feat_path)
+        df = _load_feature_frame(feat_path)
         df_author = df.filter(pl.col("author_id") == author.id)
         if df_author.is_empty():
             df_author = df
