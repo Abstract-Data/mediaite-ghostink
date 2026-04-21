@@ -23,9 +23,9 @@ def compute_config_hash(settings: ForensicsSettings) -> str:
 
 
 def compute_corpus_hash(db_path: Path) -> str:
-    """Hash ordered ``content_hash`` values from the articles table."""
+    """SHA-256 of ordered ``content_hash`` values from the articles table (full hex digest)."""
     if not db_path.is_file():
-        return hashlib.sha256(b"").hexdigest()[:12]
+        return hashlib.sha256(b"").hexdigest()
     conn = sqlite3.connect(db_path)
     try:
         hashes = conn.execute(
@@ -34,7 +34,7 @@ def compute_corpus_hash(db_path: Path) -> str:
     finally:
         conn.close()
     combined = "|".join(h[0] for h in hashes if h[0])
-    return hashlib.sha256(combined.encode()).hexdigest()[:12]
+    return hashlib.sha256(combined.encode()).hexdigest()
 
 
 def get_run_metadata(settings: ForensicsSettings) -> dict[str, str]:
@@ -88,7 +88,7 @@ def verify_corpus_hash(db_path: Path, analysis_dir: Path) -> tuple[bool, str]:
 
 
 def audit_scrape_timestamps(db_path: Path) -> Mapping[str, Any]:
-    """Summarize ``scraped_at`` coverage for chain-of-custody notebooks."""
+    """Summarize ``scraped_at`` coverage (Phase 8 notebooks + Phase 10 chain-of-custody)."""
     if not db_path.is_file():
         return {
             "articles_total": 0,
@@ -96,6 +96,11 @@ def audit_scrape_timestamps(db_path: Path) -> Mapping[str, Any]:
             "duplicates_excluded": 0,
             "scraped_at_min": None,
             "scraped_at_max": None,
+            "total_articles": 0,
+            "articles_with_scraped_at": 0,
+            "earliest_scrape": None,
+            "latest_scrape": None,
+            "scrape_duration_days": 0,
             "message": "database file not found",
         }
     conn = sqlite3.connect(db_path)
@@ -129,12 +134,36 @@ def audit_scrape_timestamps(db_path: Path) -> Mapping[str, Any]:
             "duplicates_excluded": 0,
             "scraped_at_min": None,
             "scraped_at_max": None,
+            "total_articles": 0,
+            "articles_with_scraped_at": 0,
+            "earliest_scrape": None,
+            "latest_scrape": None,
+            "scrape_duration_days": 0,
             "message": "empty database",
         }
+    total = int(row["n"] or 0)
+    missing = int(row["missing"] or 0)
+    mn = bounds["mn"] if bounds else None
+    mx = bounds["mx"] if bounds else None
+    duration_days = 0
+    if mn and mx:
+        try:
+            from datetime import datetime
+
+            a = datetime.fromisoformat(str(mn).replace("Z", "+00:00"))
+            b = datetime.fromisoformat(str(mx).replace("Z", "+00:00"))
+            duration_days = max(0, int((b - a).total_seconds() // 86400))
+        except ValueError:
+            duration_days = 0
     return {
-        "articles_total": int(row["n"] or 0),
-        "missing_scraped_at": int(row["missing"] or 0),
+        "articles_total": total,
+        "missing_scraped_at": missing,
         "duplicates_excluded": int(row["dups"] or 0),
-        "scraped_at_min": bounds["mn"] if bounds else None,
-        "scraped_at_max": bounds["mx"] if bounds else None,
+        "scraped_at_min": mn,
+        "scraped_at_max": mx,
+        "total_articles": total,
+        "articles_with_scraped_at": total - missing,
+        "earliest_scrape": mn,
+        "latest_scrape": mx,
+        "scrape_duration_days": duration_days,
     }

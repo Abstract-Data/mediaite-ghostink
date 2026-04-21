@@ -448,6 +448,8 @@ See `prompts/README.md` for the full versioning contract, bump rules, and releas
 - When implementing tasks from a numbered repository plan, do not edit the plan markdown file itself; only complete the assigned to-dos.
 - For prompt-library work, ship substantive changes as a new immutable `v*.md` snapshot and advance `current.md`, `versions.json`, and `CHANGELOG.md` together instead of rewriting prior frozen versions.
 - For Notion-linked specs or reports in this workspace, use the Notion MCP tools when a normal URL fetch returns no page body (Notion pages are often auth-walled to anonymous HTTP).
+- Do not close GitHub pull requests unless the user explicitly asks; when head/base conflicts or duplicate-PR errors appear, use the existing open PR, rename the branch for a new head, or merge—avoid mass-closing a stack as a default fix.
+- Before switching branches or publishing with GitButler, commit prompt or tracked-file edits to a virtual branch (or otherwise record them) so checkouts are not blocked by “would be overwritten by checkout” on paths like `prompts/**`.
 
 ## Learned Workspace Facts
 
@@ -455,3 +457,4 @@ See `prompts/README.md` for the full versioning contract, bump rules, and releas
 - **`requires-python`** in `pyproject.toml` is **`>=3.13,<3.14`** so the declared scientific and ML dependency set resolves against published wheels.
 - Phase 2 discovery and metadata scraping persist **`data/authors_manifest.jsonl`**, **`data/scrape_errors.jsonl`**, and **`data/articles.db`** at the repository root (paths resolved via `get_project_root()`).
 - GitButler (`but`) from this repo: authenticate the forge once (`but config forge auth`); for GitHub PRs ensure the integration target is **`origin/main`** (not `gb-local/main`). If `but config target` refuses while virtual branches are applied, `but unapply` the stack first, set the target, then `but apply` again before `but push` / `but pr new`.
+- GitHub allows at most one **open** pull request per (`head`, `base`) branch pair; creating or reopening a second PR for the same pair fails with a validation error while the first PR stays open (duplicate PR attempts often surface as HTTP 422 from the API).

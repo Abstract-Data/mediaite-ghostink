@@ -211,3 +211,14 @@ def compute_perplexity(
         "ppl_skewness": sk,
         "low_ppl_sentence_ratio": low_ratio,
     }
+
+
+def load_reference_model(
+    settings: object | None = None,
+    *,
+    device_override: str | None = None,
+) -> tuple[Any, Any]:
+    """Load the configured reference LM + tokenizer (lazy import; requires torch stack)."""
+    from forensics.features.probability_pipeline import load_reference_language_model
+
+    return load_reference_language_model(settings, device_override=device_override)

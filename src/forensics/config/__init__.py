@@ -3,6 +3,8 @@
 from forensics.config.settings import (
     AnalysisConfig,
     AuthorConfig,
+    BaselineConfig,
+    ChainOfCustodyConfig,
     ForensicsSettings,
     ProbabilityConfig,
     ReportConfig,
@@ -26,6 +28,8 @@ settings = _SettingsProxy()
 __all__ = [
     "AnalysisConfig",
     "AuthorConfig",
+    "BaselineConfig",
+    "ChainOfCustodyConfig",
     "ForensicsSettings",
     "ProbabilityConfig",
     "ReportConfig",

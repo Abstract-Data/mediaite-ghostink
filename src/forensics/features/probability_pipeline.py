@@ -123,6 +123,19 @@ def _load_reference_lm(
     return model, tok
 
 
+def load_reference_language_model(
+    settings: ForensicsSettings | None = None,
+    *,
+    device_override: str | None = None,
+) -> tuple[Any, Any]:
+    """Load the configured reference causal LM and tokenizer (requires torch + transformers)."""
+    from forensics.config import get_settings
+
+    s = settings or get_settings()
+    device = _resolve_torch_device(s.probability, device_override)
+    return _load_reference_lm(s.probability, device)
+
+
 def extract_probability_features(
     db_path: Path,
     settings: ForensicsSettings,

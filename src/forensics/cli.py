@@ -18,6 +18,7 @@ from forensics.scraper.dedup import deduplicate_articles
 from forensics.scraper.fetcher import archive_raw_year_dirs, fetch_articles
 from forensics.storage.export import export_articles_jsonl
 from forensics.storage.repository import insert_analysis_run
+from forensics.utils.provenance import compute_corpus_hash
 
 logger = logging.getLogger(__name__)
 
@@ -181,6 +182,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         metavar="SLUG",
         help="Limit analysis to one configured author slug",
+    )
+    analyze_p.add_argument(
+        "--verify-corpus",
+        action="store_true",
+        help="Run chain-of-custody checks (raw archives, scrape audit) before analysis",
     )
     report_p = subparsers.add_parser("report", help="Render Quarto forensic book")
     report_p.add_argument(
@@ -395,6 +401,26 @@ def _run_analyze(args: argparse.Namespace) -> int:
     analysis_dir = root / "data" / "analysis"
     analysis_dir.mkdir(parents=True, exist_ok=True)
 
+    corpus_hash = compute_corpus_hash(db_path)
+
+    if bool(getattr(args, "verify_corpus", False)):
+        from forensics.baseline.custody import verify_raw_archive_integrity
+        from forensics.utils.provenance import audit_scrape_timestamps
+
+        if settings.chain_of_custody.verify_raw_archives and not verify_raw_archive_integrity(
+            root / "data",
+        ):
+            logger.error("analyze: raw archive integrity check failed (--verify-corpus)")
+            return 1
+        aud = audit_scrape_timestamps(db_path)
+        logger.info(
+            "analyze: scrape audit total=%s with_scraped_at=%s missing=%s window_days=%s",
+            aud.get("total_articles"),
+            aud.get("articles_with_scraped_at"),
+            aud.get("missing_scraped_at"),
+            aud.get("scrape_duration_days"),
+        )
+
     want_cp = bool(getattr(args, "changepoint", False))
     want_ts = bool(getattr(args, "timeseries", False))
     want_drift = bool(getattr(args, "drift", False))
@@ -410,6 +436,7 @@ def _run_analyze(args: argparse.Namespace) -> int:
             db_path,
             config_hash=_config_fingerprint(),
             description="forensics analyze --compare",
+            input_corpus_hash=corpus_hash,
         )
         meta = {
             "run_id": rid,
@@ -441,6 +468,7 @@ def _run_analyze(args: argparse.Namespace) -> int:
         db_path,
         config_hash=_config_fingerprint(),
         description="forensics analyze",
+        input_corpus_hash=corpus_hash,
     )
     meta = {
         "run_id": rid,

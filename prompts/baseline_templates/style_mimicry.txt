@@ -1,0 +1,8 @@
+Write a {word_count}-word article in the style of a {outlet_name} columnist who typically covers {topic_area}. The article should discuss {topic_keywords}.
+
+Style characteristics to emulate:
+- Average sentence length: {author_avg_sentence_length} words
+- Tone: {author_tone_description}
+- Typical article structure: {author_structure_notes}
+
+Do not include the author's name or any identifying information.

@@ -67,7 +67,8 @@ CREATE TABLE IF NOT EXISTS analysis_runs (
     id TEXT PRIMARY KEY,
     timestamp DATETIME NOT NULL,
     config_hash TEXT NOT NULL,
-    description TEXT
+    description TEXT,
+    input_corpus_hash TEXT
 );
 """
 
@@ -95,6 +96,14 @@ def _db_session(db_path: Path) -> Generator[sqlite3.Connection]:
         conn.close()
 
 
+def _migrate_analysis_runs_columns(conn: sqlite3.Connection) -> None:
+    """Add Phase 10 chain-of-custody column to existing DBs (idempotent)."""
+    rows = conn.execute("PRAGMA table_info(analysis_runs)").fetchall()
+    names = {str(r[1]) for r in rows}
+    if "input_corpus_hash" not in names:
+        conn.execute("ALTER TABLE analysis_runs ADD COLUMN input_corpus_hash TEXT;")
+
+
 def _migrate_articles_columns(conn: sqlite3.Connection) -> None:
     """Add Phase 3 columns to existing databases (idempotent)."""
     rows = conn.execute("PRAGMA table_info(articles)").fetchall()
@@ -118,6 +127,7 @@ def init_db(db_path: Path) -> None:
     with _db_session(db_path) as conn:
         conn.executescript(_SCHEMA)
         _migrate_articles_columns(conn)
+        _migrate_analysis_runs_columns(conn)
 
 
 def insert_analysis_run(
@@ -125,6 +135,7 @@ def insert_analysis_run(
     *,
     config_hash: str,
     description: str = "",
+    input_corpus_hash: str | None = None,
 ) -> str:
     """Insert one row into ``analysis_runs`` (pipeline audit trail). Returns run id."""
     init_db(db_path)
@@ -132,8 +143,10 @@ def insert_analysis_run(
     ts = datetime.now(UTC).isoformat()
     with _db_session(db_path) as conn:
         conn.execute(
-            "INSERT INTO analysis_runs (id, timestamp, config_hash, description) VALUES (?,?,?,?)",
-            (rid, ts, config_hash, description),
+            "INSERT INTO analysis_runs ("
+            "id, timestamp, config_hash, description, input_corpus_hash"
+            ") VALUES (?,?,?,?,?)",
+            (rid, ts, config_hash, description, input_corpus_hash),
         )
     return rid
 
