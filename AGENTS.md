@@ -18,7 +18,7 @@ You are an expert Python data engineer working on this **forensic analysis pipel
 - **Framework:** None (pure pipeline)
 - **AI Framework:** pydantic-ai
 - **Data Stack:** Polars, DuckDB, SQLite, Parquet, sentence-transformers
-- **CLI:** argparse (`uv run forensics`)
+- **CLI:** Typer (`uv run forensics`)
 
 ## Agent Scope
 

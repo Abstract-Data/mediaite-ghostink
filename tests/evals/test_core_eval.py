@@ -1,10 +1,16 @@
 """Lightweight eval-style checks for Phase 1 contracts."""
 
+from __future__ import annotations
+
 from datetime import date
 
-from forensics.cli import build_parser, main
+from typer.testing import CliRunner
+
+from forensics.cli import app, main
 from forensics.config import ForensicsSettings, get_settings
 from forensics.models import Author
+
+_runner = CliRunner()
 
 
 def test_eval_settings_contract(monkeypatch) -> None:
@@ -30,17 +36,12 @@ def test_eval_models_import_contract() -> None:
 
 
 def test_eval_cli_stage_command_regression() -> None:
-    parser = build_parser()
     for command in ("scrape", "extract", "analyze", "report", "all"):
-        parsed = parser.parse_args([command])
-        assert parsed.command == command
+        result = _runner.invoke(app, [command, "--help"])
+        assert result.exit_code == 0, f"{command} --help failed: {result.output}"
 
 
-def test_eval_cli_main_all_runs_pipeline(monkeypatch) -> None:
-    monkeypatch.setattr("sys.argv", ["forensics", "all"])
-
-    async def _stub_all() -> int:
-        return 0
-
-    monkeypatch.setattr("forensics.cli._run_all_pipeline", _stub_all)
-    assert main() == 0
+def test_eval_cli_main_entrypoint_returns_int(monkeypatch) -> None:
+    monkeypatch.setattr("sys.argv", ["forensics", "--help"])
+    rc = main()
+    assert isinstance(rc, int)

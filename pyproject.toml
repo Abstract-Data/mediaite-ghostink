@@ -25,9 +25,19 @@ dependencies = [
   "textstat>=0.7.4",
   "ipython>=8.31.0",
   "ipykernel>=6.29.0",
+  "typer>=0.15.0",
 ]
 
 [project.optional-dependencies]
+probability = [
+  "torch>=2.0",
+  "transformers>=4.40",
+  "accelerate>=0.30",
+]
+baseline = [
+  "pydantic-ai-slim[openai]>=1.0",
+  "pydantic-evals>=1.0",
+]
 dev = [
   "pytest>=8.3.5",
   "pytest-asyncio>=0.26.0",

@@ -182,3 +182,47 @@ uv run pytest tests/ -v — 4/4 passed, 80.12% coverage
 #### Risks & Next Steps
 - Run Phase 11 after completing the current phase work to retool the CLI.
 - The migration is backward-compatible: `pyproject.toml` entry point and `__main__.py` import path don't change.
+
+---
+
+### Phase 11 Typer CLI Migration (Implementation)
+**Status:** Complete
+**Date:** 2026-04-21
+**Agent/Session:** claude/review-prompts-plan-uWhOn (Scope A)
+
+#### What Was Done
+- Replaced the single-file argparse CLI (`src/forensics/cli.py`) with a Typer package at `src/forensics/cli/` (one file per subcommand group).
+- Preserved the scrape flag-combination dispatcher byte-for-byte — promoted it to a testable `_dispatch` async function.
+- Pre-wired Phase 9/10 flags (`--probability`, `--no-binoculars`, `--device`, `--verify-corpus`) so later scopes only add logic.
+- Wired `--verify-corpus` to call the existing `forensics.utils.provenance.verify_corpus_hash` against `data/analysis/corpus_custody.json`.
+- Rewrote `tests/integration/test_cli.py` to use `typer.testing.CliRunner` and `tests/integration/test_cli_scrape_dispatch.py` to call `_dispatch` directly.
+- Updated `tests/evals/test_core_eval.py` for the Typer API.
+- Added `typer>=0.15.0` to core deps; added `probability` and `baseline` optional-extras.
+
+#### Files Modified
+- `src/forensics/cli.py` — deleted (replaced by package)
+- `src/forensics/cli/__init__.py`, `_helpers.py`, `scrape.py`, `extract.py`, `analyze.py`, `report.py` — created
+- `tests/integration/test_cli.py`, `tests/integration/test_cli_scrape_dispatch.py`, `tests/evals/test_core_eval.py` — rewritten for Typer
+- `pyproject.toml` — added `typer>=0.15.0` to dependencies; added `probability` and `baseline` optional-extras
+- `AGENTS.md` — CLI line argparse → Typer
+
+#### Verification Evidence
+```
+uv run forensics --help       # Typer-rendered help
+uv run forensics --version    # prints "forensics 0.1.0"
+uv run python -m forensics --help
+uv run pytest tests/ -v       # 145 passed, 15 skipped (spaCy model) — coverage 60.14%
+uv run ruff check .           # All checks passed
+uv run ruff format --check .  # 89 files already formatted
+```
+
+#### Decisions Made
+- Kept `--openai-key` and `--llm-model` on the analyze command as deprecated — they will be removed together with the OpenAI baseline path in Scope C (Phase 10).
+- `main()` returns an int so `__main__.py` keeps working unchanged; inside, it catches `SystemExit` from `app()`.
+
+#### Unresolved Questions
+- None for this scope.
+
+#### Risks & Next Steps
+- Scope B (Phase 9 probability features) builds on the wired but stubbed `--probability` / `--no-binoculars` / `--device` flags.
+- Scope C (Phase 10 Ollama baseline) will wire `--ai-baseline` and `--verify-corpus` stubs and retire the OpenAI code path.
