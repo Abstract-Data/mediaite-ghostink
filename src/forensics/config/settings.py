@@ -66,6 +66,7 @@ class AnalysisConfig(BaseModel):
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     embedding_model_version: str = "v2.0"
     changepoint_methods: list[str] = Field(default_factory=lambda: ["pelt", "bocpd"])
+    effect_size_threshold: float = 0.5
 
 
 class ReportConfig(BaseModel):
