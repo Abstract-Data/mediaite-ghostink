@@ -337,3 +337,60 @@ uv run ruff check . && uv run ruff format --check .             # all clean
 
 #### Risks & Next Steps
 - Manual end-to-end run of `uv run python scripts/generate_baseline.py --author <slug> --articles-per-cell 1` on a host with Ollama + pulled models is the next verification step; CI can't exercise it.
+
+---
+
+### Development Environment Bootstrap + Runtime Validation
+**Status:** Complete
+**Date:** 2026-04-21
+**Agent/Session:** codex/cloud-c958
+
+#### What Was Done
+- Installed `uv` in the cloud environment, synced project dependencies (including `dev` extra), validated CLI/test tooling, and executed representative application commands to confirm runtime health.
+- Verified expected template guard behavior on `forensics all` / scrape-discovery and confirmed a successful executable stage run with `forensics scrape --dedup`.
+- Added an operational runbook note for environments where `uv` is missing from `PATH`.
+
+#### Files Modified
+- `docs/RUNBOOK.md` — added “Command not found: `uv`” recovery steps discovered during bootstrap.
+- `HANDOFF.md` — appended this completion record with command evidence.
+
+#### Verification Evidence
+```
+source "$HOME/.local/bin/env" && uv --version
+# uv 0.11.7
+
+source "$HOME/.local/bin/env" && uv sync
+# success: virtualenv created, project deps installed
+
+source "$HOME/.local/bin/env" && uv sync --extra dev
+# success: installed pytest/ruff/dev tooling
+
+source "$HOME/.local/bin/env" && uv run forensics --help
+# success: Typer CLI renders commands
+
+source "$HOME/.local/bin/env" && uv run ruff check .
+# All checks passed
+
+source "$HOME/.local/bin/env" && uv run ruff format --check .
+# 103 files already formatted
+
+source "$HOME/.local/bin/env" && uv run pytest tests/ -v
+# 174 passed, 15 skipped, 1 deselected (coverage 62.93%)
+
+source "$HOME/.local/bin/env" && uv run forensics all
+# expected failure: placeholder authors guard in config.toml
+
+source "$HOME/.local/bin/env" && uv run forensics scrape --dedup
+# success: dedup stage executed, marked 0 near-duplicates
+```
+
+#### Decisions Made
+- Did not replace template placeholder authors because that would alter project analysis scope and requires real author inputs.
+- Used `forensics scrape --dedup` as the successful runtime proof path that does not require live WordPress author configuration.
+
+#### Unresolved Questions
+- Who are the real target/control authors for `config.toml` to enable full scrape/all pipeline execution in this environment?
+
+#### Risks & Next Steps
+- Until placeholder authors are replaced, networked scrape commands (`forensics scrape --discover` and `forensics all`) will intentionally fail fast.
+- Next operator can enable full end-to-end run by updating `config.toml` author rows, then rerunning `uv run forensics all`.
