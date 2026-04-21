@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from typing import Any
 from uuid import uuid4
@@ -91,6 +92,27 @@ def _nested_keys() -> frozenset[str]:
     )
 
 
+_FLAT_DICT_FIELDS: frozenset[str] = frozenset(
+    {
+        "function_word_distribution",
+        "punctuation_profile",
+        "pos_bigram_top30",
+        "clause_initial_top10",
+    }
+)
+
+
+def _maybe_decode_dict_field(value: Any) -> Any:
+    """Round-trip compat: Parquet stores dict fields as JSON strings; decode on read."""
+    if isinstance(value, str):
+        try:
+            decoded = json.loads(value)
+        except (json.JSONDecodeError, ValueError):
+            return {}
+        return decoded if isinstance(decoded, dict) else {}
+    return value
+
+
 class FeatureVector(BaseModel):
     """Per-article computed linguistic and productivity features (nested by family)."""
 
@@ -114,6 +136,9 @@ class FeatureVector(BaseModel):
         if any(k in data for k in _nested_keys()):
             return data
         flat = dict(data)
+        for dict_field in _FLAT_DICT_FIELDS:
+            if dict_field in flat:
+                flat[dict_field] = _maybe_decode_dict_field(flat[dict_field])
         out: dict[str, Any] = {}
         lex_f = {f: flat.pop(f) for f in LexicalFeatures.model_fields if f in flat}
         str_f = {f: flat.pop(f) for f in StructuralFeatures.model_fields if f in flat}

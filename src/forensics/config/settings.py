@@ -78,6 +78,8 @@ class AnalysisConfig(BaseModel):
     intra_variance_pairwise_max: int = 20
     ai_baseline_llm_temperature: float = 0.7
     feature_extraction_max_failure_ratio: float = 0.25
+    lda_num_topics: int = 20
+    lda_n_keywords: int = 10
 
 
 class ProbabilityConfig(BaseModel):

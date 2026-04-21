@@ -289,6 +289,53 @@ def test_feature_pipeline_isolation(
     assert n == 2
 
 
+def test_feature_pipeline_aborts_when_failure_ratio_exceeded(
+    tmp_path: Path,
+    sample_author: Author,
+    forensics_config_path: Path,
+    nlp,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """>max_fail_ratio failures in a per-author batch must raise RuntimeError."""
+    from forensics.config import get_settings
+    from forensics.features import lexical as lex_mod
+    from forensics.features import pipeline as pl
+
+    get_settings.cache_clear()
+    db_path = tmp_path / "articles.db"
+    init_db(db_path)
+    good = _long_text()
+
+    def always_fail(text: str, doc) -> dict:
+        raise RuntimeError("simulated failure")
+
+    monkeypatch.setattr(lex_mod, "extract_lexical_features", always_fail)
+    with Repository(db_path) as repo:
+        repo.upsert_author(sample_author)
+        for i in range(5):
+            url = f"https://www.mediaite.com/2024/03/{i + 1:02d}/p/"
+            a = Article(
+                id=f"abort-{i}",
+                author_id=sample_author.id,
+                url=url,
+                title=f"T{i}",
+                published_date=datetime(2024, 3, i + 1, tzinfo=UTC),
+                clean_text=good,
+                word_count=len(good.split()),
+                content_hash=f"ha{i}",
+            )
+            repo.upsert_article(a)
+
+    monkeypatch.setattr("forensics.features.pipeline.spacy.load", lambda name: nlp)
+    with pytest.raises(RuntimeError, match="Feature extraction abort"):
+        pl.extract_all_features(
+            db_path,
+            get_settings(),
+            skip_embeddings=True,
+            project_root=tmp_path,
+        )
+
+
 def test_nan_handling(nlp) -> None:
     from forensics.features import lexical
 
@@ -332,3 +379,40 @@ def test_write_features_roundtrip(tmp_path: Path, sample_author: Author) -> None
     df = read_features(path)
     assert df.height == 1
     assert "article_id" in df.columns
+
+
+def test_feature_vector_parquet_dict_field_roundtrip(
+    tmp_path: Path,
+    sample_author: Author,
+) -> None:
+    """Dict-typed fields must survive to_flat_dict → Parquet → row → FeatureVector."""
+    from forensics.models.features import FeatureVector
+    from forensics.storage.parquet import read_features, write_features
+
+    fw = {"the": 0.25, "of": 0.12, "and": 0.08}
+    punct = {".": 0.3, ",": 0.5, ";": 0.05}
+    bigrams = {"DET_NOUN": 0.4, "NOUN_VERB": 0.2, "VERB_ADP": 0.15}
+    clause_heads = {"DET_NOUN_VERB": 0.3, "PRON_VERB_NOUN": 0.2}
+
+    fv = FeatureVector(
+        article_id="rt",
+        author_id=sample_author.id,
+        timestamp=datetime(2024, 2, 1, tzinfo=UTC),
+        function_word_distribution=fw,
+        punctuation_profile=punct,
+        pos_bigram_top30=bigrams,
+        clause_initial_top10=clause_heads,
+    )
+    path = tmp_path / "fv_rt.parquet"
+    write_features([fv], path)
+
+    df = read_features(path)
+    row = df.row(0, named=True)
+
+    restored = FeatureVector.model_validate(row)
+    assert restored.lexical.function_word_distribution == fw
+    assert restored.structural.punctuation_profile == punct
+    assert restored.pos.pos_bigram_top30 == bigrams
+    assert restored.pos.clause_initial_top10 == clause_heads
+    assert restored.article_id == "rt"
+    assert restored.author_id == sample_author.id

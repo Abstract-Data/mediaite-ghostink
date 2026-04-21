@@ -359,7 +359,15 @@ class Repository:
         ]
 
     def rewrite_raw_paths_after_archive(self, year: int) -> int:
-        """Rewrite ``raw_html_path`` after year folder is archived to a tar member ref."""
+        """Rewrite ``raw_html_path`` after year folder is archived to a tar member ref.
+
+        Rejects rows whose tail contains path separators or ``..`` so the rewritten
+        reference cannot escape the ``raw/{year}.tar.gz:`` archive root even if the
+        stored path was tampered with.
+        """
+        if not isinstance(year, int) or year < 1000 or year > 9999:
+            msg = f"archive year must be 4-digit int: {year!r}"
+            raise ValueError(msg)
         prefix = f"raw/{year}/"
         archive_ref = f"raw/{year}.tar.gz"
         conn = self._require_conn()
@@ -372,6 +380,8 @@ class Repository:
             if not old or not isinstance(old, str) or not old.startswith(prefix):
                 continue
             tail = old[len(prefix) :]
+            if not tail or "/" in tail or "\\" in tail or tail.startswith(".."):
+                continue
             new_path = f"{archive_ref}:{tail}"
             conn.execute(
                 "UPDATE articles SET raw_html_path = ? WHERE id = ?",
