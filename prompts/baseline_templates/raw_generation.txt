@@ -1,0 +1,6 @@
+Write a {word_count}-word news article about the following topic for a political news website.
+
+Topic: {topic_keywords}
+Angle: {suggested_angle}
+
+Write in a professional journalistic style. Include quotes from relevant sources where appropriate. Return only the article body — no headline list, no meta-commentary, no preamble.

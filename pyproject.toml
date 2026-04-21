@@ -87,6 +87,10 @@ omit = [
   "*/forensics/features/*",
   "*/forensics/storage/parquet.py",
   "*/forensics/storage/duckdb_queries.py",
+  # Phase 10 baseline orchestration requires a live Ollama server + the baseline
+  # optional-extra. Covered via manual smoke runs, not CI.
+  "*/forensics/baseline/orchestrator.py",
+  "*/forensics/baseline/agent.py",
 ]
 
 [tool.coverage.report]

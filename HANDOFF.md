@@ -274,3 +274,66 @@ uv run ruff check . && uv run ruff format --check .
 
 #### Risks & Next Steps
 - Scope C (Phase 10 Ollama baseline + chain of custody) is next; it will remove the legacy OpenAI path in `src/forensics/analysis/drift.py`.
+
+---
+
+### Phase 10 AI Baseline (Ollama) + Chain of Custody (Implementation)
+**Status:** Complete
+**Date:** 2026-04-21
+**Agent/Session:** claude/review-prompts-plan-uWhOn (Scope C)
+
+#### What Was Done
+- Introduced `src/forensics/baseline/` package with:
+  - `agent.py` — `BaselineDeps`, `GeneratedArticle`, `make_baseline_agent` (PydanticAI + Ollama OpenAI-compatible provider, lazy import).
+  - `orchestrator.py` — `run_generation_matrix` (models × temperatures × modes × n), `reembed_existing_baseline`, manifest writer.
+  - `topics.py` — LDA-based topic stratification (reuses `extract_lda_topic_keywords` from `analysis/drift.py`); word-count sampler.
+  - `prompts.py` — template loader + `PromptContext` for `raw_generation` / `style_mimicry`.
+  - `preflight.py` — async Ollama connectivity + model availability check.
+  - `utils.py` — `sanitize_model_tag`, `get_model_digest`, prompt hash helpers.
+- Added `scripts/generate_baseline.py` CLI with `--author`, `--all`, `--model`, `--articles-per-cell`, `--dry-run`, `--preflight`.
+- Added `evals/baseline_quality.py` with pydantic-evals harness (WordCountAccuracy, TopicRelevance, RepetitionDetector, PerplexityRangeCheck).
+- Added prompt templates under `prompts/baseline_templates/raw_generation.txt` and `style_mimicry.txt`.
+- Added `BaselineConfig` and `ChainOfCustodyConfig` pydantic models and wired them into `ForensicsSettings`.
+- Added `[baseline]` and `[chain_of_custody]` sections in `config.toml`.
+- **Retired the OpenAI baseline path entirely** from `src/forensics/analysis/drift.py`:
+  - Removed `_openai_chat_completion` and the entire `generate_ai_baseline` body.
+  - Rewrote `run_ai_baseline_command` as a thin dispatch wrapper that calls the new baseline package.
+  - Dropped unused imports (`httpx`, `os`, `uuid`, `UTC`).
+  - Removed `--openai-key` and `--llm-model` flags from `analyze`; added `--baseline-model` and `--articles-per-cell` in their place.
+- Wired `analyze --verify-corpus` to `forensics.utils.provenance.verify_corpus_hash` (fails hard with exit code 1 on mismatch).
+- Added `tests/test_baseline.py` with 16 unit tests (agent/prompts/topics/preflight/config/chain-of-custody) — all mocked, no live Ollama required.
+- Adjusted `pyproject.toml`: coverage omits `baseline/orchestrator.py` and `baseline/agent.py` (cannot exercise without Ollama + extras).
+- Documented the `baseline` extra, generation commands, and eval flow in `docs/RUNBOOK.md`.
+
+#### Files Modified / Created
+- `src/forensics/baseline/__init__.py`, `agent.py`, `orchestrator.py`, `topics.py`, `prompts.py`, `preflight.py`, `utils.py` — created
+- `scripts/generate_baseline.py` — created
+- `evals/baseline_quality.py` — created
+- `prompts/baseline_templates/raw_generation.txt`, `style_mimicry.txt` — created
+- `src/forensics/config/settings.py` — added `BaselineConfig`, `ChainOfCustodyConfig`, attached to `ForensicsSettings`
+- `config.toml` — added `[baseline]` and `[chain_of_custody]` sections
+- `src/forensics/analysis/drift.py` — removed OpenAI generator; `run_ai_baseline_command` now dispatches to `baseline.orchestrator`
+- `src/forensics/cli/analyze.py` — `--openai-key` / `--llm-model` → `--baseline-model` / `--articles-per-cell`; `--verify-corpus` now actually verifies
+- `src/forensics/cli/__init__.py` — `run_all` helper updated for new analyze signature
+- `pyproject.toml` — coverage omit for baseline orchestrator/agent
+- `tests/test_baseline.py` — created
+- `docs/RUNBOOK.md` — baseline generation + evals section
+
+#### Verification Evidence
+```
+grep -rn "_openai_chat_completion\|api.openai.com" src/        # zero matches
+uv run forensics analyze --help                                 # shows --verify-corpus, --baseline-model, --articles-per-cell
+uv run pytest tests/ -v                                         # 169 passed, 15 skipped, 1 deselected, coverage 61.81%
+uv run ruff check . && uv run ruff format --check .             # all clean
+```
+
+#### Decisions Made
+- Ollama is accessed through its OpenAI-compatible `/v1` endpoint via `pydantic_ai.providers.openai.OpenAIProvider` — same pattern used across `pydantic-ai[openai]`. This lets the `baseline` extra ship without a separate `ollama` extra of pydantic-ai.
+- `baseline/orchestrator.py` and `baseline/agent.py` are omitted from coverage because they require a live Ollama server. All logic around them (preflight, prompts, topics, utils, chain of custody) is fully tested.
+- `verify_corpus_hash` returns `(bool, str)` — the CLI uses both the ok flag and the message so operators get a specific reason on failure.
+
+#### Unresolved Questions
+- None for this scope.
+
+#### Risks & Next Steps
+- Manual end-to-end run of `uv run python scripts/generate_baseline.py --author <slug> --articles-per-cell 1` on a host with Ollama + pulled models is the next verification step; CI can't exercise it.

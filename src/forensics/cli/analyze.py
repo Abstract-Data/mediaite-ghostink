@@ -59,22 +59,22 @@ def analyze(
             help="Verify corpus hash against data/analysis/corpus_custody.json",
         ),
     ] = False,
-    openai_key: Annotated[
+    baseline_model: Annotated[
         str | None,
         typer.Option(
-            "--openai-key",
-            metavar="KEY",
-            help="OpenAI API key for --ai-baseline (deprecated: prefer Ollama)",
+            "--baseline-model",
+            metavar="MODEL",
+            help="With --ai-baseline: restrict to one configured Ollama model",
         ),
     ] = None,
-    llm_model: Annotated[
-        str,
+    articles_per_cell: Annotated[
+        int | None,
         typer.Option(
-            "--llm-model",
-            metavar="MODEL",
-            help="Chat model for --ai-baseline generation (deprecated path)",
+            "--articles-per-cell",
+            metavar="N",
+            help="With --ai-baseline: override articles_per_cell (default from config)",
         ),
-    ] = "gpt-4o",
+    ] = None,
     author: Annotated[
         str | None,
         typer.Option("--author", metavar="SLUG", help="Limit to one author slug"),
@@ -93,19 +93,13 @@ def analyze(
     analysis_dir.mkdir(parents=True, exist_ok=True)
 
     if verify_corpus:
-        try:
-            from forensics.utils.provenance import verify_corpus_hash
-        except ImportError:
-            verify_corpus_hash = None  # type: ignore[assignment]
-        if verify_corpus_hash is not None:
-            custody_path = analysis_dir / "corpus_custody.json"
-            ok = verify_corpus_hash(db_path, custody_path)
-            if not ok:
-                logger.error("corpus hash verification failed (see %s)", custody_path)
-                raise typer.Exit(code=1)
-            logger.info("corpus hash verified against %s", custody_path)
-        else:
-            logger.warning("analyze --verify-corpus: verify_corpus_hash unavailable; skipping")
+        from forensics.utils.provenance import verify_corpus_hash
+
+        ok, message = verify_corpus_hash(db_path, analysis_dir)
+        if not ok:
+            logger.error("corpus hash verification failed: %s", message)
+            raise typer.Exit(code=1)
+        logger.info("corpus hash verified (%s)", message)
 
     explicit = changepoint or timeseries or drift or ai_baseline or convergence or compare
 
@@ -181,8 +175,8 @@ def analyze(
             project_root=root,
             author_slug=author,
             skip_generation=skip_generation,
-            openai_key=openai_key,
-            llm_model=llm_model,
+            articles_per_cell=articles_per_cell,
+            model_filter=baseline_model,
         )
     logger.info(
         "analyze: completed (changepoint=%s, timeseries=%s, drift=%s, "

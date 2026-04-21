@@ -101,8 +101,8 @@ def run_all() -> None:
             ai_baseline=False,
             skip_generation=False,
             verify_corpus=False,
-            openai_key=None,
-            llm_model="gpt-4o",
+            baseline_model=None,
+            articles_per_cell=None,
             author=None,
         )
     except typer.Exit as exc:

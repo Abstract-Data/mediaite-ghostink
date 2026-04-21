@@ -5,23 +5,19 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
-import uuid
 from collections import defaultdict
 from collections.abc import Sequence
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-import httpx
 import numpy as np
 from scipy.spatial.distance import cosine
 from sklearn.decomposition import LatentDirichletAllocation
 from sklearn.feature_extraction.text import TfidfVectorizer
 
 from forensics.config import get_project_root
-from forensics.config.settings import AnalysisConfig, ForensicsSettings
-from forensics.features import embeddings as embed_mod
+from forensics.config.settings import ForensicsSettings
 from forensics.models.analysis import DriftScores
 from forensics.storage.parquet import read_embeddings_manifest
 from forensics.storage.repository import Repository, init_db
@@ -284,131 +280,6 @@ def extract_lda_topic_keywords(
     return topics
 
 
-async def _openai_chat_completion(
-    *,
-    api_key: str,
-    model: str,
-    user_prompt: str,
-    temperature: float,
-    max_tokens: int,
-) -> str:
-    url = "https://api.openai.com/v1/chat/completions"
-    payload = {
-        "model": model,
-        "messages": [{"role": "user", "content": user_prompt}],
-        "temperature": temperature,
-        "max_tokens": max_tokens,
-    }
-    async with httpx.AsyncClient(timeout=120.0) as client:
-        resp = await client.post(
-            url,
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            json=payload,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-    return str(data["choices"][0]["message"]["content"])
-
-
-async def generate_ai_baseline(
-    db_path: Path,
-    author_slug: str,
-    config: AnalysisConfig,
-    *,
-    project_root: Path | None = None,
-    llm_model: str = "gpt-4o",
-    articles_per_topic: int = 3,
-    num_topics: int = 20,
-    api_key: str | None = None,
-    skip_generation: bool = False,
-) -> Path:
-    """Synthetic AI articles + embeddings under ``data/ai_baseline/{author_slug}/``."""
-    init_db(db_path)
-    root = project_root or get_project_root()
-    out_dir = root / "data" / "ai_baseline" / author_slug
-    articles_dir = out_dir / "articles"
-    emb_dir = out_dir / "embeddings"
-    articles_dir.mkdir(parents=True, exist_ok=True)
-    emb_dir.mkdir(parents=True, exist_ok=True)
-
-    repo = Repository(db_path)
-    author = repo.get_author_by_slug(author_slug)
-    if author is None:
-        msg = f"Unknown author slug: {author_slug}"
-        raise ValueError(msg)
-
-    model_name = config.embedding_model
-    key = (api_key or os.environ.get("OPENAI_API_KEY", "")).strip()
-
-    if not skip_generation:
-        if not key:
-            msg = "OPENAI_API_KEY or api_key is required unless --skip-generation is set"
-            raise ValueError(msg)
-        corpus = repo.list_articles_for_extraction(author_id=author.id)
-        texts = [a.clean_text for a in corpus if a.clean_text.strip()]
-        if len(texts) < 5:
-            msg = f"Need at least 5 articles with text for LDA baseline (got {len(texts)})"
-            raise ValueError(msg)
-        word_counts = [a.word_count for a in corpus if a.clean_text.strip()]
-        median_words = int(np.median(word_counts)) if word_counts else 600
-
-        topics = extract_lda_topic_keywords(texts, num_topics=num_topics, n_keywords=10)
-        if not topics:
-            msg = "LDA returned no topics; corpus may be too small or too uniform."
-            raise ValueError(msg)
-        generated: list[dict[str, Any]] = []
-
-        for topic_id, keywords, summary in topics:
-            topic_summary = summary
-            for _j in range(articles_per_topic):
-                prompt = (
-                    f"Write a {median_words}-word news article about {topic_summary} "
-                    "in the style of a professional journalist."
-                )
-                text = await _openai_chat_completion(
-                    api_key=key,
-                    model=llm_model,
-                    user_prompt=prompt,
-                    temperature=0.7,
-                    max_tokens=1500,
-                )
-                rec_id = str(uuid.uuid4())
-                payload = {
-                    "id": rec_id,
-                    "topic_id": topic_id,
-                    "topic_keywords": keywords,
-                    "prompt": prompt,
-                    "model": llm_model,
-                    "model_version": datetime.now(UTC).date().isoformat(),
-                    "generated_at": datetime.now(UTC).isoformat(),
-                    "text": text,
-                    "generation_params": {"temperature": 0.7, "max_tokens": 1500},
-                }
-                path = articles_dir / f"{rec_id}.json"
-                path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-                generated.append(payload)
-                logger.info("ai_baseline: wrote synthetic article %s (topic %s)", rec_id, topic_id)
-
-        for payload in generated:
-            vec = embed_mod.compute_embedding(payload["text"], model_name)
-            np.save(emb_dir / f"{payload['id']}.npy", vec)
-    else:
-        json_paths = sorted(articles_dir.glob("*.json"))
-        if not json_paths:
-            msg = f"No baseline articles under {articles_dir}; run without --skip-generation first."
-            raise ValueError(msg)
-        for path in json_paths:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-            vec = embed_mod.compute_embedding(str(payload.get("text", "")), model_name)
-            np.save(emb_dir / f"{Path(path).stem}.npy", vec)
-        logger.info("ai_baseline: re-embedded %s from existing JSON", author_slug)
-
-    return out_dir
-
-
 def _write_drift_artifacts(
     author_slug: str,
     author_id: str,
@@ -534,22 +405,40 @@ def run_ai_baseline_command(
     project_root: Path | None = None,
     author_slug: str | None = None,
     skip_generation: bool = False,
-    openai_key: str | None = None,
-    llm_model: str = "gpt-4o",
+    articles_per_cell: int | None = None,
+    model_filter: str | None = None,
+    dry_run: bool = False,
 ) -> None:
-    """CLI entry: generate or re-embed AI baseline corpus."""
+    """CLI entry: generate or re-embed AI baseline corpus via local Ollama.
+
+    Delegates to ``forensics.baseline.orchestrator``. The Phase 10 v0.3.0 spec
+    replaces the old OpenAI path with three locally-run Ollama models
+    (Llama 3.1 8B, Mistral 7B, Gemma 2 9B) so baselines are reproducible by
+    model digest with no external API keys required.
+    """
+    from forensics.baseline.orchestrator import (
+        reembed_existing_baseline,
+        run_generation_matrix,
+    )
+
+    init_db(db_path)
     slugs = [author_slug] if author_slug else [a.slug for a in settings.authors]
+
+    if skip_generation:
+        for slug in slugs:
+            reembed_existing_baseline(slug, settings, project_root=project_root)
+        return
 
     async def _run() -> None:
         for slug in slugs:
-            await generate_ai_baseline(
-                db_path,
+            await run_generation_matrix(
                 slug,
-                settings.analysis,
+                settings,
+                db_path=db_path,
                 project_root=project_root,
-                llm_model=llm_model,
-                skip_generation=skip_generation,
-                api_key=openai_key,
+                articles_per_cell=articles_per_cell,
+                model_filter=model_filter,
+                dry_run=dry_run,
             )
 
     asyncio.run(_run())

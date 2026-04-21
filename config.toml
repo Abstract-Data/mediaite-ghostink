@@ -52,6 +52,21 @@ batch_size = 16
 device = "auto"
 low_ppl_threshold = 20.0
 
+[baseline]
+# Phase 10 — AI baseline generation via local Ollama models.
+# Requires the `baseline` optional-extra:  uv sync --extra baseline
+ollama_base_url = "http://localhost:11434"
+models = ["llama3.1:8b", "mistral:7b", "gemma2:9b"]
+temperatures = [0.0, 0.8]
+articles_per_cell = 30
+max_tokens = 1500
+request_timeout = 120
+
+[chain_of_custody]
+verify_corpus_hash = true
+verify_raw_archives = true
+log_all_generations = true
+
 [report]
 title = "Writing Forensics Analysis"
 output_format = "both"
