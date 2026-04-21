@@ -41,7 +41,8 @@ Agents must not operate outside declared boundaries without human approval.
 uv sync                          # Install/sync dependencies
 uv run forensics --help          # Show pipeline CLI help
 uv run forensics scrape          # Run scrape stage
-uv run forensics extract         # Run feature extraction
+uv run forensics extract         # Run feature extraction (+ probability if torch installed)
+uv run forensics extract --probability  # Probability-only (data/probability/)
 uv run forensics analyze         # Run analysis stage
 uv run forensics report          # Generate report
 uv run forensics all             # Run full pipeline

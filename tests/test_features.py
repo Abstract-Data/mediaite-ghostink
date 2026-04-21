@@ -284,6 +284,7 @@ def test_feature_pipeline_isolation(
         db_path,
         get_settings(),
         skip_embeddings=True,
+        skip_probability=True,
         project_root=tmp_path,
     )
     assert n == 2

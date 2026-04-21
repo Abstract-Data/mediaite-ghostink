@@ -105,6 +105,27 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Skip sentence-transformer embeddings (faster for tests)",
     )
+    extract_p.add_argument(
+        "--probability",
+        action="store_true",
+        help="Run probability / perplexity scoring only (writes data/probability/)",
+    )
+    extract_p.add_argument(
+        "--no-binoculars",
+        action="store_true",
+        help="With --probability: skip Falcon Binoculars pair (GPT-2 perplexity only)",
+    )
+    extract_p.add_argument(
+        "--device",
+        default=None,
+        metavar="NAME",
+        help="Force torch device, e.g. cpu or cuda (default: config [probability].device)",
+    )
+    extract_p.add_argument(
+        "--skip-probability",
+        action="store_true",
+        help="Skip GPT-2 / probability scoring after stylometric extraction",
+    )
     analyze_p = subparsers.add_parser(
         "analyze", help="Run analysis (change-point, time-series, later drift/comparison)"
     )
@@ -508,7 +529,14 @@ async def _run_all_pipeline() -> int:
     if code != 0:
         return code
 
-    extract_ns = argparse.Namespace(author=None, skip_embeddings=False)
+    extract_ns = argparse.Namespace(
+        author=None,
+        skip_embeddings=False,
+        skip_probability=True,
+        probability=False,
+        no_binoculars=False,
+        device=None,
+    )
     code = _run_extract(extract_ns)
     if code != 0:
         return code
@@ -540,17 +568,38 @@ async def _run_all_pipeline() -> int:
 
 def _run_extract(args: argparse.Namespace) -> int:
     from forensics.features.pipeline import extract_all_features
+    from forensics.features.probability_pipeline import extract_probability_features
 
     settings = get_settings()
     root = get_project_root()
     db_path = root / "data" / "articles.db"
     author_slug = getattr(args, "author", None)
     skip_embeddings = bool(getattr(args, "skip_embeddings", False))
+    probability_only = bool(getattr(args, "probability", False))
+    no_binoculars = bool(getattr(args, "no_binoculars", False))
+    device_override = getattr(args, "device", None)
+
+    if probability_only:
+        n = extract_probability_features(
+            db_path,
+            settings,
+            author_slug=author_slug,
+            no_binoculars=no_binoculars,
+            device_override=device_override,
+            project_root=root,
+        )
+        logger.info("extract --probability: scored %d article(s)", n)
+        return 0
+
+    skip_probability = bool(getattr(args, "skip_probability", False))
     n = extract_all_features(
         db_path,
         settings,
         author_slug=author_slug,
         skip_embeddings=skip_embeddings,
+        skip_probability=skip_probability,
+        probability_no_binoculars=no_binoculars,
+        project_root=root,
     )
     logger.info("extract: processed %d article(s)", n)
     return 0

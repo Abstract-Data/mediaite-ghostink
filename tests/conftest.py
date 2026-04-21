@@ -11,6 +11,24 @@ from forensics.config import get_settings
 from forensics.models import Article, Author
 from forensics.scraper.crawler import stable_article_id
 
+
+def pytest_addoption(parser: pytest.Parser) -> None:
+    parser.addoption(
+        "--skip-slow",
+        action="store_true",
+        default=False,
+        help="Skip tests marked @pytest.mark.slow (HF model downloads).",
+    )
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    if config.getoption("--skip-slow"):
+        skip = pytest.mark.skip(reason="--skip-slow")
+        for item in items:
+            if "slow" in item.keywords:
+                item.add_marker(skip)
+
+
 MINIMAL_CONFIG_TOML = """
 [[authors]]
 name = "Fixture Author"
@@ -24,6 +42,9 @@ baseline_end = 2023-12-31
 [scraping]
 
 [analysis]
+
+[probability]
+binoculars_enabled = false
 
 [report]
 """

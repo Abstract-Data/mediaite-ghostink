@@ -85,6 +85,8 @@ def extract_all_features(
     *,
     author_slug: str | None = None,
     skip_embeddings: bool = False,
+    skip_probability: bool = False,
+    probability_no_binoculars: bool = False,
     project_root: Path | None = None,
 ) -> int:
     """
@@ -219,4 +221,26 @@ def extract_all_features(
         write_embeddings_manifest(manifest_records, embed_root / "manifest.jsonl")
 
     logger.info("Feature extraction finished: %d article(s) processed.", processed)
+
+    if not skip_probability:
+        from forensics.features.probability_pipeline import (
+            extract_probability_features,
+            maybe_log_probability_hint,
+            probability_stack_available,
+        )
+
+        if probability_stack_available():
+            try:
+                extract_probability_features(
+                    db_path,
+                    settings,
+                    author_slug=author_slug,
+                    no_binoculars=probability_no_binoculars,
+                    project_root=root,
+                )
+            except Exception:
+                logger.exception("Probability extraction failed after feature pass")
+        else:
+            maybe_log_probability_hint()
+
     return processed

@@ -69,6 +69,21 @@ class AnalysisConfig(BaseModel):
     effect_size_threshold: float = 0.5
 
 
+class ProbabilityConfig(BaseModel):
+    """Token-level probability / Binoculars settings (Phase 9, optional torch stack)."""
+
+    reference_model: str = "gpt2"
+    reference_model_revision: str = "e7da7f2"
+    binoculars_model_base: str = "tiiuae/falcon-7b"
+    binoculars_model_instruct: str = "tiiuae/falcon-7b-instruct"
+    binoculars_enabled: bool = True
+    max_sequence_length: int = 1024
+    stride: int = 512
+    batch_size: int = 16
+    device: Literal["auto", "cpu", "cuda"] = "auto"
+    low_ppl_sentence_threshold: float = 20.0
+
+
 class ReportConfig(BaseModel):
     title: str = "Writing Forensics Analysis"
     output_format: Literal["html", "pdf", "both"] = "both"
