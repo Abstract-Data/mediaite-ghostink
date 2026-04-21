@@ -1,0 +1,46 @@
+# Mediaite AI writing forensics — local configuration (Phase 1 template).
+# Override with FORENSICS_* environment variables (see pydantic-settings nested keys).
+
+[[authors]]
+name = "Placeholder Target"
+slug = "placeholder-target"
+outlet = "mediaite.com"
+role = "target"
+archive_url = "https://www.mediaite.com/author/placeholder-target/"
+baseline_start = 2020-01-01
+baseline_end = 2023-12-31
+
+[[authors]]
+name = "Placeholder Control"
+slug = "placeholder-control"
+outlet = "mediaite.com"
+role = "control"
+archive_url = "https://www.mediaite.com/author/placeholder-control/"
+baseline_start = 2020-01-01
+baseline_end = 2023-12-31
+
+[scraping]
+rate_limit_seconds = 2.0
+rate_limit_jitter = 0.5
+respect_robots_txt = true
+user_agent = "AI-Writing-Forensics/1.0 (research)"
+max_concurrent = 3
+max_retries = 3
+retry_backoff_seconds = 5.0
+
+[analysis]
+rolling_windows = [30, 90]
+significance_threshold = 0.05
+multiple_comparison_method = "benjamini_hochberg"
+bootstrap_iterations = 1000
+min_articles_for_period = 5
+embedding_model = "sentence-transformers/all-MiniLM-L6-v2"
+embedding_model_version = "v2.0"
+changepoint_methods = ["pelt", "bocpd"]
+
+[report]
+title = "Writing Forensics Analysis"
+output_format = "both"
+include_sections = []
+chart_theme = "plotly_white"
+cloudflare_deploy = false
