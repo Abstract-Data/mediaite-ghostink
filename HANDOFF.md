@@ -149,3 +149,36 @@ uv run pytest tests/ -v — 4/4 passed, 80.12% coverage
 - All 10 phase prompts are now complete and versioned — ready to begin implementation.
 - Start with Phase 1 (author config) or Phase 2 (scraper discovery).
 - Install Ollama and pull models before Phase 10 implementation.
+
+---
+
+### Phase 11: Typer CLI Migration Prompt
+**Status:** Complete
+**Date:** 2026-04-20
+
+#### What Was Done
+- Created `prompts/phase11-typer-cli-migration/` with full versioned prompt (v0.1.0) for migrating argparse CLI to Typer.
+- Inventoried complete CLI surface area across all 10 phase prompts (30+ flags).
+- Designed one-file-per-subcommand package structure (`cli/__init__.py`, `_helpers.py`, `scrape.py`, `extract.py`, `analyze.py`, `report.py`).
+- Pre-wired all Phase 6–10 flags as stubs so future phases don't need to restructure the CLI.
+- Included complete test rewrites for Typer CliRunner.
+
+#### Files Modified
+- `prompts/phase11-typer-cli-migration/current.md` — created (v0.1.0)
+- `prompts/phase11-typer-cli-migration/v0.1.0.md` — immutable snapshot
+- `prompts/phase11-typer-cli-migration/versions.json` — created
+- `prompts/phase11-typer-cli-migration/CHANGELOG.md` — created
+
+#### Decisions Made
+- Typer over Click (Typer wraps Click with less boilerplate and Python type annotations).
+- `typer[all]>=0.15.0` includes rich for formatted help output.
+- Scrape uses `add_typer()` (sub-app with `invoke_without_command=True`); other commands use `app.command()`.
+- Placeholder guard raises `typer.BadParameter` instead of `ValueError`.
+- Phase 11 runs after all analysis phases are built — retool the CLI as a clean-up pass.
+
+#### Unresolved Questions
+- None.
+
+#### Risks & Next Steps
+- Run Phase 11 after completing the current phase work to retool the CLI.
+- The migration is backward-compatible: `pyproject.toml` entry point and `__main__.py` import path don't change.
