@@ -163,3 +163,160 @@ def test_analysis_stub_modules_importable() -> None:
     import forensics.analysis.drift  # noqa: F401
     import forensics.analysis.orchestrator  # noqa: F401
     import forensics.analysis.statistics  # noqa: F401
+
+
+# --- Phase 6: embedding drift ---
+
+
+def test_monthly_centroids() -> None:
+    from forensics.analysis.drift import compute_monthly_centroids
+
+    stamps = [
+        datetime(2024, 1, 5, tzinfo=UTC),
+        datetime(2024, 1, 25, tzinfo=UTC),
+        datetime(2024, 2, 3, tzinfo=UTC),
+        datetime(2024, 2, 18, tzinfo=UTC),
+        datetime(2024, 3, 1, tzinfo=UTC),
+        datetime(2024, 3, 22, tzinfo=UTC),
+    ]
+    pairs: list[tuple[datetime, np.ndarray]] = []
+    for i, dt in enumerate(stamps):
+        pairs.append((dt, np.ones(4, dtype=np.float32) * float(i)))
+    out = compute_monthly_centroids(pairs)
+    assert len(out) == 3
+    for _m, c in out:
+        assert c.shape == (4,)
+
+
+def test_centroid_velocity_stationary() -> None:
+    from forensics.analysis.drift import track_centroid_velocity
+
+    v = np.array([1.0, 0.0, 0.0], dtype=np.float32)
+    cents = [("2024-01", v.copy()), ("2024-02", v.copy()), ("2024-03", v.copy())]
+    vel = track_centroid_velocity(cents)
+    assert len(vel) == 2
+    assert all(abs(x) < 1e-6 for x in vel)
+
+
+def test_centroid_velocity_drift() -> None:
+    from forensics.analysis.drift import track_centroid_velocity
+
+    cents = [
+        ("2024-01", np.array([1.0, 0.0, 0.0], dtype=np.float32)),
+        ("2024-02", np.array([1.0, 0.3, 0.0], dtype=np.float32)),
+        ("2024-03", np.array([1.0, 0.9, 0.0], dtype=np.float32)),
+    ]
+    vel = track_centroid_velocity(cents)
+    assert len(vel) == 2
+    assert vel[1] > vel[0]
+
+
+def test_baseline_similarity_stable() -> None:
+    from forensics.analysis.drift import compute_baseline_similarity_curve
+
+    base = datetime(2024, 1, 1, tzinfo=UTC)
+    e = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32)
+    pairs = [(base + timedelta(days=i), e.copy()) for i in range(5)]
+    curve = compute_baseline_similarity_curve(pairs, baseline_count=3)
+    assert len(curve) == 5
+    assert all(abs(s - 1.0) < 1e-5 for _, s in curve)
+
+
+def test_baseline_similarity_drift() -> None:
+    from forensics.analysis.drift import compute_baseline_similarity_curve
+
+    base = datetime(2024, 1, 1, tzinfo=UTC)
+    b = np.array([1.0, 0.0], dtype=np.float32)
+    pairs = []
+    for i in range(10):
+        noise = np.array([0.0, float(i) * 0.2], dtype=np.float32)
+        pairs.append((base + timedelta(days=i), b + noise))
+    curve = compute_baseline_similarity_curve(pairs, baseline_count=3)
+    assert curve[0][1] >= curve[-1][1]
+
+
+def test_intra_variance_uniform() -> None:
+    from forensics.analysis.drift import compute_intra_period_variance
+
+    base = datetime(2024, 3, 1, tzinfo=UTC)
+    v = np.ones(5, dtype=np.float32)
+    pairs = [(base, v), (base + timedelta(days=1), v.copy()), (base + timedelta(days=2), v.copy())]
+    out = compute_intra_period_variance(pairs, period="month")
+    assert out[0][0] == "2024-03"
+    assert out[0][1] == 0.0
+
+
+def test_ai_convergence_signal() -> None:
+    from forensics.analysis.drift import compute_ai_convergence
+
+    ai = np.array([1.0, 0.0, 0.0], dtype=np.float64)
+    ai_emb = [ai, ai + 0.01]
+    months = []
+    for k in range(4):
+        t = 0.2 * k
+        c = np.array([0.0, 1.0, 0.0], dtype=np.float64) * (1 - t) + ai * t
+        months.append((f"2024-0{k + 1}", c))
+    conv = compute_ai_convergence(months, ai_emb)
+    sims = [s for _, s in conv]
+    assert sims[-1] > sims[0]
+
+
+def test_ai_convergence_null() -> None:
+    from forensics.analysis.drift import compute_ai_convergence
+
+    rng = np.random.default_rng(42)
+    ai = rng.normal(size=6)
+    ai_emb = [ai, ai + 0.01]
+    months = [(f"2024-{i:02d}", rng.normal(size=6)) for i in range(1, 7)]
+    conv = compute_ai_convergence(months, ai_emb)
+    assert len(conv) == 6
+
+
+def test_umap_output_shape() -> None:
+    from forensics.analysis.drift import generate_umap_projection
+
+    rng = np.random.default_rng(7)
+    cents = [(f"2024-{i:02d}", rng.normal(size=12).astype(np.float32)) for i in range(1, 6)]
+    out = generate_umap_projection({"a1": cents})
+    assert "a1" in out["projections"]
+    assert len(out["projections"]["a1"]) == 5
+    for row in out["projections"]["a1"]:
+        assert "x" in row and "y" in row
+
+
+def test_drift_scores_assembly() -> None:
+    from forensics.analysis.drift import compute_drift_scores
+
+    base = datetime(2024, 1, 1, tzinfo=UTC)
+    curve = [(base + timedelta(days=i), 1.0 - 0.01 * i) for i in range(3)]
+    ai_c = [("2024-01", 0.1), ("2024-02", 0.5)]
+    ds = compute_drift_scores(
+        "author-1",
+        curve,
+        ai_c,
+        [0.01, 0.02],
+        [("2024-01", 0.3), ("2024-02", 0.2)],
+    )
+    assert ds.author_id == "author-1"
+    assert abs(ds.baseline_centroid_similarity - curve[-1][1]) < 1e-9
+    assert ds.ai_baseline_similarity == 0.5
+    assert ds.monthly_centroid_velocities == [0.01, 0.02]
+    assert ds.intra_period_variance_trend == [0.3, 0.2]
+
+
+def test_extract_lda_topic_keywords_runs() -> None:
+    from forensics.baseline.topics import extract_lda_topic_keywords
+
+    texts = [
+        "The senate voted today on climate policy and energy reform.",
+        "Congress debates healthcare funding and hospital budgets this week.",
+        "The president spoke about foreign policy and trade agreements abroad.",
+        "Local elections saw high turnout in the school board race downtown.",
+        "Stocks rose as investors weighed inflation data and interest rates.",
+        "The governor announced infrastructure spending for roads and bridges.",
+        "Scientists published findings on vaccines and public health outcomes.",
+        "The team won the championship after a strong defensive performance.",
+    ] * 3
+    topics = extract_lda_topic_keywords(texts, num_topics=4, n_keywords=5, random_state=0)
+    assert topics
+    assert all(len(kws) == 5 for _tid, kws, _s in topics)
