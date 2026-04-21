@@ -61,7 +61,10 @@ packages = ["src/forensics"]
 minversion = "8.0"
 testpaths = ["tests"]
 pythonpath = ["src"]
-addopts = "-ra -q --strict-markers --cov=forensics --cov-report=term-missing"
+addopts = "-ra -q --strict-markers --cov=forensics --cov-report=term-missing -m 'not slow'"
+markers = [
+  "slow: test requires loading large models / downloading external artifacts",
+]
 
 [tool.ruff]
 line-length = 100

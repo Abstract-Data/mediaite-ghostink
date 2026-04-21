@@ -38,6 +38,20 @@ embedding_model = "sentence-transformers/all-MiniLM-L6-v2"
 embedding_model_version = "v2.0"
 changepoint_methods = ["pelt", "bocpd"]
 
+[probability]
+# Phase 9 — token-level probability features (perplexity, burstiness, Binoculars).
+# Requires the `probability` optional-extra:  uv sync --extra probability
+reference_model = "gpt2"
+reference_model_revision = "e7da7f2"
+binoculars_model_base = "tiiuae/falcon-7b"
+binoculars_model_instruct = "tiiuae/falcon-7b-instruct"
+binoculars_enabled = false
+max_sequence_length = 1024
+sliding_window_stride = 512
+batch_size = 16
+device = "auto"
+low_ppl_threshold = 20.0
+
 [report]
 title = "Writing Forensics Analysis"
 output_format = "both"

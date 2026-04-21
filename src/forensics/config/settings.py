@@ -69,6 +69,21 @@ class AnalysisConfig(BaseModel):
     effect_size_threshold: float = 0.5
 
 
+class ProbabilityConfig(BaseModel):
+    """Phase 9 — token-level probability feature settings."""
+
+    reference_model: str = "gpt2"
+    reference_model_revision: str = "e7da7f2"
+    binoculars_model_base: str = "tiiuae/falcon-7b"
+    binoculars_model_instruct: str = "tiiuae/falcon-7b-instruct"
+    binoculars_enabled: bool = False
+    max_sequence_length: int = 1024
+    sliding_window_stride: int = 512
+    batch_size: int = 16
+    device: Literal["auto", "cpu", "cuda"] = "auto"
+    low_ppl_threshold: float = 20.0
+
+
 class ReportConfig(BaseModel):
     title: str = "Writing Forensics Analysis"
     output_format: Literal["html", "pdf", "both"] = "both"
@@ -101,6 +116,7 @@ class ForensicsSettings(BaseSettings):
     authors: list[AuthorConfig]
     scraping: ScrapingConfig = Field(default_factory=ScrapingConfig)
     analysis: AnalysisConfig = Field(default_factory=AnalysisConfig)
+    probability: ProbabilityConfig = Field(default_factory=ProbabilityConfig)
     report: ReportConfig = Field(default_factory=ReportConfig)
 
     @computed_field  # type: ignore[prop-decorator]

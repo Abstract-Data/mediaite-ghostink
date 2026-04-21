@@ -62,6 +62,27 @@ Hardware: M1 Mac with 32GB unified memory runs all three 7-9B models comfortably
 - Falcon-7B pair (Binoculars, optional): ~28GB full / ~8GB quantized
 - Embedding model (all-MiniLM-L6-v2): ~80MB (auto-downloads on first embedding run)
 
+### Running probability features
+
+```
+uv sync --extra probability            # install torch + transformers + accelerate
+uv run forensics extract --probability --author <slug>
+uv run forensics extract --probability --no-binoculars --device cpu
+cat data/probability/model_card.json   # pinned model revisions + digest
+```
+
+Artifacts: `data/probability/{author_slug}.parquet` + `data/probability/model_card.json`.
+
+### Running tests with the slow gate
+
+The default `uv run pytest` run skips tests marked `@pytest.mark.slow` (real
+GPT-2 load + inference). To run them explicitly:
+
+```
+uv run pytest -m slow tests/test_probability.py -v
+uv run pytest -m "not slow" tests/ -v       # default behavior
+```
+
 ## Common Issues
 
 ### Command not found: `forensics`
