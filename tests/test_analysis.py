@@ -306,7 +306,7 @@ def test_drift_scores_assembly() -> None:
 
 
 def test_extract_lda_topic_keywords_runs() -> None:
-    from forensics.analysis.drift import extract_lda_topic_keywords
+    from forensics.baseline.topics import extract_lda_topic_keywords
 
     texts = [
         "The senate voted today on climate policy and energy reform.",
@@ -636,7 +636,6 @@ async def test_full_analysis_integration(tmp_path: Path) -> None:
 
     db_path = tmp_path / "articles.db"
     init_db(db_path)
-    repo = Repository(db_path)
     auth = Author(
         name="Test",
         slug="test-author",
@@ -646,7 +645,8 @@ async def test_full_analysis_integration(tmp_path: Path) -> None:
         baseline_end=date(2024, 1, 1),
         archive_url="https://example.com",
     )
-    repo.upsert_author(auth)
+    with Repository(db_path) as repo:
+        repo.upsert_author(auth)
 
     n = 50
     base = datetime(2024, 1, 1, tzinfo=UTC)
@@ -871,7 +871,6 @@ def test_compare_target_to_controls_minimal(tmp_path: Path) -> None:
 
     db = tmp_path / "db.sqlite"
     init_db(db)
-    repo = Repository(db)
     tgt = Author(
         name="T",
         slug="target-a",
@@ -890,8 +889,9 @@ def test_compare_target_to_controls_minimal(tmp_path: Path) -> None:
         baseline_end=date(2024, 1, 1),
         archive_url="https://example.com",
     )
-    repo.upsert_author(tgt)
-    repo.upsert_author(ctl)
+    with Repository(db) as repo:
+        repo.upsert_author(tgt)
+        repo.upsert_author(ctl)
 
     n = 30
     base = datetime(2024, 1, 1, tzinfo=UTC)

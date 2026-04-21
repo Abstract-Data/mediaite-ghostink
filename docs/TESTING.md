@@ -44,7 +44,7 @@ uv run pytest tests/unit -x
 - Lint must pass: `uv run ruff check .`
 - Format check must pass: `uv run ruff format --check .`
 - Test suite must pass before merging.
-- Coverage target: 80% (enforced in `pyproject.toml` via `fail_under = 80`).
+- Coverage target: 60% (enforced in `pyproject.toml` via `fail_under = 60`). Raise this threshold only when the omitted modules are brought under test.
 
 ## Coverage Omission Policy
 

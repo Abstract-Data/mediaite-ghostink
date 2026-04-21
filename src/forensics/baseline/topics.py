@@ -1,8 +1,4 @@
-"""Topic-stratified sampling for Phase 10 baseline generation.
-
-Reuses ``extract_lda_topic_keywords`` from the drift analysis module to keep
-the LDA fit identical to what's used in Phase 6.
-"""
+"""Topic-stratified sampling for Phase 10 baseline generation (LDA on author corpus)."""
 
 from __future__ import annotations
 
@@ -10,8 +6,47 @@ import random
 from collections.abc import Sequence
 from pathlib import Path
 
-from forensics.analysis.drift import extract_lda_topic_keywords
+from sklearn.decomposition import LatentDirichletAllocation
+from sklearn.feature_extraction.text import TfidfVectorizer
+
 from forensics.storage.repository import Repository
+
+
+def extract_lda_topic_keywords(
+    texts: list[str],
+    *,
+    num_topics: int = 20,
+    n_keywords: int = 10,
+    random_state: int = 42,
+) -> list[tuple[int, list[str], str]]:
+    """Fit LDA on TF-IDF corpus; return ``(topic_id, keywords, summary)`` per topic."""
+    if not texts:
+        return []
+    n_samples = len(texts)
+    max_features = min(5000, max(100, n_samples * 10))
+    vectorizer = TfidfVectorizer(
+        max_df=0.95,
+        min_df=max(1, min(2, n_samples // 5)),
+        max_features=max_features,
+        stop_words="english",
+    )
+    X = vectorizer.fit_transform(texts)
+    n_topics_eff = max(2, min(num_topics, max(2, X.shape[0] // 5)))
+    lda = LatentDirichletAllocation(
+        n_components=n_topics_eff,
+        random_state=random_state,
+        max_iter=30,
+        learning_method="online",
+    )
+    lda.fit(X)
+    names = vectorizer.get_feature_names_out()
+    topics: list[tuple[int, list[str], str]] = []
+    for topic_idx, topic in enumerate(lda.components_):
+        top_ix = topic.argsort()[: -n_keywords - 1 : -1]
+        kws = [str(names[i]) for i in top_ix]
+        summary = ", ".join(kws[:5])
+        topics.append((topic_idx, kws, summary))
+    return topics
 
 
 def sample_topic_keywords(
@@ -23,11 +58,11 @@ def sample_topic_keywords(
     random_state: int = 42,
 ) -> list[list[str]]:
     """Return one keyword-list per LDA topic for this author's corpus."""
-    repo = Repository(db_path)
-    author = repo.get_author_by_slug(author_slug)
-    if author is None:
-        raise ValueError(f"Unknown author slug: {author_slug}")
-    articles = repo.get_articles_by_author(author.id)
+    with Repository(db_path) as repo:
+        author = repo.get_author_by_slug(author_slug)
+        if author is None:
+            raise ValueError(f"Unknown author slug: {author_slug}")
+        articles = repo.get_articles_by_author(author.id)
     texts = [a.clean_text for a in articles if a.clean_text and not a.is_duplicate]
     if len(texts) < 5:
         raise ValueError(f"Need ≥5 articles for LDA topics (got {len(texts)} for {author_slug})")
@@ -48,15 +83,15 @@ def sample_word_counts(
     seed: int = 42,
 ) -> list[int]:
     """Sample target word counts from the author's historical distribution."""
-    repo = Repository(db_path)
-    author = repo.get_author_by_slug(author_slug)
-    if author is None:
-        raise ValueError(f"Unknown author slug: {author_slug}")
-    counts = [
-        a.word_count
-        for a in repo.get_articles_by_author(author.id)
-        if a.clean_text and a.word_count > 0
-    ]
+    with Repository(db_path) as repo:
+        author = repo.get_author_by_slug(author_slug)
+        if author is None:
+            raise ValueError(f"Unknown author slug: {author_slug}")
+        counts = [
+            a.word_count
+            for a in repo.get_articles_by_author(author.id)
+            if a.clean_text and a.word_count > 0
+        ]
     if not counts:
         return [600] * n
     rng = random.Random(seed)

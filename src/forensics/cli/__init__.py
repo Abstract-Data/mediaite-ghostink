@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import asyncio
 import importlib.metadata
 import logging
-from argparse import Namespace
 from typing import Annotated
 
 import typer
@@ -61,50 +59,12 @@ app.command(name="report")(report)
 @app.command(name="all")
 def run_all() -> None:
     """Run full pipeline end-to-end: scrape → extract → analyze → report."""
-    from forensics.cli.scrape import _dispatch as _scrape_dispatch
-    from forensics.config import get_settings
-    from forensics.features.pipeline import extract_all_features
-    from forensics.reporting import run_report
+    from forensics.pipeline import run_all_pipeline
 
     logger = logging.getLogger(__name__)
-
-    code = asyncio.run(
-        _scrape_dispatch(
-            discover=False,
-            metadata=False,
-            fetch=False,
-            dedup=False,
-            archive=False,
-            dry_run=False,
-            force_refresh=False,
-        )
-    )
-    if code != 0:
-        raise typer.Exit(code=code)
-
-    from forensics.config import get_project_root
-
-    settings = get_settings()
-    root = get_project_root()
-    db_path = root / "data" / "articles.db"
-    extract_all_features(db_path, settings, author_slug=None, skip_embeddings=False)
-
-    from forensics.cli.analyze import run_analyze
-
-    try:
-        run_analyze(timeseries=True, convergence=True)
-    except typer.Exit as exc:
-        if exc.exit_code:
-            raise
-
-    report_args = Namespace(
-        notebook=None,
-        report_format=settings.report.output_format,
-        verify=False,
-    )
-    rc = run_report(report_args)
+    rc = run_all_pipeline()
     if rc != 0:
-        logger.error("report stage exited with code %d", rc)
+        logger.error("pipeline exited with code %d", rc)
         raise typer.Exit(code=rc)
 
 

@@ -178,8 +178,6 @@ def test_embedding_shape(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_list_articles_for_extraction(tmp_path: Path, sample_author: Author) -> None:
     db_path = tmp_path / "articles.db"
     init_db(db_path)
-    repo = Repository(db_path)
-    repo.upsert_author(sample_author)
     url = "https://www.mediaite.com/2024/01/02/extract-test/"
     body = _long_text()
     a_ok = Article(
@@ -223,18 +221,20 @@ def test_list_articles_for_extraction(tmp_path: Path, sample_author: Author) -> 
         content_hash="h4",
         is_duplicate=True,
     )
-    for a in (a_ok, a_short, a_redirect, a_dup):
-        repo.upsert_article(a)
-    rows = repo.list_articles_for_extraction()
+    with Repository(db_path) as repo:
+        repo.upsert_author(sample_author)
+        for a in (a_ok, a_short, a_redirect, a_dup):
+            repo.upsert_article(a)
+        rows = repo.list_articles_for_extraction()
     assert len(rows) == 1 and rows[0].id == "a-ok"
 
 
 def test_get_author_by_slug(tmp_path: Path, sample_author: Author) -> None:
     db_path = tmp_path / "articles.db"
     init_db(db_path)
-    repo = Repository(db_path)
-    repo.upsert_author(sample_author)
-    found = repo.get_author_by_slug("test-author")
+    with Repository(db_path) as repo:
+        repo.upsert_author(sample_author)
+        found = repo.get_author_by_slug("test-author")
     assert found is not None and found.id == sample_author.id
 
 
@@ -252,8 +252,6 @@ def test_feature_pipeline_isolation(
     get_settings.cache_clear()
     db_path = tmp_path / "articles.db"
     init_db(db_path)
-    repo = Repository(db_path)
-    repo.upsert_author(sample_author)
     good = _long_text()
     orig_lex = lex_mod.extract_lexical_features
     calls = {"n": 0}
@@ -265,19 +263,21 @@ def test_feature_pipeline_isolation(
         return orig_lex(text, doc)
 
     monkeypatch.setattr(lex_mod, "extract_lexical_features", flaky)
-    for i in range(3):
-        url = f"https://www.mediaite.com/2024/02/{i + 1:02d}/p/"
-        a = Article(
-            id=f"art-{i}",
-            author_id=sample_author.id,
-            url=url,
-            title=f"T{i}",
-            published_date=datetime(2024, 2, i + 1, tzinfo=UTC),
-            clean_text=good,
-            word_count=len(good.split()),
-            content_hash=f"h{i}",
-        )
-        repo.upsert_article(a)
+    with Repository(db_path) as repo:
+        repo.upsert_author(sample_author)
+        for i in range(3):
+            url = f"https://www.mediaite.com/2024/02/{i + 1:02d}/p/"
+            a = Article(
+                id=f"art-{i}",
+                author_id=sample_author.id,
+                url=url,
+                title=f"T{i}",
+                published_date=datetime(2024, 2, i + 1, tzinfo=UTC),
+                clean_text=good,
+                word_count=len(good.split()),
+                content_hash=f"h{i}",
+            )
+            repo.upsert_article(a)
 
     monkeypatch.setattr("forensics.features.pipeline.spacy.load", lambda name: nlp)
     n = pl.extract_all_features(

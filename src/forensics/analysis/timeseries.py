@@ -13,7 +13,7 @@ import polars as pl
 
 from forensics.analysis.changepoint import PELT_FEATURE_COLUMNS
 from forensics.config.settings import ForensicsSettings
-from forensics.storage.parquet import read_features
+from forensics.storage.parquet import load_feature_frame_sorted
 from forensics.storage.repository import Repository, init_db
 from forensics.utils.datetime import parse_datetime
 
@@ -183,23 +183,14 @@ def run_timeseries_analysis(
 ) -> dict[str, Any]:
     """Write ``data/analysis/{slug}_timeseries.parquet`` with rolling + STL per numeric feature."""
     init_db(db_path)
-    repo = Repository(db_path)
     analysis_dir = project_root / "data" / "analysis"
     analysis_dir.mkdir(parents=True, exist_ok=True)
     windows = settings.analysis.rolling_windows or [30, 90]
 
-    if author_slug:
-        au = repo.get_author_by_slug(author_slug)
-        if au is None:
-            msg = f"Unknown author slug: {author_slug}"
-            raise ValueError(msg)
-        author_rows = [au]
-    else:
-        author_rows = []
-        for a in settings.authors:
-            au = repo.get_author_by_slug(a.slug)
-            if au is not None:
-                author_rows.append(au)
+    from forensics.analysis.utils import resolve_author_rows
+
+    with Repository(db_path) as repo:
+        author_rows = resolve_author_rows(repo, settings, author_slug=author_slug)
 
     summary: dict[str, Any] = {"authors": [], "timeseries_files": []}
     numeric_cols = list(PELT_FEATURE_COLUMNS)
@@ -209,7 +200,7 @@ def run_timeseries_analysis(
         if not feat_path.is_file():
             logger.warning("Skipping timeseries for %s: missing %s", author.slug, feat_path)
             continue
-        df = read_features(feat_path).sort("timestamp")
+        df = load_feature_frame_sorted(feat_path)
         df_a = df.filter(pl.col("author_id") == author.id)
         if df_a.is_empty():
             df_a = df

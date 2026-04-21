@@ -10,18 +10,37 @@ from scipy import stats
 from forensics.models.analysis import HypothesisTest
 
 
-def cohens_d(group1: list[float], group2: list[float]) -> float:
-    """Pooled Cohen's d (mean2 - mean1) / pooled_std for two samples."""
+def cohens_d(
+    group1: list[float] | np.ndarray,
+    group2: list[float] | np.ndarray,
+) -> float:
+    """Pooled Cohen's d (mean2 - mean1) / pooled_std for two samples (array-like).
+
+    Handles length-1 tails (changepoint segments) like the legacy numpy helper.
+    """
     a = np.asarray(group1, dtype=float).ravel()
     b = np.asarray(group2, dtype=float).ravel()
+    if a.size < 1 or b.size < 1:
+        return 0.0
+    if a.size == 1 and b.size >= 2:
+        pooled = float(np.std(b, ddof=1))
+        if pooled < 1e-12:
+            return 0.0
+        return (float(np.mean(b)) - float(a[0])) / pooled
+    if b.size == 1 and a.size >= 2:
+        pooled = float(np.std(a, ddof=1))
+        if pooled < 1e-12:
+            return 0.0
+        return (float(b[0]) - float(np.mean(a))) / pooled
+    if a.size < 2 or b.size < 2:
+        return float(np.mean(b) - np.mean(a)) if a.size and b.size else 0.0
+    m1, m2 = float(np.mean(a)), float(np.mean(b))
+    v1, v2 = float(np.var(a, ddof=1)), float(np.var(b, ddof=1))
     n1, n2 = a.size, b.size
-    if n1 < 2 or n2 < 2:
-        return float(np.mean(b) - np.mean(a)) if n1 and n2 else 0.0
-    var1, var2 = float(np.var(a, ddof=1)), float(np.var(b, ddof=1))
-    pooled_std = math.sqrt(((n1 - 1) * var1 + (n2 - 1) * var2) / (n1 + n2 - 2))
+    pooled_std = math.sqrt(((n1 - 1) * v1 + (n2 - 1) * v2) / (n1 + n2 - 2))
     if pooled_std <= 0.0 or not math.isfinite(pooled_std):
         return 0.0
-    return float((float(np.mean(b)) - float(np.mean(a))) / pooled_std)
+    return float((m2 - m1) / pooled_std)
 
 
 def bootstrap_ci(

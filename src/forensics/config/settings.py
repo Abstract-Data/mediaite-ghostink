@@ -67,6 +67,17 @@ class AnalysisConfig(BaseModel):
     embedding_model_version: str = "v2.0"
     changepoint_methods: list[str] = Field(default_factory=lambda: ["pelt", "bocpd"])
     effect_size_threshold: float = 0.5
+    pelt_penalty: float = 3.0
+    bocpd_hazard_rate: float = 1 / 250.0
+    bocpd_threshold: float = 0.5
+    baseline_embedding_count: int = 20
+    convergence_window_days: int = 90
+    convergence_min_feature_ratio: float = 0.6
+    convergence_perplexity_drop_ratio: float = 0.92
+    convergence_burstiness_drop_ratio: float = 0.94
+    intra_variance_pairwise_max: int = 20
+    ai_baseline_llm_temperature: float = 0.7
+    feature_extraction_max_failure_ratio: float = 0.25
 
 
 class ProbabilityConfig(BaseModel):

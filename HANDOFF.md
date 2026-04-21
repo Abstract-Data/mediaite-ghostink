@@ -337,3 +337,54 @@ uv run ruff check . && uv run ruff format --check .             # all clean
 
 #### Risks & Next Steps
 - Manual end-to-end run of `uv run python scripts/generate_baseline.py --author <slug> --articles-per-cell 1` on a host with Ollama + pulled models is the next verification step; CI can't exercise it.
+
+---
+
+### Notion code review + refactoring report — full implementation (no deferrals)
+**Status:** Complete
+**Date:** 2026-04-21
+**Agent/Session:** Cursor background agent (Notion MCP: Code Review Report + Refactoring Analysis Report)
+
+#### What Was Done
+- Implemented the consolidated recommendations from both Notion reports (repository session pattern, DRY helpers, config externalization, complexity reduction, drift/LDA/topic moves, BOCPD optimization, typed report args, nested `FeatureVector` with Parquet flat compat, scraper `Repository` injection hybrid, pipeline module population, Hypothesis lexical bounds, docs alignment).
+- Updated ADRs 001/003, `docs/TESTING.md` coverage target note, and `docs/GUARDRAILS.md` Sign for context-managed `Repository`.
+- Adjusted tests for `with Repository(...) as repo:` and added `tests/test_lexical_hypothesis.py`.
+
+#### Files Modified
+- `src/forensics/storage/repository.py` — `Repository` as context manager; single connection per session.
+- `src/forensics/storage/parquet.py`, `src/forensics/storage/export.py` — `load_feature_frame_sorted` / serialization paths.
+- `src/forensics/models/features.py`, `src/forensics/models/report_args.py` (new) — nested `FeatureVector`, `ReportArgs`.
+- `src/forensics/config/settings.py` — `AnalysisConfig` tunables for changepoint/convergence/extraction failure ratio.
+- `src/forensics/analysis/*` — `cohens_d` consolidation, BOCPD O(n), drift pipeline DRY, orchestrator/comparison/timeseries refactors, `utils.py` (new).
+- `src/forensics/baseline/topics.py` — LDA topic extraction moved from drift.
+- `src/forensics/analysis/drift.py` — drift pipeline public helpers naming, intra-period variance optimization.
+- `src/forensics/features/assembler.py` (new), `pipeline.py`, `readability.py`, `probability_pipeline.py` — assembler + extraction abort threshold + narrower exceptions.
+- `src/forensics/cli/*`, `src/forensics/pipeline.py`, `src/forensics/reporting.py` — dispatch/registry patterns, `run_all_pipeline`, typed report args.
+- `src/forensics/scraper/{crawler,dedup,fetcher}.py` — optional `Repository` injection for hybrid decoupling.
+- `docs/adr/001-sqlite-connection-management.md`, `docs/adr/003-deferred-scraper-storage-decoupling.md`, `docs/GUARDRAILS.md`, `docs/TESTING.md`.
+- `tests/*.py`, `tests/test_lexical_hypothesis.py` (new).
+
+#### Verification Evidence
+```
+uv run ruff check .
+# All checks passed!
+
+uv run ruff format --check .
+# 107 files already formatted
+
+uv run pytest tests/ -q --tb=line
+# Required test coverage of 60.0% reached. Total coverage: 64.04%
+# 15 skipped: en_core_web_md not installed (expected without spacy model)
+```
+
+#### Decisions Made
+- `Repository` must be used as `with Repository(path) as repo:` everywhere (production + tests); aligns with ADR-001 and removes connection-per-call anti-pattern.
+- `FeatureVector` nested Pydantic models retain Parquet compatibility via `to_flat_dict` / legacy flat ingestion.
+- Scraper/storage “decoupling” is hybrid: injectable `Repository` while keeping persistence responsibilities in scraper modules (ADR-003 partial accepted).
+
+#### Unresolved Questions
+- None for this implementation scope.
+
+#### Risks & Next Steps
+- Any out-of-tree scripts or operators still calling `Repository(path)` without `with` will fail fast with `RuntimeError`; search callers outside `src/` and `tests/` if you have local tooling.
+- Optional: install `en_core_web_md` locally to un-skip spaCy-dependent tests.

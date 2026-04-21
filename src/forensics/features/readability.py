@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import logging
+
 import textstat
+
+logger = logging.getLogger(__name__)
 
 
 def extract_readability_features(text: str) -> dict[str, float]:
@@ -21,7 +25,8 @@ def extract_readability_features(text: str) -> dict[str, float]:
             "gunning_fog": float(textstat.gunning_fog(text)),
             "smog": float(textstat.smog_index(text)),
         }
-    except Exception:
+    except (ValueError, ZeroDivisionError, AttributeError) as exc:
+        logger.warning("readability: textstat failed (%s); returning NaN scores", exc)
         return {
             "flesch_kincaid": float("nan"),
             "coleman_liau": float("nan"),

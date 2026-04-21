@@ -13,9 +13,10 @@ import polars as pl
 import ruptures as rpt
 from scipy.special import logsumexp
 
+from forensics.analysis.statistics import cohens_d
 from forensics.config.settings import ForensicsSettings
 from forensics.models.analysis import ChangePoint, ConvergenceWindow
-from forensics.storage.parquet import read_features
+from forensics.storage.parquet import load_feature_frame_sorted
 from forensics.storage.repository import Repository, init_db
 from forensics.utils.datetime import parse_datetime
 
@@ -70,6 +71,9 @@ def detect_bocpd(
     ``log_pi_new[0]`` is the posterior log-probability that the segment restarts at ``t``
     (i.e. a changepoint immediately before the current observation). Returns ``(t, p_cp)``
     when that probability exceeds ``threshold`` (typically sparse).
+
+    Segment sums use prefix sums so the inner loop over segment lengths is O(1) amortized
+    per timestep (vectorized over ``s``).
     """
     x = np.asarray(signal, dtype=float).ravel()
     n = len(x)
@@ -88,6 +92,7 @@ def detect_bocpd(
 
     log_pi = np.array([0.0])
     changepoints: list[tuple[int, float]] = []
+    cumsum = np.concatenate((np.zeros(1, dtype=float), np.cumsum(x, dtype=float)))
 
     for t in range(1, n):
         xt = x[t]
@@ -96,14 +101,13 @@ def detect_bocpd(
         if log_pi.size < max_s:
             log_pi = np.concatenate([log_pi, np.full(max_s - log_pi.size, -np.inf)])
 
-        log_pred = np.empty(max_s)
-        for s in range(1, max_s + 1):
-            seg = x[t - s : t]
-            sum_s = float(np.sum(seg))
-            inv_v = inv_v0 + len(seg) * inv_sig2
-            m = (inv_v0 * mu0 + inv_sig2 * sum_s) / inv_v
-            var_pred = 1.0 / inv_v + sigma2
-            log_pred[s - 1] = -0.5 * (np.log(2 * np.pi * var_pred) + (xt - m) ** 2 / var_pred)
+        s_idx = np.arange(1, max_s + 1, dtype=np.int64)
+        sum_s = cumsum[t] - cumsum[t - s_idx]
+        lengths = s_idx.astype(float)
+        inv_v = inv_v0 + lengths * inv_sig2
+        m = (inv_v0 * mu0 + inv_sig2 * sum_s) / inv_v
+        var_pred = 1.0 / inv_v + sigma2
+        log_pred = -0.5 * (np.log(2 * np.pi * var_pred) + (xt - m) ** 2 / var_pred)
 
         log_evidence = logsumexp(log_pi[:max_s] + log_pred)
         log_pi_new = np.full(t + 1, -np.inf)
@@ -118,32 +122,6 @@ def detect_bocpd(
             changepoints.append((t, p_cp))
 
     return changepoints
-
-
-def cohens_d(before: np.ndarray, after: np.ndarray) -> float:
-    """Pooled Cohen's d for two segments (handles length-1 tail after an online CP)."""
-    a = np.asarray(before, dtype=float).ravel()
-    b = np.asarray(after, dtype=float).ravel()
-    if a.size < 1 or b.size < 1:
-        return 0.0
-    if a.size == 1 and b.size >= 2:
-        pooled = float(np.std(b, ddof=1))
-        if pooled < 1e-12:
-            return 0.0
-        return (float(np.mean(b)) - float(a[0])) / pooled
-    if b.size == 1 and a.size >= 2:
-        pooled = float(np.std(a, ddof=1))
-        if pooled < 1e-12:
-            return 0.0
-        return (float(b[0]) - float(np.mean(a))) / pooled
-    if a.size < 2 or b.size < 2:
-        return float(np.mean(b) - np.mean(a))
-    m1, m2 = float(np.mean(a)), float(np.mean(b))
-    v1, v2 = float(np.var(a, ddof=1)), float(np.var(b, ddof=1))
-    pooled = np.sqrt(((a.size - 1) * v1 + (b.size - 1) * v2) / (a.size + b.size - 2))
-    if pooled < 1e-12:
-        return 0.0
-    return (m2 - m1) / pooled
 
 
 def _pelt_confidence_from_effect(d: float) -> float:
@@ -227,10 +205,15 @@ def find_convergence_windows(
     window_days: int = 90,
     min_features: float = 0.6,
     total_features: int | None = None,
+    *,
+    settings: ForensicsSettings | None = None,
 ) -> list[ConvergenceWindow]:
     """Bin change points into calendar windows; flag windows with enough distinct features."""
     if not change_points:
         return []
+    if settings is not None:
+        window_days = settings.analysis.convergence_window_days
+        min_features = settings.analysis.convergence_min_feature_ratio
     total = total_features if total_features is not None else len(PELT_FEATURE_COLUMNS)
     if total <= 0:
         return []
@@ -262,14 +245,6 @@ def find_convergence_windows(
     return windows
 
 
-def _load_feature_frame(features_path: Path) -> pl.DataFrame:
-    df = read_features(features_path)
-    if "timestamp" not in df.columns:
-        msg = f"features parquet missing timestamp: {features_path}"
-        raise ValueError(msg)
-    return df.sort("timestamp")
-
-
 def analyze_author_feature_changepoints(
     df: pl.DataFrame,
     *,
@@ -278,9 +253,9 @@ def analyze_author_feature_changepoints(
 ) -> list[ChangePoint]:
     """Run configured changepoint methods on each numeric feature column."""
     methods = {m.lower() for m in settings.analysis.changepoint_methods}
-    pen = 3.0
-    hazard = 1 / 250.0
-    bocpd_threshold = 0.5
+    pen = settings.analysis.pelt_penalty
+    hazard = settings.analysis.bocpd_hazard_rate
+    bocpd_threshold = settings.analysis.bocpd_threshold
     out: list[ChangePoint] = []
 
     ts_list = df["timestamp"].to_list()
@@ -319,22 +294,13 @@ def run_changepoint_analysis(
 ) -> dict[str, Any]:
     """Load Parquet per author; write changepoint and convergence JSON under data/analysis/."""
     init_db(db_path)
-    repo = Repository(db_path)
     analysis_dir = project_root / "data" / "analysis"
     analysis_dir.mkdir(parents=True, exist_ok=True)
 
-    if author_slug:
-        au = repo.get_author_by_slug(author_slug)
-        if au is None:
-            msg = f"Unknown author slug: {author_slug}"
-            raise ValueError(msg)
-        author_rows = [au]
-    else:
-        author_rows = []
-        for a in settings.authors:
-            au = repo.get_author_by_slug(a.slug)
-            if au is not None:
-                author_rows.append(au)
+    from forensics.analysis.utils import resolve_author_rows
+
+    with Repository(db_path) as repo:
+        author_rows = resolve_author_rows(repo, settings, author_slug=author_slug)
 
     summary: dict[str, Any] = {"authors": [], "changepoint_files": [], "convergence_files": []}
 
@@ -343,16 +309,15 @@ def run_changepoint_analysis(
         if not feat_path.is_file():
             logger.warning("Skipping author %s: missing %s", author.slug, feat_path)
             continue
-        df = _load_feature_frame(feat_path)
+        df = load_feature_frame_sorted(feat_path)
         df_author = df.filter(pl.col("author_id") == author.id)
         if df_author.is_empty():
             df_author = df
         cps = analyze_author_feature_changepoints(df_author, author_id=author.id, settings=settings)
         conv = find_convergence_windows(
             cps,
-            window_days=90,
-            min_features=0.6,
             total_features=len(PELT_FEATURE_COLUMNS),
+            settings=settings,
         )
 
         cp_path = analysis_dir / f"{author.slug}_changepoints.json"
