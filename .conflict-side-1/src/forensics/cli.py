@@ -93,7 +93,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="With discovery: overwrite authors_manifest.jsonl if it exists",
     )
 
-<<<<<<< New base: Phase 4 implementation
     extract_p = subparsers.add_parser("extract", help="Run feature extraction pipeline")
     extract_p.add_argument(
         "--author",
@@ -120,56 +119,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Run rolling statistics + STL-style decomposition only",
     )
     analyze_p.add_argument(
-        "--drift",
-        action="store_true",
-        help="Run embedding drift analysis (Phase 6: centroids, velocities, UMAP)",
-    )
-    analyze_p.add_argument(
-        "--ai-baseline",
-        action="store_true",
-        help="Generate or refresh synthetic AI baseline articles + embeddings (needs API key)",
-    )
-    analyze_p.add_argument(
-        "--skip-generation",
-        action="store_true",
-        help="With --ai-baseline: re-embed existing JSON articles only (no LLM calls)",
-    )
-    analyze_p.add_argument(
-        "--openai-key",
-        default=None,
-        metavar="KEY",
-        help="OpenAI API key for --ai-baseline (else OPENAI_API_KEY)",
-    )
-    analyze_p.add_argument(
-        "--llm-model",
-        default="gpt-4o",
-        metavar="MODEL",
-        help="Chat model for --ai-baseline generation",
-    )
-    analyze_p.add_argument(
         "--author",
         default=None,
         metavar="SLUG",
         help="Limit analysis to one configured author slug",
     )
-||||||| Common ancestor
-    subparsers.add_parser("extract", help="Run feature extraction pipeline")
-    subparsers.add_parser("analyze", help="Run analysis (change-point, drift, comparison)")
-=======
-    extract_p = subparsers.add_parser("extract", help="Run feature extraction pipeline")
-    extract_p.add_argument(
-        "--author",
-        default=None,
-        metavar="SLUG",
-        help="Limit extraction to one configured author slug",
-    )
-    extract_p.add_argument(
-        "--skip-embeddings",
-        action="store_true",
-        help="Skip sentence-transformer embeddings (faster for tests)",
-    )
-    subparsers.add_parser("analyze", help="Run analysis (change-point, drift, comparison)")
->>>>>>> Current commit: Phase 4 implementation
     subparsers.add_parser("report", help="Generate notebook outputs")
     subparsers.add_parser("all", help="Full pipeline end-to-end")
     return parser
@@ -366,32 +320,6 @@ def _run_analyze(args: argparse.Namespace) -> int:
     do_changepoint = want_cp or (not want_cp and not want_ts)
     do_timeseries = want_ts or (not want_cp and not want_ts)
 
-<<<<<<< New base: Phase 4 implementation
-def _run_analyze(args: argparse.Namespace) -> int:
-    from forensics.analysis.changepoint import run_changepoint_analysis
-    from forensics.analysis.drift import run_ai_baseline_command, run_drift_analysis
-    from forensics.analysis.timeseries import run_timeseries_analysis
-
-    settings = get_settings()
-    root = get_project_root()
-    db_path = root / "data" / "articles.db"
-    analysis_dir = root / "data" / "analysis"
-    analysis_dir.mkdir(parents=True, exist_ok=True)
-
-    want_cp = bool(getattr(args, "changepoint", False))
-    want_ts = bool(getattr(args, "timeseries", False))
-    want_drift = bool(getattr(args, "drift", False))
-    want_ai = bool(getattr(args, "ai_baseline", False))
-    explicit = want_cp or want_ts or want_drift or want_ai
-    if explicit:
-        do_changepoint = want_cp
-        do_timeseries = want_ts
-        do_drift = want_drift
-    else:
-        do_changepoint = True
-        do_timeseries = True
-        do_drift = False
-
     author_slug = getattr(args, "author", None)
     rid = insert_analysis_run(
         db_path,
@@ -404,7 +332,6 @@ def _run_analyze(args: argparse.Namespace) -> int:
         "config_hash": _config_fingerprint(),
         "changepoint": do_changepoint,
         "timeseries": do_timeseries,
-        "drift": do_drift,
         "author": author_slug,
     }
     (analysis_dir / "run_metadata.json").write_text(
@@ -426,29 +353,10 @@ def _run_analyze(args: argparse.Namespace) -> int:
             project_root=root,
             author_slug=author_slug,
         )
-    if do_drift:
-        run_drift_analysis(
-            db_path,
-            settings,
-            project_root=root,
-            author_slug=author_slug,
-        )
-    if want_ai:
-        run_ai_baseline_command(
-            db_path,
-            settings,
-            project_root=root,
-            author_slug=author_slug,
-            skip_generation=bool(getattr(args, "skip_generation", False)),
-            openai_key=getattr(args, "openai_key", None),
-            llm_model=str(getattr(args, "llm_model", "gpt-4o")),
-        )
     logger.info(
-        "analyze: completed (changepoint=%s, timeseries=%s, drift=%s, ai_baseline=%s, author=%s)",
+        "analyze: completed (changepoint=%s, timeseries=%s, author=%s)",
         do_changepoint,
         do_timeseries,
-        do_drift,
-        want_ai,
         author_slug or "all",
     )
     return 0
@@ -472,27 +380,6 @@ def _run_extract(args: argparse.Namespace) -> int:
     return 0
 
 
-||||||| Common ancestor
-=======
-def _run_extract(args: argparse.Namespace) -> int:
-    from forensics.features.pipeline import extract_all_features
-
-    settings = get_settings()
-    root = get_project_root()
-    db_path = root / "data" / "articles.db"
-    author_slug = getattr(args, "author", None)
-    skip_embeddings = bool(getattr(args, "skip_embeddings", False))
-    n = extract_all_features(
-        db_path,
-        settings,
-        author_slug=author_slug,
-        skip_embeddings=skip_embeddings,
-    )
-    logger.info("extract: processed %d article(s)", n)
-    return 0
-
-
->>>>>>> Current commit: Phase 4 implementation
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     parser = build_parser()
@@ -501,7 +388,6 @@ def main() -> int:
     if args.command == "scrape":
         return asyncio.run(_async_scrape(args))
 
-<<<<<<< New base: Phase 4 implementation
     if args.command == "extract":
         try:
             return _run_extract(args)
@@ -516,23 +402,6 @@ def main() -> int:
             logger.error("%s", exc)
             return 1
 
-||||||| Common ancestor
-=======
-    if args.command == "extract":
-        try:
-            return _run_extract(args)
-        except ValueError as exc:
-            logger.error("%s", exc)
-            return 1
-
-    if args.command == "analyze":
-        try:
-            return _run_analyze(args)
-        except ValueError as exc:
-            logger.error("%s", exc)
-            return 1
-
->>>>>>> Current commit: Phase 4 implementation
     logger.warning("Phase not yet implemented")
     return 0
 

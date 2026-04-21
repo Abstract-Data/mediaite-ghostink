@@ -351,21 +351,6 @@ async def _async_scrape(args: argparse.Namespace) -> int:
     return 1
 
 
-def _run_analyze(args: argparse.Namespace) -> int:
-    from forensics.analysis.changepoint import run_changepoint_analysis
-    from forensics.analysis.timeseries import run_timeseries_analysis
-
-    settings = get_settings()
-    root = get_project_root()
-    db_path = root / "data" / "articles.db"
-    analysis_dir = root / "data" / "analysis"
-    analysis_dir.mkdir(parents=True, exist_ok=True)
-
-    want_cp = bool(getattr(args, "changepoint", False))
-    want_ts = bool(getattr(args, "timeseries", False))
-    do_changepoint = want_cp or (not want_cp and not want_ts)
-    do_timeseries = want_ts or (not want_cp and not want_ts)
-
 <<<<<<< New base: Phase 4 implementation
 def _run_analyze(args: argparse.Namespace) -> int:
     from forensics.analysis.changepoint import run_changepoint_analysis
@@ -521,13 +506,6 @@ def main() -> int:
     if args.command == "extract":
         try:
             return _run_extract(args)
-        except ValueError as exc:
-            logger.error("%s", exc)
-            return 1
-
-    if args.command == "analyze":
-        try:
-            return _run_analyze(args)
         except ValueError as exc:
             logger.error("%s", exc)
             return 1
