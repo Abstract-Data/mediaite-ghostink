@@ -70,7 +70,6 @@ branch = true
 omit = [
   "*/forensics/pipeline.py",
   "*/forensics/features/*",
-  "*/forensics/analysis/*",
   "*/forensics/storage/parquet.py",
   "*/forensics/storage/duckdb_queries.py",
 ]
