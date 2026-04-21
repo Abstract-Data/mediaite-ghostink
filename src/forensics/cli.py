@@ -5,8 +5,10 @@ from __future__ import annotations
 import argparse
 import asyncio
 import hashlib
+import json
 import logging
 import os
+from datetime import UTC, datetime
 from pathlib import Path
 
 from forensics.config import get_project_root, get_settings
@@ -103,7 +105,25 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Skip sentence-transformer embeddings (faster for tests)",
     )
-    subparsers.add_parser("analyze", help="Run analysis (change-point, drift, comparison)")
+    analyze_p = subparsers.add_parser(
+        "analyze", help="Run analysis (change-point, time-series, later drift/comparison)"
+    )
+    analyze_p.add_argument(
+        "--changepoint",
+        action="store_true",
+        help="Run change-point detection only (PELT / BOCPD per feature)",
+    )
+    analyze_p.add_argument(
+        "--timeseries",
+        action="store_true",
+        help="Run rolling statistics + STL-style decomposition only",
+    )
+    analyze_p.add_argument(
+        "--author",
+        default=None,
+        metavar="SLUG",
+        help="Limit analysis to one configured author slug",
+    )
     subparsers.add_parser("report", help="Generate notebook outputs")
     subparsers.add_parser("all", help="Full pipeline end-to-end")
     return parser
@@ -285,6 +305,63 @@ async def _async_scrape(args: argparse.Namespace) -> int:
     return 1
 
 
+def _run_analyze(args: argparse.Namespace) -> int:
+    from forensics.analysis.changepoint import run_changepoint_analysis
+    from forensics.analysis.timeseries import run_timeseries_analysis
+
+    settings = get_settings()
+    root = get_project_root()
+    db_path = root / "data" / "articles.db"
+    analysis_dir = root / "data" / "analysis"
+    analysis_dir.mkdir(parents=True, exist_ok=True)
+
+    want_cp = bool(getattr(args, "changepoint", False))
+    want_ts = bool(getattr(args, "timeseries", False))
+    do_changepoint = want_cp or (not want_cp and not want_ts)
+    do_timeseries = want_ts or (not want_cp and not want_ts)
+
+    author_slug = getattr(args, "author", None)
+    rid = insert_analysis_run(
+        db_path,
+        config_hash=_config_fingerprint(),
+        description="forensics analyze",
+    )
+    meta = {
+        "run_id": rid,
+        "run_timestamp": datetime.now(UTC).isoformat(),
+        "config_hash": _config_fingerprint(),
+        "changepoint": do_changepoint,
+        "timeseries": do_timeseries,
+        "author": author_slug,
+    }
+    (analysis_dir / "run_metadata.json").write_text(
+        json.dumps(meta, indent=2),
+        encoding="utf-8",
+    )
+
+    if do_changepoint:
+        run_changepoint_analysis(
+            db_path,
+            settings,
+            project_root=root,
+            author_slug=author_slug,
+        )
+    if do_timeseries:
+        run_timeseries_analysis(
+            db_path,
+            settings,
+            project_root=root,
+            author_slug=author_slug,
+        )
+    logger.info(
+        "analyze: completed (changepoint=%s, timeseries=%s, author=%s)",
+        do_changepoint,
+        do_timeseries,
+        author_slug or "all",
+    )
+    return 0
+
+
 def _run_extract(args: argparse.Namespace) -> int:
     from forensics.features.pipeline import extract_all_features
 
@@ -314,6 +391,13 @@ def main() -> int:
     if args.command == "extract":
         try:
             return _run_extract(args)
+        except ValueError as exc:
+            logger.error("%s", exc)
+            return 1
+
+    if args.command == "analyze":
+        try:
+            return _run_analyze(args)
         except ValueError as exc:
             logger.error("%s", exc)
             return 1
