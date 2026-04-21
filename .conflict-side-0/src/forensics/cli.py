@@ -351,7 +351,6 @@ async def _async_scrape(args: argparse.Namespace) -> int:
     return 1
 
 
-<<<<<<< New base: Phase 4 implementation
 def _run_analyze(args: argparse.Namespace) -> int:
     from forensics.analysis.changepoint import run_changepoint_analysis
     from forensics.analysis.drift import run_ai_baseline_command, run_drift_analysis
@@ -520,11 +519,6 @@ def _run_extract(args: argparse.Namespace) -> int:
     return 0
 
 
-||||||| Common ancestor
-=======
-def _run_extract(args: argparse.Namespace) -> int:
-    from forensics.features.pipeline import extract_all_features
-
 >>>>>>> Current commit: Phase 4 implementation
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
@@ -561,15 +555,6 @@ def main() -> int:
     if args.command == "analyze":
         try:
             return _run_analyze(args)
-        except ValueError as exc:
-            logger.error("%s", exc)
-            return 1
-
-||||||| Common ancestor
-=======
-    if args.command == "extract":
-        try:
-            return _run_extract(args)
         except ValueError as exc:
             logger.error("%s", exc)
             return 1

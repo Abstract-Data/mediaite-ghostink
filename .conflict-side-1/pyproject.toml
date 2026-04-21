@@ -1,0 +1,81 @@
+[project]
+name = "mediaite-ghostink"
+version = "0.1.0"
+description = "Forensic pipeline for scrape -> extract -> analyze -> report workflows."
+readme = "README.md"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+  "httpx>=0.28.1",
+  "beautifulsoup4>=4.13.4",
+  "lxml>=5.4.0",
+  "pydantic>=2.11.0",
+  "pydantic-settings>=2.9.0",
+  "polars>=1.29.0",
+  "duckdb>=1.2.2",
+  "jinja2>=3.1.6",
+  "markdown>=3.8",
+  "spacy>=3.7.0",
+  "scikit-learn>=1.5.0",
+  "sentence-transformers>=3.0.0",
+  "ruptures>=1.1.9",
+  "scipy>=1.14.0",
+  "numpy>=1.26.0",
+  "plotly>=5.22.0",
+  "umap-learn>=0.5.6",
+  "textstat>=0.7.4",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3.5",
+  "pytest-asyncio>=0.26.0",
+  "pytest-cov>=6.1.1",
+  "hypothesis>=6.131.15",
+  "ruff>=0.11.6",
+  "pre-commit>=4.2.0",
+]
+
+[project.scripts]
+forensics = "forensics.cli:main"
+
+[build-system]
+requires = ["hatchling>=1.27.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/forensics"]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-ra -q --strict-markers --cov=forensics --cov-report=term-missing"
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = []
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.coverage.run]
+source = ["forensics"]
+branch = true
+omit = [
+  "*/forensics/pipeline.py",
+  "*/forensics/features/*",
+  "*/forensics/storage/parquet.py",
+  "*/forensics/storage/duckdb_queries.py",
+]
+
+[tool.coverage.report]
+# Aggregate dropped when scraper/ was removed from omit (P2-TEST-1); raise as integration tests grow.
+fail_under = 60
+show_missing = true
+skip_covered = false
