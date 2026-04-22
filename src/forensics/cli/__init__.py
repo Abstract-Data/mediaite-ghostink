@@ -92,6 +92,18 @@ def preflight(
     raise typer.Exit(code=0)
 
 
+@app.command(name="lock-preregistration")
+def lock_preregistration_cmd() -> None:
+    """Lock analysis thresholds for pre-registration (run before analyzing data)."""
+    from forensics.config import get_settings
+    from forensics.preregistration import lock_preregistration
+
+    settings = get_settings()
+    path = lock_preregistration(settings)
+    typer.echo(f"Pre-registration locked: {path}")
+    typer.echo("Run analysis AFTER this point. Threshold changes will trigger warnings.")
+
+
 @app.command(name="all")
 def run_all() -> None:
     """Run full pipeline end-to-end: scrape → extract → analyze → report."""
