@@ -7,9 +7,8 @@ from typing import Annotated
 
 import typer
 
-from forensics.cli._helpers import config_fingerprint
 from forensics.config import get_project_root, get_settings
-from forensics.storage.repository import insert_analysis_run
+from forensics.pipeline_context import PipelineContext
 
 logger = logging.getLogger(__name__)
 
@@ -45,15 +44,7 @@ def extract(
     settings = get_settings()
     root = get_project_root()
     db_path = root / "data" / "articles.db"
-
-    try:
-        insert_analysis_run(
-            db_path,
-            config_hash=config_fingerprint(),
-            description="forensics extract",
-        )
-    except OSError as exc:
-        logger.warning("Could not record analysis_runs row: %s", exc)
+    PipelineContext.resolve().record_audit("forensics extract", optional=True, log=logger)
 
     try:
         n = extract_all_features(

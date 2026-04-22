@@ -11,10 +11,9 @@ from typing import Annotated
 
 import typer
 
-from forensics.cli._helpers import config_fingerprint
 from forensics.config import get_project_root, get_settings
 from forensics.config.settings import ForensicsSettings
-from forensics.storage.repository import insert_analysis_run
+from forensics.pipeline_context import PipelineContext
 
 logger = logging.getLogger(__name__)
 
@@ -38,17 +37,15 @@ def _run_compare_only_flow(
     from forensics.analysis.artifact_paths import AnalysisArtifactPaths
     from forensics.analysis.orchestrator import run_compare_only
 
-    rid = insert_analysis_run(
-        db_path,
-        config_hash=config_fingerprint(),
-        description="forensics analyze --compare",
-    )
+    ctx = PipelineContext.resolve()
+    rid = ctx.record_audit("forensics analyze --compare", optional=False, log=logger)
+    assert rid is not None
     analysis_dir = root / "data" / "analysis"
     analysis_dir.mkdir(parents=True, exist_ok=True)
     meta = {
         "run_id": rid,
         "run_timestamp": datetime.now(UTC).isoformat(),
-        "config_hash": config_fingerprint(),
+        "config_hash": ctx.config_hash,
         "compare_only": True,
         "author": author,
     }
@@ -202,15 +199,13 @@ def run_analyze(
         ai_baseline=ai_baseline,
     )
 
-    rid = insert_analysis_run(
-        db_path,
-        config_hash=config_fingerprint(),
-        description="forensics analyze",
-    )
+    ctx = PipelineContext.resolve()
+    rid = ctx.record_audit("forensics analyze", optional=False, log=logger)
+    assert rid is not None
     meta = {
         "run_id": rid,
         "run_timestamp": datetime.now(UTC).isoformat(),
-        "config_hash": config_fingerprint(),
+        "config_hash": ctx.config_hash,
         "changepoint": do_changepoint,
         "timeseries": do_timeseries,
         "drift": do_drift,

@@ -40,16 +40,16 @@ todos:
     status: completed
   - id: T04a-agent3-w4-serial
     content: "[AGENT 3] TIER4 PARALLEL after T03+T02b merged - SERIAL P2-PERF-001 LDA then P2-CQ-001/RF-COMP-002 then P3-SCALE-001"
-    status: pending
+    status: completed
   - id: T04b-agent5-rf-arch-001
     content: "[AGENT 5] TIER4 PARALLEL after T03+T02b merged - RF-ARCH-001 PipelineContext audit (cli non-scrape)"
-    status: pending
+    status: completed
   - id: T04c-agent1-rf-smell-001
     content: "[AGENT 1] TIER4 PARALLEL after T02a+T03 merged - RF-SMELL-001 crawler surface (crawler.py)"
-    status: pending
+    status: completed
   - id: T04d-agent5-p3-sec-002
     content: "[AGENT 5] TIER4 PARALLEL after T02b merged - P3-SEC-002 DuckDB ATTACH (+ AGENT 2 if duckdb_queries.py code)"
-    status: pending
+    status: completed
   - id: T05-agent2-p1-sec-001
     content: "[AGENT 2] TIER5 EXCLUSIVE after T04a+T02b merged - P1-SEC-001 NPZ no pickle parquet+drift+tests"
     status: completed

@@ -151,6 +151,43 @@ def test_self_similarity(nlp) -> None:
     assert sim["self_similarity_30d"] == pytest.approx(1.0, abs=0.05)
 
 
+def test_self_similarity_ignores_blank_peers(nlp) -> None:
+    from forensics.features import content
+
+    t = "identical text " * 20
+    doc = nlp(t)
+    peers = ["", "  \n\t  ", t, t]
+    sim = content.extract_content_features(t, doc, peers, peers)
+    assert sim["self_similarity_30d"] == pytest.approx(1.0, abs=0.05)
+
+
+def test_lda_document_corpus_skips_empty_and_caps_tail() -> None:
+    from forensics.features import content as c
+
+    cur = "alpha beta gamma delta " * 20
+    peers = ["", "   "] + [f"topic{i} " * 40 for i in range(10)]
+    out = c._lda_document_corpus(cur, peers, max_peer_documents=3, max_chars_per_document=200)
+    assert len(out) == 4
+    assert out[0].startswith("alpha")
+    assert all(len(x) <= 200 for x in out)
+    tail_joined = " ".join(out[1:])
+    assert "topic7" in tail_joined and "topic8" in tail_joined and "topic9" in tail_joined
+
+
+def test_lda_document_corpus_empty_current() -> None:
+    from forensics.features import content as c
+
+    assert c._lda_document_corpus("  \n", ["hello world " * 5], max_peer_documents=10, max_chars_per_document=100) == []
+
+
+def test_discrete_distribution_entropy() -> None:
+    from forensics.features import content as c
+
+    assert np.isnan(c._discrete_distribution_entropy(np.array([0.0, 0.0])))
+    h = c._discrete_distribution_entropy(np.array([0.5, 0.5]))
+    assert h == pytest.approx(1.0)
+
+
 def test_readability_scores() -> None:
     from forensics.features import readability
 

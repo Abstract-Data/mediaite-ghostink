@@ -9,6 +9,34 @@ import duckdb
 import polars as pl
 
 
+def _sql_string_literal(value: str) -> str:
+    """Escape ``value`` for safe use inside a single-quoted SQL string literal."""
+    return "'" + value.replace("'", "''") + "'"
+
+
+def _validated_sqlite_path_for_attach(db_path: Path) -> str:
+    """Resolve and validate a local SQLite file path for ``ATTACH`` (P3-SEC-002).
+
+    DuckDB does not support bind parameters on ``ATTACH``, so paths are embedded
+    as escaped string literals. This rejects control characters and obvious
+    non-filesystem URI prefixes to limit injection and unexpected attach targets.
+    """
+    resolved = Path(db_path).expanduser().resolve(strict=True)
+    if not resolved.is_file():
+        msg = f"SQLite attach path must be an existing file: {db_path}"
+        raise ValueError(msg)
+    raw = str(resolved)
+    if "\x00" in raw or "\n" in raw or "\r" in raw:
+        msg = "SQLite attach path contains invalid control characters"
+        raise ValueError(msg)
+    lower = raw.lower()
+    for prefix in ("http://", "https://", "s3://", "memory:", ":memory:", "duckdb:"):
+        if lower.startswith(prefix):
+            msg = f"Unsupported SQLite attach source (local files only): {raw!r}"
+            raise ValueError(msg)
+    return _sql_string_literal(raw)
+
+
 def _validate_feature_name(feature_name: str) -> str:
     if not re.fullmatch(r"[a-zA-Z_][a-zA-Z0-9_]*", feature_name):
         msg = f"Invalid feature column name: {feature_name!r}"
@@ -28,11 +56,11 @@ def get_rolling_feature_comparison(
         msg = "window must be >= 1"
         raise ValueError(msg)
     pattern = str((features_dir / "*.parquet").resolve())
-    db_uri = str(db_path.resolve()).replace("'", "''")
+    db_lit = _validated_sqlite_path_for_attach(db_path)
     pat_esc = pattern.replace("'", "''")
     con = duckdb.connect()
     try:
-        con.execute(f"ATTACH '{db_uri}' AS articles_db (TYPE sqlite)")
+        con.execute(f"ATTACH {db_lit} AS articles_db (TYPE sqlite, READ_ONLY)")
         sql = f"""
             SELECT
                 a.name AS author,

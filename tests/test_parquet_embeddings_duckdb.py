@@ -40,6 +40,27 @@ def test_get_rolling_feature_comparison_invalid_feature_name(tmp_path: Path) -> 
         get_rolling_feature_comparison(db_path, features_dir, "not-valid")
 
 
+def test_get_rolling_feature_comparison_attach_rejects_missing_sqlite(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "missing.db"
+    features_dir = tmp_path / "features"
+    features_dir.mkdir()
+    with pytest.raises(FileNotFoundError):
+        get_rolling_feature_comparison(db_path, features_dir, "ttr")
+
+
+def test_get_rolling_feature_comparison_attach_rejects_directory_not_file(
+    tmp_path: Path,
+) -> None:
+    db_dir = tmp_path / "not_a_file"
+    db_dir.mkdir()
+    features_dir = tmp_path / "features"
+    features_dir.mkdir()
+    with pytest.raises(ValueError, match="must be an existing file"):
+        get_rolling_feature_comparison(db_dir, features_dir, "ttr")
+
+
 def test_get_rolling_and_monthly_stats_with_sqlite_and_parquet(tmp_path: Path) -> None:
     """End-to-end DuckDB: SQLite authors joined to Parquet feature shards."""
     from forensics.models import Author

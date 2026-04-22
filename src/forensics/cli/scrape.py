@@ -10,8 +10,8 @@ from typing import Annotated, assert_never
 
 import typer
 
-from forensics.cli._helpers import config_fingerprint, guard_placeholder_authors
-from forensics.config import get_project_root, get_settings
+from forensics.cli._helpers import guard_placeholder_authors
+from forensics.config import config_fingerprint, get_project_root, get_settings
 from forensics.config.settings import ForensicsSettings
 from forensics.scraper.crawler import collect_article_metadata, discover_authors
 from forensics.scraper.dedup import deduplicate_articles

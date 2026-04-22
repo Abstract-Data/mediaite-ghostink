@@ -2,6 +2,7 @@
 
 import warnings
 
+from forensics.config.fingerprint import config_fingerprint
 from forensics.config.settings import (
     AnalysisConfig,
     AuthorConfig,
@@ -37,6 +38,7 @@ class _SettingsProxy:
 settings = _SettingsProxy()
 
 __all__ = [
+    "config_fingerprint",
     "AnalysisConfig",
     "AuthorConfig",
     "ForensicsSettings",

@@ -8,6 +8,7 @@ from typing import Annotated
 import typer
 
 from forensics.models.report_args import ReportArgs
+from forensics.pipeline_context import PipelineContext
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,14 @@ def report(
 ) -> None:
     """Render Quarto forensic book."""
     from forensics.reporting import run_report
+
+    PipelineContext.resolve().record_audit("forensics report", optional=True, log=logger)
+    logger.info(
+        "report: starting render format=%s notebook=%s verify=%s",
+        format,
+        notebook or "all",
+        verify,
+    )
 
     if format not in {"html", "pdf", "both"}:
         raise typer.BadParameter(f"--format must be one of html, pdf, both (got {format!r})")

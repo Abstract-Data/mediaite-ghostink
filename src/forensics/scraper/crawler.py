@@ -27,10 +27,13 @@ from forensics.utils.datetime import parse_wp_datetime
 
 logger = logging.getLogger(__name__)
 
+# Stable entrypoints for CLI and cross-module idempotency; everything else is internal.
+__all__ = ("collect_article_metadata", "discover_authors", "stable_article_id")
+
 MEDIAITE_REST = "https://www.mediaite.com/wp-json/wp/v2"
 
 
-def stable_author_id(slug: str) -> str:
+def _stable_author_id(slug: str) -> str:
     """Deterministic UUID5 per slug so upsert_author targets one row across runs."""
     return str(uuid5(NAMESPACE_URL, f"forensics:author:{slug}"))
 
@@ -56,7 +59,7 @@ def _modifier_user_id_from_post(post: dict[str, object]) -> int | None:
     return None
 
 
-def wp_post_to_article(post: dict[str, object], author_id: str) -> Article:
+def _wp_post_to_article(post: dict[str, object], author_id: str) -> Article:
     """Build an ``Article`` from a ``wp/v2/posts`` element (metadata fields only)."""
     link = str(post["link"])
     title_raw = str(post["title"]["rendered"])  # type: ignore[index]
@@ -68,9 +71,6 @@ def wp_post_to_article(post: dict[str, object], author_id: str) -> Article:
             modified_date = parse_wp_datetime(str(post["modified"]))
         except (TypeError, ValueError):
             modified_date = None
-    meta: dict[str, object] = {}
-    if "id" in post:
-        meta["wp_post_id"] = post["id"]
     return Article(
         id=stable_article_id(link),
         author_id=author_id,
@@ -79,14 +79,14 @@ def wp_post_to_article(post: dict[str, object], author_id: str) -> Article:
         published_date=published,
         clean_text="",
         word_count=0,
-        metadata=meta,
+        metadata={},
         content_hash="",
         modified_date=modified_date,
         modifier_user_id=_modifier_user_id_from_post(post),
     )
 
 
-def user_dict_to_manifest(
+def _user_dict_to_manifest(
     user: dict[str, object],
     *,
     total_posts: int,
@@ -111,7 +111,7 @@ def _int_header(response: httpx.Response, name: str, default: int | None = None)
         return default
 
 
-def author_config_from_manifest(m: AuthorManifest) -> AuthorConfig:
+def _author_config_from_manifest(m: AuthorManifest) -> AuthorConfig:
     """Build ``AuthorConfig`` for corpus-wide metadata ingestion.
 
     Baseline dates are wide placeholders; downstream analysis should filter or
@@ -128,7 +128,7 @@ def author_config_from_manifest(m: AuthorManifest) -> AuthorConfig:
     )
 
 
-def load_authors_manifest(path: Path) -> dict[str, AuthorManifest]:
+def _load_authors_manifest(path: Path) -> dict[str, AuthorManifest]:
     """Load ``slug -> AuthorManifest`` from JSONL."""
     if not path.is_file():
         return {}
@@ -246,7 +246,7 @@ async def discover_authors(
                         "discover_count",
                     )
                 try:
-                    return user_dict_to_manifest(
+                    return _user_dict_to_manifest(
                         user,
                         total_posts=total_posts,
                         discovered_at=discovered_at,
@@ -292,10 +292,10 @@ async def collect_article_metadata(
         msg = f"Author manifest not found: {manifest}"
         raise FileNotFoundError(msg)
 
-    by_slug = load_authors_manifest(manifest)
+    by_slug = _load_authors_manifest(manifest)
     if all_authors:
         manifests_sorted = sorted(by_slug.values(), key=lambda x: x.slug)
-        author_cfgs = [author_config_from_manifest(m) for m in manifests_sorted]
+        author_cfgs = [_author_config_from_manifest(m) for m in manifests_sorted]
         logger.info(
             "metadata: all-authors mode (%d author(s) from manifest; config author list ignored)",
             len(author_cfgs),
@@ -368,7 +368,7 @@ async def _ingest_author_posts(
 
     inserted_here = 0
     author = Author(
-        id=stable_author_id(cfg.slug),
+        id=_stable_author_id(cfg.slug),
         name=manifest_row.name,
         slug=cfg.slug,
         outlet=cfg.outlet,
@@ -419,7 +419,7 @@ async def _ingest_author_posts(
         for post in posts:
             if not isinstance(post, dict):
                 continue
-            article = wp_post_to_article(post, author_id)
+            article = _wp_post_to_article(post, author_id)
             published_dates.append(article.published_date)
             url_s = str(article.url)
             async with db_lock:
@@ -439,15 +439,15 @@ async def _ingest_author_posts(
     return inserted_here
 
 
-def iter_manifests_from_users_json(
+def _iter_manifests_from_users_json(
     users: list[dict[str, object]],
     *,
     total_posts_by_id: dict[int, int],
     discovered_at: datetime | None = None,
 ) -> Iterator[AuthorManifest]:
-    """Test helper: build manifests from static user JSON and post-count map."""
+    """Build manifests from static user JSON and post-count map (tests / tooling)."""
     when = discovered_at or datetime.now(UTC)
     for u in users:
         wp_id = int(u["id"])
         tp = total_posts_by_id.get(wp_id, 0)
-        yield user_dict_to_manifest(u, total_posts=tp, discovered_at=when)
+        yield _user_dict_to_manifest(u, total_posts=tp, discovered_at=when)

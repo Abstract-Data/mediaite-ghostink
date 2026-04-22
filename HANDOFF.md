@@ -444,3 +444,45 @@ uv run pytest tests/ --tb=short
 - The archive-path hardening is defense-in-depth; no known producer of malformed `raw_html_path` values exists. Worth a fuzz test if untrusted ingestion is ever added.
 - If downstream callers of `load_feature_frame_sorted` relied on the eager read-and-sort (e.g., to catch Parquet corruption early), the lazy scan now defers that to `.collect()`. All current call sites immediately filter/collect, so this is safe.
 - Optional: install `en_core_web_md` locally to un-skip spaCy-dependent tests.
+
+---
+
+### RF-ARCH-001 — PipelineContext audit (non-scrape CLI)
+**Status:** Complete
+**Date:** 2026-04-21
+**Agent/Session:** Cursor Agent 5 (T04b)
+
+#### What Was Done
+- Introduced `PipelineContext` in `src/forensics/pipeline_context.py` with `resolve()` and `record_audit()` (optional best-effort vs required insert, unified INFO audit line).
+- Routed `forensics extract`, `forensics analyze` (including compare-only), `forensics report`, and `run_all_pipeline` audit through `PipelineContext`.
+- Added `forensics report` `analysis_runs` row (`forensics report`) plus a structured INFO line for format/notebook/verify.
+- Moved `config_fingerprint()` to `src/forensics/config/fingerprint.py` to avoid `pipeline_context` → `cli._helpers` → `cli` package circular import; `scrape.py` now imports `config_fingerprint` from `forensics.config`.
+
+#### Files Modified
+- `src/forensics/pipeline_context.py` — new.
+- `src/forensics/config/fingerprint.py` — new; holds `config_fingerprint`.
+- `src/forensics/config/__init__.py` — export `config_fingerprint`.
+- `src/forensics/cli/_helpers.py` — removed inlined fingerprint (delegation removed; scrape uses config).
+- `src/forensics/cli/scrape.py` — import `config_fingerprint` from config.
+- `src/forensics/cli/extract.py`, `analyze.py`, `report.py`, `src/forensics/pipeline.py` — use `PipelineContext`.
+- `tests/test_pipeline_context.py` — unit tests for audit paths.
+- `tests/integration/test_cli.py` — monkeypatch `forensics.pipeline_context.insert_analysis_run`.
+
+#### Verification Evidence
+```
+uv run ruff check src/forensics/config/fingerprint.py src/forensics/config/__init__.py src/forensics/cli/_helpers.py src/forensics/cli/scrape.py src/forensics/pipeline_context.py src/forensics/cli/extract.py src/forensics/cli/analyze.py src/forensics/cli/report.py src/forensics/pipeline.py tests/test_pipeline_context.py tests/integration/test_cli.py
+# All checks passed!
+
+uv run pytest tests/test_pipeline_context.py tests/integration/test_cli.py -v --tb=short
+# 12 passed
+```
+
+#### Decisions Made
+- `record_audit(optional=True)` matches prior extract / `forensics all` behavior; analyze paths use `optional=False` so failures still surface when embedding `run_id` into `run_metadata.json`.
+- Circular import fixed by lifting fingerprint into `config/` rather than lazy-import hacks in `pipeline_context`.
+
+#### Unresolved Questions
+- None.
+
+#### Risks & Next Steps
+- Any external code that imported `config_fingerprint` only from `forensics.cli._helpers` must switch to `forensics.config` (only `scrape.py` did in-repo).

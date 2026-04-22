@@ -8,10 +8,13 @@ from collections import Counter
 from functools import lru_cache
 from typing import Any
 
+import numpy as np
 from sklearn.decomposition import LatentDirichletAllocation
 from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from spacy.tokens import Doc
+
+from forensics.config.settings import AnalysisConfig
 
 
 def _shannon_bigrams_trigrams(words: list[str]) -> tuple[float, float]:
@@ -45,7 +48,45 @@ def _self_similarity_cached(current: str, peers: tuple[str, ...]) -> float:
 
 
 def _self_similarity(current: str, peers: list[str]) -> float:
-    return _self_similarity_cached(current, tuple(peers))
+    usable = [p for p in peers if p and p.strip()]
+    return _self_similarity_cached(current, tuple(usable))
+
+
+def _nonempty_stripped(texts: list[str]) -> list[str]:
+    return [t.strip() for t in texts if t and t.strip()]
+
+
+def _truncate_for_lda(text: str, max_chars: int) -> str:
+    if max_chars <= 0 or len(text) <= max_chars:
+        return text
+    return text[:max_chars]
+
+
+def _lda_document_corpus(
+    current: str,
+    peers: list[str],
+    *,
+    max_peer_documents: int,
+    max_chars_per_document: int,
+) -> list[str]:
+    """Current article plus recent peers, capped for cost and memory (row 0 = current)."""
+    head = _truncate_for_lda(current.strip(), max_chars_per_document)
+    if not head:
+        return []
+    tail_src = _nonempty_stripped(peers)
+    if max_peer_documents > 0 and len(tail_src) > max_peer_documents:
+        tail_src = tail_src[-max_peer_documents:]
+    tail = [_truncate_for_lda(p, max_chars_per_document) for p in tail_src]
+    tail = [p for p in tail if p]
+    return [head, *tail]
+
+
+def _discrete_distribution_entropy(dist: np.ndarray) -> float:
+    s = float(dist.sum())
+    if s <= 0:
+        return float("nan")
+    p = dist / s
+    return float(-sum(float(x) * math.log2(float(x)) for x in p if x > 0))
 
 
 _OPENING_PATTERNS = (
@@ -95,31 +136,36 @@ def _hedging_frequency(lower: str, n_sents: int) -> float:
     return hedge_hits / max(1, n_sents)
 
 
-def _topic_entropy_lda(docs: list[str], *, topic_row: int = 0, k: int = 10) -> float:
+def _topic_entropy_lda(
+    docs: list[str],
+    *,
+    topic_row: int,
+    analysis: AnalysisConfig,
+) -> float:
     """Fit LDA on ``docs`` and return Shannon entropy of the topic mixture for row ``topic_row``."""
     if len(docs) < 3:
         return float("nan")
+    k = analysis.content_lda_n_components
     k_eff = min(k, max(2, len(docs) - 1))
     try:
-        vec = CountVectorizer(max_features=2000, min_df=1, max_df=0.95)
+        vec = CountVectorizer(
+            max_features=analysis.content_lda_max_features,
+            min_df=1,
+            max_df=analysis.content_lda_max_df,
+        )
         X = vec.fit_transform(docs)
         if X.shape[0] < 2 or X.shape[1] < 2:
             return float("nan")
         lda = LatentDirichletAllocation(
             n_components=k_eff,
-            max_iter=20,
+            max_iter=analysis.content_lda_max_iter,
             learning_method="online",
             random_state=42,
         )
         dist = lda.fit_transform(X)
         if topic_row >= dist.shape[0]:
             return float("nan")
-        row = dist[topic_row]
-        s = float(row.sum())
-        if s <= 0:
-            return float("nan")
-        p = row / s
-        return float(-sum(float(x) * math.log2(float(x)) for x in p if x > 0))
+        return _discrete_distribution_entropy(dist[topic_row])
     except ValueError:
         return float("nan")
 
@@ -129,17 +175,25 @@ def extract_content_features(
     doc: Doc,
     recent_texts_30d: list[str],
     recent_texts_90d: list[str],
+    *,
+    analysis: AnalysisConfig | None = None,
 ) -> dict[str, Any]:
     """Content, repetition, and light topic features."""
+    cfg = analysis or AnalysisConfig()
     words = [t.text.lower() for t in doc if t.is_alpha]
     bi, tri = _shannon_bigrams_trigrams(words)
 
     sim30 = _self_similarity(text, recent_texts_30d)
     sim90 = _self_similarity(text, recent_texts_90d)
 
-    # LDA: current document first so row 0 is the article under analysis.
-    lda_docs = [text, *recent_texts_90d]
-    topic_div = _topic_entropy_lda(lda_docs, topic_row=0, k=10)
+    # LDA: row 0 is the article under analysis; peers are capped for perf/scale.
+    lda_docs = _lda_document_corpus(
+        text,
+        recent_texts_90d,
+        max_peer_documents=cfg.content_lda_max_peer_documents,
+        max_chars_per_document=cfg.content_lda_max_chars_per_document,
+    )
+    topic_div = _topic_entropy_lda(lda_docs, topic_row=0, analysis=cfg)
 
     sents = list(doc.sents)
     n_words = len(words) or 1
