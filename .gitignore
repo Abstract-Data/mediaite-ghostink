@@ -47,6 +47,10 @@ data/features/*
 data/analysis/*
 data/reports/*
 data/pipeline/*
+# Runtime data subdirs produced by pre-registration, calibration, and survey runs.
+data/preregistration/
+data/calibration/
+data/survey/
 !data/.gitkeep
 # DB artifacts often live directly under data/ (e.g. articles.db)
 data/*.db
@@ -56,6 +60,7 @@ data/*.db-shm
 data/*.sqlite
 data/*.sqlite3
 data/*.duckdb
+*.duckdb
 
 # Logs & scratch
 *.log

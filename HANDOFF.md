@@ -658,3 +658,263 @@ uv run forensics --help                           → 'survey' subcommand visibl
 #### Risks & Next Steps
 - ws4 (calibration) and ws6 (report overhaul) can now consume `SurveyReport.natural_controls` and the ranked `SurveyReport.results` directly.
 - `extract_all_features` is invoked once per author (by slug) — for large newsrooms the cost is dominated by spaCy nlp setup; acceptable for the survey use case, but if latency becomes an issue the extractor could be lifted out of the per-author loop.
+
+---
+
+### Phase 12 Unit 4 — ws4-calibration
+**Status:** Complete
+**Date:** 2026-04-22
+**Agent/Session:** ws4-calibration worker (Opus 4.7)
+
+#### What Was Done
+- Added the calibration suite per prompt §4. New module `src/forensics/calibration/` ships a synthetic-corpus builder, a trial runner, and sensitivity/specificity/precision/F1/date-accuracy metrics.
+- Registered the `forensics calibrate` Typer subapp with flags `--positive-trials`, `--negative-trials`, `--author`, `--seed`, `--output`, `--dry-run`.
+- Added `tests/test_calibration.py` (9 tests) covering splice semantics, negative-control identity, metric arithmetic (including empty-group edge case), perfect detector (F1=1.0), blind detector (sensitivity=0, specificity=1), dry-run short-circuit, and CLI help surfaces flags.
+
+#### Files Created
+- `src/forensics/calibration/__init__.py` — barrel exports.
+- `src/forensics/calibration/synthetic.py` — `build_spliced_corpus`, `build_negative_control`, `SyntheticCorpus`.
+- `src/forensics/calibration/runner.py` — `run_calibration`, `CalibrationTrial`, `CalibrationReport`, `compute_metrics`.
+- `src/forensics/cli/calibrate.py` — Typer subapp.
+- `tests/test_calibration.py`.
+
+#### Files Modified
+- `src/forensics/cli/__init__.py` — wired `calibrate_app` via `app.add_typer(...)`.
+
+#### Verification Evidence
+```
+uv run ruff format --check .                 -> 136 files already formatted
+uv run ruff check .                           -> All checks passed!
+uv run pytest tests/test_calibration.py -v    -> 9 passed
+uv run pytest tests/ -v                       -> 262 passed, 18 skipped (spaCy), 2 deselected
+uv run forensics calibrate --help             -> shows all six flags
+uv run forensics --help                       -> lists 'calibrate' command
+```
+
+#### Decisions Made
+- Each trial writes to its own `articles.db` under `data/calibration/run_<ts>/positive_NN/` (or `negative_NN/`) so parallel runs and reproducibility are easy. Materialising the corpus gives the full pipeline (extract + analyze) a normal filesystem layout without any pipeline changes.
+- `_run_trial_analysis` is a deliberate seam — tests monkeypatch it to simulate the detector without loading spaCy or sentence-transformers.
+- Detector “fires” is defined as `SignalStrength in {WEAK, MODERATE, STRONG}` — matches the §1d convention that `NONE` is the explicit no-signal tier.
+- Splice date is picked between the 30th and 70th percentile of the author timeline, RNG seeded per `--seed`.
+- AI baseline articles are read from `data/ai_baseline/<slug>/articles.json` best-effort; missing file -> empty list with a warning (runner still operates, splice is a no-op).
+- `--dry-run` returns an empty report without touching the database so the CLI smoke test stays cheap.
+
+#### Unresolved Questions
+- None. Real calibration runs need Phase 10 AI baseline articles per author; none are checked in, so a live `uv run forensics calibrate` would produce a best-effort (empty-splice) report. The prompt explicitly defers the live smoke test; coverage is via pytest.
+
+#### Risks & Next Steps
+- Downstream ws6 report overhaul can surface `CalibrationReport` metrics; the JSON schema is stable (`sensitivity`, `specificity`, `precision`, `f1_score`, `median_date_error_days`, `n_trials`, `trials`).
+- Positive trials currently run sequentially; they are independent and could be `asyncio.gather`’d if wall-clock matters. Holding off until a real calibration run demonstrates the cost.
+
+---
+
+### Phase 12 Unit 5 — ws7-operational-qol
+**Status:** Complete
+**Date:** 2026-04-22
+**Agent/Session:** ws7-operational-qol worker (Opus 4.7, resumed from partial state)
+
+#### What Was Done
+- Finished `src/forensics/storage/duckdb_queries.py::export_to_duckdb(db_path, output, *, include_features=True, include_analysis=True) -> ExportReport` — a single-file DuckDB export. Uses DuckDB's `sqlite` extension to materialise `authors` and `articles` from `data/articles.db`, optionally folds in `data/features/*.parquet` (via `read_parquet` with `union_by_name=true`), and optionally flattens `data/analysis/*_result.json` into an `analysis_results` table (polars → DuckDB `register` round-trip so nested fields are JSON-encoded). `ExportReport` captures `output_path`, `bytes_written`, and `tables: dict[str, int]`. Reuses the existing `_validated_sqlite_path_for_attach` helper for `ATTACH` injection protection (P3-SEC-002).
+- Added two CLI commands in `src/forensics/cli/__init__.py`:
+  - `forensics validate [--check-endpoints]` — parses `config.toml`, runs `run_all_preflight_checks(settings)` (not the stale untyped tuple form; matches v0.2.0 signature), prints PASS/WARN/FAIL per check, optionally probes `https://www.mediaite.com/wp-json/wp/v2/types` + `http://localhost:11434/api/tags` (3s timeout, reported as warnings only). Exits `1` on config parse error or any preflight hard-fail, `0` otherwise.
+  - `forensics export [-o PATH] [--features/--no-features] [--analysis/--no-analysis]` — resolves `data/articles.db` from the project root, calls `export_to_duckdb(...)`, prints the `ExportReport`, exits `1` when the SQLite source is missing.
+- `.gitignore` now covers runtime artefacts: `data/preregistration/`, `data/calibration/`, `data/survey/`, and `*.duckdb` (in addition to the existing `data/*.duckdb`).
+- Deleted the stale `data/preregistration/preregistration_lock.json` left over from the Unit 2 smoke test — now permanently ignored by the new `.gitignore` rule.
+- Tests in `tests/integration/test_cli.py`:
+  - `test_validate_help` — asserts `--check-endpoints` surfaces in help.
+  - `test_validate_config_command` — monkeypatches `forensics.preflight.run_all_preflight_checks` to a clean-pass report, asserts exit 0 and "Config parsed" line.
+  - `test_validate_detects_config_error` — writes a broken `config.toml`, asserts exit 1 + "Config error".
+  - `test_export_help` — asserts `--output`, `--no-features`, `--no-analysis` appear.
+  - `test_export_to_duckdb_smoke` — seeds SQLite via `Repository.upsert_author` + `upsert_article`, runs `export_to_duckdb` with features/analysis disabled, opens the output `.duckdb` read-only and asserts `authors` + `articles` row counts.
+
+#### Files Modified
+- `src/forensics/storage/duckdb_queries.py`
+- `src/forensics/cli/__init__.py`
+- `tests/integration/test_cli.py`
+- `.gitignore`
+- `docs/RUNBOOK.md`
+- `HANDOFF.md`
+
+#### Files Deleted
+- `data/preregistration/preregistration_lock.json` (stale smoke-test artefact)
+
+#### Verification Evidence
+```
+uv run ruff format --check .                        → 136 files already formatted
+uv run ruff check .                                  → All checks passed!
+uv run pytest tests/integration/test_cli.py -v -k "validate or export" → 5 passed
+uv run pytest tests/ -v                              → 267 passed, 18 skipped (spaCy), 2 deselected
+uv run forensics validate --help                    → shows --check-endpoints
+uv run forensics validate                            → exit 1 (spaCy + placeholder authors FAIL, expected in staging env)
+uv run forensics export --help                       → shows --output/-o, --no-features, --no-analysis
+uv run forensics export --output /tmp/forensics_export_smoke.duckdb → wrote 274432 bytes, authors:0, articles:0
+duckdb SHOW TABLES on the export                     → [('articles',), ('authors',)]
+uv run forensics --help                              → 'validate' and 'export' commands visible
+```
+
+#### Decisions Made
+- Kept the `Repository` context-manager contract: the smoke test uses `with Repository(db_path) as repo:` and lets the context commit. No repository changes required.
+- `export_to_duckdb` derives `features_dir` / `analysis_dir` from `db_path.parent` (so a test with `tmp_path/data/articles.db` naturally looks at `tmp_path/data/features` and `tmp_path/data/analysis`). Matches the convention used throughout the repo.
+- Analysis JSONs are flattened (one row per `*_result.json`) with nested structures (`change_points`, `convergence_windows`, `drift_scores`, `hypothesis_tests`) serialised to JSON strings — DuckDB has no first-class nested-JSON column and this keeps `SELECT * FROM analysis_results` queryable without extension-specific syntax.
+- The `forensics validate` endpoint probes are reported as PASS/WARN but never affect the exit code, per prompt §7a ("reports as warnings"). Exit code is driven solely by config parse + preflight hard-fails.
+- `check_endpoints` uses a synchronous `httpx.get` per endpoint rather than `asyncio.run(...)` — there are only two probes, both short-timeout, and a sync path keeps the command free of async ceremony.
+- The `export_to_duckdb` CLI resolves relative `--output` against `get_project_root()`; absolute paths are respected as-is (so `/tmp/...` works for ad-hoc smoke tests).
+
+#### Unresolved Questions
+- None blocking. Follow-up ideas: `forensics validate --strict` to mirror `preflight --strict` (promote warnings to failures); `forensics export --survey` to also fold `data/survey/run_*/survey_results.json` once ws6 starts consuming that artefact.
+
+#### Risks & Next Steps
+- ws2 (TUI wizard) and ws6 (report overhaul) should not need any repository changes from this unit. The `export_to_duckdb` function is a stable read-only consumer of the DB + parquet shards + analysis JSON; adding tables in the future is additive.
+- The Ollama probe URL is hard-coded to `http://localhost:11434`; if the runbook ever recommends a non-default host, expose it via `AnalysisConfig` or an env var.
+
+---
+
+### Unit 6: ws2-tui-wizard (Phase 12 §2 — Interactive TUI Setup Wizard)
+**Status:** Complete
+**Date:** 2026-04-22
+**Agent/Session:** opus-4-7 worker (ws2)
+
+#### What Was Done
+- Added `tui` optional extra (`textual>=1.0.0`, `rich>=13.0`) and a
+  `forensics-setup` console script in `pyproject.toml` → `uv.lock` refreshed.
+- Scaffolded `src/forensics/tui/` package with module-level `main()` that
+  falls back to a friendly "install the tui extra" message when `textual`
+  is missing (the only place a bare `print` is allowed per prompt §2).
+- Implemented `ForensicsSetupApp` with five sequential screens:
+  Dependencies → Discovery → Config → Preflight → Launch. Keybindings
+  `q` / `n` / `b` for quit / next / back.
+- Added Textual CSS (`styles.tcss`) with minimal colour scheme.
+- Registered `forensics setup` Typer command that delegates to
+  `forensics.tui.main`.
+- Dependency screen probes Python, spaCy model, sentence-transformers,
+  Quarto, and Ollama — core logic lives in `check_dependencies()` which
+  returns a list of `DependencyCheckResult` dataclasses (unit-testable
+  without the Textual runtime).
+- Discovery screen probes `articles.db` via `Repository.all_authors()`
+  (protocol from ws1) and summarises into an `AuthorDiscoveryResult`;
+  falls back gracefully when the DB does not yet exist.
+- Config screen exposes `Input` widgets for project name + baseline
+  range + author slugs, renders a live TOML preview via
+  `generate_config()`, and calls `write_config()` (backing up any
+  existing file with a timestamped `.bak` suffix).
+- Preflight screen re-runs `run_all_preflight_checks(settings)` and
+  blocks progression when there are hard-failures.
+- Launch screen prints the chosen next CLI command (`forensics survey`
+  or `forensics all`) into the app exit message.
+
+#### Files Modified
+- `pyproject.toml` — added `tui` optional extra + `forensics-setup` script
+- `uv.lock` — regenerated via `uv sync --extra tui`
+- `src/forensics/cli/__init__.py` — registered the `setup` command
+- `src/forensics/tui/__init__.py` — new package entry with `main()`
+- `src/forensics/tui/app.py` — new `ForensicsSetupApp`
+- `src/forensics/tui/styles.tcss` — new Textual CSS
+- `src/forensics/tui/screens/__init__.py` — new screen barrel
+- `src/forensics/tui/screens/dependencies.py` — new dependency check
+- `src/forensics/tui/screens/discovery.py` — new author discovery
+- `src/forensics/tui/screens/config.py` — new config generation
+- `src/forensics/tui/screens/preflight.py` — new preflight screen
+- `src/forensics/tui/screens/launch.py` — new launch screen
+- `tests/test_tui.py` — 8 tests (pytest.importorskip guard + pilot mount)
+
+#### Verification Evidence
+```
+uv sync --extra tui                                  → textual 8.2.4 installed
+uv run ruff check .                                  → All checks passed!
+uv run ruff format --check .                         → 145 files already formatted
+uv run pytest tests/test_tui.py -v --no-cov          → 8 passed in 6.01s
+uv run pytest tests/ --no-cov                        → 275 passed, 18 skipped, 2 deselected
+uv run forensics setup --help                        → shows "Launch the interactive setup wizard"
+uv run forensics --help | grep -i setup              → "setup  Launch the interactive setup wizard"
+
+tmux smoke test:
+  tmux new-session -d -s tui-smoke 'uv run forensics-setup'
+  tmux capture-pane -t tui-smoke -p
+  → Step 1 of 5: Dependency Check (rendered)
+  → Python 3.13+ / spaCy / sentence-transformers / Quarto / Ollama (5 rows)
+  → Continue button visible
+  tmux send-keys -t tui-smoke "q"  → clean exit
+  grep -qi "depend" /tmp/tui-screen1.txt → SCREEN 1 RENDERED: OK
+```
+
+#### Decisions Made
+- `textual>=1.0.0` picked because prompt §2a explicitly asks for `textual>=1.0.0` (the installed version is 8.2.4 — Textual 8.x satisfies `>=1.0.0`). Included `rich>=13.0` alongside as §2a documents.
+- Core screens each expose a *pure* helper (`check_dependencies`, `generate_config`, `write_config`, `discover_authors_summary`) that is independent of Textual, so the unit tests can cover logic without a running app.
+- `DependencyCheckResult.status` is a `Literal["pass", "warn", "fail"]`, matching the style used in `forensics.preflight`. Kept a separate dataclass rather than reusing `PreflightCheck` because the TUI probe surfaces install hints + required/optional fields that preflight does not.
+- `write_config` backs up via `config.toml.YYYYMMDD-HHMMSS.bak` — preserves the suffix so linters ignore it and so multiple consecutive runs do not overwrite one another.
+- `action_next_step` uses `push_screen` (stacking) so `action_prev_step` can call `pop_screen()` without re-running the previous screen's `on_mount`. Kept the wizard state dict (`app.wizard_state`) as the cross-screen bridge.
+- Dropped the deep ad-hoc callables (e.g. `subprocess.run(["quarto", "--version"])`) into `_safe_version(cmd, flag)` with a 5s timeout and broad `(OSError, SubprocessError)` catch — probes should *never* hang the TUI.
+- The launch screen intentionally does NOT kick off a pipeline run inside the Textual process — it prints the chosen command in the exit message and lets the user run it from the shell so pipeline logs are directly visible.
+- Textual 8.x: `RadioSet.pressed_button` is read-only; the discovery screen sets `RadioButton.value = True` instead.
+
+#### Unresolved Questions
+- `forensics-setup` (the direct script) has no `--help` because Textual apps consume stdin/stdout — running with `--help` just launches the TUI. The `forensics setup` Typer subcommand is the documented entry point for `--help`.
+- Follow-up for ws6: the launch screen currently prints the next-command message rather than wiring a progress bar. If ws6's survey report adds a progress endpoint, the launch screen can be upgraded to drive it via `run_worker`.
+
+#### Risks & Next Steps
+- Downstream ws6 should not need to touch `src/forensics/tui/`; if ws6 wants a survey-progress screen it can add a new screen class and append to `STEP_ORDER`.
+- `uv sync --extra tui` is a hard prerequisite — document this in the RUNBOOK so new operators do not try to run `forensics setup` against a stock install.
+
+---
+
+### Phase 12 Unit 7 — Report Overhaul (ws6-report-overhaul)
+**Status:** Complete
+**Date:** 2026-04-22
+**Agent/Session:** Phase 12 ws6-report-overhaul worker
+
+#### What Was Done
+- Added `src/forensics/reporting/narrative.py` with `generate_evidence_narrative(analysis_result, author_slug, *, score=None, control_count=0, preregistration=None) -> str`. Pure function, deterministic, ~200-400 word factual paragraph citing score tier, convergence window, top-3 effect sizes, drift acceleration, change-point dates, natural controls, and (optional) preregistration lock status.
+- Converted `src/forensics/reporting.py` into a package (`reporting/__init__.py`) so `narrative.py` can live alongside the existing Quarto runner without introducing new barrel re-exports (existing `from forensics.reporting import run_report` and `test_report.py`'s `forensics.reporting.shutil.which` mock path keep working).
+- Added `notebooks/10_survey_dashboard.ipynb` — loads the most recent `data/survey/run_*/survey_results.json`, renders top-10 ranked table, composite-score histogram with natural-controls overlay, earliest-convergence-window timeline, and preregistration verification. Degrades gracefully when no data.
+- Added `notebooks/11_calibration.ipynb` — loads the most recent `data/calibration/calibration_*.json`, displays sensitivity/specificity/precision/F1/median-date-error metrics, confusion-matrix heatmap, date-error histogram, and preregistration verification. Degrades gracefully when no data.
+- Parameterized `notebooks/05_change_point_detection.ipynb`, `06_embedding_drift.ipynb`, `07_statistical_evidence.ipynb` with a `parameters`-tagged cell defaulting to `author_slug = "all"` — enables `quarto render NOTEBOOK -P author_slug:some-slug` per-author drill-down.
+- Added `tests/test_narrative.py` — 7 tests covering determinism (byte-identical), NONE tier ("no evidence" language + no false convergence claims), STRONG tier (d= effect sizes cited), slug verbatim insertion, control-sentence toggle, caveat always present.
+
+#### Files Modified
+- `src/forensics/reporting/__init__.py` — moved from `reporting.py`; unchanged content (Quarto runner).
+- `src/forensics/reporting/narrative.py` — NEW, evidence narrative generator.
+- `notebooks/10_survey_dashboard.ipynb` — NEW, survey dashboard.
+- `notebooks/11_calibration.ipynb` — NEW, calibration metrics + heatmap.
+- `notebooks/05_change_point_detection.ipynb` — added `parameters`-tagged cell.
+- `notebooks/06_embedding_drift.ipynb` — added `parameters`-tagged cell.
+- `notebooks/07_statistical_evidence.ipynb` — added `parameters`-tagged cell.
+- `tests/test_narrative.py` — NEW.
+
+#### Verification Evidence
+```
+$ uv run ruff format --check . && uv run ruff check .
+149 files already formatted
+All checks passed!
+
+$ uv run pytest tests/test_narrative.py -v
+7 passed in 0.93s
+
+$ uv run pytest tests/
+282 passed, 18 skipped, 2 deselected, 1 warning in 31.28s
+
+$ uv run python -c "from forensics.reporting.narrative import generate_evidence_narrative; print('import ok')"
+import ok
+
+$ uv run python -c "import json; json.load(open('notebooks/10_survey_dashboard.ipynb')); print('10_*.ipynb parses ok'); json.load(open('notebooks/11_calibration.ipynb')); print('11_*.ipynb parses ok')"
+10_*.ipynb parses ok
+11_*.ipynb parses ok
+
+Notebook code-cell AST parse — all 5 touched notebooks parse cleanly.
+nbconvert/quarto not installed on host, so execute-render smoke was
+replaced with a JSON + AST validation pass.
+```
+
+#### Decisions Made
+- `generate_evidence_narrative` accepts `score: SurveyScore | None`; when `None`, it computes the score via `compute_composite_score` so callers don't have to wire both. This keeps the simple `(analysis_result, author_slug)` call shape the prompt task brief specifies, while still allowing advanced callers to pass a pre-computed ranked score to keep narrative and ranking table consistent.
+- Preregistration citation is opt-in (caller passes a `VerificationResult`) rather than being read from disk inside the narrative. The rationale: the function must be deterministic and pure; touching the lock file at generation time would add I/O non-determinism. Notebook cells call `verify_preregistration()` and pass the result in.
+- Converted `reporting.py` into a package rather than adding `narrative.py` at the top level, to keep the module namespace consistent (`forensics.reporting.narrative` / `forensics.reporting.run_report`). `__init__.py` is unchanged content — no new barrel re-exports, honouring the v0.2.0 audit rule.
+- Notebooks use polars + plotly (both already project deps), no new dependencies added. Pandas is intentionally avoided per project convention.
+- Parameters cells default `author_slug = "all"` so existing un-parameterized renders are unchanged — downstream Quarto drill-down is a pure capability add.
+
+#### Unresolved Questions
+- The narrative function is pure but does not yet feed notebook 09 (full report) — integration with the Quarto book TOC is a follow-up for whoever merges the stack.
+- `quarto` is not on the shared-repo host, so end-to-end render was validated via JSON + AST parse rather than a live render. A follow-up CI step could install Quarto to close the loop.
+
+#### Risks & Next Steps
+- Downstream consumers should pass a `SurveyScore` when they want the narrative numbers to match an already-rendered ranking table; otherwise the narrative re-scores from scratch, which is still deterministic but could in theory drift if scoring.py thresholds change between rank-time and narrative-time.
+- Per-author drill-down notebooks 05-07 default to `author_slug = "all"` — cells currently read `settings.authors[0]`. Wiring the `author_slug` parameter into the existing author selection is left as a follow-up so this commit stays scoped to the parameter contract.
