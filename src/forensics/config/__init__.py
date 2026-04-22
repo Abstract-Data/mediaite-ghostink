@@ -1,4 +1,8 @@
-"""Configuration: TOML + environment-backed settings."""
+"""Configuration: TOML + environment-backed settings.
+
+``__all__`` is the supported import surface; ``settings`` remains a deprecated
+lazy proxy for notebook compatibility (``_SettingsProxy`` below).
+"""
 
 import warnings
 

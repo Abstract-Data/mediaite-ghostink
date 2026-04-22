@@ -61,7 +61,7 @@ todos:
     status: completed
   - id: T08-agent5-rf-dead-002
     content: "[AGENT 5] TIER8 after T04b stable + no cli conflict - RF-DEAD-002 __init__ export policy"
-    status: pending
+    status: completed
   - id: T09-agents-2-5-rf-smell-002
     content: "[AGENT 2]+[AGENT 5] TIER9 EXCLUSIVE after T04+T02b+T08 merged - RF-SMELL-002 AnalysisArtifactPaths migration"
     status: pending

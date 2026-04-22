@@ -77,5 +77,9 @@ def main() -> int:
     return 0
 
 
+# Typer ``app`` and console ``main`` only; subcommands live in ``forensics.cli.*``.
+__all__ = ["app", "main"]
+
+
 if __name__ == "__main__":
     raise SystemExit(main())
