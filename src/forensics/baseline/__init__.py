@@ -1,12 +1,8 @@
 """Phase 10 — AI baseline generation via local Ollama models (PydanticAI).
 
-Public surface:
-    BaselineDeps, GeneratedArticle, make_baseline_agent   — agent.py
-    build_prompt, load_template                             — prompts.py
-    sanitize_model_tag, get_model_digest                    — utils.py
-    preflight_check                                         — preflight.py
-    run_generation_matrix, reembed_existing_baseline        — orchestrator.py
-    extract_topic_distribution                              — topics.py
+Heavy optional dependencies live in submodules (``agent``, ``orchestrator``,
+``prompts``, …). Only lightweight helpers are re-exported here; import other
+symbols from ``forensics.baseline.<module>`` directly.
 """
 
 from __future__ import annotations

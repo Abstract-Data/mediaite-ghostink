@@ -8,31 +8,39 @@ Operational quick reference. Agents: append new sections here whenever you disco
 2. For Phase 10 (baseline generation): `uv sync --extra baseline`
 3. Validate environment: `uv run ruff check . && uv run ruff format --check .`
 4. Run tests: `uv run pytest tests/ -v`
-5. Run with coverage: `uv run pytest tests/ -v --cov=src --cov-report=term-missing`
+5. Run with coverage: `uv run pytest tests/ -v --cov-report=term-missing` (coverage target `forensics` is configured in [`pyproject.toml`](../pyproject.toml) `addopts`)
 
 ## Pipeline Operations
 
-- Run full pipeline: `uv run forensics all`
-- Stage-by-stage:
-  - `uv run forensics scrape`
+- Run full pipeline: `uv run forensics all` — implementation: `src/forensics/pipeline.py` (`run_all_pipeline`). It runs **full scrape** (same as bare `forensics scrape` when no scrape flags are set), then extract, then `run_analyze(timeseries=True, convergence=True)` (**not** changepoint/drift unless you change the pipeline), then Quarto report. See [`docs/ARCHITECTURE.md`](ARCHITECTURE.md#forensics-all-end-to-end).
+- Stage-by-stage (recommended when debugging):
+  - `uv run forensics scrape` (use `--discover` / `--metadata` / `--fetch` etc. as needed; see `--help`)
   - `uv run forensics extract`
-  - `uv run forensics analyze`
-  - `uv run forensics report`
+  - `uv run forensics analyze` (add `--changepoint`, `--drift`, … as needed)
+  - `uv run forensics report` (requires **Quarto** on `PATH`; output under `data/reports/` per `quarto.yml`)
 - Extract probability features (Phase 9): `uv run forensics extract --probability`
 - Generate AI baseline (Phase 10): `uv run python scripts/generate_baseline.py --author {slug}`
 
+### Exit codes and warnings
+
+- Stages return **non-zero** on fatal errors (scrape failure, missing Quarto, analysis `typer.Exit`, report subprocess failure). `forensics all` propagates the first non-zero code.
+- `insert_analysis_run` at the start of `all` / scrape / extract / analyze is **best-effort**: SQLite permission or I/O errors log **`Could not record analysis_runs row`** and the stage still continues where the code path allows.
+
 ## Expected Artifacts
 
-After a successful full run, verify:
+After a successful full run, verify (paths depend on configured authors):
 
-- `data/raw/documents.json`
-- `data/features/features.parquet`
-- `data/analysis/analysis.json`
-- `data/reports/report.md`
-- `data/pipeline/summary.json`
+- `data/articles.db` — corpus + `analysis_runs`
+- `data/authors_manifest.jsonl` — post–discover manifest
+- `data/features/{slug}.parquet` — per-author features
+- `data/embeddings/{slug}/batch.npz` — embeddings when not skipped
+- `data/analysis/` — per-author `*_result.json`, `run_metadata.json`, and other stage JSON as enabled
+- `data/reports/` — Quarto HTML/PDF outputs (not a single `report.md` at repo root)
 
-Phase 9 outputs: `data/probability/{author_slug}.parquet`, `data/probability/model_card.json`
+Phase 9 outputs: `data/probability/{author_slug}.parquet`, `data/probability/model_card.json`  
 Phase 10 outputs: `data/ai_baseline/{author_slug}/`, `data/ai_baseline/generation_manifest.json`
+
+Legacy checklists that mention `data/raw/documents.json`, `data/analysis/analysis.json`, or `data/pipeline/summary.json` are **obsolete** for this codebase.
 
 ## Ollama Setup (Phase 10)
 
@@ -190,15 +198,26 @@ uv run pytest tests/ -v --cov=src --cov-report=term-missing
 uv run pytest tests/ -v --hypothesis-show-statistics
 ```
 
-## Git Workflow
+## Git workflow (GitButler)
+
+Use GitButler CLI (`but`) for writes (commit, push, branch, merge, stash, rebase-style edits). The full command map and recipes live in the repo-local skill:
+
+- `.claude/skills/gitbutler/SKILL.md` (Claude Code)
+- `.cursor/skills/gitbutler/SKILL.md` (Cursor — same mirror)
+
+Notion playbook add-on (parallel agents, `but status --json`, `--json --status-after`): `.claude/skills/gitbutler-workflow/SKILL.md` (mirrored under `.cursor/skills/gitbutler-workflow/`).
+
+Project-specific notes (forge target, PRs) are in `AGENTS.md` under **Learned Workspace Facts** (GitButler bullet).
 
 ```bash
-# Before every commit
+# Preflight before you commit (quality bar — run with git or but read-only)
 uv run ruff format .
 uv run ruff check . --fix
 uv run pytest tests/ -v
 
-# Conventional commit prefixes
+# Then use but for the actual commit/push (see gitbutler skill — e.g. but status -fv, but commit ... --status-after; optional JSON flow in gitbutler-workflow skill)
+
+# Conventional commit prefixes for messages
 # feat: fix: refactor: test: docs: chore:
 ```
 

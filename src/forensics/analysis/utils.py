@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import polars as pl
@@ -11,10 +12,17 @@ from forensics.models.author import Author
 from forensics.storage.parquet import load_feature_frame_sorted
 from forensics.storage.repository import Repository
 
+logger = logging.getLogger(__name__)
+
 
 def intervals_overlap(a0, a1, b0, b1) -> bool:
     """Return True if closed intervals ``[a0, a1]`` and ``[b0, b1]`` intersect."""
     return a0 <= b1 and b0 <= a1
+
+
+def closed_interval_contains(value, lo, hi) -> bool:
+    """Return True if ``lo <= value <= hi`` for mutually orderable operands (e.g. dates)."""
+    return lo <= value <= hi
 
 
 def load_feature_frame_for_author(
@@ -28,6 +36,13 @@ def load_feature_frame_for_author(
         return None
     dfc = load_feature_frame_sorted(path).filter(pl.col("author_id") == author_id)
     if dfc.is_empty():
+        logger.warning(
+            "No feature rows for author_id=%s in %s (slug=%s); loading full parquet "
+            "as fallback — downstream code must filter by author_id.",
+            author_id,
+            path.name,
+            slug,
+        )
         dfc = load_feature_frame_sorted(path)
     return dfc
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, date, datetime
 from pathlib import Path
+
 import httpx
 import pytest
 
@@ -15,7 +16,11 @@ from forensics.scraper import crawler as crawler_mod
 from forensics.scraper import fetcher as fetcher_mod
 from forensics.scraper.client import client_headers
 from forensics.scraper.crawler import stable_article_id
-from forensics.scraper.fetcher import _fetch_one_article_html, fetch_articles
+from forensics.scraper.fetcher import (
+    ArticleHtmlFetchContext,
+    _fetch_one_article_html,
+    fetch_articles,
+)
 from forensics.storage.export import append_jsonl_async
 from forensics.storage.repository import Repository, UnfetchedArticle
 
@@ -118,7 +123,43 @@ async def test_discover_authors_post_count_calls_overlap(
 
 
 def _minimal_html(body: str = "word " * 30) -> str:
-    return f"""<!doctype html><html><head><title>T</title></head><body><article>{body}</article></body></html>"""
+    return (
+        f"<!doctype html><html><head><title>T</title></head>"
+        f"<body><article>{body}</article></body></html>"
+    )
+
+
+def _article_html_ctx(
+    repo: Repository,
+    tmp_path: Path,
+    scraping: ScrapingConfig,
+    *,
+    sem: asyncio.Semaphore | None = None,
+    db_lock: asyncio.Lock | None = None,
+    done_lock: asyncio.Lock | None = None,
+    done_count: list[int] | None = None,
+    errors: Path | None = None,
+    total: int = 1,
+) -> ArticleHtmlFetchContext:
+    sem = sem or asyncio.Semaphore(2)
+    db_lock = db_lock or asyncio.Lock()
+    done_lock = done_lock or asyncio.Lock()
+    counts = [0] if done_count is None else done_count
+    err_path = errors if errors is not None else (tmp_path / "e.jsonl")
+    return ArticleHtmlFetchContext(
+        repo=repo,
+        root=tmp_path,
+        scraping=scraping,
+        limiter=fetcher_mod.RateLimiter(0.0, 0.0),
+        errors=err_path,
+        coauth=tmp_path / "c.jsonl",
+        warns=tmp_path / "w.jsonl",
+        sem=sem,
+        db_lock=db_lock,
+        done_lock=done_lock,
+        done_count=counts,
+        total=total,
+    )
 
 
 @pytest.mark.asyncio
@@ -159,35 +200,17 @@ async def test_fetch_http_error_persists_placeholder(
         max_retries=0,
         retry_backoff_seconds=0.01,
     )
-    sem = asyncio.Semaphore(2)
-    db_lock = asyncio.Lock()
-    done_lock = asyncio.Lock()
-    done_count = [0]
 
     with Repository(db_path) as repo:
+        ctx = _article_html_ctx(repo, tmp_path, scraping)
         async with httpx.AsyncClient() as client:
-            await _fetch_one_article_html(
-                client,
-                row,
-                repo=repo,
-                root=tmp_path,
-                scraping=scraping,
-                limiter=fetcher_mod.RateLimiter(0.0, 0.0),
-                errors=tmp_path / "e.jsonl",
-                coauth=tmp_path / "c.jsonl",
-                warns=tmp_path / "w.jsonl",
-                sem=sem,
-                db_lock=db_lock,
-                done_lock=done_lock,
-                done_count=done_count,
-                total=1,
-            )
+            await _fetch_one_article_html(client, row, ctx=ctx)
 
     with Repository(db_path) as repo:
         art = repo.get_article_by_id(sample_article.id)
     assert art is not None
     assert "[HTTP_ERROR:503]" in art.clean_text
-    assert done_count[0] == 1
+    assert ctx.done_count[0] == 1
 
 
 @pytest.mark.asyncio
@@ -230,36 +253,18 @@ async def test_fetch_off_domain_persists_redirect_marker(
         max_retries=0,
         retry_backoff_seconds=0.01,
     )
-    sem = asyncio.Semaphore(2)
-    db_lock = asyncio.Lock()
-    done_lock = asyncio.Lock()
-    done_count = [0]
     errors = tmp_path / "e.jsonl"
 
     with Repository(db_path) as repo:
+        ctx = _article_html_ctx(repo, tmp_path, scraping, errors=errors)
         async with httpx.AsyncClient() as client:
-            await _fetch_one_article_html(
-                client,
-                row,
-                repo=repo,
-                root=tmp_path,
-                scraping=scraping,
-                limiter=fetcher_mod.RateLimiter(0.0, 0.0),
-                errors=errors,
-                coauth=tmp_path / "c.jsonl",
-                warns=tmp_path / "w.jsonl",
-                sem=sem,
-                db_lock=db_lock,
-                done_lock=done_lock,
-                done_count=done_count,
-                total=1,
-            )
+            await _fetch_one_article_html(client, row, ctx=ctx)
 
     with Repository(db_path) as repo:
         art = repo.get_article_by_id(sample_article.id)
     assert art is not None
     assert "[REDIRECT:" in art.clean_text
-    assert done_count[0] == 1
+    assert ctx.done_count[0] == 1
 
 
 @pytest.mark.asyncio
@@ -310,32 +315,14 @@ async def test_fetch_resume_skip_when_already_fetched(
         max_retries=0,
         retry_backoff_seconds=0.01,
     )
-    sem = asyncio.Semaphore(2)
-    db_lock = asyncio.Lock()
-    done_lock = asyncio.Lock()
-    done_count = [0]
 
     with Repository(db_path) as repo:
+        ctx = _article_html_ctx(repo, tmp_path, scraping)
         async with httpx.AsyncClient() as client:
-            await _fetch_one_article_html(
-                client,
-                row,
-                repo=repo,
-                root=tmp_path,
-                scraping=scraping,
-                limiter=fetcher_mod.RateLimiter(0.0, 0.0),
-                errors=tmp_path / "e.jsonl",
-                coauth=tmp_path / "c.jsonl",
-                warns=tmp_path / "w.jsonl",
-                sem=sem,
-                db_lock=db_lock,
-                done_lock=done_lock,
-                done_count=done_count,
-                total=1,
-            )
+            await _fetch_one_article_html(client, row, ctx=ctx)
 
     assert called["n"] == 1
-    assert done_count[0] == 0
+    assert ctx.done_count[0] == 0
     with Repository(db_path) as repo:
         art = repo.get_article_by_id(sample_article.id)
     assert art is not None
@@ -380,36 +367,18 @@ async def test_fetch_success_persists_body_and_raw_path(
         max_retries=0,
         retry_backoff_seconds=0.01,
     )
-    sem = asyncio.Semaphore(2)
-    db_lock = asyncio.Lock()
-    done_lock = asyncio.Lock()
-    done_count = [0]
 
     with Repository(db_path) as repo:
+        ctx = _article_html_ctx(repo, tmp_path, scraping)
         async with httpx.AsyncClient() as client:
-            await _fetch_one_article_html(
-                client,
-                row,
-                repo=repo,
-                root=tmp_path,
-                scraping=scraping,
-                limiter=fetcher_mod.RateLimiter(0.0, 0.0),
-                errors=tmp_path / "e.jsonl",
-                coauth=tmp_path / "c.jsonl",
-                warns=tmp_path / "w.jsonl",
-                sem=sem,
-                db_lock=db_lock,
-                done_lock=done_lock,
-                done_count=done_count,
-                total=1,
-            )
+            await _fetch_one_article_html(client, row, ctx=ctx)
 
     with Repository(db_path) as repo:
         art = repo.get_article_by_id(sample_article.id)
     assert art is not None
     assert "word" in art.clean_text
     assert art.raw_html_path.startswith("raw/2024/")
-    assert done_count[0] == 1
+    assert ctx.done_count[0] == 1
 
 
 @pytest.mark.asyncio

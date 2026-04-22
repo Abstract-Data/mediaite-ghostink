@@ -45,7 +45,9 @@ PROVENANCE = """#| echo: false
 from datetime import datetime, timezone
 import sys
 from IPython.display import Markdown, display
-from forensics.config import settings
+from forensics.config import get_settings
+
+settings = get_settings()
 from forensics.utils.provenance import compute_config_hash, compute_corpus_hash
 
 config_hash = compute_config_hash(settings)
@@ -129,7 +131,7 @@ def nb00() -> None:
         code(
             "from datetime import datetime, timezone\n"
             "import hashlib\n"
-            "from forensics.config import get_project_root, settings\n"
+            "from forensics.config import get_project_root, get_settings\n\nsettings = get_settings()\n"
             "from forensics.utils.provenance import compute_config_hash\n\n"
             "n_articles = 400  # illustrative; replace with live COUNT from DB in production\n"
             "d_min = 0.5\n"
@@ -191,7 +193,7 @@ def nb01() -> None:
         ),
         code(
             "from IPython.display import display\n"
-            "from forensics.config import settings\n"
+            "from forensics.config import get_settings\n\nsettings = get_settings()\n"
             "import polars as pl\n\n"
             'uri = f"sqlite:///{settings.db_path}"\n'
             'q = """\n'
@@ -210,7 +212,7 @@ def nb01() -> None:
         ),
         code(
             "import polars as pl\n"
-            "from forensics.config import settings\n"
+            "from forensics.config import get_settings\n\nsettings = get_settings()\n"
             "from forensics.utils.charts import register_forensics_template\n"
             "import plotly.express as px\n\n"
             "register_forensics_template()\n"
@@ -253,7 +255,7 @@ def nb02() -> None:
         md(header),
         code(PROVENANCE),
         code(
-            "from forensics.config import settings\n"
+            "from forensics.config import get_settings\n\nsettings = get_settings()\n"
             "from forensics.utils.provenance import (\n"
             "    compute_corpus_hash,\n"
             "    load_corpus_custody,\n"
@@ -295,7 +297,7 @@ def nb03() -> None:
         md(header),
         code(PROVENANCE),
         code(
-            "from forensics.config import settings\n"
+            "from forensics.config import get_settings\n\nsettings = get_settings()\n"
             "from forensics.utils.charts import register_forensics_template\n"
             "import polars as pl\n"
             "import plotly.express as px\n\n"
@@ -336,7 +338,7 @@ def nb04() -> None:
         code(
             "from IPython.display import display\n"
             "from pathlib import Path\n"
-            "from forensics.config import get_project_root, settings\n"
+            "from forensics.config import get_project_root, get_settings\n\nsettings = get_settings()\n"
             "from forensics.storage.parquet import read_features\n"
             "import polars as pl\n\n"
             "root = get_project_root()\n"
@@ -377,7 +379,7 @@ def nb05() -> None:
         code(PROVENANCE),
         code(
             "import json\n"
-            "from forensics.config import get_project_root, settings\n"
+            "from forensics.config import get_project_root, get_settings\n\nsettings = get_settings()\n"
             "import plotly.graph_objects as go\n"
             "from forensics.utils.charts import (\n"
             "    apply_change_point_annotations,\n"
@@ -421,7 +423,7 @@ def nb06() -> None:
         code(PROVENANCE),
         code(
             "import json\n"
-            "from forensics.config import get_project_root, settings\n\n"
+            "from forensics.config import get_project_root, get_settings\n\nsettings = get_settings()\n\n"
             "root = get_project_root()\n"
             "slug = settings.authors[0].slug\n"
             "p = root / 'data' / 'analysis' / f'{slug}_drift.json'\n"
@@ -456,7 +458,7 @@ def nb07() -> None:
         code(
             "import json\n"
             "from datetime import date\n"
-            "from forensics.config import get_project_root, settings\n"
+            "from forensics.config import get_project_root, get_settings\n\nsettings = get_settings()\n"
             "from forensics.models.report import classify_finding_strength\n"
             "from forensics.models.analysis import ConvergenceWindow\n\n"
             "root = get_project_root()\n"

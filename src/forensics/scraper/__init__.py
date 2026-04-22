@@ -1,1 +1,7 @@
-"""Scraper package: discovery, fetch, parse (implemented in Phases 2–3)."""
+"""Scraper package: discovery, fetch, parse.
+
+No barrel re-exports — import submodules explicitly (``forensics.scraper.fetcher``,
+``from forensics.scraper import crawler``, …).
+"""
+
+__all__: tuple[str, ...] = ()

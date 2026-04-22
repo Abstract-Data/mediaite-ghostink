@@ -1,4 +1,19 @@
-"""End-to-end pipeline orchestration (scrape → extract → analyze → report)."""
+"""End-to-end pipeline orchestration (scrape → extract → analyze → report).
+
+`forensics.cli.run_all` calls `run_all_pipeline` here. Order of operations:
+
+1. **Audit** — ``PipelineContext`` records ``forensics all`` in ``analysis_runs``
+   (best-effort; failures log a warning and the run continues).
+2. **Scrape** — `asyncio.run(dispatch_scrape(...))` with all boolean stage flags false, which
+   selects the same **full scrape** handler as a plain `forensics scrape` (discover → metadata
+   → fetch → dedup → JSONL export). See `forensics.cli.scrape.dispatch_scrape`.
+3. **Extract** — `extract_all_features` for all authors, embeddings on.
+4. **Analyze** — `run_analyze(timeseries=True, convergence=True)` only (no changepoint,
+   drift, compare-only, or AI baseline unless you edit this module).
+5. **Report** — `run_report` with `ReportArgs` built from `get_settings().report.output_format`.
+
+Operational detail and artifact layout: `docs/RUNBOOK.md`, `docs/ARCHITECTURE.md`.
+"""
 
 from __future__ import annotations
 
@@ -7,14 +22,13 @@ import logging
 
 import typer
 
-from forensics.cli._helpers import config_fingerprint
 from forensics.cli.analyze import run_analyze
 from forensics.cli.scrape import dispatch_scrape
 from forensics.config import get_project_root, get_settings
 from forensics.features.pipeline import extract_all_features
 from forensics.models.report_args import ReportArgs
+from forensics.pipeline_context import PipelineContext
 from forensics.reporting import run_report
-from forensics.storage.repository import insert_analysis_run
 
 logger = logging.getLogger(__name__)
 
@@ -23,14 +37,7 @@ def run_all_pipeline() -> int:
     """Run the default full pipeline; returns process exit code."""
     root = get_project_root()
     db_path = root / "data" / "articles.db"
-    try:
-        insert_analysis_run(
-            db_path,
-            config_hash=config_fingerprint(),
-            description="forensics all",
-        )
-    except OSError as exc:
-        logger.warning("Could not record analysis_runs row: %s", exc)
+    PipelineContext.resolve().record_audit("forensics all", optional=True, log=logger)
 
     code = asyncio.run(
         dispatch_scrape(

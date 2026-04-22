@@ -21,21 +21,19 @@ from forensics.config.settings import (
 from forensics.models.article import Article
 from forensics.models.author import Author, AuthorManifest
 from forensics.scraper.client import create_scraping_client
-from forensics.scraper.fetcher import (
-    RateLimiter,
-    append_scrape_error,
-    request_with_retry,
-    scrape_error_record,
-)
+from forensics.scraper.fetcher import RateLimiter, log_scrape_error, request_with_retry
 from forensics.storage.repository import Repository
 from forensics.utils.datetime import parse_wp_datetime
 
 logger = logging.getLogger(__name__)
 
+# Stable entrypoints for CLI and cross-module idempotency; everything else is internal.
+__all__ = ("collect_article_metadata", "discover_authors", "stable_article_id")
+
 MEDIAITE_REST = "https://www.mediaite.com/wp-json/wp/v2"
 
 
-def stable_author_id(slug: str) -> str:
+def _stable_author_id(slug: str) -> str:
     """Deterministic UUID5 per slug so upsert_author targets one row across runs."""
     return str(uuid5(NAMESPACE_URL, f"forensics:author:{slug}"))
 
@@ -61,7 +59,7 @@ def _modifier_user_id_from_post(post: dict[str, object]) -> int | None:
     return None
 
 
-def wp_post_to_article(post: dict[str, object], author_id: str) -> Article:
+def _wp_post_to_article(post: dict[str, object], author_id: str) -> Article:
     """Build an ``Article`` from a ``wp/v2/posts`` element (metadata fields only)."""
     link = str(post["link"])
     title_raw = str(post["title"]["rendered"])  # type: ignore[index]
@@ -73,9 +71,6 @@ def wp_post_to_article(post: dict[str, object], author_id: str) -> Article:
             modified_date = parse_wp_datetime(str(post["modified"]))
         except (TypeError, ValueError):
             modified_date = None
-    meta: dict[str, object] = {}
-    if "id" in post:
-        meta["wp_post_id"] = post["id"]
     return Article(
         id=stable_article_id(link),
         author_id=author_id,
@@ -84,14 +79,14 @@ def wp_post_to_article(post: dict[str, object], author_id: str) -> Article:
         published_date=published,
         clean_text="",
         word_count=0,
-        metadata=meta,
+        metadata={},
         content_hash="",
         modified_date=modified_date,
         modifier_user_id=_modifier_user_id_from_post(post),
     )
 
 
-def user_dict_to_manifest(
+def _user_dict_to_manifest(
     user: dict[str, object],
     *,
     total_posts: int,
@@ -116,7 +111,7 @@ def _int_header(response: httpx.Response, name: str, default: int | None = None)
         return default
 
 
-def author_config_from_manifest(m: AuthorManifest) -> AuthorConfig:
+def _author_config_from_manifest(m: AuthorManifest) -> AuthorConfig:
     """Build ``AuthorConfig`` for corpus-wide metadata ingestion.
 
     Baseline dates are wide placeholders; downstream analysis should filter or
@@ -133,7 +128,7 @@ def author_config_from_manifest(m: AuthorManifest) -> AuthorConfig:
     )
 
 
-def load_authors_manifest(path: Path) -> dict[str, AuthorManifest]:
+def _load_authors_manifest(path: Path) -> dict[str, AuthorManifest]:
     """Load ``slug -> AuthorManifest`` from JSONL."""
     if not path.is_file():
         return {}
@@ -199,16 +194,13 @@ async def discover_authors(
                 phase="discover_users",
             )
             if not resp.is_success:
-                await append_scrape_error(
+                await log_scrape_error(
                     errors,
-                    scrape_error_record(
-                        url,
-                        resp.status_code,
-                        resp.reason_phrase,
-                        "discover_users",
-                    ),
+                    url,
+                    resp.status_code,
+                    f"{resp.reason_phrase} (users page {page})",
+                    "discover_users",
                 )
-                logger.warning("Failed users page %s: HTTP %s", page, resp.status_code)
                 break
             tp = _int_header(resp, "X-WP-TotalPages", 1)
             if tp is not None:
@@ -246,17 +238,15 @@ async def discover_authors(
                     tt = _int_header(cresp, "X-WP-Total", 0)
                     total_posts = tt if tt is not None else 0
                 else:
-                    await append_scrape_error(
+                    await log_scrape_error(
                         errors,
-                        scrape_error_record(
-                            count_url,
-                            cresp.status_code,
-                            cresp.reason_phrase,
-                            "discover_count",
-                        ),
+                        count_url,
+                        cresp.status_code,
+                        cresp.reason_phrase,
+                        "discover_count",
                     )
                 try:
-                    return user_dict_to_manifest(
+                    return _user_dict_to_manifest(
                         user,
                         total_posts=total_posts,
                         discovered_at=discovered_at,
@@ -302,10 +292,10 @@ async def collect_article_metadata(
         msg = f"Author manifest not found: {manifest}"
         raise FileNotFoundError(msg)
 
-    by_slug = load_authors_manifest(manifest)
+    by_slug = _load_authors_manifest(manifest)
     if all_authors:
         manifests_sorted = sorted(by_slug.values(), key=lambda x: x.slug)
-        author_cfgs = [author_config_from_manifest(m) for m in manifests_sorted]
+        author_cfgs = [_author_config_from_manifest(m) for m in manifests_sorted]
         logger.info(
             "metadata: all-authors mode (%d author(s) from manifest; config author list ignored)",
             len(author_cfgs),
@@ -336,14 +326,12 @@ async def collect_article_metadata(
                     )
                 except Exception as exc:  # noqa: BLE001 — isolate per-author failures
                     logger.exception("metadata ingestion failed for author slug=%s", cfg.slug)
-                    await append_scrape_error(
+                    await log_scrape_error(
                         errors,
-                        scrape_error_record(
-                            cfg.archive_url,
-                            None,
-                            f"{cfg.slug}: {exc!r}",
-                            "metadata_author",
-                        ),
+                        cfg.archive_url,
+                        None,
+                        f"{cfg.slug}: {exc!r}",
+                        "metadata_author",
                     )
                     return 0
 
@@ -369,16 +357,18 @@ async def _ingest_author_posts(
 ) -> int:
     manifest_row = by_slug.get(cfg.slug)
     if manifest_row is None:
-        logger.warning("Author slug %s not in manifest; skipping metadata", cfg.slug)
-        await append_scrape_error(
+        await log_scrape_error(
             errors_path,
-            scrape_error_record("", None, f"slug_not_in_manifest:{cfg.slug}", "metadata"),
+            "",
+            None,
+            f"slug_not_in_manifest:{cfg.slug}",
+            "metadata",
         )
         return 0
 
     inserted_here = 0
     author = Author(
-        id=stable_author_id(cfg.slug),
+        id=_stable_author_id(cfg.slug),
         name=manifest_row.name,
         slug=cfg.slug,
         outlet=cfg.outlet,
@@ -411,16 +401,13 @@ async def _ingest_author_posts(
             phase="metadata",
         )
         if not resp.is_success:
-            await append_scrape_error(
+            await log_scrape_error(
                 errors_path,
-                scrape_error_record(
-                    url,
-                    resp.status_code,
-                    resp.reason_phrase,
-                    "metadata",
-                ),
+                url,
+                resp.status_code,
+                f"{resp.reason_phrase} (author={cfg.slug} posts page {page})",
+                "metadata",
             )
-            logger.warning("Failed posts for %s page %s: HTTP %s", cfg.slug, page, resp.status_code)
             break
         tp = _int_header(resp, "X-WP-TotalPages", 1)
         if tp is not None:
@@ -432,7 +419,7 @@ async def _ingest_author_posts(
         for post in posts:
             if not isinstance(post, dict):
                 continue
-            article = wp_post_to_article(post, author_id)
+            article = _wp_post_to_article(post, author_id)
             published_dates.append(article.published_date)
             url_s = str(article.url)
             async with db_lock:
@@ -452,15 +439,15 @@ async def _ingest_author_posts(
     return inserted_here
 
 
-def iter_manifests_from_users_json(
+def _iter_manifests_from_users_json(
     users: list[dict[str, object]],
     *,
     total_posts_by_id: dict[int, int],
     discovered_at: datetime | None = None,
 ) -> Iterator[AuthorManifest]:
-    """Test helper: build manifests from static user JSON and post-count map."""
+    """Build manifests from static user JSON and post-count map (tests / tooling)."""
     when = discovered_at or datetime.now(UTC)
     for u in users:
         wp_id = int(u["id"])
         tp = total_posts_by_id.get(wp_id, 0)
-        yield user_dict_to_manifest(u, total_posts=tp, discovered_at=when)
+        yield _user_dict_to_manifest(u, total_posts=tp, discovered_at=when)

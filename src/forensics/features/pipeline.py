@@ -187,6 +187,7 @@ def extract_all_features(
                         doc,
                         recent30,
                         recent90,
+                        analysis=settings.analysis,
                     )
                     prior_tuples = [(a.published_date, a.word_count) for a in seq[:idx]]
                     prod = productivity.extract_productivity_features(

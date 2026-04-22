@@ -14,14 +14,14 @@ from forensics.config.settings import ScrapingConfig
 from forensics.models.article import Article
 from forensics.models.author import AuthorManifest
 from forensics.scraper.crawler import (
+    _author_config_from_manifest,
     _int_header,
-    author_config_from_manifest,
-    iter_manifests_from_users_json,
-    load_authors_manifest,
+    _iter_manifests_from_users_json,
+    _load_authors_manifest,
+    _stable_author_id,
+    _user_dict_to_manifest,
+    _wp_post_to_article,
     stable_article_id,
-    stable_author_id,
-    user_dict_to_manifest,
-    wp_post_to_article,
 )
 from forensics.scraper.dedup import deduplicate_articles
 from forensics.scraper.fetcher import RateLimiter, _is_mediaite_host, request_with_retry
@@ -33,8 +33,8 @@ from forensics.utils.text import word_count
 
 
 def test_stable_author_id_deterministic() -> None:
-    assert stable_author_id("jane-doe") == stable_author_id("jane-doe")
-    assert stable_author_id("a") != stable_author_id("b")
+    assert _stable_author_id("jane-doe") == _stable_author_id("jane-doe")
+    assert _stable_author_id("a") != _stable_author_id("b")
 
 
 def test_parse_wp_datetime_naive_becomes_utc() -> None:
@@ -50,7 +50,7 @@ def test_parse_wp_datetime_z_suffix() -> None:
 def test_user_dict_to_manifest() -> None:
     user = {"id": 42, "name": "Test User", "slug": "test-user"}
     when = datetime(2025, 1, 2, tzinfo=UTC)
-    m = user_dict_to_manifest(user, total_posts=7, discovered_at=when)
+    m = _user_dict_to_manifest(user, total_posts=7, discovered_at=when)
     assert m.wp_id == 42
     assert m.slug == "test-user"
     assert m.total_posts == 7
@@ -66,7 +66,7 @@ def test_author_config_from_manifest() -> None:
         total_posts=12,
         discovered_at=when,
     )
-    cfg = author_config_from_manifest(m)
+    cfg = _author_config_from_manifest(m)
     assert cfg.name == "Pat Example"
     assert cfg.slug == "pat-example"
     assert cfg.outlet == "mediaite.com"
@@ -80,7 +80,7 @@ def test_iter_manifests_from_users_json() -> None:
         {"id": 2, "name": "B", "slug": "b"},
     ]
     counts = {1: 10, 2: 3}
-    rows = list(iter_manifests_from_users_json(users, total_posts_by_id=counts))
+    rows = list(_iter_manifests_from_users_json(users, total_posts_by_id=counts))
     assert {r.slug for r in rows} == {"a", "b"}
     assert next(r for r in rows if r.slug == "a").total_posts == 10
 
@@ -94,12 +94,12 @@ def test_wp_post_to_article(sample_author) -> None:
         "modified": "2024-01-03T10:00:00",
         "meta": {"_edit_last": "7"},
     }
-    art = wp_post_to_article(post, sample_author.id)
+    art = _wp_post_to_article(post, sample_author.id)
     assert art.author_id == sample_author.id
     assert "Hello & goodbye" in art.title
     assert art.word_count == 0
     assert art.clean_text == ""
-    assert art.metadata.get("wp_post_id") == 99
+    assert art.metadata == {}
     assert str(art.url).rstrip("/") == "https://www.mediaite.com/2024/01/02/sample"
     assert art.modified_date is not None
     assert art.modified_date.year == 2024
@@ -123,7 +123,7 @@ def test_load_authors_manifest_roundtrip(tmp_path) -> None:
         discovered_at=datetime.now(UTC),
     )
     path.write_text(m.model_dump_json() + "\n", encoding="utf-8")
-    loaded = load_authors_manifest(path)
+    loaded = _load_authors_manifest(path)
     assert loaded["s"].wp_id == 1
 
 
@@ -288,8 +288,8 @@ def test_stable_article_id_upsert_same_url(tmp_db, sample_author) -> None:
         "title": {"rendered": "T"},
         "date": "2024-01-02T00:00:00",
     }
-    a1 = wp_post_to_article(post, sample_author.id)
-    a2 = wp_post_to_article(post, sample_author.id)
+    a1 = _wp_post_to_article(post, sample_author.id)
+    a2 = _wp_post_to_article(post, sample_author.id)
     assert a1.id == a2.id == stable_article_id(str(post["link"]))
     with Repository(tmp_db) as repo:
         repo.upsert_author(sample_author)

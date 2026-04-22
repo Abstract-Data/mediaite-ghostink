@@ -55,8 +55,9 @@ low_ppl_threshold = 20.0
 [baseline]
 # Phase 10 — AI baseline generation via local Ollama models.
 # Requires the `baseline` optional-extra:  uv sync --extra baseline
+# Tags must exist locally (`ollama list`); Phase 9 probability uses HF separately (`uv sync --extra probability`).
 ollama_base_url = "http://localhost:11434"
-models = ["llama3.1:8b", "mistral:7b", "gemma2:9b"]
+models = ["llama3.2:latest"]
 temperatures = [0.0, 0.8]
 articles_per_cell = 30
 max_tokens = 1500

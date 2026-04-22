@@ -1,6 +1,6 @@
 # AGENTS.md
 # Version: 0.3.0
-# Last Updated: 2026-04-20
+# Last Updated: 2026-04-21
 # Environment: dev
 # Model: gpt-5-3-codex
 # Fallback Model: gpt-5.1
@@ -457,19 +457,27 @@ See `prompts/README.md` for the full versioning contract, bump rules, and releas
 - Tasks database: https://www.notion.so/abstractdata/mediaite-ghostink-tasks
 - Project page: https://www.notion.so/abstractdata/Colby-Hall-AI-Use-Investigation-34a7d7f56298807a8e38e05e30edc3d5
 - Client page: https://www.notion.so/abstractdata/Mediaite-2f47d7f5629880659e33d3eed6e2b498
+- GitButler skill template (Claude Code + Cursor): https://www.notion.so/34a7d7f56298816eae8be56c8fd8c4aa
+- GitButler playbook — virtual branches for parallel agent work: https://www.notion.so/34a7d7f56298816fa6d2cd77b6cebfc8
 
 ## Learned User Preferences
 
 - When implementing tasks from a numbered repository plan or an attached Cursor plan artifact, do not edit the plan markdown file itself; only complete the assigned to-dos.
+- When the user explicitly asks to mark work in progress on an attached Cursor plan, change only status or checkbox metadata; do not rewrite the plan body or task descriptions.
 - For prompt-library work, ship substantive changes as a new immutable `v*.md` snapshot and advance `current.md`, `versions.json`, and `CHANGELOG.md` together instead of rewriting prior frozen versions.
 - For Notion-linked specs or reports in this workspace, use the Notion MCP tools when a normal URL fetch returns no page body (Notion pages are often auth-walled to anonymous HTTP).
+- When syncing GitButler guidance from Notion into this repo, add a companion skill under a distinct name (for example `gitbutler-workflow`) rather than replacing the existing GitButler skill wholesale.
 - For Typer/Rich CLI help tests that assert literal `--flag` substrings, disable color on `CliRunner.invoke` and strip ANSI escape sequences so Rich markup does not break contiguous flag text.
 
 ## Learned Workspace Facts
 
 - Git remote `origin` targets **Abstract-Data/mediaite-ghostink** on GitHub; `git remote -v` may show an SSH form if HTTPS URLs are rewritten in Git config.
+- Architectural decision records live under **`docs/adr/`**; keep a single ADR-style tree rather than reintroducing a parallel `docs/decisions/` layout unless the repo convention is explicitly changed.
 - **`requires-python`** in `pyproject.toml` is **`>=3.13,<3.14`** so the declared scientific and ML dependency set resolves against published wheels.
+- Ruff **`[tool.ruff.lint.per-file-ignores]`** entries in `pyproject.toml` must remain valid TOML (for example a multi-line table); inline tables cannot span lines and will break parsing.
 - Phase 2 discovery and metadata scraping persist **`data/authors_manifest.jsonl`**, **`data/scrape_errors.jsonl`**, and **`data/articles.db`** at the repository root (paths resolved via `get_project_root()`).
-- GitButler (`but`) from this repo: authenticate the forge once (`but config forge auth`); for GitHub PRs ensure the integration target is **`origin/main`** (not `gb-local/main`). If `but config target` refuses while virtual branches are applied, `but unapply` the stack first, set the target, then `but apply` again before `but push` / `but pr new`.
+- GitButler (`but`): follow the repo-local skill at `.claude/skills/gitbutler/SKILL.md` (mirrored at `.cursor/skills/gitbutler/SKILL.md`). For the Notion playbook add-on (parallel agents, JSON workflow), see `.claude/skills/gitbutler-workflow/SKILL.md` (mirrored under `.cursor/skills/gitbutler-workflow/`). From this repo: authenticate the forge once (`but config forge auth`); for GitHub PRs ensure the integration target is **`origin/main`** (not `gb-local/main`). If `but config target` refuses while virtual branches are applied, `but unapply` the stack first, set the target, then `but apply` again before `but push` / `but pr new`.
 - The `forensics` console script imports the **`forensics.cli` package** (`src/forensics/cli/` Typer app); the old monolithic `src/forensics/cli.py` was removed after the Typer migration—treat package modules as the CLI source of truth when updating docs or tracing dispatch.
 - `forensics scrape --all-authors` walks **every** author in `data/authors_manifest.jsonl` for metadata (and skips the placeholder guard on scrape-like invocations); `extract` / `analyze` / reporting still resolve study authors from `config.toml` via `resolve_author_rows` unless narrowed with `--author`.
+- README-aligned local modeling and reporting expect **`uv run python -m spacy download en_core_web_md`** for extraction and **Quarto on `PATH`** when running **`forensics report`** or **`forensics all`** (plus non-placeholder `config.toml` authors for guarded scrape paths).
+- In `collect_article_metadata`, author ingestion runs **concurrently** up to **`scraping.max_concurrent`**, all tasks share one **`RateLimiter`**, SQLite writes go through a per-run **`asyncio.Lock`**, and per-author failures append to **`data/scrape_errors.jsonl`** without stopping the whole batch.

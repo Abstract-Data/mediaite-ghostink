@@ -10,6 +10,7 @@ import shutil
 import tarfile
 import time
 import weakref
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -93,6 +94,17 @@ def scrape_error_record(
     }
 
 
+async def log_scrape_error(
+    path: Path,
+    url: str,
+    status_code: int | None,
+    error: str,
+    phase: str,
+) -> None:
+    """Append one structured scrape error (``scrape_error_record`` shape)."""
+    await append_scrape_error(path, scrape_error_record(url, status_code, error, phase))
+
+
 def _retry_after_seconds(response: httpx.Response) -> float | None:
     raw = response.headers.get("Retry-After")
     if raw is None:
@@ -101,6 +113,69 @@ def _retry_after_seconds(response: httpx.Response) -> float | None:
         return float(raw)
     except ValueError:
         return None
+
+
+def _exponential_backoff_seconds(attempt: int, backoff_base: float) -> float:
+    """Seconds to wait before retry attempt ``attempt`` (0-based) after transport or 5xx errors."""
+    return backoff_base * (2**attempt)
+
+
+async def _sleep_exponential_backoff(attempt: int, backoff_base: float) -> None:
+    await asyncio.sleep(_exponential_backoff_seconds(attempt, backoff_base))
+
+
+async def _handle_retried_response(
+    response: httpx.Response,
+    *,
+    attempt: int,
+    max_retries: int,
+    backoff_base: float,
+    errors_path: Path,
+    url: str,
+    phase: str,
+) -> httpx.Response | None:
+    """Return ``response`` when done; return ``None`` to retry the HTTP request."""
+    if response.status_code == 404:
+        await log_scrape_error(errors_path, url, 404, "Not Found", phase)
+        return response
+
+    if response.status_code == 429:
+        wait429 = _retry_after_seconds(response) or 30.0
+        if attempt >= max_retries:
+            await log_scrape_error(
+                errors_path,
+                url,
+                429,
+                "Too Many Requests (exhausted retries)",
+                phase,
+            )
+            return response
+        logger.warning("429 for %s; sleeping %.1fs", url, wait429)
+        await asyncio.sleep(wait429)
+        return None
+
+    if 500 <= response.status_code < 600:
+        if attempt >= max_retries:
+            await log_scrape_error(
+                errors_path,
+                url,
+                response.status_code,
+                response.reason_phrase,
+                phase,
+            )
+            return response
+        sleep_s = _exponential_backoff_seconds(attempt, backoff_base)
+        logger.warning(
+            "Server error %s for %s (attempt %s); sleeping %.1fs",
+            response.status_code,
+            url,
+            attempt + 1,
+            sleep_s,
+        )
+        await asyncio.sleep(sleep_s)
+        return None
+
+    return response
 
 
 async def request_with_retry(
@@ -125,67 +200,25 @@ async def request_with_retry(
             response = await client.request(method, url, **kwargs)
         except httpx.RequestError as exc:
             if attempt >= max_retries:
-                await append_scrape_error(
-                    errors_path,
-                    scrape_error_record(url, None, repr(exc), phase),
-                )
+                await log_scrape_error(errors_path, url, None, repr(exc), phase)
                 raise
-            sleep_s = backoff_base * (2**attempt)
             logger.warning("Request error %s (attempt %s): %s", url, attempt + 1, exc)
-            await asyncio.sleep(sleep_s)
+            await _sleep_exponential_backoff(attempt, backoff_base)
             attempt += 1
             continue
 
-        if response.status_code == 404:
-            await append_scrape_error(
-                errors_path,
-                scrape_error_record(url, 404, "Not Found", phase),
-            )
-            return response
-
-        if response.status_code == 429:
-            wait429 = _retry_after_seconds(response) or 30.0
-            if attempt >= max_retries:
-                await append_scrape_error(
-                    errors_path,
-                    scrape_error_record(
-                        url,
-                        429,
-                        "Too Many Requests (exhausted retries)",
-                        phase,
-                    ),
-                )
-                return response
-            logger.warning("429 for %s; sleeping %.1fs", url, wait429)
-            await asyncio.sleep(wait429)
-            attempt += 1
-            continue
-
-        if 500 <= response.status_code < 600:
-            if attempt >= max_retries:
-                await append_scrape_error(
-                    errors_path,
-                    scrape_error_record(
-                        url,
-                        response.status_code,
-                        response.reason_phrase,
-                        phase,
-                    ),
-                )
-                return response
-            sleep_s = backoff_base * (2**attempt)
-            logger.warning(
-                "Server error %s for %s (attempt %s); sleeping %.1fs",
-                response.status_code,
-                url,
-                attempt + 1,
-                sleep_s,
-            )
-            await asyncio.sleep(sleep_s)
-            attempt += 1
-            continue
-
-        return response
+        finished = await _handle_retried_response(
+            response,
+            attempt=attempt,
+            max_retries=max_retries,
+            backoff_base=backoff_base,
+            errors_path=errors_path,
+            url=url,
+            phase=phase,
+        )
+        if finished is not None:
+            return finished
+        attempt += 1
 
 
 def _is_mediaite_host(host: str) -> bool:
@@ -242,7 +275,10 @@ async def _build_successful_fetch_outside_lock(
     coauth: Path,
     warns: Path,
 ) -> None:
-    """Parse HTML, write raw file, merge metadata, append side JSONL; mutates ``article`` (no DB)."""
+    """Parse HTML, write raw file, merge metadata, append side JSONL.
+
+    Mutates ``article`` (no DB).
+    """
     raw_path = _write_raw_html_file(root, year, article_id, html)
     clean = extract_article_text(html)
     meta_extra = extract_metadata(html)
@@ -281,33 +317,40 @@ async def _build_successful_fetch_outside_lock(
         )
 
 
+@dataclass(frozen=True, slots=True)
+class ArticleHtmlFetchContext:
+    """Paths, locks, and shared counters for one ``fetch_articles`` concurrent HTML run."""
+
+    repo: Repository
+    root: Path
+    scraping: ScrapingConfig
+    limiter: RateLimiter
+    errors: Path
+    coauth: Path
+    warns: Path
+    sem: asyncio.Semaphore
+    db_lock: asyncio.Lock
+    done_lock: asyncio.Lock
+    done_count: list[int]
+    total: int
+
+
 async def _fetch_one_article_html(
     client: httpx.AsyncClient,
     row: UnfetchedArticle,
     *,
-    repo: Repository,
-    root: Path,
-    scraping: ScrapingConfig,
-    limiter: RateLimiter,
-    errors: Path,
-    coauth: Path,
-    warns: Path,
-    sem: asyncio.Semaphore,
-    db_lock: asyncio.Lock,
-    done_lock: asyncio.Lock,
-    done_count: list[int],
-    total: int,
+    ctx: ArticleHtmlFetchContext,
 ) -> None:
-    """Fetch one article HTML under concurrency limits; mutates ``done_count[0]`` for progress."""
-    async with sem:
+    """Fetch one article HTML under concurrency limits; bumps ``ctx.done_count`` on completion."""
+    async with ctx.sem:
         year = row.published_date.year
         response = await request_with_retry(
             client,
-            limiter,
-            scraping,
+            ctx.limiter,
+            ctx.scraping,
             "GET",
             row.url,
-            errors_path=errors,
+            errors_path=ctx.errors,
             phase="html_fetch",
         )
 
@@ -315,79 +358,77 @@ async def _fetch_one_article_html(
         final_host = urlparse(str(response.url)).netloc
 
         if not response.is_success:
-            async with db_lock:
-                article = await asyncio.to_thread(repo.get_article_by_id, row.article_id)
+            async with ctx.db_lock:
+                article = await asyncio.to_thread(ctx.repo.get_article_by_id, row.article_id)
                 if _resume_skip_fetch(article):
                     return
                 _apply_http_failed_mutation(article, scraped_at, response)
-                await asyncio.to_thread(repo.upsert_article, article)
-            async with done_lock:
-                done_count[0] += 1
+                await asyncio.to_thread(ctx.repo.upsert_article, article)
+            async with ctx.done_lock:
+                ctx.done_count[0] += 1
                 logger.info(
                     "Fetched %s/%s articles for %s (http %s)",
-                    done_count[0],
-                    total,
+                    ctx.done_count[0],
+                    ctx.total,
                     row.author_name,
                     response.status_code,
                 )
             return
 
         if not _is_mediaite_host(final_host):
-            await append_scrape_error(
-                errors,
-                scrape_error_record(
-                    str(row.url),
-                    response.status_code,
-                    f"redirect_off_domain:{final_host}",
-                    "html_fetch",
-                ),
+            await log_scrape_error(
+                ctx.errors,
+                str(row.url),
+                response.status_code,
+                f"redirect_off_domain:{final_host}",
+                "html_fetch",
             )
-            async with db_lock:
-                article = await asyncio.to_thread(repo.get_article_by_id, row.article_id)
+            async with ctx.db_lock:
+                article = await asyncio.to_thread(ctx.repo.get_article_by_id, row.article_id)
                 if _resume_skip_fetch(article):
                     return
                 _apply_off_domain_mutation(article, scraped_at, final_host)
-                await asyncio.to_thread(repo.upsert_article, article)
-            async with done_lock:
-                done_count[0] += 1
+                await asyncio.to_thread(ctx.repo.upsert_article, article)
+            async with ctx.done_lock:
+                ctx.done_count[0] += 1
                 logger.info(
                     "Fetched %s/%s articles for %s (off-domain %s)",
-                    done_count[0],
-                    total,
+                    ctx.done_count[0],
+                    ctx.total,
                     row.author_name,
                     final_host,
                 )
             return
 
-        async with db_lock:
-            article = await asyncio.to_thread(repo.get_article_by_id, row.article_id)
+        async with ctx.db_lock:
+            article = await asyncio.to_thread(ctx.repo.get_article_by_id, row.article_id)
             if _resume_skip_fetch(article):
                 return
 
         await _build_successful_fetch_outside_lock(
             article,
-            root,
+            ctx.root,
             year,
             row.article_id,
             response.text,
             scraped_at,
-            coauth,
-            warns,
+            ctx.coauth,
+            ctx.warns,
         )
 
-        async with db_lock:
-            latest = await asyncio.to_thread(repo.get_article_by_id, row.article_id)
+        async with ctx.db_lock:
+            latest = await asyncio.to_thread(ctx.repo.get_article_by_id, row.article_id)
             if _resume_skip_fetch(latest):
                 pass
             else:
-                await asyncio.to_thread(repo.upsert_article, article)
+                await asyncio.to_thread(ctx.repo.upsert_article, article)
 
-        async with done_lock:
-            done_count[0] += 1
+        async with ctx.done_lock:
+            ctx.done_count[0] += 1
             logger.info(
                 "Fetched %s/%s articles for %s",
-                done_count[0],
-                total,
+                ctx.done_count[0],
+                ctx.total,
                 row.author_name,
             )
 
@@ -455,28 +496,24 @@ async def fetch_articles(
         db_lock = asyncio.Lock()
         done_lock = asyncio.Lock()
         done_count = [0]
+        html_ctx = ArticleHtmlFetchContext(
+            repo=r,
+            root=root,
+            scraping=scraping,
+            limiter=limiter,
+            errors=errors,
+            coauth=coauth,
+            warns=warns,
+            sem=sem,
+            db_lock=db_lock,
+            done_lock=done_lock,
+            done_count=done_count,
+            total=total,
+        )
 
         async with create_scraping_client(scraping) as client:
             await asyncio.gather(
-                *(
-                    _fetch_one_article_html(
-                        client,
-                        row,
-                        repo=r,
-                        root=root,
-                        scraping=scraping,
-                        limiter=limiter,
-                        errors=errors,
-                        coauth=coauth,
-                        warns=warns,
-                        sem=sem,
-                        db_lock=db_lock,
-                        done_lock=done_lock,
-                        done_count=done_count,
-                        total=total,
-                    )
-                    for row in rows
-                )
+                *(_fetch_one_article_html(client, row, ctx=html_ctx) for row in rows)
             )
         return done_count[0]
 

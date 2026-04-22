@@ -1,0 +1,2658 @@
+# Phase 12: Survey Mode, Interactive TUI, Runtime Hardening & Calibration
+
+Version: 0.1.0
+Status: pending
+Last Updated: 2026-04-21
+Model: claude-opus-4-6
+Depends on: Phase 11 (Typer CLI), Phase 10 (AI baseline), Phase 9 (probability features), Phase 7 (convergence/statistics), Phase 6 (drift), Phase 5 (changepoint/timeseries), Phase 4 (feature extraction), Phase 3 (scraper)
+
+## Objective
+
+Transform the pipeline from a targeted investigation tool ("analyze this suspect") into a full newsroom survey system ("analyze everyone, tell me what you find") while simultaneously making it approachable for a small team via an interactive setup wizard, hardening the runtime against silent failures, and adding calibration infrastructure to validate detection accuracy before publishing findings.
+
+This phase delivers seven interlocking workstreams:
+
+1. **Survey/Blind Run Mode** — discover all authors, run full pipeline on everyone, rank by AI adoption signal
+2. **Interactive TUI Setup Wizard** — guided first-run experience via `textual` (dependency checks, author discovery, config generation, preflight, pipeline launch)
+3. **Preflight & Runtime Hardening** — model availability checks, early-article edge cases, configurable dedup thresholds, progress reporting, Quarto validation at pipeline start
+4. **Calibration Suite** — synthetic validation to measure detection sensitivity and false positive rate before touching real unknowns
+5. **Statistical Rigor Improvements** — pre-registration locking, permutation-based significance, natural control cohort from blind run
+6. **Report Overhaul** — survey dashboard, per-author drill-down, methodology & calibration sections, evidence chain narratives
+7. **Operational Quality of Life** — checkpoint/resume for long runs, config validation command, DuckDB export for team querying
+
+After this phase, a new team member can run `uv run forensics setup` and go from zero to a complete newsroom AI adoption survey with validated methodology in a single session.
+
+## Pre-flight
+
+```bash
+cd "$(git rev-parse --show-toplevel)"
+uv sync --extra dev
+uv run ruff check .
+uv run ruff format --check .
+uv run pytest tests/ -v
+```
+
+Confirm all tests pass and linting is clean before starting. Read `AGENTS.md`, `docs/GUARDRAILS.md`, and `docs/ARCHITECTURE.md` to ground yourself in existing constraints.
+
+## Non-goals
+
+- Replacing the existing Typer CLI — the TUI is an additional entry point, not a replacement
+- Changing the stage boundary contract (scrape -> extract -> analyze -> report)
+- Modifying existing data model schemas (add new models/fields, don't break existing)
+- Supporting outlets other than Mediaite in this phase (cross-outlet controls are a future phase)
+- Real-time streaming UI — the TUI is a setup wizard + progress monitor, not a live dashboard
+
+---
+
+## 1. Survey/Blind Run Mode
+
+### 1a. Design Principles
+
+The blind run inverts the current workflow. Instead of declaring target/control authors in `config.toml`, the pipeline:
+
+1. Discovers ALL authors via the WordPress REST API (reuses Phase 2 `discover_authors`)
+2. Filters to authors with sufficient article volume for statistical analysis
+3. Runs the full extraction and analysis pipeline against every qualifying author
+4. Produces a ranked survey report — who shows AI adoption signals, who doesn't, and what the evidence is
+
+The target/control distinction becomes an OUTPUT of the analysis, not an INPUT. Authors who show no change-point signals become the natural control cohort. This is stronger methodology — you're not cherry-picking controls.
+
+### 1b. Author Qualification Filter (src/forensics/survey/qualification.py)
+
+```python
+"""Author qualification for blind survey mode."""
+
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass
+from datetime import date, timedelta
+from pathlib import Path
+
+import polars as pl
+
+from forensics.models.author import Author
+from forensics.storage.repository import Repository
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class QualificationCriteria:
+    """Minimum thresholds for including an author in the survey."""
+
+    min_articles: int = 50
+    min_span_days: int = 730  # 2 years
+    min_words_per_article: int = 200
+    min_articles_per_year: float = 12.0  # at least ~monthly publishing
+    require_recent_activity: bool = True
+    recent_activity_days: int = 180  # must have published in last 6 months
+
+
+@dataclass(frozen=True)
+class QualifiedAuthor:
+    """An author who passed qualification with their stats."""
+
+    author: Author
+    total_articles: int
+    date_range_days: int
+    earliest_article: date
+    latest_article: date
+    avg_word_count: float
+    articles_per_year: float
+    disqualification_reason: str | None = None
+
+
+def qualify_authors(
+    db_path: Path,
+    criteria: QualificationCriteria | None = None,
+) -> tuple[list[QualifiedAuthor], list[QualifiedAuthor]]:
+    """Evaluate all discovered authors against qualification criteria.
+
+    Returns:
+        (qualified, disqualified) — both lists include stats for transparency.
+    """
+    if criteria is None:
+        criteria = QualificationCriteria()
+
+    qualified: list[QualifiedAuthor] = []
+    disqualified: list[QualifiedAuthor] = []
+
+    with Repository(db_path) as repo:
+        authors = repo.all_authors()
+        for author in authors:
+            articles = repo.articles_for_author(author.id)
+            if not articles:
+                disqualified.append(
+                    QualifiedAuthor(
+                        author=author,
+                        total_articles=0,
+                        date_range_days=0,
+                        earliest_article=date.min,
+                        latest_article=date.min,
+                        avg_word_count=0.0,
+                        articles_per_year=0.0,
+                        disqualification_reason="no_articles",
+                    )
+                )
+                continue
+
+            dates = sorted(a.published_date.date() for a in articles if a.published_date)
+            word_counts = [a.word_count for a in articles if a.word_count and a.word_count > 0]
+
+            if not dates or not word_counts:
+                disqualified.append(_build_dq(author, articles, "missing_dates_or_wordcounts"))
+                continue
+
+            span_days = (dates[-1] - dates[0]).days
+            avg_wc = sum(word_counts) / len(word_counts)
+            years = max(span_days / 365.25, 0.01)
+            articles_per_year = len(articles) / years
+
+            qa = QualifiedAuthor(
+                author=author,
+                total_articles=len(articles),
+                date_range_days=span_days,
+                earliest_article=dates[0],
+                latest_article=dates[-1],
+                avg_word_count=avg_wc,
+                articles_per_year=articles_per_year,
+            )
+
+            reason = _check_criteria(qa, criteria)
+            if reason:
+                disqualified.append(QualifiedAuthor(**{**qa.__dict__, "disqualification_reason": reason}))
+            else:
+                qualified.append(qa)
+
+    logger.info(
+        "qualification: %d qualified, %d disqualified out of %d total authors",
+        len(qualified), len(disqualified), len(qualified) + len(disqualified),
+    )
+    return qualified, disqualified
+
+
+def _check_criteria(qa: QualifiedAuthor, c: QualificationCriteria) -> str | None:
+    """Return disqualification reason or None if qualified."""
+    if qa.total_articles < c.min_articles:
+        return f"too_few_articles ({qa.total_articles} < {c.min_articles})"
+    if qa.date_range_days < c.min_span_days:
+        return f"date_range_too_short ({qa.date_range_days}d < {c.min_span_days}d)"
+    if qa.avg_word_count < c.min_words_per_article:
+        return f"avg_word_count_too_low ({qa.avg_word_count:.0f} < {c.min_words_per_article})"
+    if qa.articles_per_year < c.min_articles_per_year:
+        return f"publishing_frequency_too_low ({qa.articles_per_year:.1f}/yr < {c.min_articles_per_year}/yr)"
+    if c.require_recent_activity:
+        cutoff = date.today() - timedelta(days=c.recent_activity_days)
+        if qa.latest_article < cutoff:
+            return f"no_recent_activity (last: {qa.latest_article}, cutoff: {cutoff})"
+    return None
+```
+
+### 1c. Survey Orchestrator (src/forensics/survey/orchestrator.py)
+
+```python
+"""Blind survey orchestrator — run full pipeline across all qualified authors."""
+
+from __future__ import annotations
+
+import json
+import logging
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from pathlib import Path
+from uuid import uuid4
+
+from forensics.analysis.orchestrator import run_analysis_for_author
+from forensics.config.settings import ForensicsSettings
+from forensics.features.pipeline import extract_all_features
+from forensics.models.analysis import AnalysisResult
+from forensics.survey.qualification import QualifiedAuthor, qualify_authors
+from forensics.survey.scoring import compute_composite_score, SurveyScore
+from forensics.storage.repository import Repository
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class SurveyResult:
+    """Complete survey output for one author."""
+
+    author_slug: str
+    author_name: str
+    qualification: QualifiedAuthor
+    analysis: AnalysisResult | None
+    score: SurveyScore | None
+    error: str | None = None
+
+
+@dataclass
+class SurveyRun:
+    """Top-level survey run metadata and results."""
+
+    run_id: str = field(default_factory=lambda: str(uuid4()))
+    run_timestamp: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
+    config_hash: str = ""
+    total_authors_discovered: int = 0
+    total_qualified: int = 0
+    total_disqualified: int = 0
+    results: list[SurveyResult] = field(default_factory=list)
+    checkpoint_path: Path | None = None
+
+
+async def run_survey(
+    db_path: Path,
+    settings: ForensicsSettings,
+    project_root: Path,
+    *,
+    resume_from: str | None = None,
+    author_slug: str | None = None,
+) -> SurveyRun:
+    """Execute the blind survey pipeline.
+
+    1. Qualify all discovered authors
+    2. For each qualified author:
+       a. Extract features (skip if checkpoint exists)
+       b. Run full analysis
+       c. Compute composite AI adoption score
+    3. Rank all authors by composite score
+    4. Write survey results and checkpoint
+
+    Args:
+        db_path: Path to articles.db
+        settings: Pipeline settings
+        project_root: Repository root
+        resume_from: Resume a previous survey run by ID (skip completed authors)
+        author_slug: If provided, run survey for single author only (debugging)
+    """
+    survey = SurveyRun(config_hash=_compute_config_hash(settings))
+    checkpoint_dir = project_root / "data" / "survey"
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    survey.checkpoint_path = checkpoint_dir / f"survey_{survey.run_id}.json"
+
+    # Load checkpoint if resuming
+    completed_slugs: set[str] = set()
+    if resume_from:
+        completed_slugs = _load_checkpoint(checkpoint_dir, resume_from)
+        logger.info("survey: resuming run %s, %d authors already completed", resume_from, len(completed_slugs))
+
+    # Phase 1: Qualify authors
+    qualified, disqualified = qualify_authors(db_path)
+    survey.total_authors_discovered = len(qualified) + len(disqualified)
+    survey.total_qualified = len(qualified)
+    survey.total_disqualified = len(disqualified)
+
+    if author_slug:
+        qualified = [q for q in qualified if q.author.slug == author_slug]
+        if not qualified:
+            logger.error("survey: author %s not found or did not qualify", author_slug)
+            return survey
+
+    # Phase 2: Process each qualified author
+    for i, qa in enumerate(qualified, 1):
+        slug = qa.author.slug
+        if slug in completed_slugs:
+            logger.info("survey: [%d/%d] skipping %s (already completed)", i, len(qualified), slug)
+            continue
+
+        logger.info("survey: [%d/%d] processing %s (%d articles)", i, len(qualified), slug, qa.total_articles)
+
+        result = SurveyResult(
+            author_slug=slug,
+            author_name=qa.author.name,
+            qualification=qa,
+            analysis=None,
+            score=None,
+        )
+
+        try:
+            # Extract features
+            extract_all_features(db_path, settings, author_slug=slug, skip_embeddings=False)
+
+            # Run analysis
+            from forensics.analysis.artifact_paths import AnalysisArtifactPaths
+            artifact_paths = AnalysisArtifactPaths(project_root / "data" / "analysis", slug)
+            analysis = run_analysis_for_author(db_path, settings, slug, artifact_paths)
+            result.analysis = analysis
+
+            # Compute composite score
+            result.score = compute_composite_score(analysis, qa)
+
+        except Exception as exc:
+            logger.error("survey: failed on %s: %s", slug, exc, exc_info=True)
+            result.error = str(exc)
+
+        survey.results.append(result)
+
+        # Checkpoint after each author
+        _write_checkpoint(survey)
+
+    # Phase 3: Rank by composite score
+    survey.results.sort(
+        key=lambda r: r.score.composite if r.score else -1.0,
+        reverse=True,
+    )
+
+    # Write final results
+    _write_survey_output(survey, checkpoint_dir)
+    logger.info(
+        "survey: complete — %d authors processed, %d errors",
+        len(survey.results),
+        sum(1 for r in survey.results if r.error),
+    )
+    return survey
+
+
+def _write_checkpoint(survey: SurveyRun) -> None:
+    """Write incremental checkpoint so survey can resume after interruption."""
+    if survey.checkpoint_path:
+        completed = [r.author_slug for r in survey.results if r.analysis is not None]
+        checkpoint = {
+            "run_id": survey.run_id,
+            "timestamp": datetime.now(UTC).isoformat(),
+            "completed_slugs": completed,
+        }
+        survey.checkpoint_path.write_text(json.dumps(checkpoint, indent=2), encoding="utf-8")
+
+
+def _load_checkpoint(checkpoint_dir: Path, run_id: str) -> set[str]:
+    """Load completed author slugs from a previous checkpoint."""
+    cp_path = checkpoint_dir / f"survey_{run_id}.json"
+    if not cp_path.is_file():
+        logger.warning("survey: checkpoint not found for run %s", run_id)
+        return set()
+    data = json.loads(cp_path.read_text(encoding="utf-8"))
+    return set(data.get("completed_slugs", []))
+
+
+def _write_survey_output(survey: SurveyRun, output_dir: Path) -> None:
+    """Write the final ranked survey results."""
+    output = {
+        "run_id": survey.run_id,
+        "run_timestamp": survey.run_timestamp,
+        "config_hash": survey.config_hash,
+        "summary": {
+            "total_discovered": survey.total_authors_discovered,
+            "total_qualified": survey.total_qualified,
+            "total_disqualified": survey.total_disqualified,
+            "total_processed": len(survey.results),
+            "total_errors": sum(1 for r in survey.results if r.error),
+        },
+        "rankings": [
+            {
+                "rank": i + 1,
+                "author_slug": r.author_slug,
+                "author_name": r.author_name,
+                "composite_score": r.score.composite if r.score else None,
+                "signal_strength": r.score.strength.value if r.score else "error",
+                "total_articles": r.qualification.total_articles,
+                "convergence_windows": len(r.analysis.convergence_windows) if r.analysis else 0,
+                "error": r.error,
+            }
+            for i, r in enumerate(survey.results)
+        ],
+    }
+    out_path = output_dir / f"survey_results_{survey.run_id}.json"
+    out_path.write_text(json.dumps(output, indent=2), encoding="utf-8")
+    logger.info("survey: results written to %s", out_path)
+
+
+def _compute_config_hash(settings: ForensicsSettings) -> str:
+    """Deterministic hash of analysis-relevant settings."""
+    import hashlib
+    payload = json.dumps(settings.analysis.model_dump(), sort_keys=True, default=str)
+    return hashlib.sha256(payload.encode()).hexdigest()[:16]
+```
+
+### 1d. Composite Scoring (src/forensics/survey/scoring.py)
+
+```python
+"""Composite AI adoption scoring for survey mode."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from enum import Enum
+
+from forensics.models.analysis import AnalysisResult, ConvergenceWindow
+from forensics.survey.qualification import QualifiedAuthor
+
+
+class SignalStrength(str, Enum):
+    """Human-readable classification of AI adoption signal."""
+
+    STRONG = "strong"      # Multiple convergence windows, large effect sizes, drift acceleration
+    MODERATE = "moderate"  # Some convergence, moderate effects
+    WEAK = "weak"          # Single signal or borderline statistics
+    NONE = "none"          # No detectable signal
+    ERROR = "error"        # Analysis failed
+
+
+@dataclass(frozen=True)
+class SurveyScore:
+    """Composite score for one author in the survey."""
+
+    composite: float  # 0.0 - 1.0, higher = stronger AI adoption signal
+    strength: SignalStrength
+    pipeline_a_score: float  # Stylometric change-point signal (0-1)
+    pipeline_b_score: float  # Embedding drift signal (0-1)
+    pipeline_c_score: float | None  # Probability signal (0-1), None if Phase 9 unavailable
+    convergence_score: float  # Cross-pipeline agreement (0-1)
+    num_convergence_windows: int
+    strongest_window_ratio: float  # Highest convergence_ratio across all windows
+    max_effect_size: float  # Largest |Cohen's d| across significant tests
+    evidence_summary: str  # Human-readable one-liner
+
+
+def compute_composite_score(
+    analysis: AnalysisResult,
+    qualification: QualifiedAuthor,
+) -> SurveyScore:
+    """Compute a composite AI adoption score from analysis results.
+
+    Weighting:
+    - 30% Pipeline A (stylometric changepoints)
+    - 30% Pipeline B (embedding drift)
+    - 10% Pipeline C (perplexity/binoculars, if available)
+    - 30% Cross-pipeline convergence
+
+    The convergence weight is high because independent agreement across
+    pipelines is the strongest evidence. A single pipeline firing alone
+    produces a WEAK rating regardless of effect size.
+    """
+    # Pipeline A: proportion of features with significant changepoints
+    total_features = _count_total_features()
+    unique_cp_features = len({cp.feature_name for cp in analysis.change_points})
+    pa_score = min(unique_cp_features / max(total_features * 0.3, 1), 1.0)
+
+    # Pipeline B: drift acceleration relative to baseline
+    pb_score = 0.0
+    if analysis.drift_scores:
+        velocities = analysis.drift_scores.monthly_centroid_velocities
+        if len(velocities) >= 6:
+            early = sum(velocities[:len(velocities) // 2]) / max(len(velocities) // 2, 1)
+            late = sum(velocities[len(velocities) // 2:]) / max(len(velocities) // 2, 1)
+            if early > 0:
+                acceleration = (late - early) / early
+                pb_score = min(max(acceleration, 0.0), 1.0)
+
+    # Pipeline C: perplexity drop (if available)
+    pc_score = _compute_pipeline_c_score(analysis)
+
+    # Convergence: cross-pipeline agreement
+    conv_windows = analysis.convergence_windows
+    conv_score = 0.0
+    strongest_ratio = 0.0
+    if conv_windows:
+        strongest_ratio = max(w.convergence_ratio for w in conv_windows)
+        # More windows + higher ratios = higher score
+        conv_score = min(
+            (len(conv_windows) * 0.2) + (strongest_ratio * 0.8),
+            1.0,
+        )
+
+    # Max effect size across significant tests
+    sig_tests = [t for t in analysis.hypothesis_tests if t.significant]
+    max_d = max((abs(t.effect_size_cohens_d) for t in sig_tests), default=0.0)
+
+    # Composite
+    if pc_score is not None:
+        composite = (0.25 * pa_score + 0.25 * pb_score + 0.15 * pc_score + 0.35 * conv_score)
+    else:
+        composite = (0.30 * pa_score + 0.30 * pb_score + 0.40 * conv_score)
+
+    # Classify strength
+    strength = _classify_strength(composite, conv_score, max_d, len(conv_windows))
+
+    # Evidence summary
+    summary = _build_evidence_summary(
+        strength, len(conv_windows), strongest_ratio, max_d,
+        unique_cp_features, analysis,
+    )
+
+    return SurveyScore(
+        composite=round(composite, 4),
+        strength=strength,
+        pipeline_a_score=round(pa_score, 4),
+        pipeline_b_score=round(pb_score, 4),
+        pipeline_c_score=round(pc_score, 4) if pc_score is not None else None,
+        convergence_score=round(conv_score, 4),
+        num_convergence_windows=len(conv_windows),
+        strongest_window_ratio=round(strongest_ratio, 4),
+        max_effect_size=round(max_d, 4),
+        evidence_summary=summary,
+    )
+
+
+def _classify_strength(
+    composite: float,
+    conv_score: float,
+    max_d: float,
+    n_windows: int,
+) -> SignalStrength:
+    """Map numeric scores to human-readable strength."""
+    if composite >= 0.7 and conv_score >= 0.5 and max_d >= 0.8 and n_windows >= 2:
+        return SignalStrength.STRONG
+    elif composite >= 0.4 and (conv_score >= 0.3 or max_d >= 0.5):
+        return SignalStrength.MODERATE
+    elif composite >= 0.15:
+        return SignalStrength.WEAK
+    else:
+        return SignalStrength.NONE
+
+
+def _count_total_features() -> int:
+    """Count total features tracked across all families."""
+    # Lexical(7) + Structural(9) + Readability(4) + Content(7) + Productivity(5) + POS(6)
+    return 38
+
+
+def _compute_pipeline_c_score(analysis: AnalysisResult) -> float | None:
+    """Compute probability pipeline score if data available."""
+    # Check if any convergence window has pipeline_c_score set
+    c_scores = [w.pipeline_c_score for w in analysis.convergence_windows if w.pipeline_c_score is not None]
+    if not c_scores:
+        return None
+    return sum(c_scores) / len(c_scores)
+
+
+def _build_evidence_summary(
+    strength: SignalStrength,
+    n_windows: int,
+    strongest_ratio: float,
+    max_d: float,
+    n_cp_features: int,
+    analysis: AnalysisResult,
+) -> str:
+    """Build a one-line evidence summary for the survey report."""
+    if strength == SignalStrength.NONE:
+        return "No statistically significant AI adoption signal detected."
+    if strength == SignalStrength.WEAK:
+        return (
+            f"Weak signal: {n_cp_features} feature(s) with changepoints, "
+            f"max effect size d={max_d:.2f}. Insufficient convergence for confident assessment."
+        )
+    if strength == SignalStrength.MODERATE:
+        return (
+            f"Moderate signal: {n_windows} convergence window(s) "
+            f"(strongest {strongest_ratio:.0%} feature agreement), "
+            f"max effect d={max_d:.2f}."
+        )
+    # STRONG
+    dates = sorted(
+        w.start_date.isoformat() for w in analysis.convergence_windows
+        if w.convergence_ratio == strongest_ratio
+    )
+    onset = dates[0] if dates else "unknown"
+    return (
+        f"Strong signal: {n_windows} convergence window(s) starting ~{onset}, "
+        f"{strongest_ratio:.0%} feature agreement, "
+        f"effect size d={max_d:.2f}. Multiple independent pipelines agree."
+    )
+```
+
+### 1e. New `src/forensics/survey/__init__.py`
+
+```python
+"""Survey mode — blind newsroom-wide AI adoption analysis."""
+```
+
+### 1f. CLI Integration
+
+Add `survey` as a new top-level command in `src/forensics/cli/__init__.py`:
+
+```python
+from forensics.cli.survey import survey
+app.command(name="survey")(survey)
+```
+
+Create `src/forensics/cli/survey.py`:
+
+```python
+"""Survey subcommand — blind newsroom-wide analysis."""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from typing import Annotated, Optional
+
+import typer
+
+from forensics.config import get_project_root, get_settings
+
+logger = logging.getLogger(__name__)
+
+
+def survey(
+    min_articles: Annotated[
+        int,
+        typer.Option("--min-articles", help="Minimum article count to qualify (default: 50)"),
+    ] = 50,
+    min_span_days: Annotated[
+        int,
+        typer.Option("--min-span-days", help="Minimum date range in days (default: 730)"),
+    ] = 730,
+    author: Annotated[
+        Optional[str],
+        typer.Option("--author", metavar="SLUG", help="Run survey for single author (debugging)"),
+    ] = None,
+    resume: Annotated[
+        Optional[str],
+        typer.Option("--resume", metavar="RUN_ID", help="Resume a previous survey run"),
+    ] = None,
+    dry_run: Annotated[
+        bool,
+        typer.Option("--dry-run", help="Show qualified authors without running analysis"),
+    ] = False,
+    skip_scrape: Annotated[
+        bool,
+        typer.Option("--skip-scrape", help="Skip discovery/scraping, use existing data only"),
+    ] = False,
+) -> None:
+    """Run a blind newsroom survey — analyze all qualified authors and rank by AI adoption signal."""
+    settings = get_settings()
+    root = get_project_root()
+    db_path = root / "data" / "articles.db"
+
+    if dry_run:
+        from forensics.survey.qualification import QualificationCriteria, qualify_authors
+        criteria = QualificationCriteria(min_articles=min_articles, min_span_days=min_span_days)
+        qualified, disqualified = qualify_authors(db_path, criteria)
+        typer.echo(f"\nQualified: {len(qualified)} authors")
+        typer.echo(f"Disqualified: {len(disqualified)} authors\n")
+        for qa in qualified:
+            typer.echo(
+                f"  {qa.author.name:<30} {qa.total_articles:>5} articles  "
+                f"{qa.date_range_days:>5}d span  {qa.articles_per_year:>5.1f}/yr"
+            )
+        if disqualified:
+            typer.echo(f"\nDisqualified ({len(disqualified)}):")
+            for dq in disqualified[:10]:
+                typer.echo(f"  {dq.author.name:<30} reason: {dq.disqualification_reason}")
+            if len(disqualified) > 10:
+                typer.echo(f"  ... and {len(disqualified) - 10} more")
+        raise typer.Exit(0)
+
+    if not skip_scrape:
+        # Run discovery + full scrape first
+        from forensics.cli.scrape import _dispatch as scrape_dispatch
+        logger.info("survey: running full scrape pipeline first...")
+        rc = asyncio.run(scrape_dispatch(
+            discover=False, metadata=False, fetch=False,
+            dedup=False, archive=False, dry_run=False, force_refresh=False,
+        ))
+        if rc != 0:
+            logger.error("survey: scrape failed with exit code %d", rc)
+            raise typer.Exit(code=rc)
+
+    from forensics.survey.orchestrator import run_survey
+    survey_run = asyncio.run(run_survey(
+        db_path, settings, root,
+        resume_from=resume, author_slug=author,
+    ))
+
+    # Print summary
+    typer.echo(f"\n{'=' * 70}")
+    typer.echo(f"SURVEY COMPLETE — {len(survey_run.results)} authors analyzed")
+    typer.echo(f"{'=' * 70}\n")
+    for r in survey_run.results[:20]:
+        if r.score:
+            indicator = {
+                "strong": "!!!",
+                "moderate": " ! ",
+                "weak": " . ",
+                "none": "   ",
+                "error": "ERR",
+            }.get(r.score.strength.value, "???")
+            typer.echo(
+                f"  [{indicator}] {r.author_name:<30} "
+                f"score={r.score.composite:.3f}  "
+                f"strength={r.score.strength.value:<10} "
+                f"{r.score.evidence_summary[:60]}"
+            )
+        elif r.error:
+            typer.echo(f"  [ERR] {r.author_name:<30} {r.error[:60]}")
+
+    typer.echo(f"\nFull results: {survey_run.checkpoint_path}")
+```
+
+### 1g. Repository Additions
+
+Add `all_authors()` method to `src/forensics/storage/repository.py`:
+
+```python
+def all_authors(self) -> list[Author]:
+    """Return all authors in the database."""
+    rows = self._conn.execute(
+        "SELECT id, name, slug, outlet, role, baseline_start, baseline_end, archive_url "
+        "FROM authors ORDER BY name"
+    ).fetchall()
+    return [
+        Author(
+            id=r[0], name=r[1], slug=r[2], outlet=r[3], role=r[4],
+            baseline_start=r[5], baseline_end=r[6], archive_url=r[7],
+        )
+        for r in rows
+    ]
+```
+
+### 1h. Config additions
+
+Add to `config.toml`:
+
+```toml
+[survey]
+min_articles = 50
+min_span_days = 730
+min_words_per_article = 200
+min_articles_per_year = 12.0
+require_recent_activity = true
+recent_activity_days = 180
+```
+
+Add `SurveyConfig` to `src/forensics/config/settings.py`:
+
+```python
+class SurveyConfig(BaseModel):
+    """Configuration for blind survey mode."""
+
+    min_articles: int = 50
+    min_span_days: int = 730
+    min_words_per_article: int = 200
+    min_articles_per_year: float = 12.0
+    require_recent_activity: bool = True
+    recent_activity_days: int = 180
+```
+
+Add `survey: SurveyConfig = SurveyConfig()` to `ForensicsSettings`.
+
+---
+
+## 2. Interactive TUI Setup Wizard
+
+### 2a. Dependency
+
+Add to `[project.optional-dependencies]` in `pyproject.toml`:
+
+```toml
+tui = [
+    "textual>=1.0.0",
+    "rich>=13.0",
+]
+```
+
+Install with: `uv sync --extra tui`
+
+Note: `rich` is already a transitive dependency of Typer, but pin it explicitly for the TUI.
+
+### 2b. Entry Point
+
+Add to `pyproject.toml` `[project.scripts]`:
+
+```toml
+forensics-setup = "forensics.tui:main"
+```
+
+Also register as a Typer command:
+
+```python
+# In src/forensics/cli/__init__.py
+@app.command(name="setup")
+def setup_wizard() -> None:
+    """Launch the interactive setup wizard (requires textual)."""
+    try:
+        from forensics.tui import main as tui_main
+        tui_main()
+    except ImportError:
+        typer.echo("Setup wizard requires the 'tui' extra: uv sync --extra tui")
+        raise typer.Exit(code=1)
+```
+
+### 2c. TUI Application (src/forensics/tui/__init__.py)
+
+```python
+"""Interactive setup wizard for the forensics pipeline."""
+
+from __future__ import annotations
+
+
+def main() -> None:
+    """Launch the TUI setup wizard."""
+    from forensics.tui.app import ForensicsSetupApp
+    app = ForensicsSetupApp()
+    app.run()
+```
+
+### 2d. TUI App (src/forensics/tui/app.py)
+
+The wizard has 5 screens, navigated sequentially:
+
+```python
+"""Textual TUI application — multi-step setup wizard."""
+
+from __future__ import annotations
+
+from textual.app import App, ComposeResult
+from textual.binding import Binding
+from textual.widgets import Footer, Header
+
+from forensics.tui.screens import (
+    DependencyCheckScreen,
+    AuthorDiscoveryScreen,
+    ConfigGenerationScreen,
+    PreflightScreen,
+    PipelineLaunchScreen,
+)
+
+
+class ForensicsSetupApp(App):
+    """Interactive setup wizard for AI Writing Forensics."""
+
+    TITLE = "AI Writing Forensics — Setup Wizard"
+    CSS_PATH = "styles.tcss"
+    BINDINGS = [
+        Binding("q", "quit", "Quit", show=True),
+        Binding("n", "next_step", "Next", show=True),
+        Binding("b", "prev_step", "Back", show=True),
+    ]
+
+    SCREENS = {
+        "dependencies": DependencyCheckScreen,
+        "discovery": AuthorDiscoveryScreen,
+        "config": ConfigGenerationScreen,
+        "preflight": PreflightScreen,
+        "launch": PipelineLaunchScreen,
+    }
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._step_order = ["dependencies", "discovery", "config", "preflight", "launch"]
+        self._current_step = 0
+        self._wizard_state: dict = {}
+
+    def on_mount(self) -> None:
+        self.push_screen(self._step_order[0])
+
+    def action_next_step(self) -> None:
+        if self._current_step < len(self._step_order) - 1:
+            self._current_step += 1
+            self.push_screen(self._step_order[self._current_step])
+
+    def action_prev_step(self) -> None:
+        if self._current_step > 0:
+            self._current_step -= 1
+            self.pop_screen()
+```
+
+### 2e. Screen 1: Dependency Check (src/forensics/tui/screens/dependencies.py)
+
+```python
+"""Dependency check screen — verify all required tools and models."""
+
+from __future__ import annotations
+
+import shutil
+import subprocess
+import sys
+from dataclasses import dataclass
+
+from textual.app import ComposeResult
+from textual.screen import Screen
+from textual.widgets import Static, DataTable, Button, Label
+
+
+@dataclass
+class DependencyStatus:
+    name: str
+    required: bool
+    installed: bool
+    version: str
+    install_hint: str
+
+
+def check_dependencies() -> list[DependencyStatus]:
+    """Check all required and optional dependencies."""
+    deps = []
+
+    # Python version
+    py_ver = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+    deps.append(DependencyStatus(
+        "Python 3.13+", True, sys.version_info >= (3, 13), py_ver,
+        "Install Python 3.13 via pyenv or brew",
+    ))
+
+    # uv
+    uv_path = shutil.which("uv")
+    deps.append(DependencyStatus(
+        "uv", True, uv_path is not None,
+        _get_version("uv", "--version") if uv_path else "not found",
+        "curl -LsSf https://astral.sh/uv/install.sh | sh",
+    ))
+
+    # spaCy model
+    spacy_ok = _check_spacy_model("en_core_web_sm")
+    deps.append(DependencyStatus(
+        "spaCy en_core_web_sm", True, spacy_ok,
+        "installed" if spacy_ok else "not found",
+        "uv run python -m spacy download en_core_web_sm",
+    ))
+
+    # sentence-transformers model (check if cached)
+    st_ok = _check_sentence_transformers()
+    deps.append(DependencyStatus(
+        "all-MiniLM-L6-v2", True, st_ok,
+        "cached" if st_ok else "will download (~80MB)",
+        "Auto-downloads on first use",
+    ))
+
+    # Quarto (optional for reports)
+    quarto_path = shutil.which("quarto")
+    deps.append(DependencyStatus(
+        "Quarto", False, quarto_path is not None,
+        _get_version("quarto", "--version") if quarto_path else "not found",
+        "brew install quarto  # or https://quarto.org/docs/get-started/",
+    ))
+
+    # Ollama (optional for AI baseline)
+    ollama_path = shutil.which("ollama")
+    deps.append(DependencyStatus(
+        "Ollama", False, ollama_path is not None,
+        _get_version("ollama", "--version") if ollama_path else "not found",
+        "brew install ollama",
+    ))
+
+    # torch (optional for probability features)
+    torch_ok = _check_import("torch")
+    deps.append(DependencyStatus(
+        "PyTorch (Phase 9)", False, torch_ok,
+        "installed" if torch_ok else "not installed",
+        "uv sync --extra probability",
+    ))
+
+    return deps
+
+
+def _check_spacy_model(model_name: str) -> bool:
+    try:
+        import spacy
+        spacy.load(model_name)
+        return True
+    except (ImportError, OSError):
+        return False
+
+
+def _check_sentence_transformers() -> bool:
+    try:
+        from pathlib import Path
+        cache_dir = Path.home() / ".cache" / "torch" / "sentence_transformers"
+        return any(cache_dir.glob("*MiniLM*")) if cache_dir.exists() else False
+    except Exception:
+        return False
+
+
+def _check_import(module: str) -> bool:
+    try:
+        __import__(module)
+        return True
+    except ImportError:
+        return False
+
+
+def _get_version(cmd: str, flag: str) -> str:
+    try:
+        result = subprocess.run([cmd, flag], capture_output=True, text=True, timeout=5)
+        return result.stdout.strip().split("\n")[0]
+    except Exception:
+        return "unknown"
+
+
+class DependencyCheckScreen(Screen):
+    """Step 1: Check dependencies."""
+
+    def compose(self) -> ComposeResult:
+        yield Label("Step 1 of 5: Dependency Check", id="step-label")
+        yield Static("Checking required tools and models...", id="status")
+        yield DataTable(id="dep-table")
+        yield Button("Install Missing (required)", id="install-btn", variant="primary")
+        yield Button("Continue →", id="next-btn", variant="success")
+
+    def on_mount(self) -> None:
+        table = self.query_one("#dep-table", DataTable)
+        table.add_columns("Dependency", "Required", "Status", "Version", "Fix")
+        deps = check_dependencies()
+        for dep in deps:
+            status = "OK" if dep.installed else "MISSING"
+            table.add_row(
+                dep.name,
+                "yes" if dep.required else "optional",
+                status,
+                dep.version,
+                "" if dep.installed else dep.install_hint,
+            )
+
+        missing_required = [d for d in deps if d.required and not d.installed]
+        if missing_required:
+            self.query_one("#status", Static).update(
+                f"[red]{len(missing_required)} required dependency(ies) missing.[/red]"
+            )
+        else:
+            self.query_one("#status", Static).update(
+                "[green]All required dependencies installed.[/green]"
+            )
+```
+
+### 2f. Screen 2: Author Discovery (src/forensics/tui/screens/discovery.py)
+
+This screen runs the WordPress author discovery API and presents results in a selectable table:
+
+```python
+"""Author discovery screen — find all authors, select for analysis."""
+
+from __future__ import annotations
+
+import asyncio
+
+from textual.app import ComposeResult
+from textual.screen import Screen
+from textual.widgets import Static, DataTable, Button, Label, RadioSet, RadioButton
+
+
+class AuthorDiscoveryScreen(Screen):
+    """Step 2: Discover and select authors."""
+
+    def compose(self) -> ComposeResult:
+        yield Label("Step 2 of 5: Author Discovery", id="step-label")
+        yield Static("Discovering authors from Mediaite WordPress API...", id="status")
+        yield RadioSet(
+            RadioButton("Survey all qualified authors (blind mode)", id="mode-blind", value=True),
+            RadioButton("Select specific target/control authors", id="mode-select"),
+            id="mode-select-group",
+        )
+        yield DataTable(id="author-table")
+        yield Button("Discover Authors", id="discover-btn", variant="primary")
+        yield Button("Continue →", id="next-btn", variant="success")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "discover-btn":
+            self._run_discovery()
+
+    def _run_discovery(self) -> None:
+        """Run WordPress author discovery and populate table."""
+        self.query_one("#status", Static).update("Discovering authors... (this may take a minute)")
+
+        # In a worker thread to avoid blocking the TUI
+        async def _discover():
+            from forensics.config import get_settings
+            from forensics.scraper.crawler import discover_authors
+            settings = get_settings()
+            n = await discover_authors(settings, force_refresh=True)
+            return n
+
+        # Schedule the async work
+        self.run_worker(self._populate_table, thread=True)
+
+    def _populate_table(self) -> None:
+        """Populate the author table from the manifest."""
+        from pathlib import Path
+        import json
+        from forensics.config import get_project_root
+
+        manifest_path = get_project_root() / "data" / "authors_manifest.jsonl"
+        if not manifest_path.is_file():
+            self.query_one("#status", Static).update("[red]No manifest found. Click Discover.[/red]")
+            return
+
+        table = self.query_one("#author-table", DataTable)
+        table.clear()
+        table.add_columns("Select", "Name", "Slug", "Articles", "Status")
+
+        with open(manifest_path) as f:
+            for line in f:
+                author = json.loads(line)
+                table.add_row(
+                    "[ ]",
+                    author.get("name", ""),
+                    author.get("slug", ""),
+                    str(author.get("article_count", "?")),
+                    "pending",
+                )
+
+        self.query_one("#status", Static).update(
+            f"[green]Found {table.row_count} authors. Select mode and continue.[/green]"
+        )
+```
+
+### 2g. Screen 3: Config Generation (src/forensics/tui/screens/config.py)
+
+Generates a real `config.toml` from wizard selections:
+
+```python
+"""Config generation screen — write config.toml from wizard state."""
+
+from __future__ import annotations
+
+from textual.app import ComposeResult
+from textual.screen import Screen
+from textual.widgets import Static, TextArea, Button, Label
+
+
+class ConfigGenerationScreen(Screen):
+    """Step 3: Generate config.toml."""
+
+    def compose(self) -> ComposeResult:
+        yield Label("Step 3 of 5: Configuration", id="step-label")
+        yield Static("Review and customize your configuration:", id="status")
+        yield TextArea(id="config-editor", language="toml")
+        yield Button("Write config.toml", id="write-btn", variant="primary")
+        yield Button("Continue →", id="next-btn", variant="success")
+
+    def on_mount(self) -> None:
+        editor = self.query_one("#config-editor", TextArea)
+        # Pre-populate with generated config based on wizard state
+        editor.text = self._generate_config()
+
+    def _generate_config(self) -> str:
+        """Generate config.toml content from wizard state."""
+        # Access wizard state from app
+        state = self.app._wizard_state
+        mode = state.get("mode", "blind")
+        authors = state.get("selected_authors", [])
+
+        lines = ["# Generated by forensics setup wizard\n"]
+
+        if mode == "blind":
+            lines.append("# Survey mode — all authors will be discovered and qualified automatically")
+            lines.append("# The [[authors]] section below is for reference only in survey mode\n")
+        else:
+            for author in authors:
+                lines.append(f'[[authors]]')
+                lines.append(f'name = "{author["name"]}"')
+                lines.append(f'slug = "{author["slug"]}"')
+                lines.append(f'outlet = "mediaite.com"')
+                lines.append(f'role = "{author.get("role", "target")}"')
+                lines.append(f'archive_url = "https://www.mediaite.com/author/{author["slug"]}/"')
+                lines.append(f'baseline_start = 2020-01-01')
+                lines.append(f'baseline_end = 2023-12-31')
+                lines.append("")
+
+        lines.extend([
+            "[scraping]",
+            "rate_limit_seconds = 2.0",
+            "jitter = 0.5",
+            "max_concurrent = 3",
+            "max_retries = 3",
+            "",
+            "[analysis]",
+            "rolling_windows = [30, 90]",
+            "significance_threshold = 0.05",
+            'embedding_model = "sentence-transformers/all-MiniLM-L6-v2"',
+            'changepoint_methods = ["pelt", "bocpd"]',
+            "",
+            "[survey]",
+            "min_articles = 50",
+            "min_span_days = 730",
+            "min_words_per_article = 200",
+            "min_articles_per_year = 12.0",
+            "require_recent_activity = true",
+            "recent_activity_days = 180",
+            "",
+            "[chain_of_custody]",
+            "verify_corpus_hash = true",
+            "verify_raw_archives = true",
+            "",
+            "[report]",
+            'output_format = "html"',
+        ])
+
+        return "\n".join(lines)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "write-btn":
+            from forensics.config import get_project_root
+            config_path = get_project_root() / "config.toml"
+            editor = self.query_one("#config-editor", TextArea)
+            config_path.write_text(editor.text, encoding="utf-8")
+            self.query_one("#status", Static).update(
+                f"[green]Config written to {config_path}[/green]"
+            )
+```
+
+### 2h. Screen 4: Preflight (src/forensics/tui/screens/preflight.py)
+
+Runs the comprehensive preflight validation:
+
+```python
+"""Preflight screen — validate everything before pipeline run."""
+
+from __future__ import annotations
+
+from textual.app import ComposeResult
+from textual.screen import Screen
+from textual.widgets import Static, DataTable, Button, Label
+
+
+class PreflightScreen(Screen):
+    """Step 4: Preflight validation."""
+
+    def compose(self) -> ComposeResult:
+        yield Label("Step 4 of 5: Preflight Validation", id="step-label")
+        yield Static("Running preflight checks...", id="status")
+        yield DataTable(id="preflight-table")
+        yield Button("Run Preflight", id="run-btn", variant="primary")
+        yield Button("Continue →", id="next-btn", variant="success")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "run-btn":
+            self.run_worker(self._run_preflight, thread=True)
+
+    def _run_preflight(self) -> None:
+        """Run all preflight checks."""
+        from forensics.preflight import run_all_preflight_checks
+        results = run_all_preflight_checks()
+
+        table = self.query_one("#preflight-table", DataTable)
+        table.clear()
+        table.add_columns("Check", "Status", "Details")
+
+        all_ok = True
+        for check in results:
+            status = "PASS" if check["passed"] else "FAIL"
+            if not check["passed"] and check["required"]:
+                all_ok = False
+            table.add_row(check["name"], status, check["detail"])
+
+        if all_ok:
+            self.query_one("#status", Static).update("[green]All preflight checks passed![/green]")
+        else:
+            self.query_one("#status", Static).update(
+                "[red]Some required checks failed. Fix issues before continuing.[/red]"
+            )
+```
+
+### 2i. Screen 5: Pipeline Launch (src/forensics/tui/screens/launch.py)
+
+```python
+"""Pipeline launch screen — kick off the analysis."""
+
+from __future__ import annotations
+
+from textual.app import ComposeResult
+from textual.screen import Screen
+from textual.widgets import Static, Button, Label, ProgressBar, RichLog
+
+
+class PipelineLaunchScreen(Screen):
+    """Step 5: Launch the pipeline."""
+
+    def compose(self) -> ComposeResult:
+        yield Label("Step 5 of 5: Launch Pipeline", id="step-label")
+        yield Static("Ready to launch. Choose your run mode:", id="status")
+        yield Button("Run Full Survey (blind mode)", id="survey-btn", variant="primary")
+        yield Button("Run Targeted Analysis", id="targeted-btn", variant="default")
+        yield ProgressBar(id="progress", total=100, show_eta=True)
+        yield RichLog(id="log", highlight=True, markup=True)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "survey-btn":
+            self.run_worker(self._run_survey, thread=True)
+        elif event.button.id == "targeted-btn":
+            self.run_worker(self._run_targeted, thread=True)
+
+    def _run_survey(self) -> None:
+        log = self.query_one("#log", RichLog)
+        log.write("[bold]Starting blind survey...[/bold]")
+        # Delegate to survey orchestrator
+        # Update progress bar as authors complete
+        import asyncio
+        from forensics.config import get_project_root, get_settings
+        from forensics.survey.orchestrator import run_survey
+
+        settings = get_settings()
+        root = get_project_root()
+        db_path = root / "data" / "articles.db"
+
+        result = asyncio.run(run_survey(db_path, settings, root))
+        log.write(f"[green]Survey complete: {len(result.results)} authors processed[/green]")
+
+    def _run_targeted(self) -> None:
+        log = self.query_one("#log", RichLog)
+        log.write("[bold]Starting targeted analysis...[/bold]")
+        # Delegate to existing pipeline.run_all_pipeline()
+```
+
+### 2j. Screen package (src/forensics/tui/screens/__init__.py)
+
+```python
+"""TUI wizard screens."""
+
+from forensics.tui.screens.dependencies import DependencyCheckScreen
+from forensics.tui.screens.discovery import AuthorDiscoveryScreen
+from forensics.tui.screens.config import ConfigGenerationScreen
+from forensics.tui.screens.preflight import PreflightScreen
+from forensics.tui.screens.launch import PipelineLaunchScreen
+
+__all__ = [
+    "DependencyCheckScreen",
+    "AuthorDiscoveryScreen",
+    "ConfigGenerationScreen",
+    "PreflightScreen",
+    "PipelineLaunchScreen",
+]
+```
+
+### 2k. TUI Styles (src/forensics/tui/styles.tcss)
+
+```css
+Screen {
+    layout: vertical;
+    padding: 1 2;
+}
+
+#step-label {
+    text-style: bold;
+    color: $accent;
+    margin-bottom: 1;
+}
+
+#status {
+    margin-bottom: 1;
+}
+
+DataTable {
+    height: 1fr;
+    margin-bottom: 1;
+}
+
+Button {
+    margin: 0 1;
+}
+
+#config-editor {
+    height: 1fr;
+    margin-bottom: 1;
+}
+
+#log {
+    height: 1fr;
+    margin-top: 1;
+    border: solid $primary;
+}
+
+ProgressBar {
+    margin-top: 1;
+}
+```
+
+---
+
+## 3. Preflight & Runtime Hardening
+
+### 3a. Preflight Module (src/forensics/preflight.py)
+
+```python
+"""Preflight checks — validate environment before pipeline runs."""
+
+from __future__ import annotations
+
+import logging
+import shutil
+from pathlib import Path
+
+from forensics.config import get_project_root, get_settings
+
+logger = logging.getLogger(__name__)
+
+
+def run_all_preflight_checks() -> list[dict]:
+    """Run all preflight checks and return structured results.
+
+    Each result: {"name": str, "passed": bool, "required": bool, "detail": str}
+    """
+    results = []
+    settings = get_settings()
+
+    # 1. Config file exists and parses
+    results.append(_check_config())
+
+    # 2. Database directory writable
+    results.append(_check_data_dir())
+
+    # 3. spaCy model
+    results.append(_check_spacy())
+
+    # 4. Sentence-transformer model
+    results.append(_check_sentence_transformer(settings.analysis.embedding_model))
+
+    # 5. Quarto (optional but warn)
+    results.append(_check_quarto())
+
+    # 6. Ollama (optional)
+    results.append(_check_ollama(settings))
+
+    # 7. Disk space (warn if < 5GB free)
+    results.append(_check_disk_space())
+
+    # 8. No placeholder authors in config
+    results.append(_check_no_placeholders(settings))
+
+    return results
+
+
+def _check_config() -> dict:
+    try:
+        from forensics.config.settings import get_settings
+        get_settings()
+        return {"name": "Config file", "passed": True, "required": True, "detail": "config.toml parses successfully"}
+    except Exception as exc:
+        return {"name": "Config file", "passed": False, "required": True, "detail": str(exc)}
+
+
+def _check_data_dir() -> dict:
+    root = get_project_root()
+    data_dir = root / "data"
+    try:
+        data_dir.mkdir(parents=True, exist_ok=True)
+        test_file = data_dir / ".preflight_test"
+        test_file.write_text("ok")
+        test_file.unlink()
+        return {"name": "Data directory", "passed": True, "required": True, "detail": f"{data_dir} is writable"}
+    except Exception as exc:
+        return {"name": "Data directory", "passed": False, "required": True, "detail": str(exc)}
+
+
+def _check_spacy() -> dict:
+    try:
+        import spacy
+        nlp = spacy.load("en_core_web_sm")
+        return {"name": "spaCy model", "passed": True, "required": True, "detail": f"en_core_web_sm loaded ({nlp.meta['version']})"}
+    except (ImportError, OSError) as exc:
+        return {"name": "spaCy model", "passed": False, "required": True, "detail": f"Run: uv run python -m spacy download en_core_web_sm ({exc})"}
+
+
+def _check_sentence_transformer(model_name: str) -> dict:
+    try:
+        from sentence_transformers import SentenceTransformer
+        model = SentenceTransformer(model_name)
+        dim = model.get_sentence_embedding_dimension()
+        return {"name": "Embedding model", "passed": True, "required": True, "detail": f"{model_name} ({dim}-dim)"}
+    except Exception as exc:
+        return {"name": "Embedding model", "passed": False, "required": True, "detail": f"Will auto-download on first use ({exc})"}
+
+
+def _check_quarto() -> dict:
+    quarto = shutil.which("quarto")
+    if quarto:
+        return {"name": "Quarto", "passed": True, "required": False, "detail": f"Found at {quarto}"}
+    return {"name": "Quarto", "passed": False, "required": False, "detail": "Not found — reports will not render. Install: brew install quarto"}
+
+
+def _check_ollama(settings) -> dict:
+    if not hasattr(settings, "baseline") or not settings.baseline:
+        return {"name": "Ollama", "passed": True, "required": False, "detail": "Baseline not configured, skipping"}
+    ollama = shutil.which("ollama")
+    if ollama:
+        return {"name": "Ollama", "passed": True, "required": False, "detail": f"Found at {ollama}"}
+    return {"name": "Ollama", "passed": False, "required": False, "detail": "Not found — AI baseline generation unavailable"}
+
+
+def _check_disk_space() -> dict:
+    import shutil as sh
+    root = get_project_root()
+    usage = sh.disk_usage(root)
+    free_gb = usage.free / (1024 ** 3)
+    if free_gb >= 5.0:
+        return {"name": "Disk space", "passed": True, "required": True, "detail": f"{free_gb:.1f} GB free"}
+    return {"name": "Disk space", "passed": False, "required": True, "detail": f"Only {free_gb:.1f} GB free — need at least 5 GB"}
+
+
+def _check_no_placeholders(settings) -> dict:
+    placeholder_slugs = {"placeholder-target", "placeholder-control"}
+    placeholders = [a for a in settings.authors if a.slug in placeholder_slugs]
+    if placeholders:
+        return {
+            "name": "Author config",
+            "passed": False,
+            "required": True,
+            "detail": "config.toml still has placeholder authors — run setup wizard or edit manually",
+        }
+    return {"name": "Author config", "passed": True, "required": True, "detail": f"{len(settings.authors)} author(s) configured"}
+```
+
+### 3b. CLI Integration
+
+Add a preflight command:
+
+```python
+# In src/forensics/cli/__init__.py
+@app.command(name="preflight")
+def preflight() -> None:
+    """Run preflight checks to validate environment."""
+    from forensics.preflight import run_all_preflight_checks
+    results = run_all_preflight_checks()
+
+    all_ok = True
+    for r in results:
+        icon = "PASS" if r["passed"] else ("FAIL" if r["required"] else "WARN")
+        if not r["passed"] and r["required"]:
+            all_ok = False
+        typer.echo(f"  [{icon}] {r['name']}: {r['detail']}")
+
+    if all_ok:
+        typer.echo("\nAll preflight checks passed.")
+        raise typer.Exit(0)
+    else:
+        typer.echo("\nSome required checks failed. Fix issues before running the pipeline.")
+        raise typer.Exit(1)
+```
+
+### 3c. Early-Article Peer Set Handling
+
+In `src/forensics/features/content.py`, add minimum peer threshold:
+
+```python
+MIN_PEERS_FOR_SIMILARITY = 5
+
+def compute_self_similarity(
+    texts_window: list[str],
+    current_text: str,
+    min_peers: int = MIN_PEERS_FOR_SIMILARITY,
+) -> float | None:
+    """Compute TF-IDF cosine similarity against peer articles.
+
+    Returns None if fewer than min_peers are available (insufficient data).
+    Downstream code must handle None — do not impute a value.
+    """
+    if len(texts_window) < min_peers:
+        return None
+    # ... existing TF-IDF cosine logic ...
+```
+
+Update `FeatureVector.content.self_similarity_30d` and `self_similarity_90d` types to `float | None` and handle `None` in:
+- Parquet serialization (Polars handles null natively)
+- Change-point detection (skip features with >20% null values)
+- Hypothesis testing (filter nulls before test)
+
+### 3d. Configurable Dedup Threshold
+
+Move simhash threshold from hardcoded to `config.toml`:
+
+```toml
+[scraping]
+simhash_threshold = 3  # hamming distance; lower = stricter
+```
+
+Add `simhash_threshold: int = 3` to `ScrapingConfig`. Update `src/forensics/scraper/dedup.py` to accept the threshold:
+
+```python
+def deduplicate_articles(db_path: Path, threshold: int = 3) -> list[str]:
+    """Mark near-duplicate articles based on simhash hamming distance."""
+    ...
+```
+
+### 3e. Progress Reporting
+
+Add `rich.progress` bars to long-running operations. In `src/forensics/features/pipeline.py`:
+
+```python
+from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
+
+def extract_all_features(
+    db_path: Path,
+    settings: ForensicsSettings,
+    author_slug: str | None = None,
+    skip_embeddings: bool = False,
+) -> int:
+    """Extract features with progress reporting."""
+    ...
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+        TimeElapsedColumn(),
+    ) as progress:
+        for author in authors_to_process:
+            articles = repo.articles_for_author(author.id)
+            task = progress.add_task(f"Extracting {author.name}", total=len(articles))
+            for article in articles:
+                # ... extract features ...
+                progress.update(task, advance=1)
+    ...
+```
+
+Apply the same pattern to `survey/orchestrator.py` for the per-author survey loop.
+
+### 3f. Preflight at Pipeline Start
+
+In `src/forensics/pipeline.py` `run_all_pipeline()`, add preflight:
+
+```python
+def run_all_pipeline() -> int:
+    """Run full pipeline with preflight validation."""
+    from forensics.preflight import run_all_preflight_checks
+
+    results = run_all_preflight_checks()
+    failures = [r for r in results if not r["passed"] and r["required"]]
+    if failures:
+        for f in failures:
+            logger.error("preflight FAIL: %s — %s", f["name"], f["detail"])
+        logger.error("Fix preflight failures before running the pipeline.")
+        return 1
+
+    # ... existing pipeline logic ...
+```
+
+---
+
+## 4. Calibration Suite
+
+### 4a. Design
+
+The calibration suite answers: "How accurate is this detector?" It creates a known-truth scenario by taking a real author's archive, splicing in AI-generated articles at a known date, running the full pipeline, and checking whether the detector finds the transition.
+
+Two metrics:
+- **Sensitivity (true positive rate):** What fraction of synthetic spliced archives does the detector correctly flag?
+- **Specificity (true negative rate):** What fraction of unmodified archives does the detector correctly pass?
+
+### 4b. Calibration Module (src/forensics/calibration/__init__.py)
+
+```python
+"""Calibration suite — validate detection accuracy against synthetic ground truth."""
+```
+
+### 4c. Synthetic Corpus Builder (src/forensics/calibration/synthetic.py)
+
+```python
+"""Build synthetic corpora with known AI splice points for calibration."""
+
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass
+from datetime import date, datetime
+from pathlib import Path
+
+from forensics.models.article import Article
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class SyntheticCorpus:
+    """A synthetic corpus with known ground truth."""
+
+    author_slug: str
+    splice_date: date | None  # None = unmodified (negative control)
+    original_articles: list[Article]
+    synthetic_articles: list[Article]  # AI-generated replacements (empty if no splice)
+    combined_articles: list[Article]  # Original pre-splice + synthetic post-splice
+
+
+def build_spliced_corpus(
+    author_slug: str,
+    articles: list[Article],
+    splice_date: date,
+    ai_articles: list[Article],
+) -> SyntheticCorpus:
+    """Replace articles after splice_date with AI-generated versions.
+
+    Args:
+        author_slug: Author identifier
+        articles: Original article archive (sorted by date)
+        splice_date: Date to splice — articles AFTER this date are replaced
+        ai_articles: AI-generated articles to substitute (from Phase 10 baseline)
+
+    Returns:
+        SyntheticCorpus with known ground truth splice point.
+    """
+    pre_splice = [a for a in articles if a.published_date.date() <= splice_date]
+    post_splice_originals = [a for a in articles if a.published_date.date() > splice_date]
+
+    # Match AI articles to post-splice dates
+    combined = list(pre_splice)
+    for i, orig in enumerate(post_splice_originals):
+        if i < len(ai_articles):
+            # Replace content but keep original metadata (date, url)
+            replacement = Article(
+                id=f"synthetic_{orig.id}",
+                author_id=orig.author_id,
+                url=orig.url,
+                title=orig.title,
+                published_date=orig.published_date,
+                clean_text=ai_articles[i].clean_text,
+                word_count=len(ai_articles[i].clean_text.split()),
+                metadata={"synthetic": True, "original_id": orig.id},
+                content_hash=None,  # Will be recomputed
+            )
+            combined.append(replacement)
+        else:
+            combined.append(orig)  # Not enough AI articles to replace all
+
+    return SyntheticCorpus(
+        author_slug=author_slug,
+        splice_date=splice_date,
+        original_articles=articles,
+        synthetic_articles=ai_articles[:len(post_splice_originals)],
+        combined_articles=combined,
+    )
+
+
+def build_negative_control(
+    author_slug: str,
+    articles: list[Article],
+) -> SyntheticCorpus:
+    """Build an unmodified corpus as a negative control."""
+    return SyntheticCorpus(
+        author_slug=author_slug,
+        splice_date=None,
+        original_articles=articles,
+        synthetic_articles=[],
+        combined_articles=list(articles),
+    )
+```
+
+### 4d. Calibration Runner (src/forensics/calibration/runner.py)
+
+```python
+"""Run calibration trials and compute detection accuracy metrics."""
+
+from __future__ import annotations
+
+import json
+import logging
+from dataclasses import dataclass
+from datetime import date
+from pathlib import Path
+
+from forensics.calibration.synthetic import SyntheticCorpus, build_spliced_corpus, build_negative_control
+from forensics.config.settings import ForensicsSettings
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class CalibrationTrial:
+    """One calibration trial result."""
+
+    author_slug: str
+    splice_date: date | None
+    is_positive: bool  # True = spliced, False = unmodified
+    detected: bool  # Did the pipeline flag this?
+    detection_date: date | None  # When did the pipeline think the transition happened?
+    composite_score: float
+    convergence_windows: int
+    date_error_days: int | None  # Abs difference between true and detected splice date
+
+
+@dataclass(frozen=True)
+class CalibrationReport:
+    """Aggregate calibration metrics."""
+
+    trials: list[CalibrationTrial]
+    sensitivity: float  # TP / (TP + FN)
+    specificity: float  # TN / (TN + FP)
+    precision: float    # TP / (TP + FP)
+    f1_score: float
+    median_date_error_days: float | None  # How close detections are to true splice date
+
+
+async def run_calibration(
+    db_path: Path,
+    settings: ForensicsSettings,
+    project_root: Path,
+    *,
+    n_positive_trials: int = 5,
+    n_negative_trials: int = 5,
+    author_slug: str | None = None,
+) -> CalibrationReport:
+    """Run calibration trials and compute accuracy metrics.
+
+    1. Select author(s) with sufficient article volume
+    2. For each positive trial:
+       a. Pick a random splice date (between 30% and 70% of article span)
+       b. Build spliced corpus using Phase 10 AI baseline articles
+       c. Run full pipeline on spliced corpus
+       d. Record whether detection fired and at what date
+    3. For each negative trial:
+       a. Run full pipeline on unmodified corpus
+       b. Record whether detection incorrectly fired (false positive)
+    4. Compute sensitivity, specificity, precision, F1
+    """
+    trials: list[CalibrationTrial] = []
+    # ... trial execution logic ...
+
+    # Compute metrics
+    tp = sum(1 for t in trials if t.is_positive and t.detected)
+    fn = sum(1 for t in trials if t.is_positive and not t.detected)
+    tn = sum(1 for t in trials if not t.is_positive and not t.detected)
+    fp = sum(1 for t in trials if not t.is_positive and t.detected)
+
+    sensitivity = tp / max(tp + fn, 1)
+    specificity = tn / max(tn + fp, 1)
+    precision = tp / max(tp + fp, 1)
+    f1 = 2 * precision * sensitivity / max(precision + sensitivity, 0.001)
+
+    date_errors = [t.date_error_days for t in trials if t.date_error_days is not None]
+    median_err = sorted(date_errors)[len(date_errors) // 2] if date_errors else None
+
+    report = CalibrationReport(
+        trials=trials,
+        sensitivity=sensitivity,
+        specificity=specificity,
+        precision=precision,
+        f1_score=f1,
+        median_date_error_days=median_err,
+    )
+
+    # Write report
+    _write_calibration_report(report, project_root / "data" / "calibration")
+    return report
+
+
+def _write_calibration_report(report: CalibrationReport, output_dir: Path) -> None:
+    """Write calibration results to JSON."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    out = {
+        "sensitivity": report.sensitivity,
+        "specificity": report.specificity,
+        "precision": report.precision,
+        "f1_score": report.f1_score,
+        "median_date_error_days": report.median_date_error_days,
+        "n_trials": len(report.trials),
+        "trials": [
+            {
+                "author": t.author_slug,
+                "splice_date": t.splice_date.isoformat() if t.splice_date else None,
+                "is_positive": t.is_positive,
+                "detected": t.detected,
+                "detection_date": t.detection_date.isoformat() if t.detection_date else None,
+                "composite_score": t.composite_score,
+                "date_error_days": t.date_error_days,
+            }
+            for t in report.trials
+        ],
+    }
+    path = output_dir / "calibration_report.json"
+    path.write_text(json.dumps(out, indent=2), encoding="utf-8")
+    logger.info("calibration: report written to %s", path)
+```
+
+### 4e. CLI Integration
+
+```python
+# In src/forensics/cli/__init__.py
+from forensics.cli.calibrate import calibrate
+app.command(name="calibrate")(calibrate)
+```
+
+Create `src/forensics/cli/calibrate.py`:
+
+```python
+"""Calibrate subcommand — validate detection accuracy."""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from typing import Annotated, Optional
+
+import typer
+
+logger = logging.getLogger(__name__)
+
+
+def calibrate(
+    positive_trials: Annotated[
+        int,
+        typer.Option("--positive-trials", help="Number of spliced corpus trials (default: 5)"),
+    ] = 5,
+    negative_trials: Annotated[
+        int,
+        typer.Option("--negative-trials", help="Number of unmodified corpus trials (default: 5)"),
+    ] = 5,
+    author: Annotated[
+        Optional[str],
+        typer.Option("--author", metavar="SLUG", help="Calibrate with specific author's corpus"),
+    ] = None,
+) -> None:
+    """Validate detection accuracy against synthetic ground truth."""
+    from forensics.calibration.runner import run_calibration
+    from forensics.config import get_project_root, get_settings
+
+    settings = get_settings()
+    root = get_project_root()
+    db_path = root / "data" / "articles.db"
+
+    report = asyncio.run(run_calibration(
+        db_path, settings, root,
+        n_positive_trials=positive_trials,
+        n_negative_trials=negative_trials,
+        author_slug=author,
+    ))
+
+    typer.echo(f"\nCalibration Results ({len(report.trials)} trials)")
+    typer.echo(f"{'=' * 50}")
+    typer.echo(f"  Sensitivity (TPR):  {report.sensitivity:.1%}")
+    typer.echo(f"  Specificity (TNR):  {report.specificity:.1%}")
+    typer.echo(f"  Precision:          {report.precision:.1%}")
+    typer.echo(f"  F1 Score:           {report.f1_score:.3f}")
+    if report.median_date_error_days is not None:
+        typer.echo(f"  Date accuracy:      {report.median_date_error_days:.0f} days median error")
+```
+
+---
+
+## 5. Statistical Rigor Improvements
+
+### 5a. Pre-Registration Locking (src/forensics/preregistration.py)
+
+```python
+"""Pre-registration locking — freeze analysis thresholds before looking at data."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import logging
+from datetime import UTC, datetime
+from pathlib import Path
+
+from forensics.config.settings import ForensicsSettings
+
+logger = logging.getLogger(__name__)
+
+
+def lock_preregistration(settings: ForensicsSettings, output_dir: Path) -> Path:
+    """Snapshot current analysis thresholds into a locked, timestamped file.
+
+    The lock file records:
+    - All analysis config thresholds (significance, effect size, convergence ratio)
+    - Survey qualification criteria
+    - Timestamp and config hash
+    - SHA256 of the serialized content (tamper detection)
+
+    The analysis pipeline checks for this file and WARNS if thresholds
+    have been modified since the lock was created.
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    payload = {
+        "locked_at": datetime.now(UTC).isoformat(),
+        "analysis": {
+            "significance_threshold": settings.analysis.significance_threshold,
+            "effect_size_threshold": getattr(settings.analysis, "effect_size_threshold", 0.5),
+            "convergence_min_feature_ratio": getattr(settings.analysis, "convergence_min_feature_ratio", 0.6),
+            "convergence_window_days": getattr(settings.analysis, "convergence_window_days", 90),
+            "changepoint_methods": settings.analysis.changepoint_methods,
+            "rolling_windows": settings.analysis.rolling_windows,
+        },
+        "survey": settings.survey.model_dump() if hasattr(settings, "survey") else {},
+    }
+
+    content = json.dumps(payload, indent=2, sort_keys=True, default=str)
+    payload["content_hash"] = hashlib.sha256(content.encode()).hexdigest()
+
+    lock_path = output_dir / "preregistration_lock.json"
+    lock_path.write_text(
+        json.dumps(payload, indent=2, sort_keys=True, default=str),
+        encoding="utf-8",
+    )
+    logger.info("preregistration: locked thresholds to %s", lock_path)
+    return lock_path
+
+
+def verify_preregistration(settings: ForensicsSettings, lock_dir: Path) -> tuple[bool, str]:
+    """Check if current thresholds match the locked pre-registration.
+
+    Returns:
+        (matches, message) — matches=True if thresholds are unchanged.
+    """
+    lock_path = lock_dir / "preregistration_lock.json"
+    if not lock_path.is_file():
+        return True, "No pre-registration lock found (analysis is exploratory, not confirmatory)."
+
+    lock = json.loads(lock_path.read_text(encoding="utf-8"))
+    locked_analysis = lock.get("analysis", {})
+
+    diffs = []
+    current = settings.analysis
+    if current.significance_threshold != locked_analysis.get("significance_threshold"):
+        diffs.append(f"significance_threshold: locked={locked_analysis.get('significance_threshold')}, current={current.significance_threshold}")
+    if getattr(current, "effect_size_threshold", 0.5) != locked_analysis.get("effect_size_threshold"):
+        diffs.append(f"effect_size_threshold changed")
+    if current.changepoint_methods != locked_analysis.get("changepoint_methods"):
+        diffs.append(f"changepoint_methods changed")
+
+    if diffs:
+        return False, f"Pre-registration VIOLATED — thresholds changed since lock: {'; '.join(diffs)}"
+    return True, f"Pre-registration intact (locked at {lock.get('locked_at', 'unknown')})"
+
+
+# CLI integration
+def _cli_lock(output_dir: str | None = None) -> None:
+    """CLI wrapper for locking pre-registration."""
+    from forensics.config import get_project_root, get_settings
+    settings = get_settings()
+    root = get_project_root()
+    out = Path(output_dir) if output_dir else root / "data" / "preregistration"
+    lock_preregistration(settings, out)
+```
+
+Add CLI command:
+
+```python
+# In src/forensics/cli/__init__.py
+@app.command(name="lock-preregistration")
+def lock_prereg() -> None:
+    """Lock analysis thresholds for pre-registration (run before analyzing data)."""
+    from forensics.config import get_project_root, get_settings
+    from forensics.preregistration import lock_preregistration
+    settings = get_settings()
+    root = get_project_root()
+    path = lock_preregistration(settings, root / "data" / "preregistration")
+    typer.echo(f"Pre-registration locked: {path}")
+    typer.echo("Run analysis AFTER this point. Threshold changes will trigger warnings.")
+```
+
+### 5b. Permutation-Based Significance (src/forensics/analysis/permutation.py)
+
+```python
+"""Permutation tests for convergence score significance."""
+
+from __future__ import annotations
+
+import logging
+from datetime import datetime
+
+import numpy as np
+
+from forensics.models.analysis import ChangePoint, ConvergenceWindow
+
+logger = logging.getLogger(__name__)
+
+
+def permutation_test_convergence(
+    change_points: list[ChangePoint],
+    timestamps: list[datetime],
+    observed_convergence_ratio: float,
+    n_permutations: int = 1000,
+    seed: int = 42,
+) -> float:
+    """Compute empirical p-value for the observed convergence ratio.
+
+    Null hypothesis: change-point timestamps are random with respect to
+    article dates (no true transition occurred).
+
+    Procedure:
+    1. Shuffle article timestamps randomly (break true temporal order)
+    2. Re-assign change-point timestamps from shuffled dates
+    3. Re-run convergence detection on shuffled data
+    4. Count how often shuffled convergence >= observed convergence
+    5. p-value = (count + 1) / (n_permutations + 1)
+
+    This handles the multiple comparisons burden more robustly than
+    parametric corrections because it directly tests the convergence
+    statistic under the null.
+    """
+    rng = np.random.default_rng(seed)
+    n_extreme = 0
+
+    for _ in range(n_permutations):
+        shuffled_timestamps = rng.permutation(timestamps)
+        # Re-map change-points to shuffled timeline
+        shuffled_ratio = _compute_shuffled_convergence(
+            change_points, shuffled_timestamps,
+        )
+        if shuffled_ratio >= observed_convergence_ratio:
+            n_extreme += 1
+
+    p_value = (n_extreme + 1) / (n_permutations + 1)
+    logger.debug(
+        "permutation test: observed=%.3f, p=%.4f (%d/%d extreme)",
+        observed_convergence_ratio, p_value, n_extreme, n_permutations,
+    )
+    return p_value
+
+
+def _compute_shuffled_convergence(
+    change_points: list[ChangePoint],
+    shuffled_timestamps: np.ndarray,
+) -> float:
+    """Compute max convergence ratio under shuffled timestamps."""
+    # Re-assign random timestamps to change-points
+    # Then check for 90-day windows with high feature agreement
+    if not change_points or len(shuffled_timestamps) == 0:
+        return 0.0
+
+    # Sample random timestamps for each change-point
+    rng = np.random.default_rng()
+    cp_times = rng.choice(shuffled_timestamps, size=len(change_points), replace=True)
+
+    # Group by 90-day windows and compute max ratio
+    window_days = 90
+    features_per_window: dict[int, set[str]] = {}
+    for cp, ts in zip(change_points, cp_times):
+        window_key = int(ts.timestamp()) // (window_days * 86400)
+        if window_key not in features_per_window:
+            features_per_window[window_key] = set()
+        features_per_window[window_key].add(cp.feature_name)
+
+    total_features = len({cp.feature_name for cp in change_points})
+    if total_features == 0:
+        return 0.0
+
+    max_ratio = max(
+        (len(feats) / total_features for feats in features_per_window.values()),
+        default=0.0,
+    )
+    return max_ratio
+```
+
+### 5c. Natural Control Cohort
+
+In survey mode, authors who show no AI adoption signal become the natural control cohort. Add to `src/forensics/survey/scoring.py`:
+
+```python
+def identify_natural_controls(
+    results: list[SurveyResult],
+    max_composite_score: float = 0.10,
+) -> list[SurveyResult]:
+    """Identify authors with no AI signal as natural controls.
+
+    These are authors whose composite score is below the threshold,
+    indicating no detectable style transition. They serve as the
+    control cohort for validating flagged authors.
+    """
+    return [
+        r for r in results
+        if r.score is not None
+        and r.score.composite <= max_composite_score
+        and r.score.strength == SignalStrength.NONE
+        and r.error is None
+    ]
+
+
+def validate_against_controls(
+    flagged: list[SurveyResult],
+    controls: list[SurveyResult],
+) -> dict:
+    """Test whether flagged authors differ significantly from natural controls.
+
+    For each flagged author, compare their feature distributions against
+    the control cohort using the same statistical tests (Welch, Mann-Whitney).
+    If flagged authors don't significantly differ from controls, the signal
+    may be editorial rather than author-specific.
+    """
+    # ... implementation: load features for flagged + control authors,
+    # run per-feature statistical comparisons, compute effect sizes
+    pass
+```
+
+---
+
+## 6. Report Overhaul for Survey Mode
+
+### 6a. Survey Dashboard Notebook (notebooks/00_survey_dashboard.ipynb)
+
+Add a new top-level notebook that renders the survey summary:
+
+- Ranked table of all analyzed authors with composite scores and signal strength badges
+- Sparkline-style mini-charts for each signal type per author (stylometric, drift, perplexity, convergence)
+- Distribution histogram of composite scores across the newsroom
+- Timeline showing detected transition dates for flagged authors
+- Natural control cohort statistics
+
+### 6b. Per-Author Drill-Down Template
+
+Update the existing notebooks (05-07) to accept an `author_slug` parameter so they can be rendered once per flagged author via Quarto parameterized rendering:
+
+```yaml
+# In each notebook's YAML header
+params:
+  author_slug: "all"  # Override with --execute-params author_slug=john-doe
+```
+
+### 6c. Methodology & Calibration Section
+
+Add `notebooks/03a_calibration.ipynb`:
+
+- Display calibration results (sensitivity, specificity, F1)
+- Show per-trial details (splice date, detected date, date error)
+- Visualize ROC-like curve across composite score thresholds
+- Include pre-registration lock verification status
+
+### 6d. Evidence Chain Narrative
+
+For each flagged author (MODERATE or STRONG), generate a structured evidence paragraph in the report:
+
+```
+Author X showed a convergence window starting [date], with [N] features
+shifting simultaneously ([feature list]). The strongest signals were
+[top 3 features by effect size]. Embedding drift velocity increased
+[X]% relative to their pre-2023 baseline. [If Pipeline C available:]
+Mean perplexity dropped from [Y] to [Z], consistent with AI-assisted
+generation. [If controls available:] This pattern was not observed in
+[N] control authors from the same period, suggesting an author-specific
+rather than editorial change.
+```
+
+Add `src/forensics/reporting/narrative.py`:
+
+```python
+"""Generate evidence chain narratives for flagged authors."""
+
+from __future__ import annotations
+
+from forensics.models.analysis import AnalysisResult
+from forensics.survey.scoring import SurveyScore
+
+
+def generate_evidence_narrative(
+    analysis: AnalysisResult,
+    score: SurveyScore,
+    control_count: int = 0,
+) -> str:
+    """Generate a structured evidence paragraph for a flagged author."""
+    parts = []
+
+    # Convergence windows
+    if analysis.convergence_windows:
+        strongest = max(analysis.convergence_windows, key=lambda w: w.convergence_ratio)
+        parts.append(
+            f"showed a convergence window starting {strongest.start_date.isoformat()}, "
+            f"with {len(strongest.features_converging)} features shifting simultaneously "
+            f"({', '.join(strongest.features_converging[:5])}{'...' if len(strongest.features_converging) > 5 else ''})"
+        )
+
+    # Top effect sizes
+    sig_tests = sorted(
+        [t for t in analysis.hypothesis_tests if t.significant],
+        key=lambda t: abs(t.effect_size_cohens_d),
+        reverse=True,
+    )
+    if sig_tests:
+        top3 = sig_tests[:3]
+        features = ", ".join(f"{t.feature_name} (d={t.effect_size_cohens_d:.2f})" for t in top3)
+        parts.append(f"The strongest signals were {features}")
+
+    # Drift
+    if analysis.drift_scores:
+        vels = analysis.drift_scores.monthly_centroid_velocities
+        if len(vels) >= 6:
+            early_avg = sum(vels[:len(vels)//2]) / max(len(vels)//2, 1)
+            late_avg = sum(vels[len(vels)//2:]) / max(len(vels)//2, 1)
+            if early_avg > 0:
+                pct = ((late_avg - early_avg) / early_avg) * 100
+                parts.append(f"Embedding drift velocity increased {pct:.0f}% relative to baseline")
+
+    # Controls
+    if control_count > 0:
+        parts.append(
+            f"This pattern was not observed in {control_count} control authors "
+            "from the same period, suggesting an author-specific rather than editorial change"
+        )
+
+    if not parts:
+        return score.evidence_summary
+
+    author_id = analysis.author_id
+    return f"Author {author_id} " + ". ".join(parts) + "."
+```
+
+---
+
+## 7. Operational Quality of Life
+
+### 7a. Config Validation Command
+
+```python
+# In src/forensics/cli/__init__.py
+@app.command(name="validate")
+def validate_config(
+    check_endpoints: Annotated[
+        bool,
+        typer.Option("--check-endpoints", help="Verify author slugs resolve to real WordPress endpoints"),
+    ] = False,
+) -> None:
+    """Validate config.toml and optionally check WordPress endpoints."""
+    import asyncio
+    from forensics.config import get_settings
+    from forensics.preflight import run_all_preflight_checks
+
+    try:
+        settings = get_settings()
+        typer.echo(f"Config parsed: {len(settings.authors)} author(s)")
+    except Exception as exc:
+        typer.echo(f"Config error: {exc}")
+        raise typer.Exit(1)
+
+    results = run_all_preflight_checks()
+    for r in results:
+        icon = "PASS" if r["passed"] else "FAIL"
+        typer.echo(f"  [{icon}] {r['name']}: {r['detail']}")
+
+    if check_endpoints:
+        typer.echo("\nChecking WordPress endpoints...")
+        for author in settings.authors:
+            ok = asyncio.run(_check_wp_endpoint(author.slug))
+            status = "OK" if ok else "FAIL"
+            typer.echo(f"  [{status}] {author.name} ({author.slug})")
+
+
+async def _check_wp_endpoint(slug: str) -> bool:
+    """Verify an author slug resolves to a real WordPress author page."""
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"https://www.mediaite.com/wp-json/wp/v2/posts",
+                params={"author_slug": slug, "per_page": 1},
+            )
+            return resp.status_code == 200 and len(resp.json()) > 0
+    except Exception:
+        return False
+```
+
+### 7b. DuckDB Export
+
+```python
+# Add to src/forensics/cli/__init__.py
+@app.command(name="export")
+def export_data(
+    output: Annotated[
+        str,
+        typer.Option("--output", "-o", help="Output path for DuckDB file"),
+    ] = "data/forensics_export.duckdb",
+) -> None:
+    """Export all data to a single DuckDB file for team querying."""
+    from forensics.storage.duckdb_queries import export_to_duckdb
+    from forensics.config import get_project_root
+
+    root = get_project_root()
+    out_path = root / output
+    export_to_duckdb(root / "data", out_path)
+    typer.echo(f"Exported to {out_path}")
+    typer.echo("Query with: duckdb data/forensics_export.duckdb")
+```
+
+Add `export_to_duckdb` to `src/forensics/storage/duckdb_queries.py`:
+
+```python
+def export_to_duckdb(data_dir: Path, output_path: Path) -> None:
+    """Export SQLite + Parquet data into a single DuckDB file.
+
+    Creates tables: authors, articles, features (per-author), analysis_results,
+    survey_results (if available). Team members can query with any DuckDB client.
+    """
+    import duckdb
+
+    conn = duckdb.connect(str(output_path))
+
+    # Import SQLite tables
+    db_path = data_dir / "articles.db"
+    if db_path.is_file():
+        conn.execute(f"INSTALL sqlite; LOAD sqlite;")
+        conn.execute(f"ATTACH '{db_path}' AS sqlite_db (TYPE sqlite)")
+        conn.execute("CREATE TABLE authors AS SELECT * FROM sqlite_db.authors")
+        conn.execute("CREATE TABLE articles AS SELECT * FROM sqlite_db.articles")
+        conn.execute("DETACH sqlite_db")
+
+    # Import feature Parquets
+    features_dir = data_dir / "features"
+    if features_dir.is_dir():
+        parquet_files = list(features_dir.glob("*.parquet"))
+        if parquet_files:
+            conn.execute(f"""
+                CREATE TABLE features AS
+                SELECT * FROM read_parquet('{features_dir}/*.parquet', union_by_name=true)
+            """)
+
+    # Import survey results if available
+    survey_dir = data_dir / "survey"
+    if survey_dir.is_dir():
+        for result_file in survey_dir.glob("survey_results_*.json"):
+            # Parse JSON and create a table from rankings
+            import json
+            data = json.loads(result_file.read_text())
+            rankings = data.get("rankings", [])
+            if rankings:
+                conn.execute("CREATE TABLE survey_rankings AS SELECT * FROM read_json_auto(?)", [str(result_file)])
+                break  # Use most recent
+
+    conn.close()
+```
+
+---
+
+## 8. Dependencies
+
+Add to `pyproject.toml`:
+
+```toml
+[project.dependencies]
+# ... existing ...
+rich = ">=13.0"  # Already transitive via typer, but pin for progress bars
+
+[project.optional-dependencies]
+# ... existing ...
+tui = [
+    "textual>=1.0.0",
+]
+```
+
+No new required dependencies. The TUI is optional (`uv sync --extra tui`). `rich` is already available via Typer. Survey mode, calibration, preflight, and pre-registration use only stdlib + existing dependencies (Polars, scipy, numpy).
+
+---
+
+## 9. New File Inventory
+
+```
+src/forensics/
+    survey/
+        __init__.py
+        qualification.py        # Author qualification filter
+        orchestrator.py         # Blind survey orchestrator
+        scoring.py              # Composite scoring + natural controls
+    calibration/
+        __init__.py
+        synthetic.py            # Synthetic corpus builder
+        runner.py               # Calibration trial runner
+    tui/
+        __init__.py             # TUI entry point
+        app.py                  # Textual App
+        styles.tcss             # TUI styles
+        screens/
+            __init__.py
+            dependencies.py     # Screen 1: dependency check
+            discovery.py        # Screen 2: author discovery
+            config.py           # Screen 3: config generation
+            preflight.py        # Screen 4: preflight validation
+            launch.py           # Screen 5: pipeline launch
+    preflight.py                # Preflight checks module
+    preregistration.py          # Pre-registration locking
+    analysis/
+        permutation.py          # Permutation-based significance tests
+    reporting/
+        narrative.py            # Evidence chain narrative generation
+    cli/
+        survey.py               # Survey CLI subcommand
+        calibrate.py            # Calibrate CLI subcommand
+
+notebooks/
+    00_survey_dashboard.ipynb   # Survey results dashboard (new)
+    03a_calibration.ipynb       # Calibration results (new)
+```
+
+### Modified Files
+
+```
+src/forensics/cli/__init__.py       # Register survey, calibrate, preflight, validate, export, setup, lock-preregistration commands
+src/forensics/config/settings.py    # Add SurveyConfig
+src/forensics/storage/repository.py # Add all_authors()
+src/forensics/storage/duckdb_queries.py  # Add export_to_duckdb()
+src/forensics/features/content.py   # Min peer threshold for self_similarity
+src/forensics/features/pipeline.py  # Rich progress bars
+src/forensics/scraper/dedup.py      # Configurable simhash threshold
+src/forensics/pipeline.py           # Preflight at pipeline start
+src/forensics/models/features.py    # self_similarity fields become Optional[float]
+config.toml                         # Add [survey] section
+pyproject.toml                      # Add tui optional dependency, forensics-setup script
+```
+
+---
+
+## 10. Tests
+
+### Survey Tests (tests/test_survey.py)
+
+```python
+# test_qualification_filters_by_volume
+# test_qualification_filters_by_date_range
+# test_qualification_filters_by_publishing_frequency
+# test_qualification_filters_by_recent_activity
+# test_qualification_all_pass
+# test_qualification_no_articles_disqualified
+# test_composite_score_no_signal_is_zero
+# test_composite_score_strong_signal
+# test_composite_score_pipeline_c_included_when_available
+# test_signal_strength_classification
+# test_natural_controls_identified
+# test_survey_orchestrator_checkpoints (mock feature extraction + analysis)
+# test_survey_orchestrator_resume (create checkpoint, verify skip)
+# test_survey_dry_run_no_analysis
+```
+
+### Calibration Tests (tests/test_calibration.py)
+
+```python
+# test_build_spliced_corpus_correct_split
+# test_build_spliced_corpus_preserves_dates
+# test_build_negative_control_unmodified
+# test_calibration_report_metrics_correct
+# test_calibration_perfect_detector (all TP, all TN)
+# test_calibration_blind_detector (all FN, all FP)
+```
+
+### Preflight Tests (tests/test_preflight.py)
+
+```python
+# test_preflight_all_pass (mock all dependencies present)
+# test_preflight_missing_spacy (mock ImportError)
+# test_preflight_placeholder_authors_detected
+# test_preflight_disk_space_low
+# test_preflight_config_parse_error
+```
+
+### Pre-Registration Tests (tests/test_preregistration.py)
+
+```python
+# test_lock_creates_file
+# test_lock_content_has_thresholds
+# test_verify_matches_when_unchanged
+# test_verify_fails_when_significance_changed
+# test_verify_fails_when_methods_changed
+# test_no_lock_file_returns_ok (exploratory mode)
+```
+
+### Permutation Tests (tests/test_permutation.py)
+
+```python
+# test_permutation_random_data_high_pvalue (no real signal -> p > 0.05)
+# test_permutation_clustered_changepoints_low_pvalue (real signal -> p < 0.05)
+# test_permutation_deterministic_with_seed
+# test_permutation_empty_changepoints
+```
+
+### TUI Tests (tests/test_tui.py)
+
+```python
+# test_dependency_check_returns_structured_results
+# test_dependency_check_detects_missing_spacy
+# test_config_generation_no_placeholders
+# test_tui_app_mounts (Textual pilot test)
+```
+
+### CLI Tests (tests/integration/test_cli.py — additions)
+
+```python
+# test_survey_help
+# test_survey_dry_run (mock qualify_authors)
+# test_calibrate_help
+# test_preflight_command
+# test_validate_config_command
+# test_lock_preregistration_command
+# test_export_help
+# test_setup_help
+```
+
+---
+
+## 11. Implementation Order
+
+Execute in this order to minimize interdependencies:
+
+1. **Preflight module** (`preflight.py`) — no dependencies on new code
+2. **Pre-registration locking** (`preregistration.py`) — no dependencies on new code
+3. **Survey qualification** (`survey/qualification.py`) — needs `Repository.all_authors()`
+4. **Survey scoring** (`survey/scoring.py`) — needs existing `AnalysisResult`
+5. **Survey orchestrator** (`survey/orchestrator.py`) — needs qualification + scoring
+6. **Permutation tests** (`analysis/permutation.py`) — standalone statistical module
+7. **Calibration synthetic** (`calibration/synthetic.py`) — needs existing Article model
+8. **Calibration runner** (`calibration/runner.py`) — needs synthetic + survey orchestrator
+9. **Evidence narrative** (`reporting/narrative.py`) — needs existing models
+10. **CLI commands** — register all new commands
+11. **TUI screens** — depends on preflight + survey modules
+12. **TUI app** — assembles screens
+13. **Content.py edge case fix** — min peer threshold
+14. **Dedup threshold config** — config + dedup module
+15. **Progress bars** — features/pipeline.py
+16. **DuckDB export** — storage module
+17. **Report notebooks** — last, depends on data flowing through
+18. **Tests** — write alongside each module (TDD)
+
+---
+
+## Validation
+
+```bash
+# Lint + format
+uv run ruff check .
+uv run ruff format --check .
+
+# Full test suite
+uv run pytest tests/ -v --cov=forensics --cov-report=term-missing
+
+# New command smoke tests
+uv run forensics --help
+uv run forensics preflight
+uv run forensics validate
+uv run forensics lock-preregistration
+uv run forensics survey --help
+uv run forensics survey --dry-run
+uv run forensics calibrate --help
+uv run forensics export --help
+uv run forensics setup --help
+
+# TUI smoke test (requires textual extra)
+uv sync --extra tui
+uv run forensics-setup
+
+# Verify no regressions on existing commands
+uv run forensics scrape --help
+uv run forensics extract --help
+uv run forensics analyze --help
+uv run forensics report --help
+```
+
+## Handoff
+
+After this phase, the pipeline supports three operating modes:
+
+1. **Targeted analysis** (existing) — declare specific authors in config.toml, run `forensics all`
+2. **Blind survey** (new) — discover all authors, qualify automatically, analyze everyone, rank by AI adoption signal via `forensics survey`
+3. **Calibration** (new) — validate detection accuracy against synthetic ground truth via `forensics calibrate`
+
+The interactive TUI (`forensics setup` or `forensics-setup`) takes a new team member from zero to a running pipeline in one session. Preflight checks prevent wasted time on environment issues. Pre-registration locking ensures methodological credibility. Permutation tests provide non-parametric significance validation for convergence scores. The DuckDB export lets team members query results without running the pipeline.
+
+The natural control cohort (authors with no signal in blind mode) replaces the need for manually declared control authors, producing stronger methodology — controls are discovered, not cherry-picked. The evidence narrative generator creates structured, defensible prose for each flagged author, suitable for inclusion in published findings.

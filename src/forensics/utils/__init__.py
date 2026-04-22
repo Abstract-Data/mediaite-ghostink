@@ -1,6 +1,11 @@
-"""Shared utilities for text, hashing, and timestamps."""
+"""Shared utilities for text, hashing, and timestamps.
 
-from datetime import UTC, datetime as datetime_std
+Re-exports common helpers only; use submodule paths (``forensics.utils.charts``,
+``provenance``, …) for everything else. ``__all__`` is exhaustive.
+"""
+
+from datetime import UTC
+from datetime import datetime as datetime_std
 
 from forensics.utils.datetime import parse_datetime, parse_wp_datetime
 from forensics.utils.hashing import content_hash, simhash

@@ -7,7 +7,6 @@ import json
 import logging
 from bisect import bisect_left
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
@@ -51,26 +50,26 @@ def _breakpoint_index(timestamps: list[datetime], event: datetime) -> int:
 
 def _write_per_author_json_artifacts(
     slug: str,
-    analysis_dir: Path,
+    paths: AnalysisArtifactPaths,
     change_points: list[ChangePoint],
     convergence_windows: list,
     assembled: AnalysisResult,
     all_tests: list,
 ) -> None:
-    (analysis_dir / f"{slug}_changepoints.json").write_text(
+    paths.changepoints_json(slug).write_text(
         json.dumps([c.model_dump(mode="json") for c in change_points], indent=2, default=str),
         encoding="utf-8",
     )
     conv_payload = [w.model_dump(mode="json") for w in convergence_windows]
-    (analysis_dir / f"{slug}_convergence.json").write_text(
+    paths.convergence_json(slug).write_text(
         json.dumps(conv_payload, indent=2, default=str),
         encoding="utf-8",
     )
-    (analysis_dir / f"{slug}_result.json").write_text(
+    paths.result_json(slug).write_text(
         assembled.model_dump_json(indent=2),
         encoding="utf-8",
     )
-    (analysis_dir / f"{slug}_hypothesis_tests.json").write_text(
+    paths.hypothesis_tests_json(slug).write_text(
         json.dumps([t.model_dump(mode="json") for t in all_tests], indent=2, default=str),
         encoding="utf-8",
     )
@@ -129,7 +128,7 @@ def _run_per_author_analysis(
     if author is None:
         logger.warning("analysis: unknown slug=%s", slug)
         return None
-    feat_path = paths.features_dir / f"{slug}.parquet"
+    feat_path = paths.features_parquet(slug)
     if not feat_path.is_file():
         logger.warning("analysis: skip %s (missing %s)", slug, feat_path)
         return None
@@ -151,12 +150,7 @@ def _run_per_author_analysis(
     drift: DriftScores | None = None
 
     try:
-        pairs = load_article_embeddings(
-            slug,
-            paths.embeddings_dir,
-            repo.db_path,
-            project_root=paths.project_root,
-        )
+        pairs = load_article_embeddings(slug, paths)
     except (ValueError, OSError) as exc:
         logger.info("analysis: no embeddings for %s (%s)", slug, exc)
         pairs = []
@@ -166,8 +160,7 @@ def _run_per_author_analysis(
         author.id,
         pairs,
         config,
-        project_root=paths.project_root,
-        analysis_dir=paths.analysis_dir,
+        paths=paths,
     )
     if drift_res is not None:
         monthly, drift, _umap, baseline_curve, vels, ai_conv = drift_res
@@ -242,11 +235,11 @@ def _run_target_control_comparisons(
 
 
 def _merge_run_metadata(
-    analysis_dir: Path,
+    paths: AnalysisArtifactPaths,
     results: dict[str, AnalysisResult],
     comparison_payload: dict[str, Any],
 ) -> None:
-    meta_path = analysis_dir / "run_metadata.json"
+    meta_path = paths.run_metadata_json()
     if meta_path.is_file():
         try:
             prev = json.loads(meta_path.read_text(encoding="utf-8"))
@@ -318,7 +311,7 @@ async def run_full_analysis(
             results[slug] = assembled
             _write_per_author_json_artifacts(
                 slug,
-                paths.analysis_dir,
+                paths,
                 change_points,
                 convergence_windows,
                 assembled,
@@ -341,12 +334,12 @@ async def run_full_analysis(
         config=config,
     )
 
-    (paths.analysis_dir / "comparison_report.json").write_text(
+    paths.comparison_report_json().write_text(
         json.dumps(comparison_payload, indent=2, default=str),
         encoding="utf-8",
     )
 
-    _merge_run_metadata(paths.analysis_dir, results, comparison_payload)
+    _merge_run_metadata(paths, results, comparison_payload)
 
     write_corpus_custody(paths.db_path, paths.analysis_dir)
 
@@ -375,6 +368,6 @@ def run_compare_only(
             )
         except (ValueError, OSError) as exc:
             logger.warning("compare-only: failed for %s (%s)", tid, exc)
-    report_path = paths.analysis_dir / "comparison_report.json"
+    report_path = paths.comparison_report_json()
     report_path.write_text(json.dumps(out, indent=2, default=str), encoding="utf-8")
     return out

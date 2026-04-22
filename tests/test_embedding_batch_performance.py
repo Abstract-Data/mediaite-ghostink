@@ -9,7 +9,10 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from forensics.storage.parquet import write_author_embedding_batch
+from forensics.storage.parquet import (
+    unpack_article_ids_from_embedding_batch,
+    write_author_embedding_batch,
+)
 
 
 def _median_time_batch_write(tmp_path: Path, n: int, dim: int, repeats: int) -> float:
@@ -63,13 +66,17 @@ def test_large_synthetic_embedding_batch_write_and_load_under_ceiling(tmp_path: 
     write_s = time.perf_counter() - t0
 
     t1 = time.perf_counter()
-    loaded = np.load(path, allow_pickle=True)
-    got_ids = loaded["article_ids"]
+    loaded = np.load(path, allow_pickle=False)
+    got_ids = unpack_article_ids_from_embedding_batch(
+        loaded["article_id_lengths"],
+        loaded["article_id_bytes"],
+    )
     got_vec = loaded["vectors"]
     read_s = time.perf_counter() - t1
 
     assert got_vec.shape == (n, dim)
     assert len(got_ids) == n
+    assert got_ids == ids
     assert np.allclose(got_vec, mat, rtol=1e-5, atol=1e-5)
 
     total_s = write_s + read_s

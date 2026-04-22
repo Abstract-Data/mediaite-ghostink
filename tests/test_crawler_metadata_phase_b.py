@@ -13,11 +13,11 @@ from urllib.parse import parse_qs, urlparse
 import httpx
 import pytest
 
-from forensics.config.settings import AuthorConfig, ForensicsSettings, ScrapingConfig
+from forensics.config.settings import ForensicsSettings, ScrapingConfig
 from forensics.models.author import AuthorManifest
 from forensics.scraper import crawler as crawler_mod
 from forensics.scraper.client import client_headers
-from forensics.scraper.crawler import author_config_from_manifest, collect_article_metadata
+from forensics.scraper.crawler import _author_config_from_manifest, collect_article_metadata
 from forensics.storage.repository import Repository, init_db
 
 
@@ -72,7 +72,7 @@ async def test_collect_article_metadata_parallel_authors_http_overlaps(
     manifest_path = tmp_path / "authors_manifest.jsonl"
     _write_manifest(manifest_path, manifests)
 
-    author_cfgs = [author_config_from_manifest(m) for m in manifests]
+    author_cfgs = [_author_config_from_manifest(m) for m in manifests]
     settings = ForensicsSettings(
         authors=author_cfgs,
         scraping=ScrapingConfig(
@@ -149,7 +149,7 @@ async def test_collect_article_metadata_request_error_isolated_per_author(
     ]
     manifest_path = tmp_path / "authors_manifest.jsonl"
     _write_manifest(manifest_path, manifests)
-    author_cfgs = [author_config_from_manifest(m) for m in manifests]
+    author_cfgs = [_author_config_from_manifest(m) for m in manifests]
     settings = ForensicsSettings(
         authors=author_cfgs,
         scraping=ScrapingConfig(

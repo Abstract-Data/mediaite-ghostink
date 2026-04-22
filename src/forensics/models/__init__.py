@@ -1,4 +1,8 @@
-"""Pydantic models for authors, articles, features, analysis, and reports."""
+"""Pydantic models for authors, articles, features, analysis, and reports.
+
+Barrel of primary domain types; ``__all__`` matches the public model surface.
+Import less common types from their defining modules when not listed.
+"""
 
 from forensics.models.analysis import (
     AnalysisResult,

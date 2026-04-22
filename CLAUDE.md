@@ -26,7 +26,9 @@
 - `docs/ARCHITECTURE.md` — pipeline design, stage contracts, storage architecture, data models
 - `docs/GUARDRAILS.md` — safety boundaries, Signs (failure patterns), PII handling, escalation
 - `docs/TESTING.md` — TDD workflow, property-based testing, benchmarks, fixture strategy
-- `docs/RUNBOOK.md` — operational quick reference and debug commands
+- `docs/RUNBOOK.md` — operational quick reference and debug commands (includes GitButler-oriented git workflow)
+- `.claude/skills/gitbutler/SKILL.md` — GitButler (`but`) version-control skill (mirrored under `.cursor/skills/gitbutler/`)
+- `.claude/skills/gitbutler-workflow/SKILL.md` — Notion playbook add-on: virtual branches vs worktrees, JSON status workflow (mirrored under `.cursor/skills/gitbutler-workflow/`)
 - `prompts/README.md` — prompt versioning contract (semver, immutability, release workflow)
 - `config.toml` — pipeline configuration (scraper, features, analysis settings)
 

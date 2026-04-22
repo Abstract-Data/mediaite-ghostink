@@ -11,10 +11,10 @@ from typing import Annotated
 
 import typer
 
-from forensics.cli._helpers import config_fingerprint
+from forensics.analysis.artifact_paths import AnalysisArtifactPaths
 from forensics.config import get_project_root, get_settings
 from forensics.config.settings import ForensicsSettings
-from forensics.storage.repository import insert_analysis_run
+from forensics.pipeline_context import PipelineContext
 
 logger = logging.getLogger(__name__)
 
@@ -35,25 +35,22 @@ def _run_compare_only_flow(
     root: Path,
     author: str | None,
 ) -> None:
-    from forensics.analysis.artifact_paths import AnalysisArtifactPaths
     from forensics.analysis.orchestrator import run_compare_only
 
-    rid = insert_analysis_run(
-        db_path,
-        config_hash=config_fingerprint(),
-        description="forensics analyze --compare",
-    )
-    analysis_dir = root / "data" / "analysis"
+    ctx = PipelineContext.resolve()
+    rid = ctx.record_audit("forensics analyze --compare", optional=False, log=logger)
+    assert rid is not None
+    paths = AnalysisArtifactPaths.from_project(root, db_path)
+    analysis_dir = paths.analysis_dir
     analysis_dir.mkdir(parents=True, exist_ok=True)
     meta = {
         "run_id": rid,
         "run_timestamp": datetime.now(UTC).isoformat(),
-        "config_hash": config_fingerprint(),
+        "config_hash": ctx.config_hash,
         "compare_only": True,
         "author": author,
     }
     _write_run_metadata(analysis_dir, rid=rid, meta=meta)
-    paths = AnalysisArtifactPaths.from_project(root, db_path)
     run_compare_only(settings, paths=paths, author_slug=author)
     logger.info("analyze: compare-only complete author=%s", author or "all")
 
@@ -106,7 +103,8 @@ def _run_drift_stage(
 ) -> None:
     from forensics.analysis.drift import run_drift_analysis
 
-    run_drift_analysis(db_path, settings, project_root=root, author_slug=author)
+    paths = AnalysisArtifactPaths.from_project(root, db_path)
+    run_drift_analysis(settings, paths=paths, author_slug=author)
 
 
 def _run_full_analysis_stage(
@@ -116,16 +114,10 @@ def _run_full_analysis_stage(
     root: Path,
     author: str | None,
 ) -> None:
-    from forensics.analysis.artifact_paths import AnalysisArtifactPaths
     from forensics.analysis.orchestrator import run_full_analysis
 
-    paths = AnalysisArtifactPaths.from_layout(
-        root,
-        db_path,
-        root / "data" / "features",
-        root / "data" / "embeddings",
-    )
-    asyncio.run(run_full_analysis(paths, settings, author_slug=author))
+    layout_paths = AnalysisArtifactPaths.from_project(root, db_path)
+    asyncio.run(run_full_analysis(layout_paths, settings, author_slug=author))
 
 
 def _run_ai_baseline_stage(
@@ -177,7 +169,8 @@ def run_analyze(
     settings = get_settings()
     root = get_project_root()
     db_path = root / "data" / "articles.db"
-    analysis_dir = root / "data" / "analysis"
+    artifact_paths = AnalysisArtifactPaths.from_project(root, db_path)
+    analysis_dir = artifact_paths.analysis_dir
     analysis_dir.mkdir(parents=True, exist_ok=True)
 
     if verify_corpus:
@@ -202,15 +195,13 @@ def run_analyze(
         ai_baseline=ai_baseline,
     )
 
-    rid = insert_analysis_run(
-        db_path,
-        config_hash=config_fingerprint(),
-        description="forensics analyze",
-    )
+    ctx = PipelineContext.resolve()
+    rid = ctx.record_audit("forensics analyze", optional=False, log=logger)
+    assert rid is not None
     meta = {
         "run_id": rid,
         "run_timestamp": datetime.now(UTC).isoformat(),
-        "config_hash": config_fingerprint(),
+        "config_hash": ctx.config_hash,
         "changepoint": do_changepoint,
         "timeseries": do_timeseries,
         "drift": do_drift,

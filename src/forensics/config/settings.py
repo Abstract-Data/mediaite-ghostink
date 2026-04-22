@@ -80,6 +80,13 @@ class AnalysisConfig(BaseModel):
     feature_extraction_max_failure_ratio: float = 0.25
     lda_num_topics: int = 20
     lda_n_keywords: int = 10
+    # Phase 4 content `topic_diversity_score` (per-article LDA on a rolling window).
+    content_lda_n_components: int = 10
+    content_lda_max_peer_documents: int = 48
+    content_lda_max_iter: int = 15
+    content_lda_max_features: int = 2000
+    content_lda_max_df: float = 0.95
+    content_lda_max_chars_per_document: int = 96_000
 
 
 class ProbabilityConfig(BaseModel):
@@ -177,5 +184,13 @@ class ForensicsSettings(BaseSettings):
 
 @lru_cache(maxsize=1)
 def get_settings() -> ForensicsSettings:
-    """Load settings from config.toml (or FORENSICS_CONFIG_FILE) with env overrides."""
+    """Load settings from config.toml (or FORENSICS_CONFIG_FILE) with env overrides.
+
+    This is the supported global accessor. Prefer it over the deprecated
+    ``forensics.config.settings`` proxy object (``from forensics.config import settings``),
+    which exists only for backward compatibility in notebooks and scripts.
+
+    Tests may clear the cache via ``get_settings.cache_clear()`` before changing
+    ``FORENSICS_*`` environment variables or ``FORENSICS_CONFIG_FILE``.
+    """
     return ForensicsSettings()

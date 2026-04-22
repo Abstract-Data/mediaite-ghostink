@@ -7,6 +7,7 @@ import json
 import logging
 from collections import defaultdict
 from collections.abc import Sequence
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -14,14 +15,28 @@ from typing import Any
 import numpy as np
 from scipy.spatial.distance import cosine
 
+from forensics.analysis.artifact_paths import AnalysisArtifactPaths
 from forensics.analysis.utils import resolve_author_rows
-from forensics.config import get_project_root
 from forensics.config.settings import ForensicsSettings
 from forensics.models.analysis import DriftScores
-from forensics.storage.parquet import read_embeddings_manifest
+from forensics.storage.parquet import (
+    EMBEDDING_BATCH_KEY_BYTES,
+    EMBEDDING_BATCH_KEY_LENGTHS,
+    EMBEDDING_BATCH_KEY_VECTORS,
+    read_embeddings_manifest,
+    unpack_article_ids_from_embedding_batch,
+)
 from forensics.storage.repository import Repository
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class ArticleEmbedding:
+    """One article's semantic embedding with its publish time (drift pipeline input)."""
+
+    published_at: datetime
+    embedding: np.ndarray = field(repr=False)
 
 
 def _load_embedding_row(
@@ -35,16 +50,39 @@ def _load_embedding_row(
     if abs_path.suffix.lower() == ".npz":
         if abs_path not in batch_cache:
             try:
-                z = np.load(abs_path, allow_pickle=True)
+                z = np.load(abs_path, allow_pickle=False)
             except (OSError, ValueError) as exc:
                 logger.warning("Could not read embedding batch %s: %s", abs_path, exc)
                 return None
-            if "article_ids" not in z.files or "vectors" not in z.files:
+            keys = frozenset(z.files)
+            if (
+                EMBEDDING_BATCH_KEY_LENGTHS in keys
+                and EMBEDDING_BATCH_KEY_BYTES in keys
+                and EMBEDDING_BATCH_KEY_VECTORS in keys
+            ):
+                try:
+                    ids_list = unpack_article_ids_from_embedding_batch(
+                        z[EMBEDDING_BATCH_KEY_LENGTHS],
+                        z[EMBEDDING_BATCH_KEY_BYTES],
+                    )
+                except ValueError as exc:
+                    logger.warning("Malformed embedding batch %s: %s", abs_path, exc)
+                    return None
+                mat = np.asarray(z[EMBEDDING_BATCH_KEY_VECTORS], dtype=np.float32)
+                if mat.ndim != 2 or mat.shape[0] != len(ids_list):
+                    logger.warning("Malformed embedding batch (shape mismatch): %s", abs_path)
+                    return None
+                id_map = {ids_list[i]: i for i in range(len(ids_list))}
+            elif "article_ids" in keys and EMBEDDING_BATCH_KEY_VECTORS in keys:
+                logger.warning(
+                    "Legacy embedding batch %s uses pickled article_ids; "
+                    "re-run feature extraction to rewrite the batch.",
+                    abs_path,
+                )
+                return None
+            else:
                 logger.warning("Malformed embedding batch (missing keys): %s", abs_path)
                 return None
-            raw_ids = z["article_ids"]
-            mat = np.asarray(z["vectors"], dtype=np.float32)
-            id_map = {str(raw_ids[i]): i for i in range(int(raw_ids.shape[0]))}
             batch_cache[abs_path] = (mat, id_map)
         mat, id_map = batch_cache[abs_path]
         row = id_map.get(article_id)
@@ -70,13 +108,13 @@ def _cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
 
 
 def compute_monthly_centroids(
-    article_embeddings: list[tuple[datetime, np.ndarray]],
+    article_embeddings: Sequence[ArticleEmbedding],
 ) -> list[tuple[str, np.ndarray]]:
     """Mean embedding vector per calendar month, sorted chronologically."""
     monthly: dict[str, list[np.ndarray]] = defaultdict(list)
-    for dt, emb in article_embeddings:
-        key = dt.strftime("%Y-%m")
-        monthly[key].append(np.asarray(emb, dtype=np.float32))
+    for row in article_embeddings:
+        key = row.published_at.strftime("%Y-%m")
+        monthly[key].append(np.asarray(row.embedding, dtype=np.float32))
     centroids: list[tuple[str, np.ndarray]] = []
     for month in sorted(monthly.keys()):
         vectors = np.stack(monthly[month], axis=0)
@@ -99,26 +137,49 @@ def track_centroid_velocity(centroids: list[tuple[str, np.ndarray]]) -> list[flo
 
 
 def compute_baseline_similarity_curve(
-    article_embeddings: list[tuple[datetime, np.ndarray]],
+    article_embeddings: Sequence[ArticleEmbedding],
     *,
     baseline_count: int = 20,
 ) -> list[tuple[datetime, float]]:
     """Cosine similarity to centroid of first ``baseline_count`` articles by publish time."""
     if not article_embeddings:
         return []
-    ordered = sorted(article_embeddings, key=lambda x: x[0])
+    ordered = sorted(article_embeddings, key=lambda r: r.published_at)
     n_base = max(1, min(baseline_count, len(ordered)))
-    base_vecs = np.stack([np.asarray(e, dtype=np.float64) for _, e in ordered[:n_base]], axis=0)
+    base_vecs = np.stack(
+        [np.asarray(r.embedding, dtype=np.float64) for r in ordered[:n_base]], axis=0
+    )
     baseline_centroid = base_vecs.mean(axis=0)
     curve: list[tuple[datetime, float]] = []
-    for dt, emb in ordered:
-        sim = _cosine_similarity(np.asarray(emb, dtype=np.float64), baseline_centroid)
-        curve.append((dt, sim))
+    for row in ordered:
+        sim = _cosine_similarity(np.asarray(row.embedding, dtype=np.float64), baseline_centroid)
+        curve.append((row.published_at, sim))
     return curve
 
 
+def _pairwise_mean_cosine_distance(vecs: list[np.ndarray]) -> float:
+    dists: list[float] = []
+    for i in range(len(vecs)):
+        for j in range(i + 1, len(vecs)):
+            d = float(cosine(vecs[i].ravel(), vecs[j].ravel()))
+            if np.isfinite(d):
+                dists.append(d)
+    return float(np.mean(dists)) if dists else 0.0
+
+
+def _mean_cosine_to_centroid(vecs: list[np.ndarray]) -> float:
+    stacked = np.stack([v.ravel() for v in vecs], axis=0)
+    centroid = stacked.mean(axis=0)
+    dists_c: list[float] = []
+    for v in vecs:
+        d = float(cosine(v.ravel(), centroid))
+        if np.isfinite(d):
+            dists_c.append(d)
+    return float(np.mean(dists_c)) if dists_c else 0.0
+
+
 def compute_intra_period_variance(
-    article_embeddings: list[tuple[datetime, np.ndarray]],
+    article_embeddings: Sequence[ArticleEmbedding],
     *,
     period: str = "month",
     max_pairwise: int = 20,
@@ -132,8 +193,10 @@ def compute_intra_period_variance(
         msg = f"Unsupported period: {period!r} (only 'month' is implemented)"
         raise ValueError(msg)
     buckets: dict[str, list[np.ndarray]] = defaultdict(list)
-    for dt, emb in article_embeddings:
-        buckets[dt.strftime("%Y-%m")].append(np.asarray(emb, dtype=np.float64))
+    for row in article_embeddings:
+        buckets[row.published_at.strftime("%Y-%m")].append(
+            np.asarray(row.embedding, dtype=np.float64)
+        )
     out: list[tuple[str, float]] = []
     for key in sorted(buckets.keys()):
         vecs = buckets[key]
@@ -141,22 +204,9 @@ def compute_intra_period_variance(
             out.append((key, 0.0))
             continue
         if len(vecs) <= max_pairwise:
-            dists: list[float] = []
-            for i in range(len(vecs)):
-                for j in range(i + 1, len(vecs)):
-                    d = float(cosine(vecs[i].ravel(), vecs[j].ravel()))
-                    if np.isfinite(d):
-                        dists.append(d)
-            out.append((key, float(np.mean(dists)) if dists else 0.0))
+            out.append((key, _pairwise_mean_cosine_distance(vecs)))
             continue
-        stacked = np.stack([v.ravel() for v in vecs], axis=0)
-        centroid = stacked.mean(axis=0)
-        dists_c: list[float] = []
-        for v in vecs:
-            d = float(cosine(v.ravel(), centroid))
-            if np.isfinite(d):
-                dists_c.append(d)
-        out.append((key, float(np.mean(dists_c)) if dists_c else 0.0))
+        out.append((key, _mean_cosine_to_centroid(vecs)))
     return out
 
 
@@ -252,22 +302,19 @@ def compute_drift_scores(
 
 def load_article_embeddings(
     author_slug: str,
-    embeddings_dir: Path,
-    db_path: Path,
-    *,
-    project_root: Path | None = None,
-) -> list[tuple[datetime, np.ndarray]]:
-    """Load ``(published_date, embedding)`` from manifest + ``.npy`` or ``batch.npz``."""
-    root = project_root or get_project_root()
+    paths: AnalysisArtifactPaths,
+) -> list[ArticleEmbedding]:
+    """Load article embeddings from manifest + ``.npy`` or ``batch.npz``."""
+    root = paths.project_root
     batch_cache: dict[Path, tuple[np.ndarray, dict[str, int]]] = {}
-    with Repository(db_path) as repo:
+    with Repository(paths.db_path) as repo:
         author = repo.get_author_by_slug(author_slug)
         if author is None:
             msg = f"Unknown author slug for embeddings load: {author_slug}"
             raise ValueError(msg)
-        manifest_path = embeddings_dir / "manifest.jsonl"
+        manifest_path = paths.embeddings_dir / "manifest.jsonl"
         records = read_embeddings_manifest(manifest_path)
-        pairs: list[tuple[datetime, np.ndarray]] = []
+        pairs: list[ArticleEmbedding] = []
         for rec in records:
             if rec.author_id != author.id:
                 continue
@@ -279,13 +326,13 @@ def load_article_embeddings(
                     "Missing or unreadable embedding for article %s: %s", rec.article_id, abs_path
                 )
                 continue
-            pairs.append((rec.timestamp, vec))
-        pairs.sort(key=lambda x: x[0])
+            pairs.append(ArticleEmbedding(published_at=rec.timestamp, embedding=vec))
+        pairs.sort(key=lambda r: r.published_at)
         return pairs
 
 
-def load_ai_baseline_embeddings(author_slug: str, project_root: Path) -> list[np.ndarray]:
-    base = project_root / "data" / "ai_baseline" / author_slug / "embeddings"
+def load_ai_baseline_embeddings(author_slug: str, paths: AnalysisArtifactPaths) -> list[np.ndarray]:
+    base = paths.ai_baseline_embeddings_dir(author_slug)
     if not base.is_dir():
         return []
     out: list[np.ndarray] = []
@@ -298,32 +345,32 @@ def write_drift_artifacts(
     author_slug: str,
     author_id: str,
     *,
-    analysis_dir: Path,
+    paths: AnalysisArtifactPaths,
     drift: DriftScores,
     centroids: list[tuple[str, np.ndarray]],
     baseline_curve: list[tuple[datetime, float]],
     umap_payload: dict[str, Any],
 ) -> None:
-    analysis_dir.mkdir(parents=True, exist_ok=True)
-    (analysis_dir / f"{author_slug}_drift.json").write_text(
+    paths.analysis_dir.mkdir(parents=True, exist_ok=True)
+    paths.drift_json(author_slug).write_text(
         drift.model_dump_json(indent=2),
         encoding="utf-8",
     )
     months = np.array([m for m, _ in centroids], dtype="U7")
     vecs = np.stack([np.asarray(v, dtype=np.float32) for _, v in centroids], axis=0)
     np.savez_compressed(
-        analysis_dir / f"{author_slug}_centroids.npz",
+        paths.centroids_npz(author_slug),
         months=months,
         centroids=vecs,
     )
     curve_json = [
         {"published_at": dt.isoformat(), "similarity": float(sim)} for dt, sim in baseline_curve
     ]
-    (analysis_dir / f"{author_slug}_baseline_curve.json").write_text(
+    paths.baseline_curve_json(author_slug).write_text(
         json.dumps(curve_json, indent=2),
         encoding="utf-8",
     )
-    (analysis_dir / f"{author_slug}_umap.json").write_text(
+    paths.umap_json(author_slug).write_text(
         json.dumps(umap_payload, indent=2),
         encoding="utf-8",
     )
@@ -332,11 +379,10 @@ def write_drift_artifacts(
 def compute_author_drift_pipeline(
     slug: str,
     author_id: str,
-    article_embs: list[tuple[datetime, np.ndarray]],
+    article_embs: Sequence[ArticleEmbedding],
     settings: ForensicsSettings,
     *,
-    project_root: Path,
-    analysis_dir: Path,
+    paths: AnalysisArtifactPaths,
 ) -> (
     tuple[
         list[tuple[str, np.ndarray]],
@@ -368,7 +414,7 @@ def compute_author_drift_pipeline(
         period="month",
         max_pairwise=settings.analysis.intra_variance_pairwise_max,
     )
-    ai_vecs = load_ai_baseline_embeddings(slug, project_root)
+    ai_vecs = load_ai_baseline_embeddings(slug, paths)
     ai_conv = compute_ai_convergence(monthly, ai_vecs) if ai_vecs else None
     ai_centroid_plot: np.ndarray | None = None
     if ai_vecs:
@@ -385,7 +431,7 @@ def compute_author_drift_pipeline(
     write_drift_artifacts(
         slug,
         author_id,
-        analysis_dir=analysis_dir,
+        paths=paths,
         drift=drift,
         centroids=monthly,
         baseline_curve=baseline_curve,
@@ -395,25 +441,19 @@ def compute_author_drift_pipeline(
 
 
 def run_drift_analysis(
-    db_path: Path,
     settings: ForensicsSettings,
     *,
-    project_root: Path | None = None,
+    paths: AnalysisArtifactPaths,
     author_slug: str | None = None,
 ) -> None:
     """Compute drift metrics for configured authors and write ``data/analysis/*`` outputs."""
-    root = project_root or get_project_root()
-    embed_root = root / "data" / "embeddings"
-    analysis_dir = root / "data" / "analysis"
     centroids_by_author: dict[str, list[tuple[str, np.ndarray]]] = {}
 
-    with Repository(db_path) as repo:
+    with Repository(paths.db_path) as repo:
         author_rows = resolve_author_rows(repo, settings, author_slug=author_slug)
         for author in author_rows:
             try:
-                article_embs = load_article_embeddings(
-                    author.slug, embed_root, db_path, project_root=root
-                )
+                article_embs = load_article_embeddings(author.slug, paths)
             except ValueError as exc:
                 logger.warning("drift: skip slug=%s (%s)", author.slug, exc)
                 continue
@@ -422,8 +462,7 @@ def run_drift_analysis(
                 author.id,
                 article_embs,
                 settings,
-                project_root=root,
-                analysis_dir=analysis_dir,
+                paths=paths,
             )
             if res is None:
                 logger.warning("drift: insufficient embeddings for %s", author.slug)
@@ -437,7 +476,7 @@ def run_drift_analysis(
             centroids_by_author,
             ai_centroid=None,
         )
-        (analysis_dir / "combined_umap.json").write_text(
+        paths.combined_umap_json().write_text(
             json.dumps(combined, indent=2),
             encoding="utf-8",
         )

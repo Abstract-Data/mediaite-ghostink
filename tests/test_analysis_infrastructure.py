@@ -43,6 +43,14 @@ def test_analysis_artifact_paths_layout(tmp_path: Path) -> None:
     paths2 = AnalysisArtifactPaths.from_project(root, db)
     assert paths2.analysis_dir == root / "data" / "analysis"
 
+    slug = "alice"
+    assert paths2.features_parquet(slug) == paths2.features_dir / "alice.parquet"
+    assert paths2.changepoints_json(slug).name == "alice_changepoints.json"
+    assert paths2.drift_json(slug).parent == paths2.analysis_dir
+    expected_ai_emb = root / "data" / "ai_baseline" / slug / "embeddings"
+    assert paths2.ai_baseline_embeddings_dir(slug) == expected_ai_emb
+    assert paths2.comparison_report_json() == paths2.analysis_dir / "comparison_report.json"
+
 
 def _window(start_d: int, end_d: int) -> ConvergenceWindow:
     return ConvergenceWindow(

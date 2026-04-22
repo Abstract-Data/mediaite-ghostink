@@ -15,7 +15,11 @@ import pytest
 
 from forensics.config import get_project_root
 from forensics.config.settings import AuthorConfig, ForensicsSettings, ReportConfig, ScrapingConfig
-from forensics.reporting import resolve_notebook_path
+from forensics.reporting import (
+    _analysis_artifacts_ok,
+    _quarto_bin,
+    resolve_notebook_path,
+)
 from forensics.utils import charts as charts_mod
 from forensics.utils.charts import apply_baseline_shading, apply_change_point_annotations
 from forensics.utils.provenance import (
@@ -174,8 +178,105 @@ def test_resolve_notebook_path() -> None:
     assert p.name.startswith("05_")
 
 
+def test_resolve_notebook_path_digit_sorted_first(tmp_path: Path) -> None:
+    nb = tmp_path / "notebooks"
+    nb.mkdir(parents=True)
+    (nb / "01_alpha.ipynb").write_text("{}", encoding="utf-8")
+    (nb / "01_beta.ipynb").write_text("{}", encoding="utf-8")
+    p = resolve_notebook_path(tmp_path, "1")
+    assert p is not None
+    assert p.name == "01_alpha.ipynb"
+
+
+def test_resolve_notebook_path_by_filename_under_notebooks(tmp_path: Path) -> None:
+    nb = tmp_path / "notebooks"
+    nb.mkdir(parents=True)
+    target = nb / "chapter.ipynb"
+    target.write_text("{}", encoding="utf-8")
+    assert resolve_notebook_path(tmp_path, "chapter.ipynb") == target
+
+
+def test_resolve_notebook_path_strips_whitespace(tmp_path: Path) -> None:
+    nb = tmp_path / "notebooks"
+    nb.mkdir(parents=True)
+    (nb / "02_x.ipynb").write_text("{}", encoding="utf-8")
+    p = resolve_notebook_path(tmp_path, "  2  ")
+    assert p is not None
+    assert p.name == "02_x.ipynb"
+
+
+def test_resolve_notebook_path_fallback_repo_root(tmp_path: Path) -> None:
+    (tmp_path / "notebooks").mkdir(parents=True)
+    loose = tmp_path / "only_at_root.ipynb"
+    loose.write_text("{}", encoding="utf-8")
+    assert resolve_notebook_path(tmp_path, "only_at_root.ipynb") == loose
+
+
+def test_resolve_notebook_path_not_found(tmp_path: Path) -> None:
+    (tmp_path / "notebooks").mkdir(parents=True)
+    assert resolve_notebook_path(tmp_path, "99") is None
+    assert resolve_notebook_path(tmp_path, "missing.ipynb") is None
+
+
+def test_analysis_artifacts_ok_complete(tmp_path: Path) -> None:
+    analysis = tmp_path / "analysis"
+    analysis.mkdir()
+    (analysis / "a_result.json").write_text("{}", encoding="utf-8")
+    ok, msg = _analysis_artifacts_ok(_minimal_forensics_settings(), analysis)
+    assert ok is True
+    assert msg == ""
+
+
+def test_analysis_artifacts_ok_missing(tmp_path: Path) -> None:
+    analysis = tmp_path / "analysis"
+    analysis.mkdir()
+    ok, msg = _analysis_artifacts_ok(_minimal_forensics_settings(), analysis)
+    assert ok is False
+    assert "Missing analysis artifacts" in msg
+    assert "a_result.json" in msg
+
+
+def test_analysis_artifacts_ok_multiple_authors(tmp_path: Path) -> None:
+    authors = [
+        AuthorConfig(
+            name="A",
+            slug="a",
+            outlet="mediaite.com",
+            role="target",
+            archive_url="https://example.com/a/",
+            baseline_start=date(2020, 1, 1),
+            baseline_end=date(2021, 1, 1),
+        ),
+        AuthorConfig(
+            name="B",
+            slug="b",
+            outlet="mediaite.com",
+            role="control",
+            archive_url="https://example.com/b/",
+            baseline_start=date(2020, 1, 1),
+            baseline_end=date(2021, 1, 1),
+        ),
+    ]
+    settings = ForensicsSettings(authors=authors)
+    analysis = tmp_path / "analysis"
+    analysis.mkdir()
+    (analysis / "a_result.json").write_text("{}", encoding="utf-8")
+    ok, msg = _analysis_artifacts_ok(settings, analysis)
+    assert ok is False
+    assert "b_result.json" in msg
+
+
+def test_quarto_bin_delegates_to_which(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "forensics.reporting.shutil.which",
+        lambda cmd: "/fake/quarto" if cmd == "quarto" else None,
+    )
+    assert _quarto_bin() == "/fake/quarto"
+
+
 def test_settings_proxy_db_path() -> None:
     from forensics.config import settings as settings_proxy
 
-    p = settings_proxy.db_path
+    with pytest.warns(DeprecationWarning, match="get_settings"):
+        p = settings_proxy.db_path
     assert p.name == "articles.db"

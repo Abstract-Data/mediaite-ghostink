@@ -129,7 +129,10 @@ def test_analyze_verify_corpus_passes_on_matching_custody(
         encoding="utf-8",
     )
     monkeypatch.setattr(analyze_mod, "get_project_root", lambda: tmp_path)
-    monkeypatch.setattr(analyze_mod, "insert_analysis_run", lambda *a, **kw: "run-id")
+    monkeypatch.setattr(
+        "forensics.pipeline_context.insert_analysis_run",
+        lambda *a, **kw: "run-id",
+    )
     # --compare short-circuits analyze after verify; stub the comparison to skip real work.
     monkeypatch.setattr(orch_mod, "run_compare_only", lambda *a, **kw: None)
 

@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from enum import Enum, auto
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, assert_never
 
 import typer
 
-from forensics.cli._helpers import config_fingerprint, guard_placeholder_authors
-from forensics.config import get_project_root, get_settings
+from forensics.cli._helpers import guard_placeholder_authors
+from forensics.config import config_fingerprint, get_project_root, get_settings
 from forensics.config.settings import ForensicsSettings
 from forensics.scraper.crawler import collect_article_metadata, discover_authors
 from forensics.scraper.dedup import deduplicate_articles
@@ -21,6 +22,47 @@ from forensics.storage.repository import Repository, insert_analysis_run
 logger = logging.getLogger(__name__)
 
 scrape_app = typer.Typer(help="Crawl and fetch articles for configured authors")
+
+
+class ScrapeMode(Enum):
+    """Valid `forensics scrape` flag combinations routed by `dispatch_scrape`."""
+
+    ARCHIVE_ONLY = auto()
+    DEDUP_ONLY = auto()
+    FETCH_ONLY = auto()
+    FETCH_DEDUP_EXPORT = auto()
+    DISCOVER_ONLY = auto()
+    METADATA_ONLY = auto()
+    DISCOVER_AND_METADATA = auto()
+    FULL_PIPELINE = auto()
+
+
+_ScrapeFlagKey = tuple[bool, bool, bool, bool, bool]
+
+_FLAG_TO_SCRAPE_MODE: dict[_ScrapeFlagKey, ScrapeMode] = {
+    (False, False, False, False, True): ScrapeMode.ARCHIVE_ONLY,
+    (False, False, False, True, False): ScrapeMode.DEDUP_ONLY,
+    (False, False, True, False, False): ScrapeMode.FETCH_ONLY,
+    (False, False, True, True, False): ScrapeMode.FETCH_DEDUP_EXPORT,
+    (True, False, False, False, False): ScrapeMode.DISCOVER_ONLY,
+    (False, True, False, False, False): ScrapeMode.METADATA_ONLY,
+    (True, True, False, False, False): ScrapeMode.DISCOVER_AND_METADATA,
+    (False, False, False, False, False): ScrapeMode.FULL_PIPELINE,
+}
+
+if set(ScrapeMode) != set(_FLAG_TO_SCRAPE_MODE.values()):
+    msg = "ScrapeMode members and _FLAG_TO_SCRAPE_MODE values must stay in sync"
+    raise RuntimeError(msg)
+
+
+def _resolve_scrape_mode(
+    discover: bool,
+    metadata: bool,
+    fetch: bool,
+    dedup: bool,
+    archive: bool,
+) -> ScrapeMode | None:
+    return _FLAG_TO_SCRAPE_MODE.get((discover, metadata, fetch, dedup, archive))
 
 
 def _export_jsonl(db_path: Path, root: Path) -> int:
@@ -168,7 +210,53 @@ async def _full_pipeline(
     return 0
 
 
-_ScrapeFlagKey = tuple[bool, bool, bool, bool, bool]
+async def _run_scrape_mode(
+    mode: ScrapeMode,
+    *,
+    db_path: Path,
+    root: Path,
+    settings: ForensicsSettings,
+    manifest_path: Path,
+    dry_run: bool,
+    force_refresh: bool,
+    all_authors: bool,
+) -> int:
+    match mode:
+        case ScrapeMode.ARCHIVE_ONLY:
+            n = archive_raw_year_dirs(root, db_path)
+            logger.info("archive: compressed %d year directory(ies) under data/raw/", n)
+            return 0
+        case ScrapeMode.DEDUP_ONLY:
+            dup_ids = deduplicate_articles(db_path)
+            logger.info("dedup: marked %d article(s) as near-duplicates", len(dup_ids))
+            return 0
+        case ScrapeMode.FETCH_ONLY:
+            return await _fetch_only(db_path, settings, dry_run=dry_run)
+        case ScrapeMode.FETCH_DEDUP_EXPORT:
+            return await _fetch_dedup_export(db_path, root, settings, dry_run=dry_run)
+        case ScrapeMode.DISCOVER_ONLY:
+            return await _discover_only(settings, manifest_path, force_refresh=force_refresh)
+        case ScrapeMode.METADATA_ONLY:
+            return await _metadata_only(db_path, settings, manifest_path, all_authors=all_authors)
+        case ScrapeMode.DISCOVER_AND_METADATA:
+            return await _discover_and_metadata(
+                db_path,
+                settings,
+                manifest_path,
+                force_refresh=force_refresh,
+                all_authors=all_authors,
+            )
+        case ScrapeMode.FULL_PIPELINE:
+            return await _full_pipeline(
+                db_path,
+                root,
+                settings,
+                manifest_path,
+                force_refresh=force_refresh,
+                all_authors=all_authors,
+            )
+        case _ as unreachable:
+            assert_never(unreachable)
 
 
 async def dispatch_scrape(
@@ -209,57 +297,23 @@ async def dispatch_scrape(
     except OSError as exc:
         logger.warning("Could not record analysis_runs row: %s", exc)
 
-    key: _ScrapeFlagKey = (discover, metadata, fetch, dedup, archive)
-
-    async def _archive_branch() -> int:
-        n = archive_raw_year_dirs(root, db_path)
-        logger.info("archive: compressed %d year directory(ies) under data/raw/", n)
-        return 0
-
-    async def _dedup_branch() -> int:
-        dup_ids = deduplicate_articles(db_path)
-        logger.info("dedup: marked %d article(s) as near-duplicates", len(dup_ids))
-        return 0
-
-    routes: dict[_ScrapeFlagKey, object] = {
-        (False, False, False, False, True): _archive_branch,
-        (False, False, False, True, False): _dedup_branch,
-        (False, False, True, False, False): lambda: _fetch_only(db_path, settings, dry_run=dry_run),
-        (False, False, True, True, False): lambda: _fetch_dedup_export(
-            db_path, root, settings, dry_run=dry_run
-        ),
-        (True, False, False, False, False): lambda: _discover_only(
-            settings, manifest_path, force_refresh=force_refresh
-        ),
-        (False, True, False, False, False): lambda: _metadata_only(
-            db_path, settings, manifest_path, all_authors=all_authors
-        ),
-        (True, True, False, False, False): lambda: _discover_and_metadata(
-            db_path,
-            settings,
-            manifest_path,
-            force_refresh=force_refresh,
-            all_authors=all_authors,
-        ),
-        (False, False, False, False, False): lambda: _full_pipeline(
-            db_path,
-            root,
-            settings,
-            manifest_path,
-            force_refresh=force_refresh,
-            all_authors=all_authors,
-        ),
-    }
-
-    handler = routes.get(key)
-    if handler is None:
+    mode = _resolve_scrape_mode(discover, metadata, fetch, dedup, archive)
+    if mode is None:
         logger.error(
             "unsupported flag combination for scrape "
             "(try individual --discover, --metadata, --fetch, --dedup, --archive)"
         )
         return 1
-    maybe = handler()
-    return await maybe if asyncio.iscoroutine(maybe) else int(maybe)
+    return await _run_scrape_mode(
+        mode,
+        db_path=db_path,
+        root=root,
+        settings=settings,
+        manifest_path=manifest_path,
+        dry_run=dry_run,
+        force_refresh=force_refresh,
+        all_authors=all_authors,
+    )
 
 
 @scrape_app.callback(invoke_without_command=True)
