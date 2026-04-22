@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.metadata
 import logging
+from pathlib import Path
 from typing import Annotated
 
 import typer
@@ -46,11 +47,15 @@ def _root(
 
 # --- Register subcommands ---
 from forensics.cli.analyze import analyze  # noqa: E402
+from forensics.cli.calibrate import calibrate_app  # noqa: E402
 from forensics.cli.extract import extract  # noqa: E402
 from forensics.cli.report import report  # noqa: E402
 from forensics.cli.scrape import scrape_app  # noqa: E402
+from forensics.cli.survey import survey_app  # noqa: E402
 
 app.add_typer(scrape_app, name="scrape")
+app.add_typer(survey_app, name="survey")
+app.add_typer(calibrate_app, name="calibrate")
 app.command(name="extract")(extract)
 app.command(name="analyze")(analyze)
 app.command(name="report")(report)
@@ -92,6 +97,130 @@ def preflight(
     raise typer.Exit(code=0)
 
 
+@app.command(name="lock-preregistration")
+def lock_preregistration_cmd() -> None:
+    """Lock analysis thresholds for pre-registration (run before analyzing data)."""
+    from forensics.config import get_settings
+    from forensics.preregistration import lock_preregistration
+
+    settings = get_settings()
+    path = lock_preregistration(settings)
+    typer.echo(f"Pre-registration locked: {path}")
+    typer.echo("Run analysis AFTER this point. Threshold changes will trigger warnings.")
+
+
+_WP_TYPES_URL = "https://www.mediaite.com/wp-json/wp/v2/types"
+_OLLAMA_TAGS_URL = "http://localhost:11434/api/tags"
+
+
+def _probe_endpoint(url: str, *, timeout: float = 3.0) -> tuple[bool, str]:
+    """Synchronous GET that tolerates every network error (returns ``(ok, detail)``)."""
+    import httpx
+
+    try:
+        resp = httpx.get(url, timeout=timeout)
+    except Exception as exc:  # noqa: BLE001 - report any failure as a warn
+        return False, f"{type(exc).__name__}: {exc}"
+    if 200 <= resp.status_code < 400:
+        return True, f"HTTP {resp.status_code}"
+    return False, f"HTTP {resp.status_code}"
+
+
+@app.command(name="validate")
+def validate_config(
+    check_endpoints: Annotated[
+        bool,
+        typer.Option(
+            "--check-endpoints",
+            help="Probe WordPress + Ollama endpoints (reported as warnings).",
+        ),
+    ] = False,
+) -> None:
+    """Validate config.toml, run preflight, and optionally probe live endpoints."""
+    from forensics.config import get_settings
+    from forensics.preflight import run_all_preflight_checks
+
+    logger = logging.getLogger(__name__)
+    try:
+        settings = get_settings()
+    except Exception as exc:  # noqa: BLE001 - surface parse errors verbatim
+        logger.error("Config error: %s", exc)
+        typer.echo(f"Config error: {exc}")
+        raise typer.Exit(code=1) from exc
+
+    typer.echo(f"Config parsed: {len(settings.authors)} author(s)")
+
+    report = run_all_preflight_checks(settings)
+    icons = {"pass": "PASS", "warn": "WARN", "fail": "FAIL"}
+    for check in report.checks:
+        typer.echo(f"  [{icons[check.status]}] {check.name}: {check.message}")
+
+    if check_endpoints:
+        typer.echo("\nEndpoint probes (warnings only, do not affect exit code):")
+        wp_ok, wp_detail = _probe_endpoint(_WP_TYPES_URL)
+        typer.echo(f"  [{'PASS' if wp_ok else 'WARN'}] WordPress API: {wp_detail}")
+        oll_ok, oll_detail = _probe_endpoint(_OLLAMA_TAGS_URL)
+        typer.echo(f"  [{'PASS' if oll_ok else 'WARN'}] Ollama: {oll_detail}")
+
+    if report.has_failures:
+        typer.echo("\nSome required checks failed.")
+        raise typer.Exit(code=1)
+    if report.has_warnings:
+        typer.echo("\nAll required checks passed (some warnings).")
+    else:
+        typer.echo("\nAll validation checks passed.")
+    raise typer.Exit(code=0)
+
+
+@app.command(name="export")
+def export_data(
+    output: Annotated[
+        Path,
+        typer.Option(
+            "--output",
+            "-o",
+            help="Output path for the single-file DuckDB export.",
+        ),
+    ] = Path("data/forensics_export.duckdb"),
+    include_features: Annotated[
+        bool,
+        typer.Option(
+            "--features/--no-features",
+            help="Include the features parquet shards (default: on).",
+        ),
+    ] = True,
+    include_analysis: Annotated[
+        bool,
+        typer.Option(
+            "--analysis/--no-analysis",
+            help="Include per-author analysis *_result.json artifacts (default: on).",
+        ),
+    ] = True,
+) -> None:
+    """Export SQLite + features + analysis into a single ``.duckdb`` file."""
+    from forensics.config import get_project_root
+    from forensics.storage.duckdb_queries import export_to_duckdb
+
+    root = get_project_root()
+    db_path = root / "data" / "articles.db"
+    out_path = output if output.is_absolute() else root / output
+
+    if not db_path.is_file():
+        typer.echo(f"SQLite source not found: {db_path}")
+        raise typer.Exit(code=1)
+
+    report = export_to_duckdb(
+        db_path,
+        out_path,
+        include_features=include_features,
+        include_analysis=include_analysis,
+    )
+    typer.echo(f"Exported to {report.output_path} ({report.bytes_written} bytes)")
+    for name, count in report.tables.items():
+        typer.echo(f"  {name}: {count} rows")
+    typer.echo(f"Query with: duckdb {report.output_path}")
+
+
 @app.command(name="all")
 def run_all() -> None:
     """Run full pipeline end-to-end: scrape → extract → analyze → report."""
@@ -101,6 +230,16 @@ def run_all() -> None:
     rc = run_all_pipeline()
     if rc != 0:
         logger.error("pipeline exited with code %d", rc)
+        raise typer.Exit(code=rc)
+
+
+@app.command(name="setup")
+def setup_wizard() -> None:
+    """Launch the interactive setup wizard (requires the 'tui' extra)."""
+    from forensics.tui import main as tui_main
+
+    rc = tui_main()
+    if rc != 0:
         raise typer.Exit(code=rc)
 
 

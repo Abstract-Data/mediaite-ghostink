@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import calendar
+import logging
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
@@ -13,6 +14,8 @@ from forensics.analysis.changepoint import PELT_FEATURE_COLUMNS
 from forensics.analysis.utils import closed_interval_contains, intervals_overlap
 from forensics.config.settings import ForensicsSettings
 from forensics.models.analysis import ChangePoint, ConvergenceWindow
+
+logger = logging.getLogger(__name__)
 
 
 def _month_key_to_range(key: str) -> tuple[date, date]:
@@ -214,8 +217,17 @@ def compute_convergence_scores(
     ai_convergence_curve: list[tuple[str, float]] | None = None,
     probability_trajectory: ProbabilityTrajectory | None = None,
     settings: ForensicsSettings | None = None,
+    use_permutation: bool = False,
+    permutation_seed: int = 42,
+    n_permutations: int = 1000,
 ) -> list[ConvergenceWindow]:
-    """Quantify agreement between Pipeline A (stylometry) and Pipeline B (embeddings)."""
+    """Quantify agreement between Pipeline A (stylometry) and Pipeline B (embeddings).
+
+    When ``use_permutation`` is True, each returned window's convergence
+    ratio is additionally evaluated via a permutation test over the
+    change-point timestamps. The empirical p-value is logged but does not
+    alter the returned windows — the default path is unchanged.
+    """
     if settings is not None:
         window_days = settings.analysis.convergence_window_days
         min_feature_ratio = settings.analysis.convergence_min_feature_ratio
@@ -286,6 +298,47 @@ def compute_convergence_scores(
                 pipeline_b_score=pipeline_b_score,
                 pipeline_c_score=pipeline_c,
             )
+        )
+
+    if use_permutation and windows_out and change_points:
+        from forensics.analysis.permutation import permutation_test
+
+        # Null: shuffle change-point labels, recompute max convergence ratio.
+        # The membership of each change-point in each window does not depend
+        # on the shuffle, so precompute it once.
+        rng = np.random.default_rng(permutation_seed)
+        labels = np.array([cp.feature_name for cp in change_points])
+        window_members: list[np.ndarray] = [
+            np.array(
+                [
+                    i
+                    for i, cp in enumerate(change_points)
+                    if closed_interval_contains(cp.timestamp.date(), w.start_date, w.end_date)
+                ],
+                dtype=int,
+            )
+            for w in windows_out
+        ]
+
+        null: list[float] = []
+        for _ in range(n_permutations):
+            shuffled = rng.permutation(labels)
+            max_shuf_ratio = 0.0
+            for idx in window_members:
+                if idx.size == 0:
+                    continue
+                ratio_shuf = len(set(shuffled[idx])) / float(total)
+                if ratio_shuf > max_shuf_ratio:
+                    max_shuf_ratio = ratio_shuf
+            null.append(max_shuf_ratio)
+
+        observed = max(w.convergence_ratio for w in windows_out)
+        result = permutation_test(observed, null, n_permutations=n_permutations)
+        logger.info(
+            "convergence permutation test: observed_ratio=%.3f p=%.4f (null mean=%.3f)",
+            result.observed,
+            result.p_value,
+            result.null_mean,
         )
 
     return windows_out
