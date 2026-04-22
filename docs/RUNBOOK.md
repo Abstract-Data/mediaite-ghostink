@@ -124,6 +124,15 @@ uv run pytest -m "not slow" tests/ -v       # default behavior
 
 ## Common Issues
 
+### Command not found: `uv`
+
+- Install uv with the official script:
+  - `curl -LsSf https://astral.sh/uv/install.sh | sh`
+- Load uv into the current shell:
+  - `source "$HOME/.local/bin/env"`
+- Verify:
+  - `uv --version`
+
 ### Command not found: `forensics`
 
 - Confirm dependencies are synced: `uv sync`
