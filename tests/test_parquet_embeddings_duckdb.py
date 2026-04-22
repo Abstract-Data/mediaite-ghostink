@@ -10,6 +10,7 @@ import polars as pl
 import pytest
 from pydantic import ValidationError
 
+from forensics.analysis.artifact_paths import AnalysisArtifactPaths
 from forensics.models.features import EmbeddingRecord
 from forensics.storage.duckdb_queries import (
     get_ai_marker_spike_detection,
@@ -230,12 +231,10 @@ def test_load_article_embeddings_legacy_npy_and_batch_npz(
         embedding_dim=5,
     )
     write_embeddings_manifest([rec_npy], emb_root / "manifest.jsonl")
-    pairs = load_article_embeddings(
-        sample_author.slug,
-        emb_root,
-        db_path,
-        project_root=root,
+    paths = AnalysisArtifactPaths.from_layout(
+        root, db_path, root / "data" / "features", emb_root
     )
+    pairs = load_article_embeddings(sample_author.slug, paths)
     assert len(pairs) == 1
     assert np.allclose(pairs[0].embedding, v1)
 
@@ -270,12 +269,7 @@ def test_load_article_embeddings_legacy_npy_and_batch_npz(
     ]
     # Second author article rows in DB are not required for load_article_embeddings
     write_embeddings_manifest(rec_batch, emb_root / "manifest.jsonl")
-    pairs_b = load_article_embeddings(
-        sample_author.slug,
-        emb_root,
-        db_path,
-        project_root=root,
-    )
+    pairs_b = load_article_embeddings(sample_author.slug, paths)
     assert len(pairs_b) == 2
     pairs_b.sort(key=lambda x: x.published_at)
     assert np.allclose(pairs_b[0].embedding, v2)
@@ -317,12 +311,10 @@ def test_load_article_embeddings_rejects_legacy_object_npz_batch(
         ),
     ]
     write_embeddings_manifest(rec_batch, emb_root / "manifest.jsonl")
-    pairs = load_article_embeddings(
-        sample_author.slug,
-        emb_root,
-        db_path,
-        project_root=root,
+    paths = AnalysisArtifactPaths.from_layout(
+        root, db_path, root / "data" / "features", emb_root
     )
+    pairs = load_article_embeddings(sample_author.slug, paths)
     assert pairs == []
 
 
@@ -355,12 +347,10 @@ def test_load_article_embeddings_skips_batch_missing_required_keys(
         embedding_dim=3,
     )
     write_embeddings_manifest([rec], emb_root / "manifest.jsonl")
-    pairs = load_article_embeddings(
-        sample_author.slug,
-        emb_root,
-        db_path,
-        project_root=root,
+    paths = AnalysisArtifactPaths.from_layout(
+        root, db_path, root / "data" / "features", emb_root
     )
+    pairs = load_article_embeddings(sample_author.slug, paths)
     assert pairs == []
 
 
@@ -398,12 +388,10 @@ def test_load_article_embeddings_skips_batch_vector_row_mismatch(
         embedding_dim=4,
     )
     write_embeddings_manifest([rec], emb_root / "manifest.jsonl")
-    pairs = load_article_embeddings(
-        sample_author.slug,
-        emb_root,
-        db_path,
-        project_root=root,
+    paths = AnalysisArtifactPaths.from_layout(
+        root, db_path, root / "data" / "features", emb_root
     )
+    pairs = load_article_embeddings(sample_author.slug, paths)
     assert pairs == []
 
 
@@ -440,12 +428,10 @@ def test_load_article_embeddings_skips_article_missing_from_batch(
         embedding_dim=5,
     )
     write_embeddings_manifest([rec], emb_root / "manifest.jsonl")
-    pairs = load_article_embeddings(
-        sample_author.slug,
-        emb_root,
-        db_path,
-        project_root=root,
+    paths = AnalysisArtifactPaths.from_layout(
+        root, db_path, root / "data" / "features", emb_root
     )
+    pairs = load_article_embeddings(sample_author.slug, paths)
     assert pairs == []
 
 
@@ -478,10 +464,8 @@ def test_load_article_embeddings_skips_corrupt_npy_file(
         embedding_dim=99,
     )
     write_embeddings_manifest([rec], emb_root / "manifest.jsonl")
-    pairs = load_article_embeddings(
-        sample_author.slug,
-        emb_root,
-        db_path,
-        project_root=root,
+    paths = AnalysisArtifactPaths.from_layout(
+        root, db_path, root / "data" / "features", emb_root
     )
+    pairs = load_article_embeddings(sample_author.slug, paths)
     assert pairs == []

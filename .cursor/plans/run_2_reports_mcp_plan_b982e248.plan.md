@@ -64,7 +64,7 @@ todos:
     status: completed
   - id: T09-agents-2-5-rf-smell-002
     content: "[AGENT 2]+[AGENT 5] TIER9 EXCLUSIVE after T04+T02b+T08 merged - RF-SMELL-002 AnalysisArtifactPaths migration"
-    status: pending
+    status: completed
   - id: T10-final-verify
     content: "[ALL AGENTS] TIER10 after T09 merged - ruff, pytest --cov, CLI smoke, full PR checklist"
     status: pending

@@ -65,7 +65,7 @@ def _load_or_compute_changepoints(
     *,
     feature_frame: pl.DataFrame | None = None,
 ) -> list[ChangePoint]:
-    cp_json = paths.analysis_dir / f"{slug}_changepoints.json"
+    cp_json = paths.changepoints_json(slug)
     if cp_json.is_file():
         raw = json.loads(cp_json.read_text(encoding="utf-8"))
         return [ChangePoint.model_validate(x) for x in raw]
@@ -88,11 +88,11 @@ def _velocity_and_baseline_for_slug(
     settings: ForensicsSettings,
 ) -> tuple[list[tuple[str, float]], list[tuple[Any, float]]]:
     """Return ``(vel_tuples, baseline_curve)`` from disk or by recomputing from embeddings."""
-    drift_path = paths.analysis_dir / f"{slug}_drift.json"
+    drift_path = paths.drift_json(slug)
     baseline_curve: list = []
     vel_tuples: list[tuple[str, float]] = []
 
-    curve_path = paths.analysis_dir / f"{slug}_baseline_curve.json"
+    curve_path = paths.baseline_curve_json(slug)
     if curve_path.is_file():
         for row in json.loads(curve_path.read_text(encoding="utf-8")):
             ts = parse_datetime(row["published_at"])
@@ -103,7 +103,7 @@ def _velocity_and_baseline_for_slug(
         ds = DriftScores.model_validate_json(drift_path.read_text(encoding="utf-8"))
 
     if ds and ds.monthly_centroid_velocities:
-        npz_path = paths.analysis_dir / f"{slug}_centroids.npz"
+        npz_path = paths.centroids_npz(slug)
         months: list[str] = []
         if npz_path.is_file():
             data = np.load(npz_path)
@@ -114,12 +114,7 @@ def _velocity_and_baseline_for_slug(
             vel_tuples = [(f"m{i}", v) for i, v in enumerate(ds.monthly_centroid_velocities)]
     else:
         try:
-            pairs = load_article_embeddings(
-                slug,
-                paths.embeddings_dir,
-                paths.db_path,
-                project_root=paths.project_root,
-            )
+            pairs = load_article_embeddings(slug, paths)
             if len(pairs) >= 2:
                 monthly = compute_monthly_centroids(pairs)
                 vels = track_centroid_velocity(monthly)
@@ -144,7 +139,7 @@ def _load_target_author_and_frame(
     if target_author is None:
         msg = f"Unknown target slug: {target_id}"
         raise ValueError(msg)
-    target_path = paths.features_dir / f"{target_id}.parquet"
+    target_path = paths.features_parquet(target_id)
     if not target_path.is_file():
         msg = f"Missing features for target: {target_path}"
         raise ValueError(msg)
@@ -226,7 +221,7 @@ def _summarize_control_authors(
             feature_frame=control_feature_frames.get(slug),
         )
 
-        drift_path = paths.analysis_dir / f"{slug}_drift.json"
+        drift_path = paths.drift_json(slug)
         if drift_path.is_file():
             raw_drift = drift_path.read_text(encoding="utf-8")
             control_drift_scores[slug] = DriftScores.model_validate_json(raw_drift)
@@ -258,7 +253,7 @@ def _editorial_signal_for_target(
     settings: ForensicsSettings,
     control_windows: dict[str, list[ConvergenceWindow]],
 ) -> float:
-    target_cp_path = paths.analysis_dir / f"{target_id}_changepoints.json"
+    target_cp_path = paths.changepoints_json(target_id)
     if target_cp_path.is_file():
         raw_cp = json.loads(target_cp_path.read_text(encoding="utf-8"))
         target_cps = [ChangePoint.model_validate(x) for x in raw_cp]

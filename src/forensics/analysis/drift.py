@@ -15,8 +15,8 @@ from typing import Any
 import numpy as np
 from scipy.spatial.distance import cosine
 
+from forensics.analysis.artifact_paths import AnalysisArtifactPaths
 from forensics.analysis.utils import resolve_author_rows
-from forensics.config import get_project_root
 from forensics.config.settings import ForensicsSettings
 from forensics.models.analysis import DriftScores
 from forensics.storage.parquet import (
@@ -306,20 +306,17 @@ def compute_drift_scores(
 
 def load_article_embeddings(
     author_slug: str,
-    embeddings_dir: Path,
-    db_path: Path,
-    *,
-    project_root: Path | None = None,
+    paths: AnalysisArtifactPaths,
 ) -> list[ArticleEmbedding]:
     """Load article embeddings from manifest + ``.npy`` or ``batch.npz``."""
-    root = project_root or get_project_root()
+    root = paths.project_root
     batch_cache: dict[Path, tuple[np.ndarray, dict[str, int]]] = {}
-    with Repository(db_path) as repo:
+    with Repository(paths.db_path) as repo:
         author = repo.get_author_by_slug(author_slug)
         if author is None:
             msg = f"Unknown author slug for embeddings load: {author_slug}"
             raise ValueError(msg)
-        manifest_path = embeddings_dir / "manifest.jsonl"
+        manifest_path = paths.embeddings_dir / "manifest.jsonl"
         records = read_embeddings_manifest(manifest_path)
         pairs: list[ArticleEmbedding] = []
         for rec in records:
@@ -338,8 +335,8 @@ def load_article_embeddings(
         return pairs
 
 
-def load_ai_baseline_embeddings(author_slug: str, project_root: Path) -> list[np.ndarray]:
-    base = project_root / "data" / "ai_baseline" / author_slug / "embeddings"
+def load_ai_baseline_embeddings(author_slug: str, paths: AnalysisArtifactPaths) -> list[np.ndarray]:
+    base = paths.ai_baseline_embeddings_dir(author_slug)
     if not base.is_dir():
         return []
     out: list[np.ndarray] = []
@@ -352,32 +349,32 @@ def write_drift_artifacts(
     author_slug: str,
     author_id: str,
     *,
-    analysis_dir: Path,
+    paths: AnalysisArtifactPaths,
     drift: DriftScores,
     centroids: list[tuple[str, np.ndarray]],
     baseline_curve: list[tuple[datetime, float]],
     umap_payload: dict[str, Any],
 ) -> None:
-    analysis_dir.mkdir(parents=True, exist_ok=True)
-    (analysis_dir / f"{author_slug}_drift.json").write_text(
+    paths.analysis_dir.mkdir(parents=True, exist_ok=True)
+    paths.drift_json(author_slug).write_text(
         drift.model_dump_json(indent=2),
         encoding="utf-8",
     )
     months = np.array([m for m, _ in centroids], dtype="U7")
     vecs = np.stack([np.asarray(v, dtype=np.float32) for _, v in centroids], axis=0)
     np.savez_compressed(
-        analysis_dir / f"{author_slug}_centroids.npz",
+        paths.centroids_npz(author_slug),
         months=months,
         centroids=vecs,
     )
     curve_json = [
         {"published_at": dt.isoformat(), "similarity": float(sim)} for dt, sim in baseline_curve
     ]
-    (analysis_dir / f"{author_slug}_baseline_curve.json").write_text(
+    paths.baseline_curve_json(author_slug).write_text(
         json.dumps(curve_json, indent=2),
         encoding="utf-8",
     )
-    (analysis_dir / f"{author_slug}_umap.json").write_text(
+    paths.umap_json(author_slug).write_text(
         json.dumps(umap_payload, indent=2),
         encoding="utf-8",
     )
@@ -389,8 +386,7 @@ def compute_author_drift_pipeline(
     article_embs: Sequence[ArticleEmbedding],
     settings: ForensicsSettings,
     *,
-    project_root: Path,
-    analysis_dir: Path,
+    paths: AnalysisArtifactPaths,
 ) -> (
     tuple[
         list[tuple[str, np.ndarray]],
@@ -422,7 +418,7 @@ def compute_author_drift_pipeline(
         period="month",
         max_pairwise=settings.analysis.intra_variance_pairwise_max,
     )
-    ai_vecs = load_ai_baseline_embeddings(slug, project_root)
+    ai_vecs = load_ai_baseline_embeddings(slug, paths)
     ai_conv = compute_ai_convergence(monthly, ai_vecs) if ai_vecs else None
     ai_centroid_plot: np.ndarray | None = None
     if ai_vecs:
@@ -439,7 +435,7 @@ def compute_author_drift_pipeline(
     write_drift_artifacts(
         slug,
         author_id,
-        analysis_dir=analysis_dir,
+        paths=paths,
         drift=drift,
         centroids=monthly,
         baseline_curve=baseline_curve,
@@ -449,25 +445,19 @@ def compute_author_drift_pipeline(
 
 
 def run_drift_analysis(
-    db_path: Path,
     settings: ForensicsSettings,
     *,
-    project_root: Path | None = None,
+    paths: AnalysisArtifactPaths,
     author_slug: str | None = None,
 ) -> None:
     """Compute drift metrics for configured authors and write ``data/analysis/*`` outputs."""
-    root = project_root or get_project_root()
-    embed_root = root / "data" / "embeddings"
-    analysis_dir = root / "data" / "analysis"
     centroids_by_author: dict[str, list[tuple[str, np.ndarray]]] = {}
 
-    with Repository(db_path) as repo:
+    with Repository(paths.db_path) as repo:
         author_rows = resolve_author_rows(repo, settings, author_slug=author_slug)
         for author in author_rows:
             try:
-                article_embs = load_article_embeddings(
-                    author.slug, embed_root, db_path, project_root=root
-                )
+                article_embs = load_article_embeddings(author.slug, paths)
             except ValueError as exc:
                 logger.warning("drift: skip slug=%s (%s)", author.slug, exc)
                 continue
@@ -476,8 +466,7 @@ def run_drift_analysis(
                 author.id,
                 article_embs,
                 settings,
-                project_root=root,
-                analysis_dir=analysis_dir,
+                paths=paths,
             )
             if res is None:
                 logger.warning("drift: insufficient embeddings for %s", author.slug)
@@ -491,7 +480,7 @@ def run_drift_analysis(
             centroids_by_author,
             ai_centroid=None,
         )
-        (analysis_dir / "combined_umap.json").write_text(
+        paths.combined_umap_json().write_text(
             json.dumps(combined, indent=2),
             encoding="utf-8",
         )
