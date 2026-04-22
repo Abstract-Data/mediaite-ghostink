@@ -658,3 +658,50 @@ uv run forensics --help                           → 'survey' subcommand visibl
 #### Risks & Next Steps
 - ws4 (calibration) and ws6 (report overhaul) can now consume `SurveyReport.natural_controls` and the ranked `SurveyReport.results` directly.
 - `extract_all_features` is invoked once per author (by slug) — for large newsrooms the cost is dominated by spaCy nlp setup; acceptable for the survey use case, but if latency becomes an issue the extractor could be lifted out of the per-author loop.
+
+---
+
+### Phase 12 Unit 4 — ws4-calibration
+**Status:** Complete
+**Date:** 2026-04-22
+**Agent/Session:** ws4-calibration worker (Opus 4.7)
+
+#### What Was Done
+- Added the calibration suite per prompt §4. New module `src/forensics/calibration/` ships a synthetic-corpus builder, a trial runner, and sensitivity/specificity/precision/F1/date-accuracy metrics.
+- Registered the `forensics calibrate` Typer subapp with flags `--positive-trials`, `--negative-trials`, `--author`, `--seed`, `--output`, `--dry-run`.
+- Added `tests/test_calibration.py` (9 tests) covering splice semantics, negative-control identity, metric arithmetic (including empty-group edge case), perfect detector (F1=1.0), blind detector (sensitivity=0, specificity=1), dry-run short-circuit, and CLI help surfaces flags.
+
+#### Files Created
+- `src/forensics/calibration/__init__.py` — barrel exports.
+- `src/forensics/calibration/synthetic.py` — `build_spliced_corpus`, `build_negative_control`, `SyntheticCorpus`.
+- `src/forensics/calibration/runner.py` — `run_calibration`, `CalibrationTrial`, `CalibrationReport`, `compute_metrics`.
+- `src/forensics/cli/calibrate.py` — Typer subapp.
+- `tests/test_calibration.py`.
+
+#### Files Modified
+- `src/forensics/cli/__init__.py` — wired `calibrate_app` via `app.add_typer(...)`.
+
+#### Verification Evidence
+```
+uv run ruff format --check .                 -> 136 files already formatted
+uv run ruff check .                           -> All checks passed!
+uv run pytest tests/test_calibration.py -v    -> 9 passed
+uv run pytest tests/ -v                       -> 262 passed, 18 skipped (spaCy), 2 deselected
+uv run forensics calibrate --help             -> shows all six flags
+uv run forensics --help                       -> lists 'calibrate' command
+```
+
+#### Decisions Made
+- Each trial writes to its own `articles.db` under `data/calibration/run_<ts>/positive_NN/` (or `negative_NN/`) so parallel runs and reproducibility are easy. Materialising the corpus gives the full pipeline (extract + analyze) a normal filesystem layout without any pipeline changes.
+- `_run_trial_analysis` is a deliberate seam — tests monkeypatch it to simulate the detector without loading spaCy or sentence-transformers.
+- Detector “fires” is defined as `SignalStrength in {WEAK, MODERATE, STRONG}` — matches the §1d convention that `NONE` is the explicit no-signal tier.
+- Splice date is picked between the 30th and 70th percentile of the author timeline, RNG seeded per `--seed`.
+- AI baseline articles are read from `data/ai_baseline/<slug>/articles.json` best-effort; missing file -> empty list with a warning (runner still operates, splice is a no-op).
+- `--dry-run` returns an empty report without touching the database so the CLI smoke test stays cheap.
+
+#### Unresolved Questions
+- None. Real calibration runs need Phase 10 AI baseline articles per author; none are checked in, so a live `uv run forensics calibrate` would produce a best-effort (empty-splice) report. The prompt explicitly defers the live smoke test; coverage is via pytest.
+
+#### Risks & Next Steps
+- Downstream ws6 report overhaul can surface `CalibrationReport` metrics; the JSON schema is stable (`sensitivity`, `specificity`, `precision`, `f1_score`, `median_date_error_days`, `n_trials`, `trials`).
+- Positive trials currently run sequentially; they are independent and could be `asyncio.gather`’d if wall-clock matters. Holding off until a real calibration run demonstrates the cost.
