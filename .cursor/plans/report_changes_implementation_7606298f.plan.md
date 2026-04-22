@@ -37,16 +37,16 @@ todos:
     status: completed
   - id: RF-ARCH-001_provenance-repository-alignment
     content: "[WAIT | WAVE-3 after RF-DRY-001] RF-ARCH-001 architecture consistency: route provenance read queries through repository-compatible connection path/settings."
-    status: pending
+    status: completed
   - id: RF-CPLX-001_P2-MAINT-001_orchestrator-decompose
     content: "[WAIT | WAVE-3 after RF-DRY-003/RF-DRY-004/P2-ARCH-002] RF-CPLX-001/P2-MAINT-001 orchestrator decomposition: split run_full_analysis into clear per-author/comparison/artifact helpers while preserving outputs."
-    status: pending
+    status: completed
   - id: RF-CPLX-002_comparison-decompose
     content: "[WAIT | WAVE-3 after P3-PERF-002 + RF-DRY-003/RF-DRY-004/P2-ARCH-002] RF-CPLX-002 comparison decomposition: extract control and target processing helpers from compare_target_to_controls for readability/testability."
-    status: pending
+    status: completed
   - id: RF-CPLX-003_fetcher-nesting-reduction
     content: "[PARALLEL | WAVE-3] RF-CPLX-003 fetcher complexity reduction: promote nested async worker to module scope with explicit state passing and simpler concurrency flow."
-    status: pending
+    status: completed
   - id: RF-SMELL-003_RF-SMELL-004_RF-SMELL-005_parameter-objects
     content: "[WAIT | WAVE-4 after RF-CPLX-001 + RF-CPLX-002] RF-SMELL-003/RF-SMELL-004/RF-SMELL-005 parameter cohesion: introduce context/option dataclasses to replace long signatures and repeated path/settings clumps incrementally."
     status: pending

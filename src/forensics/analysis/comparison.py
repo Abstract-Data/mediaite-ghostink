@@ -22,6 +22,7 @@ from forensics.analysis.drift import (
 from forensics.analysis.utils import intervals_overlap, load_feature_frame_for_author
 from forensics.config.settings import ForensicsSettings
 from forensics.models.analysis import ChangePoint, ConvergenceWindow, DriftScores
+from forensics.models.author import Author
 from forensics.storage.parquet import load_feature_frame_sorted
 from forensics.storage.repository import Repository
 from forensics.utils.datetime import parse_datetime
@@ -139,6 +140,169 @@ def _velocity_and_baseline_for_slug(
     return vel_tuples, baseline_curve
 
 
+def _load_target_author_and_frame(
+    repo: Repository,
+    features_dir: Path,
+    target_id: str,
+) -> tuple[Author, pl.DataFrame]:
+    target_author = repo.get_author_by_slug(target_id)
+    if target_author is None:
+        msg = f"Unknown target slug: {target_id}"
+        raise ValueError(msg)
+    target_path = features_dir / f"{target_id}.parquet"
+    if not target_path.is_file():
+        msg = f"Missing features for target: {target_path}"
+        raise ValueError(msg)
+    df_t = load_feature_frame_sorted(target_path).filter(pl.col("author_id") == target_author.id)
+    if df_t.is_empty():
+        df_t = load_feature_frame_sorted(target_path)
+    return target_author, df_t
+
+
+def _load_control_frames_and_pooled(
+    repo: Repository,
+    features_dir: Path,
+    control_ids: list[str],
+) -> tuple[pl.DataFrame, dict[str, pl.DataFrame]]:
+    control_frames: list[pl.DataFrame] = []
+    control_feature_frames: dict[str, pl.DataFrame] = {}
+    for slug in control_ids:
+        au = repo.get_author_by_slug(slug)
+        if au is None:
+            logger.warning("compare: skip unknown control slug=%s", slug)
+            continue
+        dfc = load_feature_frame_for_author(features_dir, slug, au.id)
+        if dfc is None:
+            logger.warning("compare: skip missing features slug=%s", slug)
+            continue
+        control_frames.append(dfc)
+        control_feature_frames[slug] = dfc
+    pooled = pl.concat(control_frames) if control_frames else pl.DataFrame()
+    return pooled, control_feature_frames
+
+
+def _two_sample_feature_comparisons(
+    df_t: pl.DataFrame,
+    pooled: pl.DataFrame,
+) -> dict[str, dict[str, Any]]:
+    feature_comparisons: dict[str, dict[str, Any]] = {}
+    cols = _numeric_feature_columns(df_t)
+    for col in cols:
+        tvals = df_t[col].cast(pl.Float64, strict=False).drop_nulls().to_numpy()
+        if pooled.is_empty() or col not in pooled.columns:
+            continue
+        cvals = pooled[col].cast(pl.Float64, strict=False).drop_nulls().to_numpy()
+        if tvals.size < 3 or cvals.size < 3:
+            continue
+        t_stat, p_two = stats.ttest_ind(tvals, cvals, equal_var=False)
+        feature_comparisons[col] = {
+            "all": {
+                "t_stat": float(t_stat),
+                "p_value": float(p_two),
+                "target_mean": float(np.mean(tvals)),
+                "control_mean": float(np.mean(cvals)),
+            }
+        }
+    return feature_comparisons
+
+
+def _summarize_control_authors(
+    control_ids: list[str],
+    repo: Repository,
+    features_dir: Path,
+    analysis_dir: Path,
+    embeddings_dir: Path,
+    db_path: Path,
+    project_root: Path,
+    settings: ForensicsSettings,
+    control_feature_frames: dict[str, pl.DataFrame],
+) -> tuple[
+    dict[str, list[ChangePoint]],
+    dict[str, DriftScores | None],
+    dict[str, list[ConvergenceWindow]],
+]:
+    control_change_points: dict[str, list[ChangePoint]] = {}
+    control_drift_scores: dict[str, DriftScores | None] = {}
+    control_windows: dict[str, list[ConvergenceWindow]] = {}
+
+    for slug in control_ids:
+        control_change_points[slug] = _load_or_compute_changepoints(
+            slug,
+            repo,
+            features_dir,
+            analysis_dir,
+            settings,
+            feature_frame=control_feature_frames.get(slug),
+        )
+
+        drift_path = analysis_dir / f"{slug}_drift.json"
+        if drift_path.is_file():
+            raw_drift = drift_path.read_text(encoding="utf-8")
+            control_drift_scores[slug] = DriftScores.model_validate_json(raw_drift)
+        else:
+            control_drift_scores[slug] = None
+
+        vel_tuples, baseline_curve = _velocity_and_baseline_for_slug(
+            slug,
+            repo,
+            analysis_dir,
+            embeddings_dir,
+            db_path,
+            project_root,
+            settings,
+        )
+        cps = control_change_points[slug]
+        control_windows[slug] = compute_convergence_scores(
+            cps,
+            vel_tuples,
+            baseline_curve,
+            settings=settings,
+        )
+    return control_change_points, control_drift_scores, control_windows
+
+
+def _editorial_signal_for_target(
+    target_id: str,
+    target_author: Author,
+    df_t: pl.DataFrame,
+    repo: Repository,
+    analysis_dir: Path,
+    embeddings_dir: Path,
+    db_path: Path,
+    project_root: Path,
+    settings: ForensicsSettings,
+    control_windows: dict[str, list[ConvergenceWindow]],
+) -> float:
+    target_cp_path = analysis_dir / f"{target_id}_changepoints.json"
+    if target_cp_path.is_file():
+        raw_cp = json.loads(target_cp_path.read_text(encoding="utf-8"))
+        target_cps = [ChangePoint.model_validate(x) for x in raw_cp]
+    else:
+        target_cps = analyze_author_feature_changepoints(
+            df_t,
+            author_id=target_author.id,
+            settings=settings,
+        )
+
+    target_vel, target_curve = _velocity_and_baseline_for_slug(
+        target_id,
+        repo,
+        analysis_dir,
+        embeddings_dir,
+        db_path,
+        project_root,
+        settings,
+    )
+
+    target_windows = compute_convergence_scores(
+        target_cps,
+        target_vel,
+        target_curve,
+        settings=settings,
+    )
+    return compute_signal_attribution(target_windows, control_windows)
+
+
 def compare_target_to_controls(
     target_id: str,
     control_ids: list[str],
@@ -152,122 +316,34 @@ def compare_target_to_controls(
 ) -> dict[str, Any]:
     """Two-sample tests (target vs pooled controls) plus cached change-point / drift summaries."""
     with Repository(db_path) as repo:
-        target_author = repo.get_author_by_slug(target_id)
-        if target_author is None:
-            msg = f"Unknown target slug: {target_id}"
-            raise ValueError(msg)
-
-        target_path = features_dir / f"{target_id}.parquet"
-        if not target_path.is_file():
-            msg = f"Missing features for target: {target_path}"
-            raise ValueError(msg)
-        df_t = load_feature_frame_sorted(target_path).filter(
-            pl.col("author_id") == target_author.id
+        target_author, df_t = _load_target_author_and_frame(repo, features_dir, target_id)
+        pooled, control_feature_frames = _load_control_frames_and_pooled(
+            repo, features_dir, control_ids
         )
-        if df_t.is_empty():
-            df_t = load_feature_frame_sorted(target_path)
-
-        control_frames: list[pl.DataFrame] = []
-        control_feature_frames: dict[str, pl.DataFrame] = {}
-        for slug in control_ids:
-            au = repo.get_author_by_slug(slug)
-            if au is None:
-                logger.warning("compare: skip unknown control slug=%s", slug)
-                continue
-            dfc = load_feature_frame_for_author(features_dir, slug, au.id)
-            if dfc is None:
-                logger.warning("compare: skip missing features slug=%s", slug)
-                continue
-            control_frames.append(dfc)
-            control_feature_frames[slug] = dfc
-
-        pooled = pl.concat(control_frames) if control_frames else pl.DataFrame()
-
-        feature_comparisons: dict[str, dict[str, Any]] = {}
-        cols = _numeric_feature_columns(df_t)
-        for col in cols:
-            tvals = df_t[col].cast(pl.Float64, strict=False).drop_nulls().to_numpy()
-            if pooled.is_empty() or col not in pooled.columns:
-                continue
-            cvals = pooled[col].cast(pl.Float64, strict=False).drop_nulls().to_numpy()
-            if tvals.size < 3 or cvals.size < 3:
-                continue
-            t_stat, p_two = stats.ttest_ind(tvals, cvals, equal_var=False)
-            feature_comparisons[col] = {
-                "all": {
-                    "t_stat": float(t_stat),
-                    "p_value": float(p_two),
-                    "target_mean": float(np.mean(tvals)),
-                    "control_mean": float(np.mean(cvals)),
-                }
-            }
-
-        control_change_points: dict[str, list[ChangePoint]] = {}
-        control_drift_scores: dict[str, DriftScores | None] = {}
-        control_windows: dict[str, list[ConvergenceWindow]] = {}
-
-        for slug in control_ids:
-            control_change_points[slug] = _load_or_compute_changepoints(
-                slug,
-                repo,
-                features_dir,
-                analysis_dir,
-                settings,
-                feature_frame=control_feature_frames.get(slug),
-            )
-
-            drift_path = analysis_dir / f"{slug}_drift.json"
-            if drift_path.is_file():
-                raw_drift = drift_path.read_text(encoding="utf-8")
-                control_drift_scores[slug] = DriftScores.model_validate_json(raw_drift)
-            else:
-                control_drift_scores[slug] = None
-
-            vel_tuples, baseline_curve = _velocity_and_baseline_for_slug(
-                slug,
-                repo,
-                analysis_dir,
-                embeddings_dir,
-                db_path,
-                project_root,
-                settings,
-            )
-            cps = control_change_points[slug]
-            control_windows[slug] = compute_convergence_scores(
-                cps,
-                vel_tuples,
-                baseline_curve,
-                settings=settings,
-            )
-
-        target_cp_path = analysis_dir / f"{target_id}_changepoints.json"
-        if target_cp_path.is_file():
-            raw_cp = json.loads(target_cp_path.read_text(encoding="utf-8"))
-            target_cps = [ChangePoint.model_validate(x) for x in raw_cp]
-        else:
-            target_cps = analyze_author_feature_changepoints(
-                df_t,
-                author_id=target_author.id,
-                settings=settings,
-            )
-
-        target_vel, target_curve = _velocity_and_baseline_for_slug(
+        feature_comparisons = _two_sample_feature_comparisons(df_t, pooled)
+        control_change_points, control_drift_scores, control_windows = _summarize_control_authors(
+            control_ids,
+            repo,
+            features_dir,
+            analysis_dir,
+            embeddings_dir,
+            db_path,
+            project_root,
+            settings,
+            control_feature_frames,
+        )
+        editorial_vs_author_signal = _editorial_signal_for_target(
             target_id,
+            target_author,
+            df_t,
             repo,
             analysis_dir,
             embeddings_dir,
             db_path,
             project_root,
             settings,
+            control_windows,
         )
-
-        target_windows = compute_convergence_scores(
-            target_cps,
-            target_vel,
-            target_curve,
-            settings=settings,
-        )
-        editorial_vs_author_signal = compute_signal_attribution(target_windows, control_windows)
 
         ccp_out = {
             k: [cp.model_dump(mode="json") for cp in v] for k, v in control_change_points.items()

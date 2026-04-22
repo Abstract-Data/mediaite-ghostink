@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from forensics.config.settings import ForensicsSettings
+from forensics.storage.repository import open_repository_connection
 
 CUSTODY_FILENAME = "corpus_custody.json"
 
@@ -26,7 +27,7 @@ def compute_corpus_hash(db_path: Path) -> str:
     """Hash ordered ``content_hash`` values from the articles table."""
     if not db_path.is_file():
         return hashlib.sha256(b"").hexdigest()[:12]
-    conn = sqlite3.connect(db_path)
+    conn = open_repository_connection(db_path)
     try:
         hashes = conn.execute(
             "SELECT content_hash FROM articles ORDER BY id",
@@ -98,7 +99,7 @@ def audit_scrape_timestamps(db_path: Path) -> Mapping[str, Any]:
             "scraped_at_max": None,
             "message": "database file not found",
         }
-    conn = sqlite3.connect(db_path)
+    conn = open_repository_connection(db_path)
     conn.row_factory = sqlite3.Row
     try:
         row = conn.execute(

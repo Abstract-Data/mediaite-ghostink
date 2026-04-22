@@ -22,7 +22,7 @@ from forensics.models.article import Article
 from forensics.scraper.client import create_scraping_client
 from forensics.scraper.parser import extract_article_text, extract_metadata, looks_coauthored
 from forensics.storage.export import append_jsonl
-from forensics.storage.repository import Repository
+from forensics.storage.repository import Repository, UnfetchedArticle
 from forensics.utils import utc_now_iso
 from forensics.utils.hashing import content_hash
 from forensics.utils.text import word_count
@@ -292,6 +292,100 @@ async def _persist_successful_fetch(
     repo.upsert_article(article)
 
 
+async def _fetch_one_article_html(
+    client: httpx.AsyncClient,
+    row: UnfetchedArticle,
+    *,
+    repo: Repository,
+    root: Path,
+    scraping: ScrapingConfig,
+    limiter: RateLimiter,
+    errors: Path,
+    coauth: Path,
+    warns: Path,
+    sem: asyncio.Semaphore,
+    db_lock: asyncio.Lock,
+    done_lock: asyncio.Lock,
+    done_count: list[int],
+    total: int,
+) -> None:
+    """Fetch one article HTML under concurrency limits; mutates ``done_count[0]`` for progress."""
+    async with sem:
+        year = row.published_date.year
+        response = await request_with_retry(
+            client,
+            limiter,
+            scraping,
+            "GET",
+            row.url,
+            errors_path=errors,
+            phase="html_fetch",
+        )
+
+        scraped_at = datetime.now(UTC)
+        final_host = urlparse(str(response.url)).netloc
+
+        async with db_lock:
+            article = repo.get_article_by_id(row.article_id)
+            if article is None or (article.clean_text and article.clean_text.strip()):
+                return
+
+            if not response.is_success:
+                await _persist_http_failed_fetch(repo, article, scraped_at, response)
+                async with done_lock:
+                    done_count[0] += 1
+                    logger.info(
+                        "Fetched %s/%s articles for %s (http %s)",
+                        done_count[0],
+                        total,
+                        row.author_name,
+                        response.status_code,
+                    )
+                return
+
+            if not _is_mediaite_host(final_host):
+                await _persist_off_domain_fetch(
+                    repo,
+                    errors,
+                    article,
+                    scraped_at,
+                    row.url,
+                    response,
+                    final_host,
+                )
+                async with done_lock:
+                    done_count[0] += 1
+                    logger.info(
+                        "Fetched %s/%s articles for %s (off-domain %s)",
+                        done_count[0],
+                        total,
+                        row.author_name,
+                        final_host,
+                    )
+                return
+
+            await _persist_successful_fetch(
+                repo,
+                root,
+                year,
+                row.article_id,
+                article,
+                response.text,
+                scraped_at,
+                coauth,
+                warns,
+            )
+
+        async with done_lock:
+            done_count[0] += 1
+            logger.info(
+                "Fetched %s/%s articles for %s",
+                done_count[0],
+                total,
+                row.author_name,
+            )
+
+
 def archive_raw_year_dirs(root: Path, db_path: Path) -> int:
     """
     Compress each ``data/raw/{YYYY}/`` directory to ``data/raw/{YYYY}.tar.gz`` and
@@ -354,94 +448,31 @@ async def fetch_articles(
         sem = asyncio.Semaphore(max(1, scraping.max_concurrent))
         db_lock = asyncio.Lock()
         done_lock = asyncio.Lock()
-        done_count = 0
-
-        async def one(
-            client: httpx.AsyncClient,
-            article_id: str,
-            url: str,
-            author_name: str,
-            published: datetime,
-        ) -> None:
-            nonlocal done_count
-            async with sem:
-                year = published.year
-                response = await request_with_retry(
-                    client,
-                    limiter,
-                    scraping,
-                    "GET",
-                    url,
-                    errors_path=errors,
-                    phase="html_fetch",
-                )
-
-                scraped_at = datetime.now(UTC)
-                final_host = urlparse(str(response.url)).netloc
-
-                async with db_lock:
-                    article = r.get_article_by_id(article_id)
-                    if article is None or (article.clean_text and article.clean_text.strip()):
-                        return
-
-                    if not response.is_success:
-                        await _persist_http_failed_fetch(r, article, scraped_at, response)
-                        async with done_lock:
-                            done_count += 1
-                            logger.info(
-                                "Fetched %s/%s articles for %s (http %s)",
-                                done_count,
-                                total,
-                                author_name,
-                                response.status_code,
-                            )
-                        return
-
-                    if not _is_mediaite_host(final_host):
-                        await _persist_off_domain_fetch(
-                            r,
-                            errors,
-                            article,
-                            scraped_at,
-                            url,
-                            response,
-                            final_host,
-                        )
-                        async with done_lock:
-                            done_count += 1
-                            logger.info(
-                                "Fetched %s/%s articles for %s (off-domain %s)",
-                                done_count,
-                                total,
-                                author_name,
-                                final_host,
-                            )
-                        return
-
-                    await _persist_successful_fetch(
-                        r,
-                        root,
-                        year,
-                        article_id,
-                        article,
-                        response.text,
-                        scraped_at,
-                        coauth,
-                        warns,
-                    )
-
-                async with done_lock:
-                    done_count += 1
-                    logger.info("Fetched %s/%s articles for %s", done_count, total, author_name)
+        done_count = [0]
 
         async with create_scraping_client(scraping) as client:
             await asyncio.gather(
                 *(
-                    one(client, row.article_id, row.url, row.author_name, row.published_date)
+                    _fetch_one_article_html(
+                        client,
+                        row,
+                        repo=r,
+                        root=root,
+                        scraping=scraping,
+                        limiter=limiter,
+                        errors=errors,
+                        coauth=coauth,
+                        warns=warns,
+                        sem=sem,
+                        db_lock=db_lock,
+                        done_lock=done_lock,
+                        done_count=done_count,
+                        total=total,
+                    )
                     for row in rows
                 )
             )
-        return done_count
+        return done_count[0]
 
     if repo is not None:
         return await _run(repo)
