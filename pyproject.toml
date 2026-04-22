@@ -47,9 +47,14 @@ dev = [
   "ruff>=0.11.6",
   "pre-commit>=4.2.0",
 ]
+tui = [
+    "textual>=1.0.0",
+    "rich>=13.0",
+]
 
 [project.scripts]
 forensics = "forensics.cli:main"
+forensics-setup = "forensics.tui:main"
 
 [build-system]
 requires = ["hatchling>=1.27.0"]

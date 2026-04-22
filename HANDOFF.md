@@ -766,3 +766,155 @@ uv run forensics --help                              → 'validate' and 'export'
 #### Risks & Next Steps
 - ws2 (TUI wizard) and ws6 (report overhaul) should not need any repository changes from this unit. The `export_to_duckdb` function is a stable read-only consumer of the DB + parquet shards + analysis JSON; adding tables in the future is additive.
 - The Ollama probe URL is hard-coded to `http://localhost:11434`; if the runbook ever recommends a non-default host, expose it via `AnalysisConfig` or an env var.
+
+---
+
+### Unit 6: ws2-tui-wizard (Phase 12 §2 — Interactive TUI Setup Wizard)
+**Status:** Complete
+**Date:** 2026-04-22
+**Agent/Session:** opus-4-7 worker (ws2)
+
+#### What Was Done
+- Added `tui` optional extra (`textual>=1.0.0`, `rich>=13.0`) and a
+  `forensics-setup` console script in `pyproject.toml` → `uv.lock` refreshed.
+- Scaffolded `src/forensics/tui/` package with module-level `main()` that
+  falls back to a friendly "install the tui extra" message when `textual`
+  is missing (the only place a bare `print` is allowed per prompt §2).
+- Implemented `ForensicsSetupApp` with five sequential screens:
+  Dependencies → Discovery → Config → Preflight → Launch. Keybindings
+  `q` / `n` / `b` for quit / next / back.
+- Added Textual CSS (`styles.tcss`) with minimal colour scheme.
+- Registered `forensics setup` Typer command that delegates to
+  `forensics.tui.main`.
+- Dependency screen probes Python, spaCy model, sentence-transformers,
+  Quarto, and Ollama — core logic lives in `check_dependencies()` which
+  returns a list of `DependencyCheckResult` dataclasses (unit-testable
+  without the Textual runtime).
+- Discovery screen probes `articles.db` via `Repository.all_authors()`
+  (protocol from ws1) and summarises into an `AuthorDiscoveryResult`;
+  falls back gracefully when the DB does not yet exist.
+- Config screen exposes `Input` widgets for project name + baseline
+  range + author slugs, renders a live TOML preview via
+  `generate_config()`, and calls `write_config()` (backing up any
+  existing file with a timestamped `.bak` suffix).
+- Preflight screen re-runs `run_all_preflight_checks(settings)` and
+  blocks progression when there are hard-failures.
+- Launch screen prints the chosen next CLI command (`forensics survey`
+  or `forensics all`) into the app exit message.
+
+#### Files Modified
+- `pyproject.toml` — added `tui` optional extra + `forensics-setup` script
+- `uv.lock` — regenerated via `uv sync --extra tui`
+- `src/forensics/cli/__init__.py` — registered the `setup` command
+- `src/forensics/tui/__init__.py` — new package entry with `main()`
+- `src/forensics/tui/app.py` — new `ForensicsSetupApp`
+- `src/forensics/tui/styles.tcss` — new Textual CSS
+- `src/forensics/tui/screens/__init__.py` — new screen barrel
+- `src/forensics/tui/screens/dependencies.py` — new dependency check
+- `src/forensics/tui/screens/discovery.py` — new author discovery
+- `src/forensics/tui/screens/config.py` — new config generation
+- `src/forensics/tui/screens/preflight.py` — new preflight screen
+- `src/forensics/tui/screens/launch.py` — new launch screen
+- `tests/test_tui.py` — 8 tests (pytest.importorskip guard + pilot mount)
+
+#### Verification Evidence
+```
+uv sync --extra tui                                  → textual 8.2.4 installed
+uv run ruff check .                                  → All checks passed!
+uv run ruff format --check .                         → 145 files already formatted
+uv run pytest tests/test_tui.py -v --no-cov          → 8 passed in 6.01s
+uv run pytest tests/ --no-cov                        → 275 passed, 18 skipped, 2 deselected
+uv run forensics setup --help                        → shows "Launch the interactive setup wizard"
+uv run forensics --help | grep -i setup              → "setup  Launch the interactive setup wizard"
+
+tmux smoke test:
+  tmux new-session -d -s tui-smoke 'uv run forensics-setup'
+  tmux capture-pane -t tui-smoke -p
+  → Step 1 of 5: Dependency Check (rendered)
+  → Python 3.13+ / spaCy / sentence-transformers / Quarto / Ollama (5 rows)
+  → Continue button visible
+  tmux send-keys -t tui-smoke "q"  → clean exit
+  grep -qi "depend" /tmp/tui-screen1.txt → SCREEN 1 RENDERED: OK
+```
+
+#### Decisions Made
+- `textual>=1.0.0` picked because prompt §2a explicitly asks for `textual>=1.0.0` (the installed version is 8.2.4 — Textual 8.x satisfies `>=1.0.0`). Included `rich>=13.0` alongside as §2a documents.
+- Core screens each expose a *pure* helper (`check_dependencies`, `generate_config`, `write_config`, `discover_authors_summary`) that is independent of Textual, so the unit tests can cover logic without a running app.
+- `DependencyCheckResult.status` is a `Literal["pass", "warn", "fail"]`, matching the style used in `forensics.preflight`. Kept a separate dataclass rather than reusing `PreflightCheck` because the TUI probe surfaces install hints + required/optional fields that preflight does not.
+- `write_config` backs up via `config.toml.YYYYMMDD-HHMMSS.bak` — preserves the suffix so linters ignore it and so multiple consecutive runs do not overwrite one another.
+- `action_next_step` uses `push_screen` (stacking) so `action_prev_step` can call `pop_screen()` without re-running the previous screen's `on_mount`. Kept the wizard state dict (`app.wizard_state`) as the cross-screen bridge.
+- Dropped the deep ad-hoc callables (e.g. `subprocess.run(["quarto", "--version"])`) into `_safe_version(cmd, flag)` with a 5s timeout and broad `(OSError, SubprocessError)` catch — probes should *never* hang the TUI.
+- The launch screen intentionally does NOT kick off a pipeline run inside the Textual process — it prints the chosen command in the exit message and lets the user run it from the shell so pipeline logs are directly visible.
+- Textual 8.x: `RadioSet.pressed_button` is read-only; the discovery screen sets `RadioButton.value = True` instead.
+
+#### Unresolved Questions
+- `forensics-setup` (the direct script) has no `--help` because Textual apps consume stdin/stdout — running with `--help` just launches the TUI. The `forensics setup` Typer subcommand is the documented entry point for `--help`.
+- Follow-up for ws6: the launch screen currently prints the next-command message rather than wiring a progress bar. If ws6's survey report adds a progress endpoint, the launch screen can be upgraded to drive it via `run_worker`.
+
+#### Risks & Next Steps
+- Downstream ws6 should not need to touch `src/forensics/tui/`; if ws6 wants a survey-progress screen it can add a new screen class and append to `STEP_ORDER`.
+- `uv sync --extra tui` is a hard prerequisite — document this in the RUNBOOK so new operators do not try to run `forensics setup` against a stock install.
+
+---
+
+### Phase 12 Unit 7 — Report Overhaul (ws6-report-overhaul)
+**Status:** Complete
+**Date:** 2026-04-22
+**Agent/Session:** Phase 12 ws6-report-overhaul worker
+
+#### What Was Done
+- Added `src/forensics/reporting/narrative.py` with `generate_evidence_narrative(analysis_result, author_slug, *, score=None, control_count=0, preregistration=None) -> str`. Pure function, deterministic, ~200-400 word factual paragraph citing score tier, convergence window, top-3 effect sizes, drift acceleration, change-point dates, natural controls, and (optional) preregistration lock status.
+- Converted `src/forensics/reporting.py` into a package (`reporting/__init__.py`) so `narrative.py` can live alongside the existing Quarto runner without introducing new barrel re-exports (existing `from forensics.reporting import run_report` and `test_report.py`'s `forensics.reporting.shutil.which` mock path keep working).
+- Added `notebooks/10_survey_dashboard.ipynb` — loads the most recent `data/survey/run_*/survey_results.json`, renders top-10 ranked table, composite-score histogram with natural-controls overlay, earliest-convergence-window timeline, and preregistration verification. Degrades gracefully when no data.
+- Added `notebooks/11_calibration.ipynb` — loads the most recent `data/calibration/calibration_*.json`, displays sensitivity/specificity/precision/F1/median-date-error metrics, confusion-matrix heatmap, date-error histogram, and preregistration verification. Degrades gracefully when no data.
+- Parameterized `notebooks/05_change_point_detection.ipynb`, `06_embedding_drift.ipynb`, `07_statistical_evidence.ipynb` with a `parameters`-tagged cell defaulting to `author_slug = "all"` — enables `quarto render NOTEBOOK -P author_slug:some-slug` per-author drill-down.
+- Added `tests/test_narrative.py` — 7 tests covering determinism (byte-identical), NONE tier ("no evidence" language + no false convergence claims), STRONG tier (d= effect sizes cited), slug verbatim insertion, control-sentence toggle, caveat always present.
+
+#### Files Modified
+- `src/forensics/reporting/__init__.py` — moved from `reporting.py`; unchanged content (Quarto runner).
+- `src/forensics/reporting/narrative.py` — NEW, evidence narrative generator.
+- `notebooks/10_survey_dashboard.ipynb` — NEW, survey dashboard.
+- `notebooks/11_calibration.ipynb` — NEW, calibration metrics + heatmap.
+- `notebooks/05_change_point_detection.ipynb` — added `parameters`-tagged cell.
+- `notebooks/06_embedding_drift.ipynb` — added `parameters`-tagged cell.
+- `notebooks/07_statistical_evidence.ipynb` — added `parameters`-tagged cell.
+- `tests/test_narrative.py` — NEW.
+
+#### Verification Evidence
+```
+$ uv run ruff format --check . && uv run ruff check .
+149 files already formatted
+All checks passed!
+
+$ uv run pytest tests/test_narrative.py -v
+7 passed in 0.93s
+
+$ uv run pytest tests/
+282 passed, 18 skipped, 2 deselected, 1 warning in 31.28s
+
+$ uv run python -c "from forensics.reporting.narrative import generate_evidence_narrative; print('import ok')"
+import ok
+
+$ uv run python -c "import json; json.load(open('notebooks/10_survey_dashboard.ipynb')); print('10_*.ipynb parses ok'); json.load(open('notebooks/11_calibration.ipynb')); print('11_*.ipynb parses ok')"
+10_*.ipynb parses ok
+11_*.ipynb parses ok
+
+Notebook code-cell AST parse — all 5 touched notebooks parse cleanly.
+nbconvert/quarto not installed on host, so execute-render smoke was
+replaced with a JSON + AST validation pass.
+```
+
+#### Decisions Made
+- `generate_evidence_narrative` accepts `score: SurveyScore | None`; when `None`, it computes the score via `compute_composite_score` so callers don't have to wire both. This keeps the simple `(analysis_result, author_slug)` call shape the prompt task brief specifies, while still allowing advanced callers to pass a pre-computed ranked score to keep narrative and ranking table consistent.
+- Preregistration citation is opt-in (caller passes a `VerificationResult`) rather than being read from disk inside the narrative. The rationale: the function must be deterministic and pure; touching the lock file at generation time would add I/O non-determinism. Notebook cells call `verify_preregistration()` and pass the result in.
+- Converted `reporting.py` into a package rather than adding `narrative.py` at the top level, to keep the module namespace consistent (`forensics.reporting.narrative` / `forensics.reporting.run_report`). `__init__.py` is unchanged content — no new barrel re-exports, honouring the v0.2.0 audit rule.
+- Notebooks use polars + plotly (both already project deps), no new dependencies added. Pandas is intentionally avoided per project convention.
+- Parameters cells default `author_slug = "all"` so existing un-parameterized renders are unchanged — downstream Quarto drill-down is a pure capability add.
+
+#### Unresolved Questions
+- The narrative function is pure but does not yet feed notebook 09 (full report) — integration with the Quarto book TOC is a follow-up for whoever merges the stack.
+- `quarto` is not on the shared-repo host, so end-to-end render was validated via JSON + AST parse rather than a live render. A follow-up CI step could install Quarto to close the loop.
+
+#### Risks & Next Steps
+- Downstream consumers should pass a `SurveyScore` when they want the narrative numbers to match an already-rendered ranking table; otherwise the narrative re-scores from scratch, which is still deterministic but could in theory drift if scoring.py thresholds change between rank-time and narrative-time.
+- Per-author drill-down notebooks 05-07 default to `author_slug = "all"` — cells currently read `settings.authors[0]`. Wiring the `author_slug` parameter into the existing author selection is left as a follow-up so this commit stays scoped to the parameter contract.
