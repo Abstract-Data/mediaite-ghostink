@@ -205,9 +205,7 @@ async def _full_pipeline(
         logger.info("metadata: inserted %d new article row(s) into %s", inserted, db_path)
         fetched = await fetch_articles(db_path, settings, dry_run=False, repo=repo)
     logger.info("fetch: processed %d article(s)", fetched)
-    dup_ids = deduplicate_articles(
-        db_path, hamming_threshold=settings.scraping.simhash_threshold
-    )
+    dup_ids = deduplicate_articles(db_path, hamming_threshold=settings.scraping.simhash_threshold)
     logger.info("dedup: marked %d article(s) as near-duplicates", len(dup_ids))
     ex = _export_jsonl(db_path, root)
     logger.info("export: wrote %d article(s) to data/articles.jsonl", ex)

@@ -23,7 +23,7 @@ CheckStatus = Literal["pass", "warn", "fail"]
 
 _MIN_PYTHON: tuple[int, int] = (3, 13)
 _MIN_FREE_GB: float = 5.0
-_PLACEHOLDER_SLUGS = frozenset({"placeholder-target", "placeholder-control"})
+_PLACEHOLDER_SLUGS: frozenset[str] = frozenset({"placeholder-target", "placeholder-control"})
 
 
 class _SettingsLike(Protocol):
@@ -260,8 +260,7 @@ def run_all_preflight_checks(
 
     if strict:
         checks = [
-            PreflightCheck(c.name, "fail", c.message) if c.status == "warn" else c
-            for c in checks
+            PreflightCheck(c.name, "fail", c.message) if c.status == "warn" else c for c in checks
         ]
 
     return PreflightReport(checks=tuple(checks))
