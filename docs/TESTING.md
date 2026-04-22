@@ -152,6 +152,7 @@ Benchmark targets:
 - Embedding generation: < 120s for 1000 articles (GPU) / < 600s (CPU)
 - Change-point detection: < 30s for 10-year author timeline
 - Full pipeline (all stages): < 30 minutes for a single author
+- **Embedding batch Parquet/NPZ I/O** — [`tests/test_embedding_batch_performance.py`](../tests/test_embedding_batch_performance.py): default pytest run includes a median-timing ratio check (one `write_author_embedding_batch` vs N per-article `np.save` writes). For the optional large synthetic write+read ceiling, run `uv run pytest tests/test_embedding_batch_performance.py -m slow --no-cov` (excluded from default `-m 'not slow'` in `pyproject.toml`).
 
 ## Test Authoring Guidance
 

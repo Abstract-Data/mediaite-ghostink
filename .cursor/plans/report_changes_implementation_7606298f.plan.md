@@ -58,7 +58,7 @@ todos:
     status: completed
   - id: FULL-VERIFY_report-acceptance-gates
     content: "[WAIT | FINAL-GATE after all tasks] FULL-VERIFY end-to-end validation: run lint/tests/coverage and targeted CLI smoke checks, then confirm all report issue IDs are addressed in final checklist."
-    status: pending
+    status: completed
 isProject: false
 ---
 
