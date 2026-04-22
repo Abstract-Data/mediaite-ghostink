@@ -20,10 +20,12 @@ Operational quick reference. Agents: append new sections here whenever you disco
   - `uv run forensics report` (requires **Quarto** on `PATH`; output under `data/reports/` per `quarto.yml`)
 - Extract probability features (Phase 9): `uv run forensics extract --probability`
 - Generate AI baseline (Phase 10): `uv run python scripts/generate_baseline.py --author {slug}`
+- Validate environment before a run: `uv run forensics preflight` (pass `--strict` to promote warnings to failures). Hard-fails on Python < 3.13, missing `en_core_web_sm`, disk < 5 GB, config parse errors, or placeholder authors; warns for Quarto/Ollama/sentence-transformers cache misses.
 
 ### Exit codes and warnings
 
 - Stages return **non-zero** on fatal errors (scrape failure, missing Quarto, analysis `typer.Exit`, report subprocess failure). `forensics all` propagates the first non-zero code.
+- `forensics all` returns exit code **`2`** when preflight hard-fails (distinct from `1` used by analyze).
 - `insert_analysis_run` at the start of `all` / scrape / extract / analyze is **best-effort**: SQLite permission or I/O errors log **`Could not record analysis_runs row`** and the stage still continues where the code path allows.
 
 ## Expected Artifacts

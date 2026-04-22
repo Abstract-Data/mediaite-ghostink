@@ -486,3 +486,70 @@ uv run pytest tests/test_pipeline_context.py tests/integration/test_cli.py -v --
 
 #### Risks & Next Steps
 - Any external code that imported `config_fingerprint` only from `forensics.cli._helpers` must switch to `forensics.config` (only `scrape.py` did in-repo).
+
+
+---
+
+### Phase 12 Unit 1: ws3-preflight-hardening
+**Status:** Complete
+**Date:** 2026-04-22
+**Agent/Session:** Opus 4.7 — worker agent (ws3)
+
+#### What Was Done
+- Added `src/forensics/preflight.py` with 8 structured checks (Python version, spaCy `en_core_web_sm`, sentence-transformers model, Quarto, Ollama, disk space, config parse, placeholder authors). Exposes `PreflightCheck`, `PreflightReport`, `run_all_preflight_checks(settings, *, strict=False)`.
+- Hard-fails only on Python, spaCy, disk, config parse, placeholder authors. Other checks degrade to `warn`.
+- Registered `forensics preflight [--strict]` CLI subcommand (exit 0 on all pass/warn, 1 on any fail).
+- Threaded `settings.scraping.simhash_threshold` through `deduplicate_articles` in all three call sites of `src/forensics/cli/scrape.py` (DEDUP_ONLY, FETCH_DEDUP_EXPORT, FULL_PIPELINE).
+- Added `simhash_threshold: int = Field(default=3, ge=0, le=64)` to `ScrapingConfig` and `simhash_threshold = 3` in `[scraping]` of `config.toml`.
+- Added `MIN_PEERS_FOR_SIMILARITY: Final[int] = 5` module constant and made `_self_similarity` return `float | None` when peer count falls short.
+- Updated `ContentFeatures.self_similarity_30d`/`90d` to `float | None = None`.
+- Wired preflight into `run_all_pipeline()`: hard-fails return exit code 2; warnings log. Added `record_audit("forensics all — preflight", ...)` before scrape.
+- Added `rich.progress.Progress` bar to `extract_all_features` in `src/forensics/features/pipeline.py` (per-author task, advances in a `finally` so failures still tick).
+- Added `tests/test_preflight.py` covering all-pass, missing spaCy, placeholder detection, disk low, config parse error, python version edge cases, report helpers, strict mode.
+- Fixed `tests/integration/test_cli_scrape_dispatch.py::test_scrape_dedup_only` monkeypatch lambda to accept new `hamming_threshold` kwarg.
+
+#### Files Modified
+- `src/forensics/preflight.py` — NEW module.
+- `tests/test_preflight.py` — NEW tests.
+- `src/forensics/cli/__init__.py` — register `preflight` command.
+- `src/forensics/features/content.py` — `MIN_PEERS_FOR_SIMILARITY`, `_self_similarity` returns `None`.
+- `src/forensics/models/features.py` — `self_similarity_*` Optional.
+- `src/forensics/scraper/dedup.py` — unchanged (signature already parametric).
+- `src/forensics/cli/scrape.py` — three dedup call sites pass threshold.
+- `src/forensics/config/settings.py` — `simhash_threshold` field.
+- `config.toml` — `simhash_threshold = 3`.
+- `src/forensics/pipeline.py` — preflight gate + audit.
+- `src/forensics/features/pipeline.py` — rich progress bar.
+- `tests/integration/test_cli_scrape_dispatch.py` — lambda kwargs.
+
+#### Verification Evidence
+```
+$ uv run ruff format --check . && uv run ruff check .
+121 files already formatted
+All checks passed!
+
+$ uv run pytest tests/test_preflight.py -v --no-cov
+9 passed in 0.84s
+
+$ uv run pytest tests/ --no-cov
+224 passed, 18 skipped, 2 deselected in 19.38s
+(skips are unrelated: en_core_web_md not installed locally.)
+
+$ uv run forensics preflight   # exit 1 on this dev env (expected: no spaCy sm model, config has placeholders)
+$ uv run forensics --help      # preflight subcommand visible
+```
+
+#### Decisions Made
+- Used a Protocol `_SettingsLike` so preflight does not import `ForensicsSettings` at module load (keeps circular risk low).
+- Individual checks exported for future TUI screen reuse.
+- `run_all_pipeline()` returns exit code `2` on preflight failure (distinct from `1` used by analyze) so operators can distinguish.
+- `rich.progress.Progress` used without adding it as an explicit dependency (transitive via typer, per prompt).
+- `sentence-transformers` and Quarto are `warn`, not `fail`, so users can run extract-only or skip the report stage.
+
+#### Unresolved Questions
+- None.
+
+#### Risks & Next Steps
+- `self_similarity_*` being `Optional` may need verification in downstream Phase 5/6 analysis modules when real data lands; current PELT path tolerates NaN via `np.nan_to_num`.
+- If a downstream stack branch (ws4/ws5/ws6) re-touches `extract_all_features`, the progress-bar `Progress.start()/stop()` lifecycle must survive their refactors.
+
