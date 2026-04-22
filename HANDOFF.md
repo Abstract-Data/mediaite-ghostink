@@ -601,3 +601,60 @@ uv run forensics --help   → lock-preregistration visible
 #### Risks & Next Steps
 - ws1 (survey-mode) will add `SurveyConfig` — at that point `_snapshot_thresholds` should extend to include survey qualification criteria.
 - ws4 (calibration) and ws6 (report-overhaul) can wire `verify_preregistration` into their entry points to emit a VIOLATION warning before running analysis.
+
+---
+
+### Unit 3 (ws1-survey-mode) — Blind Newsroom Survey Mode
+**Status:** Complete
+**Date:** 2026-04-22
+**Agent/Session:** claude-opus-4-7 (ws1)
+
+#### What Was Done
+- Added `Repository.all_authors()` (ADR-001 compliant — uses `_require_conn`, reuses `_author_row_to_model`).
+- Introduced `SurveyConfig` on `ForensicsSettings` (with `Field(default_factory=SurveyConfig)`, per v0.2.0 audit) and a `[survey]` section in `config.toml`.
+- New `src/forensics/survey/` package:
+  - `qualification.py` — `QualificationCriteria` (+ `.from_settings`), `QualifiedAuthor`, `qualify_authors(db_path, criteria, *, today=None)` filters by volume / date-span / avg word count / publishing frequency / recent activity.
+  - `scoring.py` — `SurveyScore`, `SignalStrength` (StrEnum), `compute_composite_score`, `classify_signal`, and §5c `identify_natural_controls` + `validate_against_controls` (+ `ControlValidation`).
+  - `orchestrator.py` — `run_survey(settings, *, project_root=None, db_path=None, dry_run=False, resume=None, skip_scrape=False, author=None, criteria=None)` → `SurveyReport`. Uses `dispatch_scrape(..., all_authors=True)`, `extract_all_features(..., project_root=...)`, `AnalysisArtifactPaths.from_project`, and `run_full_analysis(paths, config, *, author_slug=slug)`. Writes `data/survey/run_<id>/checkpoint.json` after every author and `survey_results.json` at the end. Resume by `run_id` skips completed authors.
+- CLI: `src/forensics/cli/survey.py` (typer subapp) registered via `app.add_typer(survey_app, name="survey")` in `cli/__init__.py`. Options: `--dry-run`, `--resume`, `--skip-scrape`, `--author`, `--min-articles`, `--min-span-days`.
+- Tests: `tests/test_survey.py` — 15 tests covering qualification filters (volume / date-range / frequency / recent activity / all-pass / empty), composite scoring (no signal / strong / Pipeline C inclusion), signal classification thresholds, natural-control identification + validation, orchestrator checkpoint, resume-skip-completed, dry-run-no-analysis, and return type.
+
+#### Files Modified
+- `src/forensics/storage/repository.py` — added `all_authors()`.
+- `src/forensics/config/settings.py` — added `SurveyConfig` + field on `ForensicsSettings`.
+- `config.toml` — added `[survey]` section.
+- `src/forensics/cli/__init__.py` — registered survey typer subapp.
+
+#### Files Created
+- `src/forensics/survey/__init__.py`
+- `src/forensics/survey/qualification.py`
+- `src/forensics/survey/scoring.py`
+- `src/forensics/survey/orchestrator.py`
+- `src/forensics/cli/survey.py`
+- `tests/test_survey.py`
+
+#### Verification Evidence
+```
+uv run ruff format --check .                      → 131 files already formatted
+uv run ruff check .                               → All checks passed!
+uv run pytest tests/test_survey.py -v             → 15 passed
+uv run pytest tests/                              → 253 passed, 18 skipped (pre-existing spaCy), 2 deselected
+uv run forensics survey --help                    → shows --dry-run, --resume, --skip-scrape, --author, --min-articles, --min-span-days
+uv run forensics survey --dry-run                 → runs qualify_authors, prints "Qualified: 0 authors" (stock DB has no authors)
+uv run forensics --help                           → 'survey' subcommand visible
+```
+
+#### Decisions Made
+- `SurveyReport` exposes `run_dir` instead of a `checkpoint_path` attribute — callers derive the checkpoint from the run dir; simplifies resume bookkeeping.
+- Checkpoint path layout is `data/survey/run_<id>/checkpoint.json` (per-run directory) so `survey_results.json` and future artefacts can live alongside.
+- `identify_natural_controls` threshold default 0.2 (per prompt §5c instruction in the coordinator brief; prompt body example uses 0.10 but the instruction text says 0.2 — matched the instruction).
+- `compute_composite_score(analysis, qualification=None)` — second arg kept in the signature to match the original API shape; body intentionally does not use it yet (confidence-weighting hook reserved for future work).
+- `SignalStrength` is a `StrEnum` (not `str, Enum`) to satisfy ruff UP042.
+- CLI delegates orchestration to `forensics.survey.orchestrator.run_survey`; `asyncio.run` is called once at the CLI boundary.
+
+#### Unresolved Questions
+- None blocking. Future: the comparison step in `run_full_analysis` uses `config.authors` (target/control from config.toml); in survey mode, the natural control cohort is emitted by the orchestrator but not yet plumbed through as input to per-author comparison reports. That is a follow-up for ws6 (report overhaul).
+
+#### Risks & Next Steps
+- ws4 (calibration) and ws6 (report overhaul) can now consume `SurveyReport.natural_controls` and the ranked `SurveyReport.results` directly.
+- `extract_all_features` is invoked once per author (by slug) — for large newsrooms the cost is dominated by spaCy nlp setup; acceptable for the survey use case, but if latency becomes an issue the extractor could be lifted out of the per-author loop.
