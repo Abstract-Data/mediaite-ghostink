@@ -486,3 +486,78 @@ uv run pytest tests/test_pipeline_context.py tests/integration/test_cli.py -v --
 
 #### Risks & Next Steps
 - Any external code that imported `config_fingerprint` only from `forensics.cli._helpers` must switch to `forensics.config` (only `scrape.py` did in-repo).
+
+---
+
+### PR #24 review remediation (phase11-1-remediation branch)
+**Status:** Complete
+**Date:** 2026-04-22
+**Agent/Session:** Claude Code (Opus 4.7)
+
+#### What Was Done
+Addressed all findings from the code review of PR #24 (`phase11-1-refactor`). Work lives on a stacked virtual branch `phase11-1-remediation` anchored to `phase11-1-refactor`; pushed to origin as a follow-up to #24.
+
+- **Fetcher TOCTOU fix** (`src/forensics/scraper/fetcher.py`): Split `_build_successful_fetch_outside_lock` into `_parse_article_html` (pure parse) + `_persist_article_fetch` (in-lock I/O). Raw HTML and JSONL writes now happen inside the second `db_lock` section, after the resume-skip re-check, preventing orphaned files when a concurrent worker wins.
+- **`_write_raw_html_file` traversal guard**: Rejects `article_id` containing `/`, `\`, or `..`.
+- **`config_fingerprint()` nullable** (`src/forensics/config/fingerprint.py`): Returns `None` instead of sentinel `"no_config_file"`. `PipelineContext.record_audit` skips the `analysis_runs` row when `config_hash is None`, preserving the NOT NULL schema.
+- **`DriftScores.ai_baseline_similarity`** → `float | None = None` (`src/forensics/models/analysis.py`, `src/forensics/analysis/drift.py`). `compute_drift_scores` passes `None` when the AI convergence curve is `None`/empty instead of silently flattening to `0.0`.
+- **`DEFAULT_DB_RELATIVE`** added in `src/forensics/config/settings.py` and consumed in `pipeline_context`, `artifact_paths`, `ForensicsSettings.db_path`, and `scrape.py`.
+- **Scrape audit dedup**: `scrape.py` routes audit through `PipelineContext.record_audit(..., optional=True)` instead of duplicating try/except.
+- **`AnalysisArtifactPaths.from_project`** replaces `db_path or ...` truthy-fallback with explicit `is not None` check.
+- **Docs dedup**: deleted orphan byte-identical `.claude/skills/gitbutler/{concepts,examples,reference}.md`; canonical copies live under `references/`.
+- **PR #24 body rewritten** via REST API (`gh api -X PATCH`) with a clean summary of the five refactor axes (prior body had garbled prose like "configingerprintudit").
+
+#### Files Modified
+- `src/forensics/scraper/fetcher.py` — TOCTOU split, traversal guard, `ParsedArticleFetch` dataclass
+- `src/forensics/config/fingerprint.py` — nullable return
+- `src/forensics/config/settings.py` — `DEFAULT_DB_RELATIVE` constant
+- `src/forensics/config/__init__.py` — re-export constant
+- `src/forensics/pipeline_context.py` — `str | None` config_hash, skip-when-None behavior
+- `src/forensics/cli/scrape.py` — consume `PipelineContext.record_audit`, use constant
+- `src/forensics/analysis/artifact_paths.py` — explicit `is not None`, use constant
+- `src/forensics/models/analysis.py` — `ai_baseline_similarity: float | None`
+- `src/forensics/analysis/drift.py` — pass `None` in `compute_drift_scores`
+- `tests/test_fetcher_phase_a.py` — TOCTOU test
+- `tests/test_scraper.py` — traversal guard tests (parametrized) + baseline UUID test
+- `tests/test_pipeline_context.py` — absent-config + skip-row tests
+- `tests/test_analysis.py` — None-semantics test for `ai_baseline_similarity`
+- `.claude/skills/gitbutler/{concepts,examples,reference}.md` — deleted (duplicates)
+
+#### Verification Evidence
+```
+uv run ruff check .
+# All checks passed!
+
+uv run ruff format --check .
+# 119 files already formatted
+
+uv run pytest tests/ --no-cov
+# 226 passed, 18 skipped, 2 deselected, 1 warning in 20.99s
+
+uv run pytest tests/test_pipeline_context.py tests/test_scraper.py::test_write_raw_html_file_rejects_unsafe_article_id tests/test_scraper.py::test_write_raw_html_file_accepts_uuid_id tests/test_analysis.py::test_drift_scores_ai_baseline_none_when_no_convergence tests/test_fetcher_phase_a.py::test_fetch_resume_skip_after_parse_does_not_orphan_raw_file -v --no-cov
+# 14 passed in 1.36s
+
+uv run forensics scrape --archive
+# INFO forensics.cli.scrape: pipeline audit: run_id=... description=forensics scrape config_fingerprint=97fdf6d566ff
+# INFO forensics.cli.scrape: archive: compressed 0 year directory(ies) under data/raw/
+```
+
+Remediation commits on `phase11-1-remediation` (newest first):
+```
+0791bf22 Dedupe gitbutler skill docs (remove root-level duplicates)
+a89770a5 Make DriftScores.ai_baseline_similarity nullable
+9819b30a Make config_fingerprint nullable and extract DEFAULT_DB_RELATIVE
+b3e3dc25 Fix fetcher TOCTOU race and guard raw file path
+```
+
+#### Decisions Made
+- **Skipped history rewrite of #24**: Original plan called for splitting `prompts/phase12-*` and gitbutler skill docs off PR #24 via force-push. Since PR #24 was already open (9 commits on main branch), rewriting published history was rejected as destructive. Chose to ship remediation on a stacked branch instead.
+- **Kept `assert_never` in `scrape.py`**: Plan called for removal as "redundant with import-time check". On re-analysis, the import-time check validates enum↔flag-dict equality, not match-statement exhaustiveness. If a new `ScrapeMode` member is added to both the enum AND the dict, only `assert_never` catches the missing match branch. Treated as independent safety rail.
+- **Skip row rather than migrate schema**: `analysis_runs.config_hash` is `TEXT NOT NULL`. Making it nullable would require a table rebuild in SQLite. Chose to skip the audit row + log a warning when fingerprint is `None` — simpler, preserves schema, communicates intent.
+
+#### Unresolved Questions
+- Follow-up PR for `phase11-1-remediation` not opened automatically (`gh pr create` blocked by harness policy). User to create the PR manually or approve the command. Branch is pushed to origin.
+
+#### Risks & Next Steps
+- Remediation is stacked on unmerged #24. When #24 lands, rebase `phase11-1-remediation` onto main before opening its PR.
+- `test_fetch_resume_skip_after_parse_does_not_orphan_raw_file` depends on the `_resume_skip_fetch` symbol being module-level monkeypatchable. Any future refactor inlining it will silently break the race-safety check.
