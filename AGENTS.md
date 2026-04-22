@@ -1,6 +1,6 @@
 # AGENTS.md
-# Version: 0.3.0
-# Last Updated: 2026-04-21
+# Version: 0.4.0
+# Last Updated: 2026-04-22
 # Environment: dev
 # Model: gpt-5-3-codex
 # Fallback Model: gpt-5.1
@@ -188,6 +188,8 @@ Hooks enforce hard constraints that language instructions cannot guarantee. Regi
 | Router Boundary Check | WARNING | Flags direct DB operations in router/api layers |
 | No print() in Production | BLOCKER | Flags print() in src/ production code. Also enforced by ruff rule `T201`. |
 | Environment Variable Leak | WARNING | Flags os.environ usage outside config.py |
+| Function Length Guard | WARNING | Flags functions exceeding 50 lines in `src/forensics/`. Excludes algorithm implementations marked `# complexity: justified`. |
+| Hand-Built Data Path | WARNING | Flags `/ "data" / "features"` or `/ "data" / "analysis"` path construction outside `AnalysisArtifactPaths`. |
 
 ---
 
@@ -386,8 +388,12 @@ settings = Settings()
 - Use `LazyFrame` over `DataFrame` — defer `.collect()` until the end
 - Chain fluently — one operation per line in a single expression
 - Log row counts at each pipeline stage
-- Check `forensics/utils/` before implementing any helper function — reuse existing utilities
+- Check `forensics/utils/` and `forensics/analysis/utils.py` before implementing any helper function — reuse existing utilities
 - Use lazy initialization for module-level mutable state (asyncio.Lock, caches) to avoid stale event-loop binding
+- Use `AnalysisArtifactPaths` for all paths under `data/` — never hand-build `project_root / "data" / ...` paths
+- Use `ensure_repo(db_path, repo)` context manager when a function accepts an optional `Repository` — never duplicate the `if repo / else open` branching
+- Use `load_feature_frame_for_author()` from `analysis/utils.py` — never inline the load-filter-fallback pattern
+- Keep functions under 50 lines (excluding docstrings). If an algorithm justifies more, add `# complexity: justified` and document why.
 
 ### ASK FIRST
 
@@ -413,6 +419,9 @@ settings = Settings()
 - Re-implement utilities that already exist in `forensics/utils/` — check before writing private helpers
 - Create module-level `asyncio.Lock`, `asyncio.Event`, or `asyncio.Semaphore` instances eagerly at import time — use lazy initialization or pass as parameters
 - Open a new SQLite connection per repository call — use the `Repository` class pattern (see ADR-001)
+- Construct `data/` paths manually — use `AnalysisArtifactPaths` methods (see GUARDRAILS Sign)
+- Duplicate the `if repo is not None: ... else: with Repository(db_path)` pattern — use `ensure_repo()` (see Phase 13)
+- Add C901 suppressions to `pyproject.toml` without a decomposition plan or tracking comment
 
 ---
 

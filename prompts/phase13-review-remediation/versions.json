@@ -1,0 +1,14 @@
+{
+  "family": "phase13-review-remediation",
+  "current_version": "0.1.0",
+  "versions": [
+    {
+      "version": "0.1.0",
+      "date": "2026-04-22",
+      "status": "active",
+      "model": "claude-opus-4-6",
+      "file": "v0.1.0.md",
+      "changelog_entry": "Initial prompt: 20-step implementation plan across 6 phases (Quick Wins, DRY Extraction, Decomposition, Testing, Structural, Cache Fix) addressing all 16 refactoring issues and 9 code review findings from the Apr 22, 2026 review reports."
+    }
+  ]
+}

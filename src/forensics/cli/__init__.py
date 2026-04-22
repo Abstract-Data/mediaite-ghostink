@@ -56,6 +56,42 @@ app.command(name="analyze")(analyze)
 app.command(name="report")(report)
 
 
+@app.command(name="preflight")
+def preflight(
+    strict: Annotated[
+        bool,
+        typer.Option(
+            "--strict",
+            help="Promote warnings to failures (useful in CI).",
+        ),
+    ] = False,
+) -> None:
+    """Run preflight checks and report pass/warn/fail for each boundary."""
+    from forensics.config import get_settings
+    from forensics.preflight import run_all_preflight_checks
+
+    logger = logging.getLogger(__name__)
+    try:
+        settings = get_settings()
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Could not load settings for preflight: %s", exc)
+        settings = None
+    report = run_all_preflight_checks(settings, strict=strict)
+
+    icons = {"pass": "PASS", "warn": "WARN", "fail": "FAIL"}
+    for check in report.checks:
+        typer.echo(f"  [{icons[check.status]}] {check.name}: {check.message}")
+
+    if report.has_failures:
+        typer.echo("\nSome required checks failed. Fix issues before running the pipeline.")
+        raise typer.Exit(code=1)
+    if report.has_warnings:
+        typer.echo("\nAll required checks passed (some warnings).")
+    else:
+        typer.echo("\nAll preflight checks passed.")
+    raise typer.Exit(code=0)
+
+
 @app.command(name="all")
 def run_all() -> None:
     """Run full pipeline end-to-end: scrape → extract → analyze → report."""

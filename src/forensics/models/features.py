@@ -47,12 +47,17 @@ class ReadabilityFeatures(BaseModel):
 
 
 class ContentFeatures(BaseModel):
-    """Entropy and self-similarity style signals."""
+    """Entropy and self-similarity style signals.
+
+    ``self_similarity_30d`` / ``self_similarity_90d`` are ``None`` for
+    early-career articles whose peer window is smaller than the minimum
+    threshold enforced in :mod:`forensics.features.content`.
+    """
 
     bigram_entropy: float = 0.0
     trigram_entropy: float = 0.0
-    self_similarity_30d: float = 0.0
-    self_similarity_90d: float = 0.0
+    self_similarity_30d: float | None = None
+    self_similarity_90d: float | None = None
     topic_diversity_score: float = 0.0
     formula_opening_score: float = 0.0
     formula_closing_score: float = 0.0
