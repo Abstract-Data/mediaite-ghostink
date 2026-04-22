@@ -1,0 +1,52 @@
+/* Textual CSS for the forensics setup wizard (Phase 12 §2k). */
+
+Screen {
+    layout: vertical;
+    padding: 1 2;
+}
+
+#step-label {
+    text-style: bold;
+    color: $accent;
+    margin-bottom: 1;
+}
+
+#status {
+    margin-bottom: 1;
+}
+
+DataTable {
+    height: 1fr;
+    margin-bottom: 1;
+}
+
+Button {
+    margin: 0 1;
+}
+
+#config-editor {
+    height: 1fr;
+    margin-bottom: 1;
+}
+
+#log {
+    height: 1fr;
+    margin-top: 1;
+    border: solid $primary;
+}
+
+ProgressBar {
+    margin-top: 1;
+}
+
+.warn {
+    color: $warning;
+}
+
+.error {
+    color: $error;
+}
+
+.ok {
+    color: $success;
+}
