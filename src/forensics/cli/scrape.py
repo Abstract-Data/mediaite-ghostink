@@ -16,7 +16,7 @@ from forensics.scraper.crawler import collect_article_metadata, discover_authors
 from forensics.scraper.dedup import deduplicate_articles
 from forensics.scraper.fetcher import archive_raw_year_dirs, fetch_articles
 from forensics.storage.export import export_articles_jsonl
-from forensics.storage.repository import insert_analysis_run
+from forensics.storage.repository import Repository, insert_analysis_run
 
 logger = logging.getLogger(__name__)
 
@@ -42,20 +42,40 @@ async def _discover_only(
     return 0
 
 
-async def _metadata_only(db_path: Path, settings: ForensicsSettings, manifest_path: Path) -> int:
+async def _metadata_only(
+    db_path: Path,
+    settings: ForensicsSettings,
+    manifest_path: Path,
+    *,
+    repo: Repository | None = None,
+) -> int:
     if not manifest_path.is_file():
         logger.error(
             "author manifest not found: %s (run `forensics scrape --discover` first)",
             manifest_path,
         )
         return 1
-    inserted = await collect_article_metadata(db_path, settings)
+    if repo is not None:
+        inserted = await collect_article_metadata(db_path, settings, repo=repo)
+    else:
+        with Repository(db_path) as r:
+            inserted = await collect_article_metadata(db_path, settings, repo=r)
     logger.info("metadata: inserted %d new article row(s) into %s", inserted, db_path)
     return 0
 
 
-async def _fetch_only(db_path: Path, settings: ForensicsSettings, *, dry_run: bool) -> int:
-    n = await fetch_articles(db_path, settings, dry_run=dry_run)
+async def _fetch_only(
+    db_path: Path,
+    settings: ForensicsSettings,
+    *,
+    dry_run: bool,
+    repo: Repository | None = None,
+) -> int:
+    if repo is not None:
+        n = await fetch_articles(db_path, settings, dry_run=dry_run, repo=repo)
+    else:
+        with Repository(db_path) as r:
+            n = await fetch_articles(db_path, settings, dry_run=dry_run, repo=r)
     suffix = " (dry-run)" if dry_run else ""
     logger.info(
         "fetch: %s %d article(s)%s",
@@ -67,9 +87,18 @@ async def _fetch_only(db_path: Path, settings: ForensicsSettings, *, dry_run: bo
 
 
 async def _fetch_dedup_export(
-    db_path: Path, root: Path, settings: ForensicsSettings, *, dry_run: bool
+    db_path: Path,
+    root: Path,
+    settings: ForensicsSettings,
+    *,
+    dry_run: bool,
+    repo: Repository | None = None,
 ) -> int:
-    n = await fetch_articles(db_path, settings, dry_run=dry_run)
+    if repo is not None:
+        n = await fetch_articles(db_path, settings, dry_run=dry_run, repo=repo)
+    else:
+        with Repository(db_path) as r:
+            n = await fetch_articles(db_path, settings, dry_run=dry_run, repo=r)
     logger.info("fetch: processed %d article(s)%s", n, " (dry-run)" if dry_run else "")
     if not dry_run:
         dup_ids = deduplicate_articles(db_path)
@@ -94,7 +123,8 @@ async def _discover_and_metadata(
     if not manifest_path.is_file():
         logger.error("author manifest missing after discover: %s", manifest_path)
         return 1
-    inserted = await collect_article_metadata(db_path, settings)
+    with Repository(db_path) as repo:
+        inserted = await collect_article_metadata(db_path, settings, repo=repo)
     logger.info("metadata: inserted %d new article row(s) into %s", inserted, db_path)
     return 0
 
@@ -115,9 +145,10 @@ async def _full_pipeline(
     if not manifest_path.is_file():
         logger.error("author manifest missing after discover: %s", manifest_path)
         return 1
-    inserted = await collect_article_metadata(db_path, settings)
-    logger.info("metadata: inserted %d new article row(s) into %s", inserted, db_path)
-    fetched = await fetch_articles(db_path, settings, dry_run=False)
+    with Repository(db_path) as repo:
+        inserted = await collect_article_metadata(db_path, settings, repo=repo)
+        logger.info("metadata: inserted %d new article row(s) into %s", inserted, db_path)
+        fetched = await fetch_articles(db_path, settings, dry_run=False, repo=repo)
     logger.info("fetch: processed %d article(s)", fetched)
     dup_ids = deduplicate_articles(db_path)
     logger.info("dedup: marked %d article(s) as near-duplicates", len(dup_ids))
@@ -126,7 +157,10 @@ async def _full_pipeline(
     return 0
 
 
-async def _dispatch(
+_ScrapeFlagKey = tuple[bool, bool, bool, bool, bool]
+
+
+async def dispatch_scrape(
     *,
     discover: bool,
     metadata: bool,
@@ -161,38 +195,70 @@ async def _dispatch(
     except OSError as exc:
         logger.warning("Could not record analysis_runs row: %s", exc)
 
-    d, m, f, dd, ar = discover, metadata, fetch, dedup, archive
+    key: _ScrapeFlagKey = (discover, metadata, fetch, dedup, archive)
 
-    if ar and not d and not m and not f and not dd:
+    async def _archive_branch() -> int:
         n = archive_raw_year_dirs(root, db_path)
         logger.info("archive: compressed %d year directory(ies) under data/raw/", n)
         return 0
-    if dd and not d and not m and not f and not ar:
+
+    async def _dedup_branch() -> int:
         dup_ids = deduplicate_articles(db_path)
         logger.info("dedup: marked %d article(s) as near-duplicates", len(dup_ids))
         return 0
-    if f and not d and not m and not dd and not ar:
-        return await _fetch_only(db_path, settings, dry_run=dry_run)
-    if f and dd and not d and not m and not ar:
-        return await _fetch_dedup_export(db_path, root, settings, dry_run=dry_run)
-    if d and not m and not f and not dd and not ar:
-        return await _discover_only(settings, manifest_path, force_refresh=force_refresh)
-    if m and not d and not f and not dd and not ar:
-        return await _metadata_only(db_path, settings, manifest_path)
-    if d and m and not f and not dd and not ar:
-        return await _discover_and_metadata(
-            db_path, settings, manifest_path, force_refresh=force_refresh
-        )
-    if not (d or m or f or dd or ar):
-        return await _full_pipeline(
-            db_path, root, settings, manifest_path, force_refresh=force_refresh
-        )
 
-    logger.error(
-        "unsupported flag combination for scrape "
-        "(try individual --discover, --metadata, --fetch, --dedup, --archive)"
+    routes: dict[_ScrapeFlagKey, object] = {
+        (False, False, False, False, True): _archive_branch,
+        (False, False, False, True, False): _dedup_branch,
+        (False, False, True, False, False): lambda: _fetch_only(db_path, settings, dry_run=dry_run),
+        (False, False, True, True, False): lambda: _fetch_dedup_export(
+            db_path, root, settings, dry_run=dry_run
+        ),
+        (True, False, False, False, False): lambda: _discover_only(
+            settings, manifest_path, force_refresh=force_refresh
+        ),
+        (False, True, False, False, False): lambda: _metadata_only(
+            db_path, settings, manifest_path
+        ),
+        (True, True, False, False, False): lambda: _discover_and_metadata(
+            db_path, settings, manifest_path, force_refresh=force_refresh
+        ),
+        (False, False, False, False, False): lambda: _full_pipeline(
+            db_path, root, settings, manifest_path, force_refresh=force_refresh
+        ),
+    }
+
+    handler = routes.get(key)
+    if handler is None:
+        logger.error(
+            "unsupported flag combination for scrape "
+            "(try individual --discover, --metadata, --fetch, --dedup, --archive)"
+        )
+        return 1
+    maybe = handler()
+    return await maybe if asyncio.iscoroutine(maybe) else int(maybe)
+
+
+async def _dispatch(
+    *,
+    discover: bool,
+    metadata: bool,
+    fetch: bool,
+    dedup: bool,
+    archive: bool,
+    dry_run: bool,
+    force_refresh: bool,
+) -> int:
+    """Deprecated alias for :func:`dispatch_scrape` (tests and older imports)."""
+    return await dispatch_scrape(
+        discover=discover,
+        metadata=metadata,
+        fetch=fetch,
+        dedup=dedup,
+        archive=archive,
+        dry_run=dry_run,
+        force_refresh=force_refresh,
     )
-    return 1
 
 
 @scrape_app.callback(invoke_without_command=True)
@@ -222,7 +288,7 @@ def scrape(
 ) -> None:
     """Crawl and fetch articles for configured authors."""
     rc = asyncio.run(
-        _dispatch(
+        dispatch_scrape(
             discover=discover,
             metadata=metadata,
             fetch=fetch,

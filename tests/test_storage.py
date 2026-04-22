@@ -45,30 +45,30 @@ def test_init_db_creates_tables(tmp_path: Path) -> None:
 
 
 def test_upsert_author_round_trip(tmp_db: Path, sample_author) -> None:
-    repo = Repository(tmp_db)
-    repo.upsert_author(sample_author)
-    loaded = repo.get_author(sample_author.id)
+    with Repository(tmp_db) as repo:
+        repo.upsert_author(sample_author)
+        loaded = repo.get_author(sample_author.id)
     assert loaded is not None
     assert loaded.slug == sample_author.slug
 
 
 def test_upsert_article_and_query(tmp_db: Path, sample_author, sample_article) -> None:
-    repo = Repository(tmp_db)
-    repo.upsert_author(sample_author)
-    repo.upsert_article(sample_article)
-    rows = repo.get_articles_by_author(sample_author.id)
-    assert len(rows) == 1
-    assert rows[0].title == sample_article.title
-    unfetched = repo.get_unfetched_urls()
-    assert len(unfetched) == 1
+    with Repository(tmp_db) as repo:
+        repo.upsert_author(sample_author)
+        repo.upsert_article(sample_article)
+        rows = repo.get_articles_by_author(sample_author.id)
+        assert len(rows) == 1
+        assert rows[0].title == sample_article.title
+        unfetched = repo.get_unfetched_urls()
+        assert len(unfetched) == 1
 
 
 def test_export_articles_jsonl_round_trip(
     tmp_path: Path, tmp_db: Path, sample_author, sample_article
 ) -> None:
-    repo = Repository(tmp_db)
-    repo.upsert_author(sample_author)
-    repo.upsert_article(sample_article)
+    with Repository(tmp_db) as repo:
+        repo.upsert_author(sample_author)
+        repo.upsert_article(sample_article)
     out = tmp_path / "articles.jsonl"
     count = export_articles_jsonl(tmp_db, out)
     assert count == 1
@@ -80,10 +80,10 @@ def test_export_articles_jsonl_round_trip(
 
 
 def test_get_all_articles(tmp_db: Path, sample_author, sample_article) -> None:
-    repo = Repository(tmp_db)
-    repo.upsert_author(sample_author)
-    repo.upsert_article(sample_article)
-    assert len(repo.get_all_articles()) == 1
+    with Repository(tmp_db) as repo:
+        repo.upsert_author(sample_author)
+        repo.upsert_article(sample_article)
+        assert len(repo.get_all_articles()) == 1
 
 
 def test_text_and_hash_helpers() -> None:

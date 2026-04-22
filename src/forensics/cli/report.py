@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import logging
-from argparse import Namespace
 from typing import Annotated
 
 import typer
+
+from forensics.models.report_args import ReportArgs
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +43,7 @@ def report(
     if format not in {"html", "pdf", "both"}:
         raise typer.BadParameter(f"--format must be one of html, pdf, both (got {format!r})")
 
-    args = Namespace(
+    args = ReportArgs(
         notebook=notebook,
         report_format=format,
         verify=verify,

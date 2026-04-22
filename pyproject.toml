@@ -5,6 +5,7 @@ description = "Forensic pipeline for scrape -> extract -> analyze -> report work
 readme = "README.md"
 requires-python = ">=3.13,<3.14"
 dependencies = [
+  "typer>=0.15.0",
   "httpx>=0.28.1",
   "beautifulsoup4>=4.13.4",
   "lxml>=5.4.0",
@@ -25,7 +26,6 @@ dependencies = [
   "textstat>=0.7.4",
   "ipython>=8.31.0",
   "ipykernel>=6.29.0",
-  "typer>=0.15.0",
 ]
 
 [project.optional-dependencies]
@@ -35,7 +35,7 @@ probability = [
   "accelerate>=0.30",
 ]
 baseline = [
-  "pydantic-ai-slim[openai]>=1.0",
+  "pydantic-ai>=1.0",
   "pydantic-evals>=1.0",
 ]
 dev = [

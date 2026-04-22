@@ -13,8 +13,6 @@ from typing import Any
 
 import numpy as np
 from scipy.spatial.distance import cosine
-from sklearn.decomposition import LatentDirichletAllocation
-from sklearn.feature_extraction.text import TfidfVectorizer
 
 from forensics.config import get_project_root
 from forensics.config.settings import ForensicsSettings
@@ -87,8 +85,13 @@ def compute_intra_period_variance(
     article_embeddings: list[tuple[datetime, np.ndarray]],
     *,
     period: str = "month",
+    max_pairwise: int = 20,
 ) -> list[tuple[str, float]]:
-    """Mean pairwise cosine distance within each period (default: calendar month)."""
+    """Dispersion within each calendar month.
+
+    For small buckets (``<= max_pairwise``), use mean pairwise cosine distance.
+    For larger buckets, use mean distance to the monthly centroid (O(k) vs O(k²)).
+    """
     if period != "month":
         msg = f"Unsupported period: {period!r} (only 'month' is implemented)"
         raise ValueError(msg)
@@ -101,13 +104,23 @@ def compute_intra_period_variance(
         if len(vecs) < 2:
             out.append((key, 0.0))
             continue
-        dists: list[float] = []
-        for i in range(len(vecs)):
-            for j in range(i + 1, len(vecs)):
-                d = float(cosine(vecs[i].ravel(), vecs[j].ravel()))
-                if np.isfinite(d):
-                    dists.append(d)
-        out.append((key, float(np.mean(dists)) if dists else 0.0))
+        if len(vecs) <= max_pairwise:
+            dists: list[float] = []
+            for i in range(len(vecs)):
+                for j in range(i + 1, len(vecs)):
+                    d = float(cosine(vecs[i].ravel(), vecs[j].ravel()))
+                    if np.isfinite(d):
+                        dists.append(d)
+            out.append((key, float(np.mean(dists)) if dists else 0.0))
+            continue
+        stacked = np.stack([v.ravel() for v in vecs], axis=0)
+        centroid = stacked.mean(axis=0)
+        dists_c: list[float] = []
+        for v in vecs:
+            d = float(cosine(v.ravel(), centroid))
+            if np.isfinite(d):
+                dists_c.append(d)
+        out.append((key, float(np.mean(dists_c)) if dists_c else 0.0))
     return out
 
 
@@ -211,29 +224,31 @@ def load_article_embeddings(
     """Load ``(published_date, embedding)`` for one author from manifest + ``.npy`` files."""
     init_db(db_path)
     root = project_root or get_project_root()
-    repo = Repository(db_path)
-    author = repo.get_author_by_slug(author_slug)
-    if author is None:
-        msg = f"Unknown author slug for embeddings load: {author_slug}"
-        raise ValueError(msg)
-    manifest_path = embeddings_dir / "manifest.jsonl"
-    records = read_embeddings_manifest(manifest_path)
-    pairs: list[tuple[datetime, np.ndarray]] = []
-    for rec in records:
-        if rec.author_id != author.id:
-            continue
-        p = Path(rec.embedding_path)
-        abs_path = p if p.is_absolute() else (root / p)
-        if not abs_path.is_file():
-            logger.warning("Missing embedding file for article %s: %s", rec.article_id, abs_path)
-            continue
-        vec = np.load(abs_path)
-        pairs.append((rec.timestamp, vec))
-    pairs.sort(key=lambda x: x[0])
-    return pairs
+    with Repository(db_path) as repo:
+        author = repo.get_author_by_slug(author_slug)
+        if author is None:
+            msg = f"Unknown author slug for embeddings load: {author_slug}"
+            raise ValueError(msg)
+        manifest_path = embeddings_dir / "manifest.jsonl"
+        records = read_embeddings_manifest(manifest_path)
+        pairs: list[tuple[datetime, np.ndarray]] = []
+        for rec in records:
+            if rec.author_id != author.id:
+                continue
+            p = Path(rec.embedding_path)
+            abs_path = p if p.is_absolute() else (root / p)
+            if not abs_path.is_file():
+                logger.warning(
+                    "Missing embedding file for article %s: %s", rec.article_id, abs_path
+                )
+                continue
+            vec = np.load(abs_path)
+            pairs.append((rec.timestamp, vec))
+        pairs.sort(key=lambda x: x[0])
+        return pairs
 
 
-def _load_ai_baseline_embeddings(author_slug: str, project_root: Path) -> list[np.ndarray]:
+def load_ai_baseline_embeddings(author_slug: str, project_root: Path) -> list[np.ndarray]:
     base = project_root / "data" / "ai_baseline" / author_slug / "embeddings"
     if not base.is_dir():
         return []
@@ -243,44 +258,7 @@ def _load_ai_baseline_embeddings(author_slug: str, project_root: Path) -> list[n
     return out
 
 
-def extract_lda_topic_keywords(
-    texts: list[str],
-    *,
-    num_topics: int = 20,
-    n_keywords: int = 10,
-    random_state: int = 42,
-) -> list[tuple[int, list[str], str]]:
-    """Fit LDA on TF-IDF corpus; return ``(topic_id, keywords, summary)`` per topic."""
-    if not texts:
-        return []
-    n_samples = len(texts)
-    max_features = min(5000, max(100, n_samples * 10))
-    vectorizer = TfidfVectorizer(
-        max_df=0.95,
-        min_df=max(1, min(2, n_samples // 5)),
-        max_features=max_features,
-        stop_words="english",
-    )
-    X = vectorizer.fit_transform(texts)
-    n_topics_eff = max(2, min(num_topics, max(2, X.shape[0] // 5)))
-    lda = LatentDirichletAllocation(
-        n_components=n_topics_eff,
-        random_state=random_state,
-        max_iter=30,
-        learning_method="online",
-    )
-    lda.fit(X)
-    names = vectorizer.get_feature_names_out()
-    topics: list[tuple[int, list[str], str]] = []
-    for topic_idx, topic in enumerate(lda.components_):
-        top_ix = topic.argsort()[: -n_keywords - 1 : -1]
-        kws = [str(names[i]) for i in top_ix]
-        summary = ", ".join(kws[:5])
-        topics.append((topic_idx, kws, summary))
-    return topics
-
-
-def _write_drift_artifacts(
+def write_drift_artifacts(
     author_slug: str,
     author_id: str,
     *,
@@ -315,6 +293,71 @@ def _write_drift_artifacts(
     )
 
 
+def compute_author_drift_pipeline(
+    slug: str,
+    author_id: str,
+    article_embs: list[tuple[datetime, np.ndarray]],
+    settings: ForensicsSettings,
+    *,
+    project_root: Path,
+    analysis_dir: Path,
+) -> (
+    tuple[
+        list[tuple[str, np.ndarray]],
+        DriftScores,
+        dict[str, Any],
+        list[tuple[datetime, float]],
+        list[float],
+        list[tuple[str, float]] | None,
+    ]
+    | None
+):
+    """Shared drift workflow: centroids, curves, scores, UMAP, artifact write.
+
+    Returns ``(monthly, drift, umap_payload, baseline_curve, velocities, ai_conv)`` or
+    ``None`` when embeddings are insufficient.
+    """
+    if len(article_embs) < 2:
+        return None
+    monthly = compute_monthly_centroids(article_embs)
+    if not monthly:
+        return None
+    velocities = track_centroid_velocity(monthly)
+    baseline_curve = compute_baseline_similarity_curve(
+        article_embs,
+        baseline_count=settings.analysis.baseline_embedding_count,
+    )
+    intra = compute_intra_period_variance(
+        article_embs,
+        period="month",
+        max_pairwise=settings.analysis.intra_variance_pairwise_max,
+    )
+    ai_vecs = load_ai_baseline_embeddings(slug, project_root)
+    ai_conv = compute_ai_convergence(monthly, ai_vecs) if ai_vecs else None
+    ai_centroid_plot: np.ndarray | None = None
+    if ai_vecs:
+        stacked_ai = np.stack([np.asarray(e, dtype=np.float64) for e in ai_vecs], axis=0)
+        ai_centroid_plot = stacked_ai.mean(axis=0).ravel()
+    drift = compute_drift_scores(
+        author_id,
+        baseline_curve,
+        ai_conv,
+        velocities,
+        intra,
+    )
+    umap_one = generate_umap_projection({slug: monthly}, ai_centroid=ai_centroid_plot)
+    write_drift_artifacts(
+        slug,
+        author_id,
+        analysis_dir=analysis_dir,
+        drift=drift,
+        centroids=monthly,
+        baseline_curve=baseline_curve,
+        umap_payload=umap_one,
+    )
+    return monthly, drift, umap_one, baseline_curve, velocities, ai_conv
+
+
 def run_drift_analysis(
     db_path: Path,
     settings: ForensicsSettings,
@@ -323,69 +366,38 @@ def run_drift_analysis(
     author_slug: str | None = None,
 ) -> None:
     """Compute drift metrics for configured authors and write ``data/analysis/*`` outputs."""
+    from forensics.analysis.utils import resolve_author_rows
+
     init_db(db_path)
     root = project_root or get_project_root()
     embed_root = root / "data" / "embeddings"
     analysis_dir = root / "data" / "analysis"
-    repo = Repository(db_path)
-
-    slugs = [author_slug] if author_slug else [a.slug for a in settings.authors]
     centroids_by_author: dict[str, list[tuple[str, np.ndarray]]] = {}
 
-    for slug in slugs:
-        try:
-            article_embs = load_article_embeddings(slug, embed_root, db_path, project_root=root)
-        except ValueError as exc:
-            logger.warning("drift: skip slug=%s (%s)", slug, exc)
-            continue
-        if len(article_embs) < 2:
-            logger.warning("drift: insufficient embeddings for %s", slug)
-            continue
-
-        author = repo.get_author_by_slug(slug)
-        if author is None:
-            logger.warning("drift: author row missing for slug=%s", slug)
-            continue
-        monthly = compute_monthly_centroids(article_embs)
-        if not monthly:
-            continue
-        velocities = track_centroid_velocity(monthly)
-        baseline_curve = compute_baseline_similarity_curve(
-            article_embs,
-            baseline_count=20,
-        )
-        intra = compute_intra_period_variance(article_embs, period="month")
-
-        ai_vecs = _load_ai_baseline_embeddings(slug, root)
-        ai_conv = compute_ai_convergence(monthly, ai_vecs) if ai_vecs else None
-        ai_centroid_plot: np.ndarray | None = None
-        if ai_vecs:
-            stacked_ai = np.stack([np.asarray(e, dtype=np.float64) for e in ai_vecs], axis=0)
-            ai_centroid_plot = stacked_ai.mean(axis=0).ravel()
-
-        drift = compute_drift_scores(
-            author.id,
-            baseline_curve,
-            ai_conv,
-            velocities,
-            intra,
-        )
-        centroids_by_author[slug] = monthly
-
-        umap_one = generate_umap_projection(
-            {slug: monthly},
-            ai_centroid=ai_centroid_plot,
-        )
-        _write_drift_artifacts(
-            slug,
-            author.id,
-            analysis_dir=analysis_dir,
-            drift=drift,
-            centroids=monthly,
-            baseline_curve=baseline_curve,
-            umap_payload=umap_one,
-        )
-        logger.info("drift: wrote analysis artifacts for %s", slug)
+    with Repository(db_path) as repo:
+        author_rows = resolve_author_rows(repo, settings, author_slug=author_slug)
+        for author in author_rows:
+            try:
+                article_embs = load_article_embeddings(
+                    author.slug, embed_root, db_path, project_root=root
+                )
+            except ValueError as exc:
+                logger.warning("drift: skip slug=%s (%s)", author.slug, exc)
+                continue
+            res = compute_author_drift_pipeline(
+                author.slug,
+                author.id,
+                article_embs,
+                settings,
+                project_root=root,
+                analysis_dir=analysis_dir,
+            )
+            if res is None:
+                logger.warning("drift: insufficient embeddings for %s", author.slug)
+                continue
+            monthly, _drift, _umap, _bc, _vel, _ai = res
+            centroids_by_author[author.slug] = monthly
+            logger.info("drift: wrote analysis artifacts for %s", author.slug)
 
     if len(centroids_by_author) > 1:
         combined = generate_umap_projection(
