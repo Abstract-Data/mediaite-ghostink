@@ -92,6 +92,17 @@ class AnalysisConfig(BaseModel):
     content_lda_max_chars_per_document: int = 96_000
 
 
+class SurveyConfig(BaseModel):
+    """Configuration for blind newsroom-wide survey mode (Phase 12 §1)."""
+
+    min_articles: int = 50
+    min_span_days: int = 730
+    min_words_per_article: int = 200
+    min_articles_per_year: float = 12.0
+    require_recent_activity: bool = True
+    recent_activity_days: int = 180
+
+
 class ProbabilityConfig(BaseModel):
     """Phase 9 — token-level probability feature settings."""
 
@@ -158,6 +169,7 @@ class ForensicsSettings(BaseSettings):
     authors: list[AuthorConfig]
     scraping: ScrapingConfig = Field(default_factory=ScrapingConfig)
     analysis: AnalysisConfig = Field(default_factory=AnalysisConfig)
+    survey: SurveyConfig = Field(default_factory=SurveyConfig)
     probability: ProbabilityConfig = Field(default_factory=ProbabilityConfig)
     baseline: BaselineConfig = Field(default_factory=BaselineConfig)
     chain_of_custody: ChainOfCustodyConfig = Field(default_factory=ChainOfCustodyConfig)
