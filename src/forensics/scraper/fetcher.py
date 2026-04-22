@@ -229,6 +229,9 @@ def _is_mediaite_host(host: str) -> bool:
 
 def _write_raw_html_file(root: Path, year: int, article_id: str, html: str) -> str:
     """Write HTML under ``data/raw/{year}/``; returns DB-relative path ``raw/{year}/{id}.html``."""
+    if "/" in article_id or "\\" in article_id or ".." in article_id:
+        msg = f"unsafe article_id for raw file: {article_id!r}"
+        raise ValueError(msg)
     out_dir = root / "data" / "raw" / str(year)
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / f"{article_id}.html"
@@ -266,8 +269,42 @@ def _apply_off_domain_mutation(
     article.content_hash = content_hash(article.clean_text)
 
 
-async def _build_successful_fetch_outside_lock(
+@dataclass(frozen=True, slots=True)
+class ParsedArticleFetch:
+    """Pure-compute result of parsing article HTML (no I/O, no mutation)."""
+
+    clean: str
+    meta_extra: dict[str, Any]
+    wc: int
+    author_line: str
+    coauth_flag: bool
+
+
+def _parse_article_html(article: Article, html: str) -> ParsedArticleFetch:
+    """Extract text, metadata, word count, and coauthored flag from HTML.
+
+    Split from persistence so persistence can run inside the final db_lock
+    critical section (after the resume-skip re-check) without orphaning
+    raw files when a concurrent worker wins the race.
+    """
+    clean = extract_article_text(html)
+    meta_extra = extract_metadata(html)
+    merged_meta = {**article.metadata, **meta_extra}
+    author_line = str(merged_meta.get("page_author") or "")
+    coauth_flag = bool(looks_coauthored(author_line) or looks_coauthored(article.title))
+    return ParsedArticleFetch(
+        clean=clean,
+        meta_extra=meta_extra,
+        wc=word_count(clean),
+        author_line=author_line,
+        coauth_flag=coauth_flag,
+    )
+
+
+async def _persist_article_fetch(
     article: Article,
+    parsed: ParsedArticleFetch,
+    *,
     root: Path,
     year: int,
     article_id: str,
@@ -276,43 +313,39 @@ async def _build_successful_fetch_outside_lock(
     coauth: Path,
     warns: Path,
 ) -> None:
-    """Parse HTML, write raw file, merge metadata, append side JSONL.
+    """Write raw HTML, mutate ``article``, and append side-JSONL entries.
 
-    Mutates ``article`` (no DB).
+    Must run under the DB lock, after the final ``_resume_skip_fetch`` check.
     """
     raw_path = _write_raw_html_file(root, year, article_id, html)
-    clean = extract_article_text(html)
-    meta_extra = extract_metadata(html)
-    merged_meta = {**article.metadata, **meta_extra}
-    article.metadata = merged_meta
-    wc = word_count(clean)
+    merged_meta = {**article.metadata, **parsed.meta_extra}
     article.raw_html_path = raw_path
-    article.clean_text = clean
-    article.word_count = wc
-    article.content_hash = content_hash(clean)
+    article.clean_text = parsed.clean
+    article.word_count = parsed.wc
+    article.content_hash = content_hash(parsed.clean)
     article.scraped_at = scraped_at
 
-    author_line = str(merged_meta.get("page_author") or "")
-    if looks_coauthored(author_line) or looks_coauthored(article.title):
+    if parsed.coauth_flag:
+        merged_meta["coauthored"] = True
         await append_jsonl_async(
             coauth,
             {
                 "article_id": article_id,
                 "url": str(article.url),
                 "title": article.title,
-                "author_field": author_line or article.title,
+                "author_field": parsed.author_line or article.title,
             },
         )
-        merged_meta["coauthored"] = True
-        article.metadata = merged_meta
 
-    if wc < 50:
+    article.metadata = merged_meta
+
+    if parsed.wc < 50:
         await append_jsonl_async(
             warns,
             {
                 "article_id": article_id,
                 "url": str(article.url),
-                "word_count": wc,
+                "word_count": parsed.wc,
                 "reason": "below_minimum_word_count",
             },
         )
@@ -431,18 +464,33 @@ async def _fetch_one_article_html(
             if _resume_skip_fetch(article):
                 return
 
-        await _build_successful_fetch_outside_lock(
-            article,
-            ctx.root,
-            year,
-            row.article_id,
-            response.text,
-            scraped_at,
-            ctx.coauth,
-            ctx.warns,
-        )
+        parsed = _parse_article_html(article, response.text)
 
-        await _persist_and_log(ctx, row, mutate=None, article=article, log_suffix="")
+        async with ctx.db_lock:
+            latest = await asyncio.to_thread(ctx.repo.get_article_by_id, row.article_id)
+            if _resume_skip_fetch(latest):
+                return
+            await _persist_article_fetch(
+                latest,
+                parsed,
+                root=ctx.root,
+                year=year,
+                article_id=row.article_id,
+                html=response.text,
+                scraped_at=scraped_at,
+                coauth=ctx.coauth,
+                warns=ctx.warns,
+            )
+            await asyncio.to_thread(ctx.repo.upsert_article, latest)
+
+        async with ctx.done_lock:
+            ctx.done_count[0] += 1
+            logger.info(
+                "Fetched %s/%s articles for %s",
+                ctx.done_count[0],
+                ctx.total,
+                row.author_name,
+            )
 
 
 def archive_raw_year_dirs(root: Path, db_path: Path) -> int:
