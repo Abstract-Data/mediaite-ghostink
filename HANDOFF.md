@@ -553,3 +553,51 @@ $ uv run forensics --help      # preflight subcommand visible
 - `self_similarity_*` being `Optional` may need verification in downstream Phase 5/6 analysis modules when real data lands; current PELT path tolerates NaN via `np.nan_to_num`.
 - If a downstream stack branch (ws4/ws5/ws6) re-touches `extract_all_features`, the progress-bar `Progress.start()/stop()` lifecycle must survive their refactors.
 
+
+---
+
+### Phase 12 Unit 2 (ws5-statistical-rigor): Pre-Registration Locking + Permutation-Based Significance
+**Status:** Complete
+**Date:** 2026-04-22
+**Agent/Session:** Claude Opus 4.7 — subagent `s5`
+
+#### What Was Done
+- Added `src/forensics/preregistration.py` — threshold snapshot/verification with SHA256 tamper detection.
+- Added `src/forensics/analysis/permutation.py` — non-parametric permutation tests (`permutation_test` + `changepoint_permutation`).
+- Wired an optional `use_permutation` hook into `compute_convergence_scores` (default off → backwards compatible).
+- Registered `forensics lock-preregistration` CLI command.
+- Added `tests/test_preregistration.py` (7 tests) and `tests/test_permutation.py` (7 tests).
+
+#### Files Modified
+- `src/forensics/preregistration.py` — new module (lock / verify / VerificationResult).
+- `src/forensics/analysis/permutation.py` — new module.
+- `src/forensics/analysis/convergence.py` — added optional permutation hook (logged-only).
+- `src/forensics/cli/__init__.py` — registered `lock-preregistration`.
+- `tests/test_preregistration.py` — new.
+- `tests/test_permutation.py` — new.
+
+#### Verification Evidence
+```
+uv run ruff format --check .   → 125 files already formatted
+uv run ruff check .            → All checks passed!
+uv run pytest tests/test_preregistration.py tests/test_permutation.py -v   → 14 passed
+uv run pytest tests/           → 238 passed, 18 skipped (pre-existing spacy)
+uv run forensics lock-preregistration   → writes data/preregistration/preregistration_lock.json
+test -f data/preregistration/preregistration_lock.json   → present
+uv run forensics --help   → lock-preregistration visible
+```
+
+#### Decisions Made
+- Snapshot only `settings.analysis` thresholds — `settings.survey` does not yet exist (belongs to ws1).
+- `VerificationResult` status is `"ok" | "missing" | "mismatch"`; missing is NOT a failure (exploratory mode).
+- Hash = SHA256 of canonical JSON (sort_keys, compact separators) via `forensics.utils.hashing.content_hash`.
+- Permutation hook precomputes per-window change-point membership once to avoid O(n_perm × n_cp × n_windows) recompute.
+- `permutation_test(...)` takes a pre-built null distribution; `changepoint_permutation(...)` shuffles internally.
+- Default path of `compute_convergence_scores` is unchanged; permutation is opt-in via `use_permutation=True`.
+
+#### Unresolved Questions
+- None.
+
+#### Risks & Next Steps
+- ws1 (survey-mode) will add `SurveyConfig` — at that point `_snapshot_thresholds` should extend to include survey qualification criteria.
+- ws4 (calibration) and ws6 (report-overhaul) can wire `verify_preregistration` into their entry points to emit a VIOLATION warning before running analysis.
