@@ -140,3 +140,97 @@ def test_analyze_verify_corpus_passes_on_matching_custody(
         app, ["analyze", "--verify-corpus", "--compare", "--author", "fixture-author"]
     )
     assert result.exit_code == 0, result.output
+
+
+# ---------------------------------------------------------------------------
+# Phase 12 §7 — validate + export CLI coverage
+# ---------------------------------------------------------------------------
+
+
+def test_validate_help() -> None:
+    result = runner.invoke(app, ["validate", "--help"])
+    assert result.exit_code == 0
+    text = _plain_help(result.output)
+    assert "--check-endpoints" in text
+
+
+def test_validate_config_command(forensics_config_path, monkeypatch) -> None:
+    """Valid config + preflight should exit 0 (warns are allowed, fails are not)."""
+    import forensics.preflight as preflight_mod
+    from forensics.preflight import PreflightCheck, PreflightReport
+
+    # ``validate`` imports ``run_all_preflight_checks`` lazily from ``forensics.preflight``,
+    # so patching the source module is sufficient — no need to also patch ``forensics.cli``.
+    monkeypatch.setattr(
+        preflight_mod,
+        "run_all_preflight_checks",
+        lambda *_a, **_kw: PreflightReport(
+            checks=(
+                PreflightCheck("Config file", "pass", "ok"),
+                PreflightCheck("Python version", "pass", "3.13"),
+            )
+        ),
+    )
+
+    result = runner.invoke(app, ["validate"])
+    assert result.exit_code == 0, result.output
+    assert "Config parsed" in result.output
+    assert "All validation checks passed" in result.output or "warnings" in result.output
+
+
+def test_validate_detects_config_error(tmp_path, monkeypatch) -> None:
+    """An unparseable config.toml should make ``validate`` exit 1."""
+    bad_cfg = tmp_path / "config.toml"
+    bad_cfg.write_text("this is = not valid = toml [[[\n", encoding="utf-8")
+    monkeypatch.setenv("FORENSICS_CONFIG_FILE", str(bad_cfg))
+    from forensics.config import get_settings
+
+    get_settings.cache_clear()
+    try:
+        result = runner.invoke(app, ["validate"])
+        assert result.exit_code == 1
+        assert "Config error" in result.output
+    finally:
+        get_settings.cache_clear()
+
+
+def test_export_help() -> None:
+    result = runner.invoke(app, ["export", "--help"])
+    assert result.exit_code == 0
+    text = _plain_help(result.output)
+    assert "--output" in text
+    assert "--no-features" in text
+    assert "--no-analysis" in text
+
+
+def test_export_to_duckdb_smoke(tmp_path, sample_author, sample_article) -> None:
+    """Seed SQLite via Repository, run export, verify both tables exist with row counts."""
+    import duckdb
+
+    from forensics.storage.duckdb_queries import export_to_duckdb
+    from forensics.storage.repository import Repository
+
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    db_path = data_dir / "articles.db"
+
+    with Repository(db_path) as repo:
+        repo.upsert_author(sample_author)
+        repo.upsert_article(sample_article)
+
+    out_path = tmp_path / "forensics_export.duckdb"
+    report = export_to_duckdb(db_path, out_path, include_features=False, include_analysis=False)
+
+    assert report.output_path == out_path
+    assert report.bytes_written > 0
+    assert report.tables == {"authors": 1, "articles": 1}
+    assert out_path.is_file()
+
+    conn = duckdb.connect(str(out_path), read_only=True)
+    try:
+        tables = {row[0] for row in conn.execute("SHOW TABLES").fetchall()}
+        assert {"authors", "articles"}.issubset(tables)
+        assert conn.execute("SELECT COUNT(*) FROM authors").fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM articles").fetchone()[0] == 1
+    finally:
+        conn.close()
