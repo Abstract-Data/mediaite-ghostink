@@ -22,13 +22,13 @@ todos:
     status: completed
   - id: P1-TEST-001_coverage-omissions-removal
     content: "[WAIT | WAVE-6 after P2-TEST-002 + P1-TEST-001_feature-parquet-tests] P1-TEST-001 coverage honesty: remove omissions for implemented pipeline/features/storage modules in pyproject coverage config."
-    status: pending
+    status: completed
   - id: P2-TEST-002_duckdb-integration-tests
     content: "[WAIT | WAVE-5 after RF-DRY-001 + RF-ARCH-001] P2-TEST-002 DuckDB integration testing: add correctness tests with temp SQLite + Parquet fixtures for rolling and monthly stats queries."
-    status: pending
+    status: completed
   - id: P1-TEST-001_feature-parquet-tests
     content: "[WAIT | WAVE-5 after P2-PERF-001] P1-TEST-001 targeted tests: add tests for features pipeline edge cases and parquet read/write/error paths currently under-tested."
-    status: pending
+    status: completed
   - id: RF-DRY-001_repository-initdb-dedup
     content: "[PARALLEL | WAVE-2] RF-DRY-001 repository lifecycle simplification: remove redundant init_db calls preceding Repository context usage and keep schema migration behavior centralized."
     status: completed
@@ -55,7 +55,7 @@ todos:
     status: completed
   - id: P2-PERF-001_embedding-storage-batching
     content: "[WAIT | WAVE-5 after RF-SMELL-003/RF-SMELL-004/RF-SMELL-005] P2-PERF-001 embedding storage scalability: replace per-article .npy write pattern with batched format and backward-compatible read support."
-    status: pending
+    status: completed
   - id: FULL-VERIFY_report-acceptance-gates
     content: "[WAIT | FINAL-GATE after all tasks] FULL-VERIFY end-to-end validation: run lint/tests/coverage and targeted CLI smoke checks, then confirm all report issue IDs are addressed in final checklist."
     status: pending

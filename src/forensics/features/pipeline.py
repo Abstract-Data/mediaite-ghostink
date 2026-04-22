@@ -26,7 +26,12 @@ from forensics.features import (
 from forensics.features.assembler import build_feature_vector_from_extractors
 from forensics.models.article import Article
 from forensics.models.features import EmbeddingRecord, FeatureVector
-from forensics.storage.parquet import write_embeddings_manifest, write_features
+from forensics.storage.parquet import (
+    AUTHOR_EMBEDDING_BATCH_BASENAME,
+    write_author_embedding_batch,
+    write_embeddings_manifest,
+    write_features,
+)
 from forensics.storage.repository import Repository
 
 logger = logging.getLogger(__name__)
@@ -105,7 +110,9 @@ def extract_all_features(
     """
     Run feature extraction for all eligible articles (optionally one author).
 
-    Writes ``data/features/{slug}.parquet`` and ``data/embeddings/{slug}/{id}.npy``.
+    Writes ``data/features/{slug}.parquet`` and ``data/embeddings/{slug}/batch.npz``
+    (one compressed matrix per author; legacy per-article ``.npy`` files are still read
+    by analysis code).
     """
     root = _resolve_project_root(db_path, project_root)
     data_dir = root / "data"
@@ -156,8 +163,7 @@ def extract_all_features(
             author_name = author.name if author else author_id
             out_features: list[FeatureVector] = []
             embed_dir_author = embed_root / slug
-            if not skip_embeddings:
-                embed_dir_author.mkdir(parents=True, exist_ok=True)
+            embed_batch: list[tuple[str, datetime, np.ndarray]] = []
 
             batch = len(seq)
             batch_failed = 0
@@ -203,20 +209,8 @@ def extract_all_features(
 
                     if not skip_embeddings:
                         vec = embeddings.compute_embedding(article.clean_text, model_name)
-                        rel_path = Path("data") / "embeddings" / slug / f"{article.id}.npy"
-                        abs_path = root / rel_path
-                        abs_path.parent.mkdir(parents=True, exist_ok=True)
-                        np.save(abs_path, vec)
-                        manifest_records.append(
-                            EmbeddingRecord(
-                                article_id=article.id,
-                                author_id=article.author_id,
-                                timestamp=article.published_date,
-                                model_name=model_name,
-                                model_version=model_version,
-                                embedding_path=str(rel_path),
-                                embedding_dim=int(vec.shape[0]),
-                            )
+                        embed_batch.append(
+                            (article.id, article.published_date, np.asarray(vec, dtype=np.float32))
                         )
                     processed += 1
                 except _FEATURE_EXTRACTION_ERRORS as exc:
@@ -234,6 +228,29 @@ def extract_all_features(
                             f"batch slug={slug} ({batch_failed}/{batch})"
                         )
                         raise RuntimeError(msg) from exc
+
+            if not skip_embeddings and embed_batch:
+                embed_dir_author.mkdir(parents=True, exist_ok=True)
+                rel_batch = Path("data") / "embeddings" / slug / AUTHOR_EMBEDDING_BATCH_BASENAME
+                abs_batch = root / rel_batch
+                mat = np.stack([row[2] for row in embed_batch], axis=0)
+                write_author_embedding_batch(
+                    abs_batch,
+                    [row[0] for row in embed_batch],
+                    mat,
+                )
+                for aid, ts, vec in embed_batch:
+                    manifest_records.append(
+                        EmbeddingRecord(
+                            article_id=aid,
+                            author_id=author_id,
+                            timestamp=ts,
+                            model_name=model_name,
+                            model_version=model_version,
+                            embedding_path=str(rel_batch),
+                            embedding_dim=int(vec.shape[0]),
+                        )
+                    )
 
             if out_features:
                 write_features(out_features, features_dir / f"{slug}.parquet")

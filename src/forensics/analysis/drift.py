@@ -24,6 +24,41 @@ from forensics.storage.repository import Repository
 logger = logging.getLogger(__name__)
 
 
+def _load_embedding_row(
+    abs_path: Path,
+    article_id: str,
+    batch_cache: dict[Path, tuple[np.ndarray, dict[str, int]]],
+) -> np.ndarray | None:
+    """Load one embedding row from a legacy ``.npy`` file or a per-author ``batch.npz``."""
+    if not abs_path.is_file():
+        return None
+    if abs_path.suffix.lower() == ".npz":
+        if abs_path not in batch_cache:
+            try:
+                z = np.load(abs_path, allow_pickle=True)
+            except (OSError, ValueError) as exc:
+                logger.warning("Could not read embedding batch %s: %s", abs_path, exc)
+                return None
+            if "article_ids" not in z.files or "vectors" not in z.files:
+                logger.warning("Malformed embedding batch (missing keys): %s", abs_path)
+                return None
+            raw_ids = z["article_ids"]
+            mat = np.asarray(z["vectors"], dtype=np.float32)
+            id_map = {str(raw_ids[i]): i for i in range(int(raw_ids.shape[0]))}
+            batch_cache[abs_path] = (mat, id_map)
+        mat, id_map = batch_cache[abs_path]
+        row = id_map.get(article_id)
+        if row is None:
+            logger.warning("Article %s not in embedding batch %s", article_id, abs_path)
+            return None
+        return np.asarray(mat[row], dtype=np.float32)
+    try:
+        return np.asarray(np.load(abs_path), dtype=np.float32).ravel()
+    except (OSError, ValueError) as exc:
+        logger.warning("Could not read embedding file %s: %s", abs_path, exc)
+        return None
+
+
 def _cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
     a = np.asarray(a, dtype=np.float64).ravel()
     b = np.asarray(b, dtype=np.float64).ravel()
@@ -222,8 +257,9 @@ def load_article_embeddings(
     *,
     project_root: Path | None = None,
 ) -> list[tuple[datetime, np.ndarray]]:
-    """Load ``(published_date, embedding)`` for one author from manifest + ``.npy`` files."""
+    """Load ``(published_date, embedding)`` from manifest + ``.npy`` or ``batch.npz``."""
     root = project_root or get_project_root()
+    batch_cache: dict[Path, tuple[np.ndarray, dict[str, int]]] = {}
     with Repository(db_path) as repo:
         author = repo.get_author_by_slug(author_slug)
         if author is None:
@@ -237,12 +273,12 @@ def load_article_embeddings(
                 continue
             p = Path(rec.embedding_path)
             abs_path = p if p.is_absolute() else (root / p)
-            if not abs_path.is_file():
+            vec = _load_embedding_row(abs_path, rec.article_id, batch_cache)
+            if vec is None:
                 logger.warning(
-                    "Missing embedding file for article %s: %s", rec.article_id, abs_path
+                    "Missing or unreadable embedding for article %s: %s", rec.article_id, abs_path
                 )
                 continue
-            vec = np.load(abs_path)
             pairs.append((rec.timestamp, vec))
         pairs.sort(key=lambda x: x[0])
         return pairs

@@ -26,6 +26,7 @@ dependencies = [
   "textstat>=0.7.4",
   "ipython>=8.31.0",
   "ipykernel>=6.29.0",
+  "pyarrow>=17.0",
 ]
 
 [project.optional-dependencies]
@@ -83,10 +84,6 @@ indent-style = "space"
 source = ["forensics"]
 branch = true
 omit = [
-  "*/forensics/pipeline.py",
-  "*/forensics/features/*",
-  "*/forensics/storage/parquet.py",
-  "*/forensics/storage/duckdb_queries.py",
   # Phase 10 baseline orchestration requires a live Ollama server + the baseline
   # optional-extra. Covered via manual smoke runs, not CI.
   "*/forensics/baseline/orchestrator.py",
@@ -94,7 +91,8 @@ omit = [
 ]
 
 [tool.coverage.report]
-# Aggregate dropped when scraper/ was removed from omit (P2-TEST-1); raise as integration tests grow.
-fail_under = 60
+# Denominator includes features + storage (P1-TEST-001); optional-heavy paths (probability,
+# live fetches) keep aggregate modest — raise gradually as tests land.
+fail_under = 50
 show_missing = true
 skip_covered = false

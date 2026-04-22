@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import polars as pl
 
 from forensics.models.features import EmbeddingRecord, FeatureVector
@@ -74,3 +76,29 @@ def read_embeddings_manifest(path: Path) -> list[EmbeddingRecord]:
             continue
         out.append(EmbeddingRecord.model_validate_json(line))
     return out
+
+
+# Per-author batch file (Phase 5): many articles, one compressed NPZ on disk.
+AUTHOR_EMBEDDING_BATCH_BASENAME = "batch.npz"
+
+
+def write_author_embedding_batch(
+    path: Path,
+    article_ids: Sequence[str],
+    vectors: np.ndarray,
+) -> None:
+    """Persist one author's embeddings as ``article_ids`` + 2-D ``vectors`` (float32)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    mat = np.asarray(vectors, dtype=np.float32)
+    if mat.ndim != 2:
+        msg = f"vectors must be 2-D, got shape {mat.shape}"
+        raise ValueError(msg)
+    ids = list(article_ids)
+    if len(ids) != mat.shape[0]:
+        msg = f"article_ids length ({len(ids)}) != vectors rows ({mat.shape[0]})"
+        raise ValueError(msg)
+    np.savez_compressed(
+        path,
+        article_ids=np.asarray(ids, dtype=object),
+        vectors=mat,
+    )
