@@ -117,6 +117,27 @@ def compute_baseline_similarity_curve(
     return curve
 
 
+def _pairwise_mean_cosine_distance(vecs: list[np.ndarray]) -> float:
+    dists: list[float] = []
+    for i in range(len(vecs)):
+        for j in range(i + 1, len(vecs)):
+            d = float(cosine(vecs[i].ravel(), vecs[j].ravel()))
+            if np.isfinite(d):
+                dists.append(d)
+    return float(np.mean(dists)) if dists else 0.0
+
+
+def _mean_cosine_to_centroid(vecs: list[np.ndarray]) -> float:
+    stacked = np.stack([v.ravel() for v in vecs], axis=0)
+    centroid = stacked.mean(axis=0)
+    dists_c: list[float] = []
+    for v in vecs:
+        d = float(cosine(v.ravel(), centroid))
+        if np.isfinite(d):
+            dists_c.append(d)
+    return float(np.mean(dists_c)) if dists_c else 0.0
+
+
 def compute_intra_period_variance(
     article_embeddings: list[tuple[datetime, np.ndarray]],
     *,
@@ -141,22 +162,9 @@ def compute_intra_period_variance(
             out.append((key, 0.0))
             continue
         if len(vecs) <= max_pairwise:
-            dists: list[float] = []
-            for i in range(len(vecs)):
-                for j in range(i + 1, len(vecs)):
-                    d = float(cosine(vecs[i].ravel(), vecs[j].ravel()))
-                    if np.isfinite(d):
-                        dists.append(d)
-            out.append((key, float(np.mean(dists)) if dists else 0.0))
+            out.append((key, _pairwise_mean_cosine_distance(vecs)))
             continue
-        stacked = np.stack([v.ravel() for v in vecs], axis=0)
-        centroid = stacked.mean(axis=0)
-        dists_c: list[float] = []
-        for v in vecs:
-            d = float(cosine(v.ravel(), centroid))
-            if np.isfinite(d):
-                dists_c.append(d)
-        out.append((key, float(np.mean(dists_c)) if dists_c else 0.0))
+        out.append((key, _mean_cosine_to_centroid(vecs)))
     return out
 
 

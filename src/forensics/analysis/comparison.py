@@ -23,7 +23,6 @@ from forensics.analysis.utils import intervals_overlap, load_feature_frame_for_a
 from forensics.config.settings import ForensicsSettings
 from forensics.models.analysis import ChangePoint, ConvergenceWindow, DriftScores
 from forensics.models.author import Author
-from forensics.storage.parquet import load_feature_frame_sorted
 from forensics.storage.repository import Repository
 from forensics.utils.datetime import parse_datetime
 
@@ -149,9 +148,10 @@ def _load_target_author_and_frame(
     if not target_path.is_file():
         msg = f"Missing features for target: {target_path}"
         raise ValueError(msg)
-    df_t = load_feature_frame_sorted(target_path).filter(pl.col("author_id") == target_author.id)
-    if df_t.is_empty():
-        df_t = load_feature_frame_sorted(target_path)
+    df_t = load_feature_frame_for_author(paths.features_dir, target_id, target_author.id)
+    if df_t is None:
+        msg = f"Missing features for target: {target_path}"
+        raise ValueError(msg)
     return target_author, df_t
 
 

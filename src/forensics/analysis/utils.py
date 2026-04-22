@@ -20,6 +20,11 @@ def intervals_overlap(a0, a1, b0, b1) -> bool:
     return a0 <= b1 and b0 <= a1
 
 
+def closed_interval_contains(value, lo, hi) -> bool:
+    """Return True if ``lo <= value <= hi`` for mutually orderable operands (e.g. dates)."""
+    return lo <= value <= hi
+
+
 def load_feature_frame_for_author(
     features_dir: Path,
     slug: str,

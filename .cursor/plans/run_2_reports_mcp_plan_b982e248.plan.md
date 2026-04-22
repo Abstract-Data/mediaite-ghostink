@@ -28,16 +28,16 @@ todos:
     status: completed
   - id: T02a-agent1-w2-serial
     content: "[AGENT 1] TIER2 PARALLEL after T01* merged - SERIAL RF-DRY-001 then RF-COMP-001 then RF-SMELL-004 (fetcher)"
-    status: pending
+    status: completed
   - id: T02b-agent2-w5-serial
     content: "[AGENT 2] TIER2 PARALLEL after T01* merged - SERIAL RF-DRY-004 then RF-COMP-004 then RF-DRY-003 (analysis)"
-    status: pending
+    status: completed
   - id: T02c-agent5-p2-ops-arch-doc
     content: "[AGENT 5] TIER2 PARALLEL after T01* merged - P2-OPS-001 + P2-ARCH-001 doc (pipeline/docs, not scraper)"
-    status: pending
+    status: completed
   - id: T03-agent1-rf-comp-003
     content: "[AGENT 1] TIER3 after T02a merged - RF-COMP-003 ScrapeMode enum (cli/scrape.py)"
-    status: pending
+    status: completed
   - id: T04a-agent3-w4-serial
     content: "[AGENT 3] TIER4 PARALLEL after T03+T02b merged - SERIAL P2-PERF-001 LDA then P2-CQ-001/RF-COMP-002 then P3-SCALE-001"
     status: pending

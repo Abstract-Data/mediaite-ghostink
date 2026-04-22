@@ -1,4 +1,19 @@
-"""End-to-end pipeline orchestration (scrape → extract → analyze → report)."""
+"""End-to-end pipeline orchestration (scrape → extract → analyze → report).
+
+`forensics.cli.run_all` calls `run_all_pipeline` here. Order of operations:
+
+1. **Audit** — `insert_analysis_run(..., description="forensics all")` on `data/articles.db`
+   (best-effort; failures log a warning and the run continues).
+2. **Scrape** — `asyncio.run(dispatch_scrape(...))` with all boolean stage flags false, which
+   selects the same **full scrape** handler as a plain `forensics scrape` (discover → metadata
+   → fetch → dedup → JSONL export). See `forensics.cli.scrape.dispatch_scrape`.
+3. **Extract** — `extract_all_features` for all authors, embeddings on.
+4. **Analyze** — `run_analyze(timeseries=True, convergence=True)` only (no changepoint,
+   drift, compare-only, or AI baseline unless you edit this module).
+5. **Report** — `run_report` with `ReportArgs` built from `get_settings().report.output_format`.
+
+Operational detail and artifact layout: `docs/RUNBOOK.md`, `docs/ARCHITECTURE.md`.
+"""
 
 from __future__ import annotations
 

@@ -11,22 +11,36 @@ The implementation follows a deterministic four-stage pipeline: `scrape → extr
 
 ## Runtime Flow
 
-The `forensics` console script (`forensics = "forensics.cli:main"` in `pyproject.toml`) loads the Typer application defined in `src/forensics/cli/__init__.py`. `forensics.cli:main` exposes five commands:
+The `forensics` console script (`forensics = "forensics.cli:main"` in `pyproject.toml`) loads the Typer application in `src/forensics/cli/__init__.py`. Commands:
 
-- `uv run forensics scrape` — discover authors and fetch articles
-- `uv run forensics extract` — compute feature vectors and embeddings
-- `uv run forensics analyze` — run change-point detection, drift analysis, convergence scoring
-- `uv run forensics report` — generate markdown/notebook reports
-- `uv run forensics all` — run full pipeline end-to-end
+- `forensics scrape` — Typer sub-app: WordPress discovery, metadata, HTML fetch, dedup, archive/export (see `forensics.cli.scrape`).
+- `forensics extract` — feature + embedding extraction from SQLite (`forensics.cli.extract`).
+- `forensics analyze` — analysis modes behind flags; default when **no** flags are passed is **time-series + full convergence / hypothesis path** (`forensics.cli.analyze.run_analyze`).
+- `forensics report` — Quarto render (`forensics.reporting.run_report`).
+- `forensics all` — synchronous orchestration in `forensics.pipeline.run_all_pipeline` (see below).
 
-Each command builds a `PipelineConfig` (via pydantic-settings with config.toml + FORENSICS_ env prefix) and calls stage functions in `forensics.pipeline`.
+Configuration is **`ForensicsSettings`** from `forensics.config.settings` (TOML + `FORENSICS_*` env). There is no separate `PipelineConfig` type; the “pipeline config” is that settings object plus implicit paths under `get_project_root()/data/`.
 
-## Stage Contracts
+### `forensics all` (end-to-end)
 
-- `scraper.scrape(seed_urls)` → `list[Article]` — WordPress REST API discovery + HTML fetch
-- `features.extract_features(articles)` → `list[FeatureVector]` — four feature families + embeddings
-- `analysis.analyze(feature_vectors, embeddings)` → `list[AnalysisResult]` — change-points + drift + convergence
-- `pipeline.run_report(config)` → `Path` — generated markdown report with Plotly visualizations
+`run_all_pipeline` in `src/forensics/pipeline.py` wires the default automation path:
+
+| Step | Code | Notes |
+|------|------|--------|
+| 1 | `insert_analysis_run` | Writes an `analysis_runs` row with description `forensics all` (non-fatal on `OSError`). |
+| 2 | `dispatch_scrape(discover=False, …, archive=False)` | All stage flags false selects the **full scrape** branch (same as bare `forensics scrape`), which again records `forensics scrape` in `analysis_runs` inside `dispatch_scrape`. |
+| 3 | `extract_all_features` | All authors; embeddings unless skipped elsewhere. |
+| 4 | `run_analyze(timeseries=True, convergence=True)` | **Does not** enable `--changepoint`, `--drift`, `--compare`, or `--ai-baseline`; change `pipeline.py` if `all` should match a richer CLI default. |
+| 5 | `run_report` | Uses `settings.report.output_format`; requires Quarto on `PATH` and per-author artifacts under `data/analysis/`. |
+
+## Stage map (implemented entrypoints)
+
+Illustrative mapping from “stage” to production modules (names are for navigation, not a single façade class):
+
+- **Scrape** — `forensics.cli.scrape.dispatch_scrape` → `crawler.discover_authors` / `collect_article_metadata` / `fetcher.fetch_articles`, `dedup.deduplicate_articles`, `export.export_articles_jsonl`, persistence via `storage.repository.Repository`.
+- **Extract** — `forensics.cli.extract` / `features.pipeline.extract_all_features` → Parquet under `data/features/`, embeddings under `data/embeddings/` as implemented by the feature pipeline.
+- **Analyze** — `forensics.cli.analyze.run_analyze` → `analysis.timeseries`, `analysis.changepoint`, `analysis.drift`, `analysis.orchestrator`, etc., depending on CLI flags; writes JSON artifacts under `data/analysis/`.
+- **Report** — `forensics.reporting.run_report` → subprocess to `quarto render`, output under `data/reports/` per `quarto.yml`.
 
 ## Data Models
 
@@ -59,14 +73,20 @@ JSONL (transparency export) ← human-readable audit trail
 Markdown/Notebooks (reports) ← Plotly charts + Quarto rendering
 ```
 
-## Data and File Outputs
+## Data and file outputs
 
-- `data/raw/documents.json` — scraped article content
-- `data/features/features.parquet` — extracted feature vectors (Polars)
-- `data/analysis/analysis.json` — analysis results
-- `data/reports/report.md` — generated markdown report
-- `data/pipeline/summary.json` — pipeline run metadata
-- `data/scrape_errors.jsonl` — scraping error log
+Canonical layout (see also [`README.md`](../README.md) **Data layout**):
+
+- `data/articles.db` — SQLite corpus, authors, `analysis_runs`, article bodies and scrape metadata.
+- `data/authors_manifest.jsonl` — discovery output from scrape.
+- `data/articles.jsonl` — optional export mirror after fetch/dedup paths.
+- `data/raw/` — optional raw HTML / year archives when scrape `--archive` is used.
+- `data/features/{author_slug}.parquet` — per-author feature tables (not a single monolithic `features.parquet`).
+- `data/embeddings/{author_slug}/batch.npz` — embedding batches (see `features.pipeline` docstring).
+- `data/analysis/` — per-author JSON (`*_result.json`, `*_changepoints.json`, `*_hypothesis_tests.json`, …), `run_metadata.json`, `corpus_custody.json` when written.
+- `data/reports/` — Quarto book output directory (`quarto.yml` `project.output-dir`).
+
+Older docs sometimes referenced `data/raw/documents.json`, `data/analysis/analysis.json`, or `data/pipeline/summary.json`; those paths are **not** the current contract—prefer the list above and the storage modules under `src/forensics/storage/`.
 
 ## Key Modules
 
