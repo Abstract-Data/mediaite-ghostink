@@ -304,9 +304,13 @@ def compute_drift_scores(
     centroid_velocities: list[float],
     intra_variance_trend: list[tuple[str, float]],
 ) -> DriftScores:
-    """Bundle drift metrics into ``DriftScores``."""
+    """Bundle drift metrics into ``DriftScores``.
+
+    ``ai_baseline_similarity`` is ``None`` when no AI baseline is available —
+    callers must distinguish "no measurement" from a real 0.0 convergence.
+    """
     last_baseline = float(baseline_similarity_curve[-1][1]) if baseline_similarity_curve else 0.0
-    last_ai = float(ai_convergence[-1][1]) if ai_convergence else 0.0
+    last_ai = float(ai_convergence[-1][1]) if ai_convergence else None
     return DriftScores(
         author_id=author_id,
         baseline_centroid_similarity=last_baseline,
