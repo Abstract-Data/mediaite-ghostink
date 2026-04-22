@@ -19,6 +19,7 @@ from forensics.storage.duckdb_queries import (
 from forensics.storage.parquet import (
     load_feature_frame_sorted,
     read_embeddings_manifest,
+    unpack_article_ids_from_embedding_batch,
     write_author_embedding_batch,
     write_embeddings_manifest,
 )
@@ -125,6 +126,29 @@ def test_write_author_embedding_batch_shape_validation(tmp_path: Path) -> None:
         write_author_embedding_batch(path, ["a", "b"], np.zeros((1, 4), dtype=np.float32))
 
 
+def test_write_author_embedding_batch_npz_roundtrip_no_pickle(tmp_path: Path) -> None:
+    path = tmp_path / "batch.npz"
+    ids = ["café-1", "naïve-2", "ascii"]
+    mat = np.arange(3 * 7, dtype=np.float32).reshape(3, 7)
+    write_author_embedding_batch(path, ids, mat)
+    z = np.load(path, allow_pickle=False)
+    assert set(z.files) == {"article_id_lengths", "article_id_bytes", "vectors"}
+    got = unpack_article_ids_from_embedding_batch(
+        z["article_id_lengths"],
+        z["article_id_bytes"],
+    )
+    assert got == ids
+    assert np.array_equal(z["vectors"], mat)
+
+
+def test_unpack_article_ids_length_mismatch_raises() -> None:
+    with pytest.raises(ValueError, match="sum"):
+        unpack_article_ids_from_embedding_batch(
+            np.array([2, 2], dtype=np.int32),
+            np.array([1, 2, 3], dtype=np.uint8),
+        )
+
+
 def test_read_embeddings_manifest_missing_file_returns_empty(tmp_path: Path) -> None:
     assert read_embeddings_manifest(tmp_path / "no_manifest.jsonl") == []
 
@@ -213,7 +237,7 @@ def test_load_article_embeddings_legacy_npy_and_batch_npz(
         project_root=root,
     )
     assert len(pairs) == 1
-    assert np.allclose(pairs[0][1], v1)
+    assert np.allclose(pairs[0].embedding, v1)
 
     # --- batched .npz (multiple rows, shared file) ---
     v2 = np.ones(5, dtype=np.float32) * 2
@@ -253,6 +277,50 @@ def test_load_article_embeddings_legacy_npy_and_batch_npz(
         project_root=root,
     )
     assert len(pairs_b) == 2
-    pairs_b.sort(key=lambda x: x[0])
-    assert np.allclose(pairs_b[0][1], v2)
-    assert np.allclose(pairs_b[1][1], v3)
+    pairs_b.sort(key=lambda x: x.published_at)
+    assert np.allclose(pairs_b[0].embedding, v2)
+    assert np.allclose(pairs_b[1].embedding, v3)
+
+
+def test_load_article_embeddings_rejects_legacy_object_npz_batch(
+    tmp_path: Path,
+    sample_author,
+) -> None:
+    """Pre-P1-SEC-001 batches used object-dtyped article_ids (pickle on load)."""
+    from forensics.analysis.drift import load_article_embeddings
+    from forensics.storage.repository import Repository, init_db
+
+    root = tmp_path
+    db_path = root / "data" / "articles.db"
+    init_db(db_path)
+    with Repository(db_path) as repo:
+        repo.upsert_author(sample_author)
+
+    emb_root = root / "data" / "embeddings"
+    slug_dir = emb_root / sample_author.slug
+    slug_dir.mkdir(parents=True)
+    legacy = slug_dir / "legacy.npz"
+    np.savez_compressed(
+        legacy,
+        article_ids=np.asarray(["leg-a", "leg-b"], dtype=object),
+        vectors=np.ones((2, 4), dtype=np.float32),
+    )
+    rec_batch = [
+        EmbeddingRecord(
+            article_id="leg-a",
+            author_id=sample_author.id,
+            timestamp=datetime(2024, 6, 1, tzinfo=UTC),
+            model_name="m",
+            model_version="v",
+            embedding_path=f"data/embeddings/{sample_author.slug}/legacy.npz",
+            embedding_dim=4,
+        ),
+    ]
+    write_embeddings_manifest(rec_batch, emb_root / "manifest.jsonl")
+    pairs = load_article_embeddings(
+        sample_author.slug,
+        emb_root,
+        db_path,
+        project_root=root,
+    )
+    assert pairs == []

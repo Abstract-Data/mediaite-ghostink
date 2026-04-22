@@ -169,7 +169,7 @@ def test_analysis_stub_modules_importable() -> None:
 
 
 def test_monthly_centroids() -> None:
-    from forensics.analysis.drift import compute_monthly_centroids
+    from forensics.analysis.drift import ArticleEmbedding, compute_monthly_centroids
 
     stamps = [
         datetime(2024, 1, 5, tzinfo=UTC),
@@ -179,9 +179,13 @@ def test_monthly_centroids() -> None:
         datetime(2024, 3, 1, tzinfo=UTC),
         datetime(2024, 3, 22, tzinfo=UTC),
     ]
-    pairs: list[tuple[datetime, np.ndarray]] = []
+    pairs: list[ArticleEmbedding] = []
     for i, dt in enumerate(stamps):
-        pairs.append((dt, np.ones(4, dtype=np.float32) * float(i)))
+        pairs.append(
+            ArticleEmbedding(
+                published_at=dt, embedding=np.ones(4, dtype=np.float32) * float(i)
+            )
+        )
     out = compute_monthly_centroids(pairs)
     assert len(out) == 3
     for _m, c in out:
@@ -212,35 +216,44 @@ def test_centroid_velocity_drift() -> None:
 
 
 def test_baseline_similarity_stable() -> None:
-    from forensics.analysis.drift import compute_baseline_similarity_curve
+    from forensics.analysis.drift import ArticleEmbedding, compute_baseline_similarity_curve
 
     base = datetime(2024, 1, 1, tzinfo=UTC)
     e = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32)
-    pairs = [(base + timedelta(days=i), e.copy()) for i in range(5)]
+    pairs = [
+        ArticleEmbedding(published_at=base + timedelta(days=i), embedding=e.copy())
+        for i in range(5)
+    ]
     curve = compute_baseline_similarity_curve(pairs, baseline_count=3)
     assert len(curve) == 5
     assert all(abs(s - 1.0) < 1e-5 for _, s in curve)
 
 
 def test_baseline_similarity_drift() -> None:
-    from forensics.analysis.drift import compute_baseline_similarity_curve
+    from forensics.analysis.drift import ArticleEmbedding, compute_baseline_similarity_curve
 
     base = datetime(2024, 1, 1, tzinfo=UTC)
     b = np.array([1.0, 0.0], dtype=np.float32)
     pairs = []
     for i in range(10):
         noise = np.array([0.0, float(i) * 0.2], dtype=np.float32)
-        pairs.append((base + timedelta(days=i), b + noise))
+        pairs.append(
+            ArticleEmbedding(published_at=base + timedelta(days=i), embedding=b + noise)
+        )
     curve = compute_baseline_similarity_curve(pairs, baseline_count=3)
     assert curve[0][1] >= curve[-1][1]
 
 
 def test_intra_variance_uniform() -> None:
-    from forensics.analysis.drift import compute_intra_period_variance
+    from forensics.analysis.drift import ArticleEmbedding, compute_intra_period_variance
 
     base = datetime(2024, 3, 1, tzinfo=UTC)
     v = np.ones(5, dtype=np.float32)
-    pairs = [(base, v), (base + timedelta(days=1), v.copy()), (base + timedelta(days=2), v.copy())]
+    pairs = [
+        ArticleEmbedding(published_at=base, embedding=v),
+        ArticleEmbedding(published_at=base + timedelta(days=1), embedding=v.copy()),
+        ArticleEmbedding(published_at=base + timedelta(days=2), embedding=v.copy()),
+    ]
     out = compute_intra_period_variance(pairs, period="month")
     assert out[0][0] == "2024-03"
     assert out[0][1] == 0.0

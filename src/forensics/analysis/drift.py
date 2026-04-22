@@ -7,6 +7,7 @@ import json
 import logging
 from collections import defaultdict
 from collections.abc import Sequence
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -18,10 +19,24 @@ from forensics.analysis.utils import resolve_author_rows
 from forensics.config import get_project_root
 from forensics.config.settings import ForensicsSettings
 from forensics.models.analysis import DriftScores
-from forensics.storage.parquet import read_embeddings_manifest
+from forensics.storage.parquet import (
+    EMBEDDING_BATCH_KEY_BYTES,
+    EMBEDDING_BATCH_KEY_LENGTHS,
+    EMBEDDING_BATCH_KEY_VECTORS,
+    read_embeddings_manifest,
+    unpack_article_ids_from_embedding_batch,
+)
 from forensics.storage.repository import Repository
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class ArticleEmbedding:
+    """One article's semantic embedding with its publish time (drift pipeline input)."""
+
+    published_at: datetime
+    embedding: np.ndarray = field(repr=False)
 
 
 def _load_embedding_row(
@@ -35,16 +50,41 @@ def _load_embedding_row(
     if abs_path.suffix.lower() == ".npz":
         if abs_path not in batch_cache:
             try:
-                z = np.load(abs_path, allow_pickle=True)
+                z = np.load(abs_path, allow_pickle=False)
             except (OSError, ValueError) as exc:
                 logger.warning("Could not read embedding batch %s: %s", abs_path, exc)
                 return None
-            if "article_ids" not in z.files or "vectors" not in z.files:
+            keys = frozenset(z.files)
+            if (
+                EMBEDDING_BATCH_KEY_LENGTHS in keys
+                and EMBEDDING_BATCH_KEY_BYTES in keys
+                and EMBEDDING_BATCH_KEY_VECTORS in keys
+            ):
+                try:
+                    ids_list = unpack_article_ids_from_embedding_batch(
+                        z[EMBEDDING_BATCH_KEY_LENGTHS],
+                        z[EMBEDDING_BATCH_KEY_BYTES],
+                    )
+                except ValueError as exc:
+                    logger.warning("Malformed embedding batch %s: %s", abs_path, exc)
+                    return None
+                mat = np.asarray(z[EMBEDDING_BATCH_KEY_VECTORS], dtype=np.float32)
+                if mat.ndim != 2 or mat.shape[0] != len(ids_list):
+                    logger.warning(
+                        "Malformed embedding batch (shape mismatch): %s", abs_path
+                    )
+                    return None
+                id_map = {ids_list[i]: i for i in range(len(ids_list))}
+            elif "article_ids" in keys and EMBEDDING_BATCH_KEY_VECTORS in keys:
+                logger.warning(
+                    "Legacy embedding batch %s uses pickled article_ids; "
+                    "re-run feature extraction to rewrite the batch.",
+                    abs_path,
+                )
+                return None
+            else:
                 logger.warning("Malformed embedding batch (missing keys): %s", abs_path)
                 return None
-            raw_ids = z["article_ids"]
-            mat = np.asarray(z["vectors"], dtype=np.float32)
-            id_map = {str(raw_ids[i]): i for i in range(int(raw_ids.shape[0]))}
             batch_cache[abs_path] = (mat, id_map)
         mat, id_map = batch_cache[abs_path]
         row = id_map.get(article_id)
@@ -70,13 +110,13 @@ def _cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
 
 
 def compute_monthly_centroids(
-    article_embeddings: list[tuple[datetime, np.ndarray]],
+    article_embeddings: Sequence[ArticleEmbedding],
 ) -> list[tuple[str, np.ndarray]]:
     """Mean embedding vector per calendar month, sorted chronologically."""
     monthly: dict[str, list[np.ndarray]] = defaultdict(list)
-    for dt, emb in article_embeddings:
-        key = dt.strftime("%Y-%m")
-        monthly[key].append(np.asarray(emb, dtype=np.float32))
+    for row in article_embeddings:
+        key = row.published_at.strftime("%Y-%m")
+        monthly[key].append(np.asarray(row.embedding, dtype=np.float32))
     centroids: list[tuple[str, np.ndarray]] = []
     for month in sorted(monthly.keys()):
         vectors = np.stack(monthly[month], axis=0)
@@ -99,21 +139,25 @@ def track_centroid_velocity(centroids: list[tuple[str, np.ndarray]]) -> list[flo
 
 
 def compute_baseline_similarity_curve(
-    article_embeddings: list[tuple[datetime, np.ndarray]],
+    article_embeddings: Sequence[ArticleEmbedding],
     *,
     baseline_count: int = 20,
 ) -> list[tuple[datetime, float]]:
     """Cosine similarity to centroid of first ``baseline_count`` articles by publish time."""
     if not article_embeddings:
         return []
-    ordered = sorted(article_embeddings, key=lambda x: x[0])
+    ordered = sorted(article_embeddings, key=lambda r: r.published_at)
     n_base = max(1, min(baseline_count, len(ordered)))
-    base_vecs = np.stack([np.asarray(e, dtype=np.float64) for _, e in ordered[:n_base]], axis=0)
+    base_vecs = np.stack(
+        [np.asarray(r.embedding, dtype=np.float64) for r in ordered[:n_base]], axis=0
+    )
     baseline_centroid = base_vecs.mean(axis=0)
     curve: list[tuple[datetime, float]] = []
-    for dt, emb in ordered:
-        sim = _cosine_similarity(np.asarray(emb, dtype=np.float64), baseline_centroid)
-        curve.append((dt, sim))
+    for row in ordered:
+        sim = _cosine_similarity(
+            np.asarray(row.embedding, dtype=np.float64), baseline_centroid
+        )
+        curve.append((row.published_at, sim))
     return curve
 
 
@@ -139,7 +183,7 @@ def _mean_cosine_to_centroid(vecs: list[np.ndarray]) -> float:
 
 
 def compute_intra_period_variance(
-    article_embeddings: list[tuple[datetime, np.ndarray]],
+    article_embeddings: Sequence[ArticleEmbedding],
     *,
     period: str = "month",
     max_pairwise: int = 20,
@@ -153,8 +197,10 @@ def compute_intra_period_variance(
         msg = f"Unsupported period: {period!r} (only 'month' is implemented)"
         raise ValueError(msg)
     buckets: dict[str, list[np.ndarray]] = defaultdict(list)
-    for dt, emb in article_embeddings:
-        buckets[dt.strftime("%Y-%m")].append(np.asarray(emb, dtype=np.float64))
+    for row in article_embeddings:
+        buckets[row.published_at.strftime("%Y-%m")].append(
+            np.asarray(row.embedding, dtype=np.float64)
+        )
     out: list[tuple[str, float]] = []
     for key in sorted(buckets.keys()):
         vecs = buckets[key]
@@ -264,8 +310,8 @@ def load_article_embeddings(
     db_path: Path,
     *,
     project_root: Path | None = None,
-) -> list[tuple[datetime, np.ndarray]]:
-    """Load ``(published_date, embedding)`` from manifest + ``.npy`` or ``batch.npz``."""
+) -> list[ArticleEmbedding]:
+    """Load article embeddings from manifest + ``.npy`` or ``batch.npz``."""
     root = project_root or get_project_root()
     batch_cache: dict[Path, tuple[np.ndarray, dict[str, int]]] = {}
     with Repository(db_path) as repo:
@@ -275,7 +321,7 @@ def load_article_embeddings(
             raise ValueError(msg)
         manifest_path = embeddings_dir / "manifest.jsonl"
         records = read_embeddings_manifest(manifest_path)
-        pairs: list[tuple[datetime, np.ndarray]] = []
+        pairs: list[ArticleEmbedding] = []
         for rec in records:
             if rec.author_id != author.id:
                 continue
@@ -287,8 +333,8 @@ def load_article_embeddings(
                     "Missing or unreadable embedding for article %s: %s", rec.article_id, abs_path
                 )
                 continue
-            pairs.append((rec.timestamp, vec))
-        pairs.sort(key=lambda x: x[0])
+            pairs.append(ArticleEmbedding(published_at=rec.timestamp, embedding=vec))
+        pairs.sort(key=lambda r: r.published_at)
         return pairs
 
 
@@ -340,7 +386,7 @@ def write_drift_artifacts(
 def compute_author_drift_pipeline(
     slug: str,
     author_id: str,
-    article_embs: list[tuple[datetime, np.ndarray]],
+    article_embs: Sequence[ArticleEmbedding],
     settings: ForensicsSettings,
     *,
     project_root: Path,

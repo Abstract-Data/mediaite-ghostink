@@ -81,13 +81,52 @@ def read_embeddings_manifest(path: Path) -> list[EmbeddingRecord]:
 # Per-author batch file (Phase 5): many articles, one compressed NPZ on disk.
 AUTHOR_EMBEDDING_BATCH_BASENAME = "batch.npz"
 
+# NPZ keys: UTF-8 ids as int32 lengths + uint8 blob (no object dtype / no pickle on load).
+EMBEDDING_BATCH_KEY_LENGTHS = "article_id_lengths"
+EMBEDDING_BATCH_KEY_BYTES = "article_id_bytes"
+EMBEDDING_BATCH_KEY_VECTORS = "vectors"
+
+
+def _pack_article_ids_utf8(ids: Sequence[str]) -> tuple[np.ndarray, np.ndarray]:
+    encoded = [str(x).encode("utf-8") for x in ids]
+    lengths = np.array([len(e) for e in encoded], dtype=np.int32)
+    blob = b"".join(encoded)
+    flat = np.frombuffer(blob, dtype=np.uint8).copy()
+    return lengths, flat
+
+
+def unpack_article_ids_from_embedding_batch(
+    lengths: np.ndarray,
+    flat: np.ndarray,
+) -> list[str]:
+    """Decode ``article_id_lengths`` + ``article_id_bytes`` from a secure batch NPZ."""
+    lens = np.asarray(lengths, dtype=np.int64).ravel()
+    buf = np.asarray(flat, dtype=np.uint8).ravel()
+    expected = int(lens.sum())
+    if expected != buf.size:
+        msg = f"article_id lengths sum ({expected}) != bytes length ({buf.size})"
+        raise ValueError(msg)
+    data = buf.tobytes()
+    pos = 0
+    out: list[str] = []
+    for ln in lens:
+        n = int(ln)
+        out.append(data[pos : pos + n].decode("utf-8"))
+        pos += n
+    return out
+
 
 def write_author_embedding_batch(
     path: Path,
     article_ids: Sequence[str],
     vectors: np.ndarray,
 ) -> None:
-    """Persist one author's embeddings as ``article_ids`` + 2-D ``vectors`` (float32)."""
+    """Persist one author's embeddings as UTF-8 id packing + 2-D ``vectors`` (float32).
+
+    On-disk arrays: ``article_id_lengths`` (int32), ``article_id_bytes`` (uint8),
+    ``vectors`` (float32, 2-D). This avoids NumPy object arrays so archives load
+    with ``np.load(..., allow_pickle=False)``.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     mat = np.asarray(vectors, dtype=np.float32)
     if mat.ndim != 2:
@@ -97,8 +136,12 @@ def write_author_embedding_batch(
     if len(ids) != mat.shape[0]:
         msg = f"article_ids length ({len(ids)}) != vectors rows ({mat.shape[0]})"
         raise ValueError(msg)
+    id_lengths, id_bytes = _pack_article_ids_utf8(ids)
     np.savez_compressed(
         path,
-        article_ids=np.asarray(ids, dtype=object),
-        vectors=mat,
+        **{
+            EMBEDDING_BATCH_KEY_LENGTHS: id_lengths,
+            EMBEDDING_BATCH_KEY_BYTES: id_bytes,
+            EMBEDDING_BATCH_KEY_VECTORS: mat,
+        },
     )
