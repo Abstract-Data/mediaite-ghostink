@@ -233,6 +233,16 @@ def run_all() -> None:
         raise typer.Exit(code=rc)
 
 
+@app.command(name="setup")
+def setup_wizard() -> None:
+    """Launch the interactive setup wizard (requires the 'tui' extra)."""
+    from forensics.tui import main as tui_main
+
+    rc = tui_main()
+    if rc != 0:
+        raise typer.Exit(code=rc)
+
+
 def main() -> int:
     """Entrypoint called by pyproject.toml [project.scripts]."""
     try:
