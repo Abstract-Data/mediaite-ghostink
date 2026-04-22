@@ -1,6 +1,6 @@
 """Storage backends: SQLite repository, exports, and future Parquet/DuckDB."""
 
-from forensics.storage.export import append_jsonl, export_articles_jsonl
+from forensics.storage.export import append_jsonl, append_jsonl_async, export_articles_jsonl
 from forensics.storage.repository import (
     Repository,
     UnfetchedArticle,
@@ -14,6 +14,7 @@ __all__ = [
     "UnfetchedArticle",
     "UnfetchedUrl",
     "append_jsonl",
+    "append_jsonl_async",
     "export_articles_jsonl",
     "init_db",
     "insert_analysis_run",

@@ -21,7 +21,7 @@ from forensics.config.settings import ForensicsSettings, ScrapingConfig, get_pro
 from forensics.models.article import Article
 from forensics.scraper.client import create_scraping_client
 from forensics.scraper.parser import extract_article_text, extract_metadata, looks_coauthored
-from forensics.storage.export import append_jsonl
+from forensics.storage.export import append_jsonl_async
 from forensics.storage.repository import Repository, UnfetchedArticle
 from forensics.utils import utc_now_iso
 from forensics.utils.hashing import content_hash
@@ -202,8 +202,14 @@ def _write_raw_html_file(root: Path, year: int, article_id: str, html: str) -> s
     return f"raw/{year}/{article_id}.html"
 
 
-async def _persist_http_failed_fetch(
-    repo: Repository,
+def _resume_skip_fetch(article: Article | None) -> bool:
+    """True when the row is missing or body text is already populated (resume / skip)."""
+    if article is None:
+        return True
+    return bool(article.clean_text.strip())
+
+
+def _apply_http_failed_mutation(
     article: Article,
     scraped_at: datetime,
     response: httpx.Response,
@@ -212,46 +218,31 @@ async def _persist_http_failed_fetch(
     article.clean_text = f"[HTTP_ERROR:{response.status_code}]"
     article.word_count = 0
     article.content_hash = content_hash(article.clean_text)
-    repo.upsert_article(article)
 
 
-async def _persist_off_domain_fetch(
-    repo: Repository,
-    errors: Path,
+def _apply_off_domain_mutation(
     article: Article,
     scraped_at: datetime,
-    url: str,
-    response: httpx.Response,
     final_host: str,
 ) -> None:
-    await append_scrape_error(
-        errors,
-        scrape_error_record(
-            url,
-            response.status_code,
-            f"redirect_off_domain:{final_host}",
-            "html_fetch",
-        ),
-    )
     article.scraped_at = scraped_at
     article.clean_text = f"[REDIRECT:{final_host}]"
     article.word_count = 0
     article.raw_html_path = ""
     article.content_hash = content_hash(article.clean_text)
-    repo.upsert_article(article)
 
 
-async def _persist_successful_fetch(
-    repo: Repository,
+async def _build_successful_fetch_outside_lock(
+    article: Article,
     root: Path,
     year: int,
     article_id: str,
-    article: Article,
     html: str,
     scraped_at: datetime,
     coauth: Path,
     warns: Path,
 ) -> None:
+    """Parse HTML, write raw file, merge metadata, append side JSONL; mutates ``article`` (no DB)."""
     raw_path = _write_raw_html_file(root, year, article_id, html)
     clean = extract_article_text(html)
     meta_extra = extract_metadata(html)
@@ -266,7 +257,7 @@ async def _persist_successful_fetch(
 
     author_line = str(merged_meta.get("page_author") or "")
     if looks_coauthored(author_line) or looks_coauthored(article.title):
-        append_jsonl(
+        await append_jsonl_async(
             coauth,
             {
                 "article_id": article_id,
@@ -279,7 +270,7 @@ async def _persist_successful_fetch(
         article.metadata = merged_meta
 
     if wc < 50:
-        append_jsonl(
+        await append_jsonl_async(
             warns,
             {
                 "article_id": article_id,
@@ -288,8 +279,6 @@ async def _persist_successful_fetch(
                 "reason": "below_minimum_word_count",
             },
         )
-
-    repo.upsert_article(article)
 
 
 async def _fetch_one_article_html(
@@ -325,56 +314,73 @@ async def _fetch_one_article_html(
         scraped_at = datetime.now(UTC)
         final_host = urlparse(str(response.url)).netloc
 
-        async with db_lock:
-            article = repo.get_article_by_id(row.article_id)
-            if article is None or (article.clean_text and article.clean_text.strip()):
-                return
+        if not response.is_success:
+            async with db_lock:
+                article = await asyncio.to_thread(repo.get_article_by_id, row.article_id)
+                if _resume_skip_fetch(article):
+                    return
+                _apply_http_failed_mutation(article, scraped_at, response)
+                await asyncio.to_thread(repo.upsert_article, article)
+            async with done_lock:
+                done_count[0] += 1
+                logger.info(
+                    "Fetched %s/%s articles for %s (http %s)",
+                    done_count[0],
+                    total,
+                    row.author_name,
+                    response.status_code,
+                )
+            return
 
-            if not response.is_success:
-                await _persist_http_failed_fetch(repo, article, scraped_at, response)
-                async with done_lock:
-                    done_count[0] += 1
-                    logger.info(
-                        "Fetched %s/%s articles for %s (http %s)",
-                        done_count[0],
-                        total,
-                        row.author_name,
-                        response.status_code,
-                    )
-                return
-
-            if not _is_mediaite_host(final_host):
-                await _persist_off_domain_fetch(
-                    repo,
-                    errors,
-                    article,
-                    scraped_at,
-                    row.url,
-                    response,
+        if not _is_mediaite_host(final_host):
+            await append_scrape_error(
+                errors,
+                scrape_error_record(
+                    str(row.url),
+                    response.status_code,
+                    f"redirect_off_domain:{final_host}",
+                    "html_fetch",
+                ),
+            )
+            async with db_lock:
+                article = await asyncio.to_thread(repo.get_article_by_id, row.article_id)
+                if _resume_skip_fetch(article):
+                    return
+                _apply_off_domain_mutation(article, scraped_at, final_host)
+                await asyncio.to_thread(repo.upsert_article, article)
+            async with done_lock:
+                done_count[0] += 1
+                logger.info(
+                    "Fetched %s/%s articles for %s (off-domain %s)",
+                    done_count[0],
+                    total,
+                    row.author_name,
                     final_host,
                 )
-                async with done_lock:
-                    done_count[0] += 1
-                    logger.info(
-                        "Fetched %s/%s articles for %s (off-domain %s)",
-                        done_count[0],
-                        total,
-                        row.author_name,
-                        final_host,
-                    )
+            return
+
+        async with db_lock:
+            article = await asyncio.to_thread(repo.get_article_by_id, row.article_id)
+            if _resume_skip_fetch(article):
                 return
 
-            await _persist_successful_fetch(
-                repo,
-                root,
-                year,
-                row.article_id,
-                article,
-                response.text,
-                scraped_at,
-                coauth,
-                warns,
-            )
+        await _build_successful_fetch_outside_lock(
+            article,
+            root,
+            year,
+            row.article_id,
+            response.text,
+            scraped_at,
+            coauth,
+            warns,
+        )
+
+        async with db_lock:
+            latest = await asyncio.to_thread(repo.get_article_by_id, row.article_id)
+            if _resume_skip_fetch(latest):
+                pass
+            else:
+                await asyncio.to_thread(repo.upsert_article, article)
 
         async with done_lock:
             done_count[0] += 1

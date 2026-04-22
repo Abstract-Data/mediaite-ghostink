@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import uuid
+from collections.abc import Iterable, Iterator
 from datetime import UTC, date, datetime
 from pathlib import Path
 from types import TracebackType
@@ -72,8 +73,17 @@ CREATE TABLE IF NOT EXISTS analysis_runs (
 
 
 def _connect(db_path: Path) -> sqlite3.Connection:
-    """Open SQLite with DEFERRED transactions, WAL, and busy timeout (ADR-001)."""
-    conn = sqlite3.connect(db_path, isolation_level="DEFERRED", timeout=30.0)
+    """Open SQLite with DEFERRED transactions, WAL, and busy timeout (ADR-001).
+
+    ``check_same_thread=False`` allows the connection to be used from asyncio worker
+    threads while callers serialize access (e.g. ``db_lock`` in the scraper fetcher).
+    """
+    conn = sqlite3.connect(
+        db_path,
+        isolation_level="DEFERRED",
+        timeout=30.0,
+        check_same_thread=False,
+    )
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA busy_timeout=5000")
     return conn
@@ -332,6 +342,89 @@ class Repository:
         conn = self._require_conn()
         rows = conn.execute("SELECT * FROM articles ORDER BY published_date").fetchall()
         return [_row_to_article(row) for row in rows]
+
+    def iter_all_articles(self, *, batch_size: int = 500) -> Iterator[Article]:
+        """Yield every article in ``published_date`` order without loading the full table."""
+        if batch_size < 1:
+            msg = f"batch_size must be >= 1, got {batch_size}"
+            raise ValueError(msg)
+        conn = self._require_conn()
+        cursor = conn.execute("SELECT * FROM articles ORDER BY published_date")
+        while True:
+            rows = cursor.fetchmany(batch_size)
+            if not rows:
+                break
+            for row in rows:
+                yield _row_to_article(row)
+
+    def iter_dedup_source_rows(
+        self, *, batch_size: int = 500
+    ) -> Iterator[tuple[str, datetime, str, str]]:
+        """Yield ``(id, published_date, title, clean_text)`` for simhash deduplication.
+
+        Matches the historical in-memory pool filter: non-empty body and not a
+        ``[REDIRECT:`` prefix (same rules as ``deduplicate_articles``).
+        """
+        if batch_size < 1:
+            msg = f"batch_size must be >= 1, got {batch_size}"
+            raise ValueError(msg)
+        conn = self._require_conn()
+        sql = """
+            SELECT id, published_date, title, clean_text
+            FROM articles
+            WHERE clean_text IS NOT NULL
+              AND clean_text != ''
+              AND (length(clean_text) < 10 OR substr(clean_text, 1, 10) != '[REDIRECT:')
+            ORDER BY published_date
+        """
+        cursor = conn.execute(sql)
+        while True:
+            rows = cursor.fetchmany(batch_size)
+            if not rows:
+                break
+            for row in rows:
+                yield (
+                    str(row["id"]),
+                    parse_datetime(row["published_date"]),
+                    str(row["title"]),
+                    str(row["clean_text"]),
+                )
+
+    def clear_duplicate_flags(self, article_ids: Iterable[str], *, chunk_size: int = 500) -> int:
+        """Set ``is_duplicate = 0`` for the given ids.
+
+        Returns number of rows touched (best-effort).
+        """
+        return self._bulk_set_is_duplicate(article_ids, 0, chunk_size=chunk_size)
+
+    def mark_duplicates(self, article_ids: Iterable[str], *, chunk_size: int = 500) -> int:
+        """Set ``is_duplicate = 1`` for the given ids.
+
+        Returns number of rows touched (best-effort).
+        """
+        return self._bulk_set_is_duplicate(article_ids, 1, chunk_size=chunk_size)
+
+    def _bulk_set_is_duplicate(
+        self, article_ids: Iterable[str], value: int, *, chunk_size: int
+    ) -> int:
+        ids = list(article_ids)
+        if not ids:
+            return 0
+        if chunk_size < 1:
+            msg = f"chunk_size must be >= 1, got {chunk_size}"
+            raise ValueError(msg)
+        conn = self._require_conn()
+        total = 0
+        for i in range(0, len(ids), chunk_size):
+            chunk = ids[i : i + chunk_size]
+            placeholders = ",".join("?" * len(chunk))
+            cur = conn.execute(
+                f"UPDATE articles SET is_duplicate = ? WHERE id IN ({placeholders})",
+                (value, *chunk),
+            )
+            if cur.rowcount >= 0:
+                total += cur.rowcount
+        return total
 
     def get_unfetched_urls(self) -> list[UnfetchedUrl]:
         """Return rows where body text has not been fetched yet."""

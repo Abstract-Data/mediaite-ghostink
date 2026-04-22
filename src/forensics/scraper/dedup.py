@@ -6,7 +6,6 @@ import logging
 from collections import defaultdict
 from pathlib import Path
 
-from forensics.models.article import Article
 from forensics.storage.repository import Repository
 from forensics.utils.hashing import simhash, simhash_hamming
 
@@ -81,22 +80,28 @@ def deduplicate_articles(db_path: Path, *, hamming_threshold: int = _NEAR_DUP_HA
     per component. Returns IDs that are marked duplicate (excluding canonical rows).
     """
     with Repository(db_path) as repo:
-        pool: list[Article] = [
-            a
-            for a in repo.get_all_articles()
-            if a.clean_text and not a.clean_text.startswith("[REDIRECT:")
-        ]
-        if not pool:
+        pool_ids: list[str] = []
+        pool_dates: list = []
+        pool_titles: list[str] = []
+        fingerprints: list[int] = []
+
+        for aid, pub_date, title, clean_text in repo.iter_dedup_source_rows():
+            pool_ids.append(aid)
+            pool_dates.append(pub_date)
+            pool_titles.append(title)
+            fingerprints.append(simhash(clean_text))
+
+        if not pool_ids:
             return []
 
-        indices = list(range(len(pool)))
+        n = len(pool_ids)
+        indices = list(range(n))
         parent = list(indices)
-        fingerprints = [simhash(a.clean_text) for a in pool]
 
-        if len(pool) > 500:
+        if n > 500:
             logger.info(
                 "dedup: banded simhash over %d articles (Hamming <= %s)",
-                len(pool),
+                n,
                 hamming_threshold,
             )
 
@@ -107,7 +112,7 @@ def deduplicate_articles(db_path: Path, *, hamming_threshold: int = _NEAR_DUP_HA
                     _union(parent, i, j)
         else:
             for i in indices:
-                for j in range(i + 1, len(pool)):
+                for j in range(i + 1, n):
                     if simhash_hamming(fingerprints[i], fingerprints[j]) <= hamming_threshold:
                         _union(parent, i, j)
 
@@ -116,21 +121,24 @@ def deduplicate_articles(db_path: Path, *, hamming_threshold: int = _NEAR_DUP_HA
             groups[_find(parent, i)].append(i)
 
         duplicate_ids: list[str] = []
+        repo.clear_duplicate_flags(pool_ids)
         for members in groups.values():
-            canonical_i = min(members, key=lambda i: pool[i].published_date)
-            can = pool[canonical_i]
+            canonical_i = min(members, key=lambda i: pool_dates[i])
+            can_title = pool_titles[canonical_i]
+            can_date = pool_dates[canonical_i]
             for i in members:
-                art = pool[i]
-                art.is_duplicate = i != canonical_i
-                repo.upsert_article(art)
-                if art.is_duplicate:
-                    logger.info(
-                        "DUPLICATE: '%s' (%s) ≈ '%s' (%s)",
-                        art.title,
-                        art.published_date.date().isoformat(),
-                        can.title,
-                        can.published_date.date().isoformat(),
-                    )
-                    duplicate_ids.append(art.id)
+                if i == canonical_i:
+                    continue
+                art_id = pool_ids[i]
+                duplicate_ids.append(art_id)
+                logger.info(
+                    "DUPLICATE: '%s' (%s) ≈ '%s' (%s)",
+                    pool_titles[i],
+                    pool_dates[i].date().isoformat(),
+                    can_title,
+                    can_date.date().isoformat(),
+                )
+        if duplicate_ids:
+            repo.mark_duplicates(duplicate_ids)
 
         return duplicate_ids

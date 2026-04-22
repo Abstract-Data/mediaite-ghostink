@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import html
 import logging
 from collections.abc import Iterator
@@ -225,44 +226,47 @@ async def discover_authors(
             logger.error("Author discovery fetched no users; manifest not written")
             return 0
 
-        manifests: list[AuthorManifest] = []
-        for user in user_rows:
-            wp_id = int(user["id"])
-            count_url = f"{MEDIAITE_REST}/posts?author={wp_id}&per_page=1&_fields=id"
-            cresp = await request_with_retry(
-                client,
-                limiter,
-                scraping,
-                "GET",
-                count_url,
-                errors_path=errors,
-                phase="discover_count",
-            )
-            total_posts = 0
-            if cresp.is_success:
-                tt = _int_header(cresp, "X-WP-Total", 0)
-                total_posts = tt if tt is not None else 0
-            else:
-                await append_scrape_error(
-                    errors,
-                    scrape_error_record(
-                        count_url,
-                        cresp.status_code,
-                        cresp.reason_phrase,
-                        "discover_count",
-                    ),
+        count_sem = asyncio.Semaphore(max(1, scraping.max_concurrent))
+
+        async def _count_posts_for_user(user: dict[str, object]) -> AuthorManifest | None:
+            async with count_sem:
+                wp_id = int(user["id"])
+                count_url = f"{MEDIAITE_REST}/posts?author={wp_id}&per_page=1&_fields=id"
+                cresp = await request_with_retry(
+                    client,
+                    limiter,
+                    scraping,
+                    "GET",
+                    count_url,
+                    errors_path=errors,
+                    phase="discover_count",
                 )
-            try:
-                manifests.append(
-                    user_dict_to_manifest(
+                total_posts = 0
+                if cresp.is_success:
+                    tt = _int_header(cresp, "X-WP-Total", 0)
+                    total_posts = tt if tt is not None else 0
+                else:
+                    await append_scrape_error(
+                        errors,
+                        scrape_error_record(
+                            count_url,
+                            cresp.status_code,
+                            cresp.reason_phrase,
+                            "discover_count",
+                        ),
+                    )
+                try:
+                    return user_dict_to_manifest(
                         user,
                         total_posts=total_posts,
                         discovered_at=discovered_at,
                     )
-                )
-            except (KeyError, TypeError, ValueError) as exc:
-                logger.warning("Skipping malformed user row: %s", exc)
-                continue
+                except (KeyError, TypeError, ValueError) as exc:
+                    logger.warning("Skipping malformed user row: %s", exc)
+                    return None
+
+        count_results = await asyncio.gather(*(_count_posts_for_user(u) for u in user_rows))
+        manifests = [m for m in count_results if m is not None]
 
         manifests.sort(key=lambda m: m.total_posts, reverse=True)
         _write_authors_manifest(manifest, manifests)
@@ -309,22 +313,43 @@ async def collect_article_metadata(
     else:
         author_cfgs = list(settings.authors)
     scraping = settings.scraping
+    # One RateLimiter for the whole metadata run: parallel author tasks all call
+    # request_with_retry with this instance, so inter-request spacing is global.
     limiter = RateLimiter(scraping.rate_limit_seconds, scraping.rate_limit_jitter)
 
     async def _run(r: Repository) -> int:
-        ins = 0
+        db_lock = asyncio.Lock()
+        author_sem = asyncio.Semaphore(max(1, scraping.max_concurrent))
+
+        async def _ingest_one(cfg: AuthorConfig) -> int:
+            async with author_sem:
+                try:
+                    return await _ingest_author_posts(
+                        client,
+                        limiter,
+                        scraping,
+                        r,
+                        cfg,
+                        by_slug,
+                        errors,
+                        db_lock,
+                    )
+                except Exception as exc:  # noqa: BLE001 — isolate per-author failures
+                    logger.exception("metadata ingestion failed for author slug=%s", cfg.slug)
+                    await append_scrape_error(
+                        errors,
+                        scrape_error_record(
+                            cfg.archive_url,
+                            None,
+                            f"{cfg.slug}: {exc!r}",
+                            "metadata_author",
+                        ),
+                    )
+                    return 0
+
         async with create_scraping_client(scraping) as client:
-            for cfg in author_cfgs:
-                ins += await _ingest_author_posts(
-                    client,
-                    limiter,
-                    scraping,
-                    r,
-                    cfg,
-                    by_slug,
-                    errors,
-                )
-        return ins
+            results = await asyncio.gather(*(_ingest_one(cfg) for cfg in author_cfgs))
+        return sum(results)
 
     if repo is not None:
         return await _run(repo)
@@ -340,6 +365,7 @@ async def _ingest_author_posts(
     cfg: AuthorConfig,
     by_slug: dict[str, AuthorManifest],
     errors_path: Path,
+    db_lock: asyncio.Lock,
 ) -> int:
     manifest_row = by_slug.get(cfg.slug)
     if manifest_row is None:
@@ -361,7 +387,8 @@ async def _ingest_author_posts(
         baseline_end=cfg.baseline_end,
         archive_url=cfg.archive_url,
     )
-    repo.upsert_author(author)
+    async with db_lock:
+        await asyncio.to_thread(repo.upsert_author, author)
     author_id = author.id
 
     wp_id = manifest_row.wp_id
@@ -408,10 +435,11 @@ async def _ingest_author_posts(
             article = wp_post_to_article(post, author_id)
             published_dates.append(article.published_date)
             url_s = str(article.url)
-            if repo.article_url_exists(url_s):
-                continue
-            repo.upsert_article(article)
-            inserted_here += 1
+            async with db_lock:
+                exists = await asyncio.to_thread(repo.article_url_exists, url_s)
+                if not exists:
+                    await asyncio.to_thread(repo.upsert_article, article)
+                    inserted_here += 1
         page += 1
 
     n_indexed = len(published_dates)
