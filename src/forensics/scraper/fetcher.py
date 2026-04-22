@@ -22,7 +22,7 @@ from forensics.models.article import Article
 from forensics.scraper.client import create_scraping_client
 from forensics.scraper.parser import extract_article_text, extract_metadata, looks_coauthored
 from forensics.storage.export import append_jsonl
-from forensics.storage.repository import Repository, init_db
+from forensics.storage.repository import Repository
 from forensics.utils import utc_now_iso
 from forensics.utils.hashing import content_hash
 from forensics.utils.text import word_count
@@ -338,8 +338,6 @@ async def fetch_articles(
     errors = errors_path or (root / "data/scrape_errors.jsonl")
     warns = warnings_path or (root / "data/extraction_warnings.jsonl")
     coauth = coauthored_path or (root / "data/coauthored_articles.jsonl")
-
-    init_db(db_path)
 
     async def _run(r: Repository) -> int:
         rows = r.list_unfetched_for_fetch()

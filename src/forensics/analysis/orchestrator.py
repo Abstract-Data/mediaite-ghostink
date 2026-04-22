@@ -28,7 +28,7 @@ from forensics.analysis.statistics import (
 from forensics.config.settings import AnalysisConfig, ForensicsSettings
 from forensics.models.analysis import AnalysisResult, ChangePoint, DriftScores
 from forensics.storage.parquet import load_feature_frame_sorted
-from forensics.storage.repository import Repository, init_db
+from forensics.storage.repository import Repository
 from forensics.utils.datetime import parse_datetime
 from forensics.utils.provenance import write_corpus_custody
 
@@ -83,7 +83,6 @@ async def run_full_analysis(
     probability_trajectory_by_slug: dict[str, ProbabilityTrajectory] | None = None,
 ) -> dict[str, AnalysisResult]:
     """Run changepoint + drift + convergence + hypothesis tests; write JSON artifacts."""
-    init_db(db_path)
     analysis_dir = project_root / "data" / "analysis"
     analysis_dir.mkdir(parents=True, exist_ok=True)
 
@@ -285,7 +284,6 @@ def run_compare_only(
     author_slug: str | None = None,
 ) -> dict[str, Any]:
     """Regenerate ``comparison_report.json`` from on-disk artifacts."""
-    init_db(db_path)
     features_dir = project_root / "data" / "features"
     embeddings_dir = project_root / "data" / "embeddings"
     analysis_dir = project_root / "data" / "analysis"

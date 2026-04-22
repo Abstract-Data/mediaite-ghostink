@@ -19,17 +19,14 @@ from forensics.analysis.drift import (
     load_article_embeddings,
     track_centroid_velocity,
 )
+from forensics.analysis.utils import intervals_overlap, load_feature_frame_for_author
 from forensics.config.settings import ForensicsSettings
 from forensics.models.analysis import ChangePoint, ConvergenceWindow, DriftScores
 from forensics.storage.parquet import load_feature_frame_sorted
-from forensics.storage.repository import Repository, init_db
+from forensics.storage.repository import Repository
 from forensics.utils.datetime import parse_datetime
 
 logger = logging.getLogger(__name__)
-
-
-def _intervals_overlap_date(a0, a1, b0, b1) -> bool:
-    return a0 <= b1 and b0 <= a1
 
 
 def compute_signal_attribution(
@@ -48,7 +45,7 @@ def compute_signal_attribution(
         agree = 0
         for cid in control_ids:
             for cw in control_change_windows[cid]:
-                if _intervals_overlap_date(tw.start_date, tw.end_date, cw.start_date, cw.end_date):
+                if intervals_overlap(tw.start_date, tw.end_date, cw.start_date, cw.end_date):
                     agree += 1
                     break
         frac = agree / float(len(control_ids))
@@ -58,20 +55,6 @@ def compute_signal_attribution(
 
 def _numeric_feature_columns(df: pl.DataFrame) -> list[str]:
     return [c for c in PELT_FEATURE_COLUMNS if c in df.columns]
-
-
-def _feature_frame_for_author(
-    features_dir: Path,
-    slug: str,
-    author_id: str,
-) -> pl.DataFrame | None:
-    p = features_dir / f"{slug}.parquet"
-    if not p.is_file():
-        return None
-    dfc = load_feature_frame_sorted(p).filter(pl.col("author_id") == author_id)
-    if dfc.is_empty():
-        dfc = load_feature_frame_sorted(p)
-    return dfc
 
 
 def _load_or_compute_changepoints(
@@ -93,7 +76,7 @@ def _load_or_compute_changepoints(
         return []
     dfc = feature_frame
     if dfc is None:
-        dfc = _feature_frame_for_author(features_dir, slug, au.id)
+        dfc = load_feature_frame_for_author(features_dir, slug, au.id)
     if dfc is None:
         return []
     return analyze_author_feature_changepoints(dfc, author_id=au.id, settings=settings)
@@ -168,7 +151,6 @@ def compare_target_to_controls(
     project_root: Path,
 ) -> dict[str, Any]:
     """Two-sample tests (target vs pooled controls) plus cached change-point / drift summaries."""
-    init_db(db_path)
     with Repository(db_path) as repo:
         target_author = repo.get_author_by_slug(target_id)
         if target_author is None:
@@ -192,7 +174,7 @@ def compare_target_to_controls(
             if au is None:
                 logger.warning("compare: skip unknown control slug=%s", slug)
                 continue
-            dfc = _feature_frame_for_author(features_dir, slug, au.id)
+            dfc = load_feature_frame_for_author(features_dir, slug, au.id)
             if dfc is None:
                 logger.warning("compare: skip missing features slug=%s", slug)
                 continue

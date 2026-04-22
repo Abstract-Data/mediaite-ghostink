@@ -7,7 +7,7 @@ from collections import defaultdict
 from pathlib import Path
 
 from forensics.models.article import Article
-from forensics.storage.repository import Repository, init_db
+from forensics.storage.repository import Repository
 from forensics.utils.hashing import simhash, simhash_hamming
 
 logger = logging.getLogger(__name__)
@@ -80,7 +80,6 @@ def deduplicate_articles(db_path: Path, *, hamming_threshold: int = _NEAR_DUP_HA
     Uses union-find over the similarity graph, then keeps the earliest ``published_date``
     per component. Returns IDs that are marked duplicate (excluding canonical rows).
     """
-    init_db(db_path)
     with Repository(db_path) as repo:
         pool: list[Article] = [
             a

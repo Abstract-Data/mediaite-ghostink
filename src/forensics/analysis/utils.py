@@ -2,9 +2,34 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
+import polars as pl
+
 from forensics.config.settings import ForensicsSettings
 from forensics.models.author import Author
+from forensics.storage.parquet import load_feature_frame_sorted
 from forensics.storage.repository import Repository
+
+
+def intervals_overlap(a0, a1, b0, b1) -> bool:
+    """Return True if closed intervals ``[a0, a1]`` and ``[b0, b1]`` intersect."""
+    return a0 <= b1 and b0 <= a1
+
+
+def load_feature_frame_for_author(
+    features_dir: Path,
+    slug: str,
+    author_id: str,
+) -> pl.DataFrame | None:
+    """Load sorted features for one author from ``{slug}.parquet`` if present."""
+    path = features_dir / f"{slug}.parquet"
+    if not path.is_file():
+        return None
+    dfc = load_feature_frame_sorted(path).filter(pl.col("author_id") == author_id)
+    if dfc.is_empty():
+        dfc = load_feature_frame_sorted(path)
+    return dfc
 
 
 def resolve_author_rows(

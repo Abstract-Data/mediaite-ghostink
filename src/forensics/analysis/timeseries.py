@@ -12,9 +12,10 @@ import numpy as np
 import polars as pl
 
 from forensics.analysis.changepoint import PELT_FEATURE_COLUMNS
+from forensics.analysis.utils import resolve_author_rows
 from forensics.config.settings import ForensicsSettings
 from forensics.storage.parquet import read_features
-from forensics.storage.repository import Repository, init_db
+from forensics.storage.repository import Repository
 from forensics.utils.datetime import parse_datetime
 
 logger = logging.getLogger(__name__)
@@ -182,12 +183,9 @@ def run_timeseries_analysis(
     author_slug: str | None = None,
 ) -> dict[str, Any]:
     """Write ``data/analysis/{slug}_timeseries.parquet`` with rolling + STL per numeric feature."""
-    init_db(db_path)
     analysis_dir = project_root / "data" / "analysis"
     analysis_dir.mkdir(parents=True, exist_ok=True)
     windows = settings.analysis.rolling_windows or [30, 90]
-
-    from forensics.analysis.utils import resolve_author_rows
 
     with Repository(db_path) as repo:
         author_rows = resolve_author_rows(repo, settings, author_slug=author_slug)

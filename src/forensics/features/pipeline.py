@@ -11,6 +11,7 @@ from pathlib import Path
 
 import numpy as np
 
+from forensics.analysis.utils import resolve_author_rows
 from forensics.config import get_project_root
 from forensics.config.settings import ForensicsSettings
 from forensics.features import (
@@ -26,7 +27,7 @@ from forensics.features.assembler import build_feature_vector_from_extractors
 from forensics.models.article import Article
 from forensics.models.features import EmbeddingRecord, FeatureVector
 from forensics.storage.parquet import write_embeddings_manifest, write_features
-from forensics.storage.repository import Repository, init_db
+from forensics.storage.repository import Repository
 
 logger = logging.getLogger(__name__)
 
@@ -106,7 +107,6 @@ def extract_all_features(
 
     Writes ``data/features/{slug}.parquet`` and ``data/embeddings/{slug}/{id}.npy``.
     """
-    init_db(db_path)
     root = _resolve_project_root(db_path, project_root)
     data_dir = root / "data"
     features_dir = data_dir / "features"
@@ -122,8 +122,6 @@ def extract_all_features(
     max_fail_ratio = settings.analysis.feature_extraction_max_failure_ratio
 
     with Repository(db_path) as repo:
-        from forensics.analysis.utils import resolve_author_rows
-
         author_rows = resolve_author_rows(repo, settings, author_slug=author_slug)
         author_id_filter: str | None = None
         if author_slug and author_rows:

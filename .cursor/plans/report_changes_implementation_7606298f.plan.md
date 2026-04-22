@@ -7,7 +7,7 @@ todos:
     status: completed
   - id: RF-DEAD-002_rf-dead-004_dead-code-hygiene
     content: "[WAIT | WAVE-1B after RF-DEAD-001] RF-DEAD-002/RF-DEAD-004 dead code hygiene: remove deprecated scrape alias and audit/remove unused utils/charts.py if truly unused."
-    status: in_progress
+    status: completed
   - id: P3-DOC-001_P3-STYLE-001_docs-typing-hygiene
     content: "[PARALLEL | WAVE-1] P3-DOC-001/P3-STYLE-001 docs and typing pass: update ARCHITECTURE.md CLI path references and normalize missing CLI helper return annotations."
     status: completed
@@ -31,10 +31,10 @@ todos:
     status: pending
   - id: RF-DRY-001_repository-initdb-dedup
     content: "[PARALLEL | WAVE-2] RF-DRY-001 repository lifecycle simplification: remove redundant init_db calls preceding Repository context usage and keep schema migration behavior centralized."
-    status: pending
+    status: completed
   - id: RF-DRY-003_RF-DRY-004_P2-ARCH-002_analysis-shared-loaders
     content: "[PARALLEL | WAVE-2] RF-DRY-003/RF-DRY-004/P2-ARCH-002 analysis loader dedup: centralize overlap and author feature-frame loading helpers in analysis/utils and replace deferred imports."
-    status: pending
+    status: completed
   - id: RF-ARCH-001_provenance-repository-alignment
     content: "[WAIT | WAVE-3 after RF-DRY-001] RF-ARCH-001 architecture consistency: route provenance read queries through repository-compatible connection path/settings."
     status: pending

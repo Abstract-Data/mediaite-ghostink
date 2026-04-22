@@ -26,7 +26,7 @@ from forensics.scraper.fetcher import (
     request_with_retry,
     scrape_error_record,
 )
-from forensics.storage.repository import Repository, init_db
+from forensics.storage.repository import Repository
 from forensics.utils.datetime import parse_wp_datetime
 
 logger = logging.getLogger(__name__)
@@ -298,7 +298,6 @@ async def collect_article_metadata(
         msg = f"Author manifest not found: {manifest}"
         raise FileNotFoundError(msg)
 
-    init_db(db_path)
     by_slug = load_authors_manifest(manifest)
     if all_authors:
         manifests_sorted = sorted(by_slug.values(), key=lambda x: x.slug)

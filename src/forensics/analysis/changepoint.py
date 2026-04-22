@@ -14,10 +14,11 @@ import ruptures as rpt
 from scipy.special import logsumexp
 
 from forensics.analysis.statistics import cohens_d
+from forensics.analysis.utils import resolve_author_rows
 from forensics.config.settings import ForensicsSettings
 from forensics.models.analysis import ChangePoint, ConvergenceWindow
-from forensics.storage.parquet import read_features
-from forensics.storage.repository import Repository, init_db
+from forensics.storage.parquet import load_feature_frame_sorted
+from forensics.storage.repository import Repository
 from forensics.utils.datetime import parse_datetime
 
 logger = logging.getLogger(__name__)
@@ -245,14 +246,6 @@ def find_convergence_windows(
     return windows
 
 
-def _load_feature_frame(features_path: Path) -> pl.DataFrame:
-    df = read_features(features_path)
-    if "timestamp" not in df.columns:
-        msg = f"features parquet missing timestamp: {features_path}"
-        raise ValueError(msg)
-    return df.sort("timestamp")
-
-
 def analyze_author_feature_changepoints(
     df: pl.DataFrame,
     *,
@@ -301,11 +294,8 @@ def run_changepoint_analysis(
     author_slug: str | None = None,
 ) -> dict[str, Any]:
     """Load Parquet per author; write changepoint and convergence JSON under data/analysis/."""
-    init_db(db_path)
     analysis_dir = project_root / "data" / "analysis"
     analysis_dir.mkdir(parents=True, exist_ok=True)
-
-    from forensics.analysis.utils import resolve_author_rows
 
     with Repository(db_path) as repo:
         author_rows = resolve_author_rows(repo, settings, author_slug=author_slug)
@@ -317,7 +307,7 @@ def run_changepoint_analysis(
         if not feat_path.is_file():
             logger.warning("Skipping author %s: missing %s", author.slug, feat_path)
             continue
-        df = _load_feature_frame(feat_path)
+        df = load_feature_frame_sorted(feat_path)
         df_author = df.filter(pl.col("author_id") == author.id)
         if df_author.is_empty():
             df_author = df

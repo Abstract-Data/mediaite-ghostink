@@ -10,6 +10,7 @@ from datetime import date, datetime, timedelta
 import numpy as np
 
 from forensics.analysis.changepoint import PELT_FEATURE_COLUMNS
+from forensics.analysis.utils import intervals_overlap
 from forensics.config.settings import ForensicsSettings
 from forensics.models.analysis import ChangePoint, ConvergenceWindow
 
@@ -19,10 +20,6 @@ def _month_key_to_range(key: str) -> tuple[date, date]:
     y, mo = int(y_str), int(m_str)
     last = calendar.monthrange(y, mo)[1]
     return date(y, mo, 1), date(y, mo, last)
-
-
-def _intervals_overlap(a0: date, a1: date, b0: date, b1: date) -> bool:
-    return a0 <= b1 and b0 <= a1
 
 
 @dataclass
@@ -40,7 +37,7 @@ def _months_touching_window(
     out: list[str] = []
     for key in month_keys:
         m0, m1 = _month_key_to_range(key)
-        if _intervals_overlap(window_start, window_end, m0, m1):
+        if intervals_overlap(window_start, window_end, m0, m1):
             out.append(key)
     return out
 
@@ -58,7 +55,7 @@ def compute_probability_pipeline_score(
     ppx = []
     for k, v in prob.monthly_perplexity:
         m0, m1 = _month_key_to_range(k)
-        if _intervals_overlap(window_start, window_end, m0, m1):
+        if intervals_overlap(window_start, window_end, m0, m1):
             ppx.append(v)
     ppx_drop = 0.92 if settings is None else settings.analysis.convergence_perplexity_drop_ratio
     if len(ppx) >= 2:
@@ -73,7 +70,7 @@ def compute_probability_pipeline_score(
     br = []
     for k, v in prob.monthly_burstiness:
         m0, m1 = _month_key_to_range(k)
-        if _intervals_overlap(window_start, window_end, m0, m1):
+        if intervals_overlap(window_start, window_end, m0, m1):
             br.append(v)
     br_drop = 0.94 if settings is None else settings.analysis.convergence_burstiness_drop_ratio
     if len(br) >= 2:
@@ -89,7 +86,7 @@ def compute_probability_pipeline_score(
         bx = []
         for k, v in prob.monthly_binoculars:
             m0, m1 = _month_key_to_range(k)
-            if _intervals_overlap(window_start, window_end, m0, m1):
+            if intervals_overlap(window_start, window_end, m0, m1):
                 bx.append(v)
         if len(bx) >= 2:
             spread = float(np.std(bx, ddof=1)) if len(bx) > 2 else abs(bx[-1] - bx[0])
@@ -177,7 +174,7 @@ def compute_convergence_scores(
         months_in = []
         for m in vel_by_month:
             m0, m1 = _month_key_to_range(m)
-            if _intervals_overlap(start_d, end_d, m0, m1):
+            if intervals_overlap(start_d, end_d, m0, m1):
                 months_in.append(m)
         vel_window = [vel_by_month[m] for m in months_in]
         peak_signal = 0.0

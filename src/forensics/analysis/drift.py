@@ -14,11 +14,12 @@ from typing import Any
 import numpy as np
 from scipy.spatial.distance import cosine
 
+from forensics.analysis.utils import resolve_author_rows
 from forensics.config import get_project_root
 from forensics.config.settings import ForensicsSettings
 from forensics.models.analysis import DriftScores
 from forensics.storage.parquet import read_embeddings_manifest
-from forensics.storage.repository import Repository, init_db
+from forensics.storage.repository import Repository
 
 logger = logging.getLogger(__name__)
 
@@ -222,7 +223,6 @@ def load_article_embeddings(
     project_root: Path | None = None,
 ) -> list[tuple[datetime, np.ndarray]]:
     """Load ``(published_date, embedding)`` for one author from manifest + ``.npy`` files."""
-    init_db(db_path)
     root = project_root or get_project_root()
     with Repository(db_path) as repo:
         author = repo.get_author_by_slug(author_slug)
@@ -366,9 +366,6 @@ def run_drift_analysis(
     author_slug: str | None = None,
 ) -> None:
     """Compute drift metrics for configured authors and write ``data/analysis/*`` outputs."""
-    from forensics.analysis.utils import resolve_author_rows
-
-    init_db(db_path)
     root = project_root or get_project_root()
     embed_root = root / "data" / "embeddings"
     analysis_dir = root / "data" / "analysis"
@@ -433,7 +430,6 @@ def run_ai_baseline_command(
         run_generation_matrix,
     )
 
-    init_db(db_path)
     slugs = [author_slug] if author_slug else [a.slug for a in settings.authors]
 
     if skip_generation:

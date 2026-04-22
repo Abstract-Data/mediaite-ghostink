@@ -262,30 +262,6 @@ async def dispatch_scrape(
     return await maybe if asyncio.iscoroutine(maybe) else int(maybe)
 
 
-async def _dispatch(
-    *,
-    discover: bool,
-    metadata: bool,
-    fetch: bool,
-    dedup: bool,
-    archive: bool,
-    dry_run: bool,
-    force_refresh: bool,
-    all_authors: bool = False,
-) -> int:
-    """Deprecated alias for :func:`dispatch_scrape` (tests and older imports)."""
-    return await dispatch_scrape(
-        discover=discover,
-        metadata=metadata,
-        fetch=fetch,
-        dedup=dedup,
-        archive=archive,
-        dry_run=dry_run,
-        force_refresh=force_refresh,
-        all_authors=all_authors,
-    )
-
-
 @scrape_app.callback(invoke_without_command=True)
 def scrape(
     discover: Annotated[
