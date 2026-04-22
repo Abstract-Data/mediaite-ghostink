@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import re
 from collections import Counter
+from functools import lru_cache
 from typing import Any
 
 from sklearn.decomposition import LatentDirichletAllocation
@@ -31,13 +32,20 @@ def _shannon_bigrams_trigrams(words: list[str]) -> tuple[float, float]:
     return entropy_ngrams(2), entropy_ngrams(3)
 
 
-def _self_similarity(current: str, peers: list[str]) -> float:
+@lru_cache(maxsize=256)
+def _self_similarity_cached(current: str, peers: tuple[str, ...]) -> float:
+    """TF-IDF mean cosine sim of ``current`` to each peer; peers key must be hashable."""
     if not peers:
         return 0.0
+    # Fresh vectorizer per compute: ``fit_transform`` mutates state; safe under concurrency.
     vec = TfidfVectorizer(max_features=4096, min_df=1)
     mat = vec.fit_transform([current, *peers])
     sims = cosine_similarity(mat[0:1], mat[1:])[0]
     return float(sims.mean())
+
+
+def _self_similarity(current: str, peers: list[str]) -> float:
+    return _self_similarity_cached(current, tuple(peers))
 
 
 _OPENING_PATTERNS = (
@@ -73,10 +81,18 @@ _HEDGES = (
 )
 
 
-def _formula_score(text: str, patterns: tuple[re.Pattern[str], ...]) -> float:
-    lower = text.lower()
+def _formula_score(lower: str, patterns: tuple[re.Pattern[str], ...]) -> float:
     hits = sum(1 for p in patterns if p.search(lower))
     return min(1.0, hits / max(1, len(patterns)))
+
+
+def _first_person_ratio(lower: str, n_words: int) -> float:
+    return len(_FIRST_PERSON.findall(lower)) / max(1, n_words)
+
+
+def _hedging_frequency(lower: str, n_sents: int) -> float:
+    hedge_hits = sum(lower.count(h) for h in _HEDGES)
+    return hedge_hits / max(1, n_sents)
 
 
 def _topic_entropy_lda(docs: list[str], *, topic_row: int = 0, k: int = 10) -> float:
@@ -129,14 +145,11 @@ def extract_content_features(
     n_words = len(words) or 1
     n_sents = len(sents) or 1
 
-    first_person = len(_FIRST_PERSON.findall(text.lower())) / n_words
-
     lower = text.lower()
-    hedge_hits = sum(lower.count(h) for h in _HEDGES)
-    hedging = hedge_hits / n_sents
-
-    open_score = _formula_score(text, _OPENING_PATTERNS)
-    close_score = _formula_score(text, _CLOSING_PATTERNS)
+    open_score = _formula_score(lower, _OPENING_PATTERNS)
+    close_score = _formula_score(lower, _CLOSING_PATTERNS)
+    first_person = _first_person_ratio(lower, n_words)
+    hedging = _hedging_frequency(lower, n_sents)
 
     return {
         "bigram_entropy": bi,

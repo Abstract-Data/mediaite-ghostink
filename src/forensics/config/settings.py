@@ -177,5 +177,13 @@ class ForensicsSettings(BaseSettings):
 
 @lru_cache(maxsize=1)
 def get_settings() -> ForensicsSettings:
-    """Load settings from config.toml (or FORENSICS_CONFIG_FILE) with env overrides."""
+    """Load settings from config.toml (or FORENSICS_CONFIG_FILE) with env overrides.
+
+    This is the supported global accessor. Prefer it over the deprecated
+    ``forensics.config.settings`` proxy object (``from forensics.config import settings``),
+    which exists only for backward compatibility in notebooks and scripts.
+
+    Tests may clear the cache via ``get_settings.cache_clear()`` before changing
+    ``FORENSICS_*`` environment variables or ``FORENSICS_CONFIG_FILE``.
+    """
     return ForensicsSettings()

@@ -10,22 +10,22 @@ todos:
     status: completed
   - id: T01c-agent3-p3-cq-002
     content: "[AGENT 3] TIER1 SERIAL 1/2 - P3-CQ-002 move first_person/hedging (features/content.py)"
-    status: pending
+    status: completed
   - id: T01d-agent3-p3-perf-002
     content: "[AGENT 3] TIER1 SERIAL 2/2 - P3-PERF-002 cache TfidfVectorizer _self_similarity (after T01c)"
-    status: pending
+    status: completed
   - id: T01e-agent4-p2-test-002
     content: "[AGENT 4] TIER1 PARALLEL - P2-TEST-002 reporting.py helper tests"
-    status: pending
+    status: completed
   - id: T01f-agent5-rf-arch-002
     content: "[AGENT 5] TIER1 SERIAL 1/3 - RF-ARCH-002 deprecate _SettingsProxy / get_settings()"
-    status: pending
+    status: completed
   - id: T01g-agent5-rf-dead-001
     content: "[AGENT 5] TIER1 SERIAL 2/3 - RF-DEAD-001 TODO phase-8 stubs (models/report.py)"
-    status: pending
+    status: completed
   - id: T01h-agent5-rf-refactor-001
     content: "[AGENT 5] TIER1 SERIAL 3/3 - RF-REFACTOR-001 ruff C901 (defer if flags fetcher until T02a done)"
-    status: pending
+    status: completed
   - id: T02a-agent1-w2-serial
     content: "[AGENT 1] TIER2 PARALLEL after T01* merged - SERIAL RF-DRY-001 then RF-COMP-001 then RF-SMELL-004 (fetcher)"
     status: pending
