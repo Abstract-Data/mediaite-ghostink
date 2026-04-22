@@ -13,9 +13,11 @@ import math
 import re
 from typing import Any
 
+from forensics.utils.model_cache import KeyedModelCache
+
 logger = logging.getLogger(__name__)
 
-_MODEL_CACHE: dict[tuple[str, str | None, str], tuple[Any, Any]] = {}
+_REF_LM_CACHE = KeyedModelCache()
 
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9\"'])")
 
@@ -31,10 +33,11 @@ def split_sentences(text: str) -> list[str]:
 
 def clear_model_cache() -> None:
     """Drop cached torch models (tests)."""
-    _MODEL_CACHE.clear()
+    _REF_LM_CACHE.clear()
 
 
-def _resolve_device(device: str | None) -> str:
+def resolve_torch_device(device: str | None) -> str:
+    """Pick ``cpu`` or ``cuda`` for optional extras; ``cpu`` when torch is missing."""
     if device in ("cpu", "cuda"):
         return device
     try:
@@ -50,37 +53,38 @@ def load_reference_model(
     device: str | None = None,
 ) -> tuple[Any, Any]:
     """Lazy-load the reference LM (default: GPT-2) and tokenizer."""
-    resolved_device = _resolve_device(device)
+    resolved_device = resolve_torch_device(device)
     cache_key = (model_name, revision, resolved_device)
-    if cache_key in _MODEL_CACHE:
-        return _MODEL_CACHE[cache_key]
 
-    try:
-        import torch  # type: ignore[import-not-found]
-        from transformers import (  # type: ignore[import-not-found]
-            AutoModelForCausalLM,
-            AutoTokenizer,
+    def load() -> tuple[Any, Any]:
+        try:
+            import torch  # type: ignore[import-not-found]
+            from transformers import (  # type: ignore[import-not-found]
+                AutoModelForCausalLM,
+                AutoTokenizer,
+            )
+        except ImportError as exc:  # pragma: no cover - exercised via CLI error path
+            raise ImportError(
+                "Probability features require torch + transformers. "
+                "Install with: uv sync --extra probability"
+            ) from exc
+
+        logger.info(
+            "Loading reference LM %s (revision=%s, device=%s)",
+            model_name,
+            revision,
+            resolved_device,
         )
-    except ImportError as exc:  # pragma: no cover - exercised via CLI error path
-        raise ImportError(
-            "Probability features require torch + transformers. "
-            "Install with: uv sync --extra probability"
-        ) from exc
+        tokenizer = AutoTokenizer.from_pretrained(model_name, revision=revision)
+        dtype = torch.float16 if resolved_device == "cuda" else torch.float32
+        model = AutoModelForCausalLM.from_pretrained(
+            model_name, revision=revision, torch_dtype=dtype
+        )
+        model.to(resolved_device)
+        model.eval()
+        return model, tokenizer
 
-    logger.info(
-        "Loading reference LM %s (revision=%s, device=%s)",
-        model_name,
-        revision,
-        resolved_device,
-    )
-    tokenizer = AutoTokenizer.from_pretrained(model_name, revision=revision)
-    dtype = torch.float16 if resolved_device == "cuda" else torch.float32
-    model = AutoModelForCausalLM.from_pretrained(model_name, revision=revision, torch_dtype=dtype)
-    model.to(resolved_device)
-    model.eval()
-
-    _MODEL_CACHE[cache_key] = (model, tokenizer)
-    return model, tokenizer
+    return _REF_LM_CACHE.get_or_load(cache_key, load)
 
 
 def _perplexity_of_ids(input_ids, model, *, max_length: int, stride: int) -> float:

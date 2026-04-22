@@ -127,7 +127,7 @@ WordPress REST API → SQLite (write store)
 - `src/forensics/analysis/` — change-point detection (PELT, BOCPD, Chow, CUSUM), embedding drift, convergence scoring
 - `src/forensics/storage/` — SQLite repository + Parquet persistence + DuckDB queries
 - `src/forensics/pipeline.py` — orchestration layer
-- `src/forensics/cli.py` — command-line interface
+- `src/forensics/cli/` — command-line interface (Typer)
 
 ---
 
@@ -460,9 +460,10 @@ See `prompts/README.md` for the full versioning contract, bump rules, and releas
 
 ## Learned User Preferences
 
-- When implementing tasks from a numbered repository plan, do not edit the plan markdown file itself; only complete the assigned to-dos.
+- When implementing tasks from a numbered repository plan or an attached Cursor plan artifact, do not edit the plan markdown file itself; only complete the assigned to-dos.
 - For prompt-library work, ship substantive changes as a new immutable `v*.md` snapshot and advance `current.md`, `versions.json`, and `CHANGELOG.md` together instead of rewriting prior frozen versions.
 - For Notion-linked specs or reports in this workspace, use the Notion MCP tools when a normal URL fetch returns no page body (Notion pages are often auth-walled to anonymous HTTP).
+- For Typer/Rich CLI help tests that assert literal `--flag` substrings, disable color on `CliRunner.invoke` and strip ANSI escape sequences so Rich markup does not break contiguous flag text.
 
 ## Learned Workspace Facts
 
@@ -470,3 +471,5 @@ See `prompts/README.md` for the full versioning contract, bump rules, and releas
 - **`requires-python`** in `pyproject.toml` is **`>=3.13,<3.14`** so the declared scientific and ML dependency set resolves against published wheels.
 - Phase 2 discovery and metadata scraping persist **`data/authors_manifest.jsonl`**, **`data/scrape_errors.jsonl`**, and **`data/articles.db`** at the repository root (paths resolved via `get_project_root()`).
 - GitButler (`but`) from this repo: authenticate the forge once (`but config forge auth`); for GitHub PRs ensure the integration target is **`origin/main`** (not `gb-local/main`). If `but config target` refuses while virtual branches are applied, `but unapply` the stack first, set the target, then `but apply` again before `but push` / `but pr new`.
+- The `forensics` console script imports the **`forensics.cli` package** (`src/forensics/cli/` Typer app); the old monolithic `src/forensics/cli.py` was removed after the Typer migration—treat package modules as the CLI source of truth when updating docs or tracing dispatch.
+- `forensics scrape --all-authors` walks **every** author in `data/authors_manifest.jsonl` for metadata (and skips the placeholder guard on scrape-like invocations); `extract` / `analyze` / reporting still resolve study authors from `config.toml` via `resolve_author_rows` unless narrowed with `--author`.

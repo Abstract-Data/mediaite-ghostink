@@ -19,7 +19,7 @@ async def test_scrape_dry_run_requires_fetch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(scrape_mod, "get_project_root", lambda: tmp_path)
-    rc = await scrape_mod._dispatch(
+    rc = await scrape_mod.dispatch_scrape(
         discover=False,
         metadata=False,
         fetch=False,
@@ -46,7 +46,7 @@ async def test_scrape_archive_only(
     monkeypatch.setattr(scrape_mod, "archive_raw_year_dirs", fake_archive)
 
     with caplog.at_level(logging.INFO, logger="forensics.cli.scrape"):
-        rc = await scrape_mod._dispatch(
+        rc = await scrape_mod.dispatch_scrape(
             discover=False,
             metadata=False,
             fetch=False,
@@ -70,7 +70,7 @@ async def test_scrape_dedup_only(
     monkeypatch.setattr(scrape_mod, "deduplicate_articles", lambda db: ["a", "b"])
 
     with caplog.at_level(logging.INFO, logger="forensics.cli.scrape"):
-        rc = await scrape_mod._dispatch(
+        rc = await scrape_mod.dispatch_scrape(
             discover=False,
             metadata=False,
             fetch=False,
@@ -98,7 +98,7 @@ async def test_scrape_fetch_only_dry_run(
     monkeypatch.setattr(scrape_mod, "fetch_articles", fake_fetch)
 
     with caplog.at_level(logging.INFO, logger="forensics.cli.scrape"):
-        rc = await scrape_mod._dispatch(
+        rc = await scrape_mod.dispatch_scrape(
             discover=False,
             metadata=False,
             fetch=True,
@@ -118,7 +118,7 @@ async def test_scrape_unsupported_flags(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(scrape_mod, "get_project_root", lambda: tmp_path)
-    rc = await scrape_mod._dispatch(
+    rc = await scrape_mod.dispatch_scrape(
         discover=True,
         metadata=False,
         fetch=True,
@@ -150,7 +150,7 @@ async def test_scrape_discover_only_zero_authors(
     monkeypatch.setattr(scrape_mod, "discover_authors", fake_discover)
 
     with caplog.at_level(logging.INFO, logger="forensics.cli.scrape"):
-        rc = await scrape_mod._dispatch(
+        rc = await scrape_mod.dispatch_scrape(
             discover=True,
             metadata=False,
             fetch=False,
@@ -170,7 +170,7 @@ async def test_scrape_metadata_only_missing_manifest(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(scrape_mod, "get_project_root", lambda: tmp_path)
-    rc = await scrape_mod._dispatch(
+    rc = await scrape_mod.dispatch_scrape(
         discover=False,
         metadata=True,
         fetch=False,
@@ -197,6 +197,42 @@ baseline_end = 2023-12-31
 
 
 @pytest.mark.asyncio
+async def test_scrape_discover_placeholder_ok_with_all_authors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = tmp_path / "bad.toml"
+    cfg.write_text(PLACEHOLDER_TOML.strip() + "\n", encoding="utf-8")
+    monkeypatch.setenv("FORENSICS_CONFIG_FILE", str(cfg))
+    get_settings.cache_clear()
+    monkeypatch.setattr(scrape_mod, "get_project_root", lambda: tmp_path)
+
+    async def fake_discover(
+        settings,
+        *,
+        force_refresh: bool = False,
+        manifest_path=None,
+        errors_path=None,
+    ):
+        return 0
+
+    monkeypatch.setattr(scrape_mod, "discover_authors", fake_discover)
+
+    rc = await scrape_mod.dispatch_scrape(
+        discover=True,
+        metadata=False,
+        fetch=False,
+        dedup=False,
+        archive=False,
+        dry_run=False,
+        force_refresh=False,
+        all_authors=True,
+    )
+    assert rc == 0
+    get_settings.cache_clear()
+
+
+@pytest.mark.asyncio
 async def test_scrape_rejects_placeholder_template_authors(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -207,7 +243,7 @@ async def test_scrape_rejects_placeholder_template_authors(
     get_settings.cache_clear()
     monkeypatch.setattr(scrape_mod, "get_project_root", lambda: tmp_path)
     with pytest.raises(typer.BadParameter, match="(?i)placeholder"):
-        await scrape_mod._dispatch(
+        await scrape_mod.dispatch_scrape(
             discover=True,
             metadata=False,
             fetch=False,

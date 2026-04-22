@@ -14,6 +14,7 @@ from uuid import uuid4
 import numpy as np
 import polars as pl
 
+from forensics.analysis.artifact_paths import AnalysisArtifactPaths
 from forensics.analysis.changepoint import (
     analyze_author_feature_changepoints,
 )
@@ -28,7 +29,7 @@ from forensics.analysis.statistics import (
 from forensics.config.settings import AnalysisConfig, ForensicsSettings
 from forensics.models.analysis import AnalysisResult, ChangePoint, DriftScores
 from forensics.storage.parquet import load_feature_frame_sorted
-from forensics.storage.repository import Repository, init_db
+from forensics.storage.repository import Repository
 from forensics.utils.datetime import parse_datetime
 from forensics.utils.provenance import write_corpus_custody
 
@@ -46,6 +47,221 @@ def _breakpoint_index(timestamps: list[datetime], event: datetime) -> int:
     x = _ts_key(event)
     i = bisect_left(keys, x)
     return max(1, min(len(timestamps) - 1, i))
+
+
+def _write_per_author_json_artifacts(
+    slug: str,
+    analysis_dir: Path,
+    change_points: list[ChangePoint],
+    convergence_windows: list,
+    assembled: AnalysisResult,
+    all_tests: list,
+) -> None:
+    (analysis_dir / f"{slug}_changepoints.json").write_text(
+        json.dumps([c.model_dump(mode="json") for c in change_points], indent=2, default=str),
+        encoding="utf-8",
+    )
+    conv_payload = [w.model_dump(mode="json") for w in convergence_windows]
+    (analysis_dir / f"{slug}_convergence.json").write_text(
+        json.dumps(conv_payload, indent=2, default=str),
+        encoding="utf-8",
+    )
+    (analysis_dir / f"{slug}_result.json").write_text(
+        assembled.model_dump_json(indent=2),
+        encoding="utf-8",
+    )
+    (analysis_dir / f"{slug}_hypothesis_tests.json").write_text(
+        json.dumps([t.model_dump(mode="json") for t in all_tests], indent=2, default=str),
+        encoding="utf-8",
+    )
+
+
+def _run_hypothesis_tests_for_changepoints(
+    df_author: pl.DataFrame,
+    timestamps: list[datetime],
+    change_points: list[ChangePoint],
+    author_id: str,
+    analysis_cfg: AnalysisConfig,
+) -> list:
+    all_tests: list = []
+    for cp in change_points:
+        if cp.feature_name not in df_author.columns:
+            continue
+        raw = df_author[cp.feature_name].cast(pl.Float64, strict=False).to_numpy()
+        med = float(np.nanmedian(raw[np.isfinite(raw)])) if np.any(np.isfinite(raw)) else 0.0
+        raw = np.nan_to_num(raw, nan=med)
+        series = [float(x) for x in raw]
+        if len(series) < 6 or len(series) != len(timestamps):
+            continue
+        bidx = _breakpoint_index(timestamps, cp.timestamp)
+        all_tests.extend(
+            run_hypothesis_tests(
+                series,
+                bidx,
+                cp.feature_name,
+                author_id,
+                n_bootstrap=analysis_cfg.bootstrap_iterations,
+            )
+        )
+    apply_correction(
+        all_tests,
+        method=analysis_cfg.multiple_comparison_method,
+        alpha=analysis_cfg.significance_threshold,
+    )
+    filter_by_effect_size(
+        all_tests,
+        analysis_cfg.effect_size_threshold,
+        alpha=analysis_cfg.significance_threshold,
+    )
+    return all_tests
+
+
+def _run_per_author_analysis(
+    slug: str,
+    repo: Repository,
+    paths: AnalysisArtifactPaths,
+    config: ForensicsSettings,
+    *,
+    probability_trajectory_by_slug: dict[str, ProbabilityTrajectory],
+) -> tuple[AnalysisResult, list[ChangePoint], list, list] | None:
+    """Changepoint, drift, convergence, and hypothesis testing for one author slug."""
+    author = repo.get_author_by_slug(slug)
+    if author is None:
+        logger.warning("analysis: unknown slug=%s", slug)
+        return None
+    feat_path = paths.features_dir / f"{slug}.parquet"
+    if not feat_path.is_file():
+        logger.warning("analysis: skip %s (missing %s)", slug, feat_path)
+        return None
+
+    df = load_feature_frame_sorted(feat_path)
+    df_author = df.filter(pl.col("author_id") == author.id)
+    if df_author.is_empty():
+        df_author = df
+
+    change_points = analyze_author_feature_changepoints(
+        df_author,
+        author_id=author.id,
+        settings=config,
+    )
+
+    baseline_curve: list[tuple[datetime, float]] = []
+    vel_tuples: list[tuple[str, float]] = []
+    ai_conv: list[tuple[str, float]] | None = None
+    drift: DriftScores | None = None
+
+    try:
+        pairs = load_article_embeddings(
+            slug,
+            paths.embeddings_dir,
+            repo.db_path,
+            project_root=paths.project_root,
+        )
+    except (ValueError, OSError) as exc:
+        logger.info("analysis: no embeddings for %s (%s)", slug, exc)
+        pairs = []
+
+    drift_res = compute_author_drift_pipeline(
+        slug,
+        author.id,
+        pairs,
+        config,
+        project_root=paths.project_root,
+        analysis_dir=paths.analysis_dir,
+    )
+    if drift_res is not None:
+        monthly, drift, _umap, baseline_curve, vels, ai_conv = drift_res
+        vel_tuples = [(monthly[i + 1][0], vels[i]) for i in range(len(vels))]
+
+    prob = probability_trajectory_by_slug.get(slug)
+    convergence_windows = compute_convergence_scores(
+        change_points,
+        vel_tuples,
+        baseline_curve,
+        ai_convergence_curve=ai_conv,
+        probability_trajectory=prob,
+        settings=config,
+    )
+
+    ts_list = df_author["timestamp"].to_list()
+    timestamps = [parse_datetime(t) for t in ts_list]
+
+    all_tests = _run_hypothesis_tests_for_changepoints(
+        df_author,
+        timestamps,
+        change_points,
+        author.id,
+        config.analysis,
+    )
+
+    assembled = assemble_analysis_result(
+        author.id,
+        change_points,
+        convergence_windows,
+        drift,
+        all_tests,
+        config.analysis,
+    )
+    return assembled, change_points, convergence_windows, all_tests
+
+
+def _resolve_targets_and_controls(
+    config: ForensicsSettings,
+    author_slug: str | None,
+) -> tuple[list[str], list[str]]:
+    controls = [a.slug for a in config.authors if a.role == "control"]
+    targets = [a.slug for a in config.authors if a.role == "target"]
+    if author_slug:
+        targets = [author_slug] if author_slug in targets else targets
+    return targets, controls
+
+
+def _run_target_control_comparisons(
+    targets: list[str],
+    controls: list[str],
+    results: dict[str, AnalysisResult],
+    *,
+    paths: AnalysisArtifactPaths,
+    config: ForensicsSettings,
+) -> dict[str, Any]:
+    comparison_payload: dict[str, Any] = {"targets": {}}
+    for tid in targets:
+        if tid not in results:
+            continue
+        try:
+            report = compare_target_to_controls(
+                tid,
+                controls,
+                paths,
+                settings=config,
+            )
+            comparison_payload["targets"][tid] = report
+        except (ValueError, OSError) as exc:
+            logger.warning("analysis: comparison failed for %s (%s)", tid, exc)
+    return comparison_payload
+
+
+def _merge_run_metadata(
+    analysis_dir: Path,
+    results: dict[str, AnalysisResult],
+    comparison_payload: dict[str, Any],
+) -> None:
+    meta_path = analysis_dir / "run_metadata.json"
+    if meta_path.is_file():
+        try:
+            prev = json.loads(meta_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            prev = {}
+    else:
+        prev = {}
+    prev.update(
+        {
+            "full_analysis_authors": list(results.keys()),
+            "comparison_targets": list(comparison_payload["targets"].keys()),
+            "completed_at": datetime.now(UTC).isoformat(),
+        }
+    )
+    meta_path.write_text(json.dumps(prev, indent=2), encoding="utf-8")
 
 
 def assemble_analysis_result(
@@ -73,150 +289,40 @@ def assemble_analysis_result(
 
 
 async def run_full_analysis(
-    db_path: Path,
-    features_dir: Path,
-    embeddings_dir: Path,
+    paths: AnalysisArtifactPaths,
     config: ForensicsSettings,
     *,
-    project_root: Path,
     author_slug: str | None = None,
     probability_trajectory_by_slug: dict[str, ProbabilityTrajectory] | None = None,
 ) -> dict[str, AnalysisResult]:
     """Run changepoint + drift + convergence + hypothesis tests; write JSON artifacts."""
-    init_db(db_path)
-    analysis_dir = project_root / "data" / "analysis"
-    analysis_dir.mkdir(parents=True, exist_ok=True)
+    paths.analysis_dir.mkdir(parents=True, exist_ok=True)
 
     slugs = [author_slug] if author_slug else [a.slug for a in config.authors]
     prob_map = probability_trajectory_by_slug or {}
 
     results: dict[str, AnalysisResult] = {}
 
-    with Repository(db_path) as repo:
+    with Repository(paths.db_path) as repo:
         for slug in slugs:
-            author = repo.get_author_by_slug(slug)
-            if author is None:
-                logger.warning("analysis: unknown slug=%s", slug)
-                continue
-            feat_path = features_dir / f"{slug}.parquet"
-            if not feat_path.is_file():
-                logger.warning("analysis: skip %s (missing %s)", slug, feat_path)
-                continue
-
-            df = load_feature_frame_sorted(feat_path)
-            df_author = df.filter(pl.col("author_id") == author.id)
-            if df_author.is_empty():
-                df_author = df
-
-            change_points = analyze_author_feature_changepoints(
-                df_author,
-                author_id=author.id,
-                settings=config,
-            )
-
-            baseline_curve: list[tuple[datetime, float]] = []
-            vel_tuples: list[tuple[str, float]] = []
-            ai_conv: list[tuple[str, float]] | None = None
-            drift: DriftScores | None = None
-
-            try:
-                pairs = load_article_embeddings(
-                    slug,
-                    embeddings_dir,
-                    db_path,
-                    project_root=project_root,
-                )
-            except (ValueError, OSError) as exc:
-                logger.info("analysis: no embeddings for %s (%s)", slug, exc)
-                pairs = []
-
-            drift_res = compute_author_drift_pipeline(
+            per_author = _run_per_author_analysis(
                 slug,
-                author.id,
-                pairs,
+                repo,
+                paths,
                 config,
-                project_root=project_root,
-                analysis_dir=analysis_dir,
+                probability_trajectory_by_slug=prob_map,
             )
-            if drift_res is not None:
-                monthly, drift, _umap, baseline_curve, vels, ai_conv = drift_res
-                vel_tuples = [(monthly[i + 1][0], vels[i]) for i in range(len(vels))]
-
-            prob = prob_map.get(slug)
-            convergence_windows = compute_convergence_scores(
-                change_points,
-                vel_tuples,
-                baseline_curve,
-                ai_convergence_curve=ai_conv,
-                probability_trajectory=prob,
-                settings=config,
-            )
-
-            ts_list = df_author["timestamp"].to_list()
-            timestamps = [parse_datetime(t) for t in ts_list]
-
-            all_tests: list = []
-            for cp in change_points:
-                if cp.feature_name not in df_author.columns:
-                    continue
-                raw = df_author[cp.feature_name].cast(pl.Float64, strict=False).to_numpy()
-                med = (
-                    float(np.nanmedian(raw[np.isfinite(raw)])) if np.any(np.isfinite(raw)) else 0.0
-                )
-                raw = np.nan_to_num(raw, nan=med)
-                series = [float(x) for x in raw]
-                if len(series) < 6 or len(series) != len(timestamps):
-                    continue
-                bidx = _breakpoint_index(timestamps, cp.timestamp)
-                all_tests.extend(
-                    run_hypothesis_tests(
-                        series,
-                        bidx,
-                        cp.feature_name,
-                        author.id,
-                        n_bootstrap=config.analysis.bootstrap_iterations,
-                    )
-                )
-
-            apply_correction(
-                all_tests,
-                method=config.analysis.multiple_comparison_method,
-                alpha=config.analysis.significance_threshold,
-            )
-            filter_by_effect_size(
-                all_tests,
-                config.analysis.effect_size_threshold,
-                alpha=config.analysis.significance_threshold,
-            )
-
-            assembled = assemble_analysis_result(
-                author.id,
+            if per_author is None:
+                continue
+            assembled, change_points, convergence_windows, all_tests = per_author
+            results[slug] = assembled
+            _write_per_author_json_artifacts(
+                slug,
+                paths.analysis_dir,
                 change_points,
                 convergence_windows,
-                drift,
+                assembled,
                 all_tests,
-                config.analysis,
-            )
-            results[slug] = assembled
-
-            (analysis_dir / f"{slug}_changepoints.json").write_text(
-                json.dumps(
-                    [c.model_dump(mode="json") for c in change_points], indent=2, default=str
-                ),
-                encoding="utf-8",
-            )
-            conv_payload = [w.model_dump(mode="json") for w in convergence_windows]
-            (analysis_dir / f"{slug}_convergence.json").write_text(
-                json.dumps(conv_payload, indent=2, default=str),
-                encoding="utf-8",
-            )
-            (analysis_dir / f"{slug}_result.json").write_text(
-                assembled.model_dump_json(indent=2),
-                encoding="utf-8",
-            )
-            (analysis_dir / f"{slug}_hypothesis_tests.json").write_text(
-                json.dumps([t.model_dump(mode="json") for t in all_tests], indent=2, default=str),
-                encoding="utf-8",
             )
             logger.info(
                 "analysis: author=%s change_points=%d windows=%d tests=%d",
@@ -226,53 +332,23 @@ async def run_full_analysis(
                 len(all_tests),
             )
 
-    comparison_payload: dict[str, Any] = {"targets": {}}
-    controls = [a.slug for a in config.authors if a.role == "control"]
-    targets = [a.slug for a in config.authors if a.role == "target"]
-    if author_slug:
-        targets = [author_slug] if author_slug in targets else targets
+    targets, controls = _resolve_targets_and_controls(config, author_slug)
+    comparison_payload = _run_target_control_comparisons(
+        targets,
+        controls,
+        results,
+        paths=paths,
+        config=config,
+    )
 
-    for tid in targets:
-        if tid not in results:
-            continue
-        try:
-            report = compare_target_to_controls(
-                tid,
-                controls,
-                features_dir,
-                db_path,
-                settings=config,
-                analysis_dir=analysis_dir,
-                embeddings_dir=embeddings_dir,
-                project_root=project_root,
-            )
-            comparison_payload["targets"][tid] = report
-        except (ValueError, OSError) as exc:
-            logger.warning("analysis: comparison failed for %s (%s)", tid, exc)
-
-    (analysis_dir / "comparison_report.json").write_text(
+    (paths.analysis_dir / "comparison_report.json").write_text(
         json.dumps(comparison_payload, indent=2, default=str),
         encoding="utf-8",
     )
 
-    meta_path = analysis_dir / "run_metadata.json"
-    if meta_path.is_file():
-        try:
-            prev = json.loads(meta_path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            prev = {}
-    else:
-        prev = {}
-    prev.update(
-        {
-            "full_analysis_authors": list(results.keys()),
-            "comparison_targets": list(comparison_payload["targets"].keys()),
-            "completed_at": datetime.now(UTC).isoformat(),
-        }
-    )
-    meta_path.write_text(json.dumps(prev, indent=2), encoding="utf-8")
+    _merge_run_metadata(paths.analysis_dir, results, comparison_payload)
 
-    write_corpus_custody(db_path, analysis_dir)
+    write_corpus_custody(paths.db_path, paths.analysis_dir)
 
     return results
 
@@ -280,15 +356,10 @@ async def run_full_analysis(
 def run_compare_only(
     config: ForensicsSettings,
     *,
-    project_root: Path,
-    db_path: Path,
+    paths: AnalysisArtifactPaths,
     author_slug: str | None = None,
 ) -> dict[str, Any]:
     """Regenerate ``comparison_report.json`` from on-disk artifacts."""
-    init_db(db_path)
-    features_dir = project_root / "data" / "features"
-    embeddings_dir = project_root / "data" / "embeddings"
-    analysis_dir = project_root / "data" / "analysis"
     controls = [a.slug for a in config.authors if a.role == "control"]
     targets = [a.slug for a in config.authors if a.role == "target"]
     if author_slug:
@@ -299,15 +370,11 @@ def run_compare_only(
             out["targets"][tid] = compare_target_to_controls(
                 tid,
                 controls,
-                features_dir,
-                db_path,
+                paths,
                 settings=config,
-                analysis_dir=analysis_dir,
-                embeddings_dir=embeddings_dir,
-                project_root=project_root,
             )
         except (ValueError, OSError) as exc:
             logger.warning("compare-only: failed for %s (%s)", tid, exc)
-    report_path = analysis_dir / "comparison_report.json"
+    report_path = paths.analysis_dir / "comparison_report.json"
     report_path.write_text(json.dumps(out, indent=2, default=str), encoding="utf-8")
     return out

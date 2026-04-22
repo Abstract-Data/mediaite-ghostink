@@ -90,12 +90,12 @@ Each Sign has:
 
 **Sign: Stage Directly Imports Another Stage's Internals**
 - Trigger: A module in `scraper/` imports from `storage/repository.py` directly (e.g., `from forensics.storage.repository import upsert_article`), or any stage module imports internal functions from a different stage.
-- Instruction: Stages should return data structures to the orchestration layer (`cli.py` or `pipeline.py`), which handles persistence. If a stage needs to read data, it should receive it as a parameter, not reach into another stage's storage layer.
+- Instruction: Stages should return data structures to the orchestration layer (`forensics/cli/` or `pipeline.py`), which handles persistence. If a stage needs to read data, it should receive it as a parameter, not reach into another stage's storage layer.
 - Reason: Stage boundaries are architecturally sacred (ARCHITECTURE.md §Stage Contracts). Direct cross-stage imports create tight coupling that makes stages untestable in isolation and prevents swapping storage backends.
 - Provenance: Agent-learned — 2026-04-20 code review (P2-ARCH-3).
 
 **Sign: God Function Exceeding 50 Lines in CLI/Orchestration**
-- Trigger: Any function in `cli.py` or `pipeline.py` exceeds 50 lines (excluding docstrings and blank lines), or a single function handles more than 3 distinct flag/command combinations via sequential `if` blocks.
+- Trigger: Any function in `forensics/cli/` or `pipeline.py` exceeds 50 lines (excluding docstrings and blank lines), or a single function handles more than 3 distinct flag/command combinations via sequential `if` blocks.
 - Instruction: Decompose into a command registry or strategy mapping (see ADR-002). Each pipeline operation should be a separate callable registered in a dispatch table. New phases must slot in via registration, not by adding more `if` branches.
 - Reason: The 117-line `_async_scrape` function with ~18 cyclomatic complexity was flagged as the single most critical refactoring issue. Adding Phase 4–7 flags to this pattern would make it unmaintainable.
 - Provenance: Agent-learned — 2026-04-20 code review (RF-CPLX-001, P2-CQ-2).

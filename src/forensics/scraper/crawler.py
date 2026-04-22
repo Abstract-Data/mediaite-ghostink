@@ -5,7 +5,7 @@ from __future__ import annotations
 import html
 import logging
 from collections.abc import Iterator
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from uuid import NAMESPACE_URL, uuid5
 
@@ -26,7 +26,7 @@ from forensics.scraper.fetcher import (
     request_with_retry,
     scrape_error_record,
 )
-from forensics.storage.repository import Repository, init_db
+from forensics.storage.repository import Repository
 from forensics.utils.datetime import parse_wp_datetime
 
 logger = logging.getLogger(__name__)
@@ -113,6 +113,23 @@ def _int_header(response: httpx.Response, name: str, default: int | None = None)
         return int(raw)
     except ValueError:
         return default
+
+
+def author_config_from_manifest(m: AuthorManifest) -> AuthorConfig:
+    """Build ``AuthorConfig`` for corpus-wide metadata ingestion.
+
+    Baseline dates are wide placeholders; downstream analysis should filter or
+    override using ``config.toml`` targets when needed.
+    """
+    return AuthorConfig(
+        name=m.name,
+        slug=m.slug,
+        outlet="mediaite.com",
+        role="target",
+        archive_url=f"https://www.mediaite.com/author/{m.slug}/",
+        baseline_start=date(1990, 1, 1),
+        baseline_end=date(2035, 12, 31),
+    )
 
 
 def load_authors_manifest(path: Path) -> dict[str, AuthorManifest]:
@@ -262,9 +279,14 @@ async def collect_article_metadata(
     manifest_path: Path | None = None,
     errors_path: Path | None = None,
     repo: Repository | None = None,
+    all_authors: bool = False,
 ) -> int:
     """
-    Upsert configured authors and their posts (metadata only) into SQLite.
+    Upsert authors and their posts (metadata only) into SQLite.
+
+    When ``all_authors`` is False, only ``settings.authors`` are processed.
+    When True, every author in ``authors_manifest.jsonl`` is ingested (still
+    requires a prior ``discover_authors`` run to build the manifest).
 
     Returns the number of new article rows inserted (skips when URL already exists).
     """
@@ -276,15 +298,23 @@ async def collect_article_metadata(
         msg = f"Author manifest not found: {manifest}"
         raise FileNotFoundError(msg)
 
-    init_db(db_path)
     by_slug = load_authors_manifest(manifest)
+    if all_authors:
+        manifests_sorted = sorted(by_slug.values(), key=lambda x: x.slug)
+        author_cfgs = [author_config_from_manifest(m) for m in manifests_sorted]
+        logger.info(
+            "metadata: all-authors mode (%d author(s) from manifest; config author list ignored)",
+            len(author_cfgs),
+        )
+    else:
+        author_cfgs = list(settings.authors)
     scraping = settings.scraping
     limiter = RateLimiter(scraping.rate_limit_seconds, scraping.rate_limit_jitter)
 
     async def _run(r: Repository) -> int:
         ins = 0
         async with create_scraping_client(scraping) as client:
-            for cfg in settings.authors:
+            for cfg in author_cfgs:
                 ins += await _ingest_author_posts(
                     client,
                     limiter,

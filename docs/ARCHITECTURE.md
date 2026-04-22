@@ -11,7 +11,7 @@ The implementation follows a deterministic four-stage pipeline: `scrape → extr
 
 ## Runtime Flow
 
-`forensics.cli:main` exposes five commands:
+The `forensics` console script (`forensics = "forensics.cli:main"` in `pyproject.toml`) loads the Typer application defined in `src/forensics/cli/__init__.py`. `forensics.cli:main` exposes five commands:
 
 - `uv run forensics scrape` — discover authors and fetch articles
 - `uv run forensics extract` — compute feature vectors and embeddings
@@ -77,7 +77,7 @@ Markdown/Notebooks (reports) ← Plotly charts + Quarto rendering
 - `src/forensics/analysis/` — change-point detection (PELT, BOCPD, Chow, CUSUM), embedding drift, convergence
 - `src/forensics/storage/` — SQLite repository + Parquet persistence + DuckDB analytical queries
 - `src/forensics/pipeline.py` — orchestration layer
-- `src/forensics/cli.py` — command-line interface (argparse)
+- `src/forensics/cli/` — command-line interface (Typer)
 
 ## Feature Families
 

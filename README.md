@@ -53,7 +53,6 @@ Outputs include SQLite + Parquet + DuckDB-friendly artifacts, JSONL exports, ana
 - **Entrypoint:** `forensics` console script → [`src/forensics/cli/__init__.py`](src/forensics/cli/__init__.py) (**Typer**). Use `uv run forensics --help` and `uv run forensics <command> --help`.
 - **Stages:** scraper (WordPress discovery + HTTP + dedup), feature extraction (`src/forensics/features/`), analysis (`src/forensics/analysis/`), reporting (`src/forensics/reporting.py`). Full orchestration for `forensics all` lives in [`src/forensics/pipeline.py`](src/forensics/pipeline.py).
 - **Configuration:** [`src/forensics/config/settings.py`](src/forensics/config/settings.py) loads **`config.toml`** at the project root with **`FORENSICS_`** environment overrides (pydantic-settings). Override the TOML path with **`FORENSICS_CONFIG_FILE`**.
-- **Legacy module:** [`src/forensics/cli.py`](src/forensics/cli.py) is an older **argparse** surface; the installed CLI uses the **`forensics.cli` package** above, not that file.
 
 Storage and model contracts are summarized in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and ADRs under [`docs/adr/`](docs/adr/).
 

@@ -19,7 +19,7 @@ from forensics.config.settings import ForensicsSettings
 from forensics.features.binoculars import compute_binoculars_score, load_binoculars_models
 from forensics.features.probability import compute_perplexity, load_reference_model
 from forensics.models.article import Article
-from forensics.storage.repository import Repository, init_db
+from forensics.storage.repository import Repository
 
 logger = logging.getLogger(__name__)
 
@@ -112,7 +112,6 @@ def extract_probability_features(
     )
     device_cfg = device or (cfg.device if cfg.device != "auto" else None)
 
-    init_db(db_path)
     with Repository(db_path) as repo:
         configured_slugs = [a.slug for a in settings.authors]
         if author_slug:

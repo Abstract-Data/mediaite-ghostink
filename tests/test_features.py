@@ -169,7 +169,7 @@ def test_embedding_shape(monkeypatch: pytest.MonkeyPatch) -> None:
         def encode(self, text: str, show_progress_bar: bool = False) -> np.ndarray:
             return np.zeros(384, dtype=np.float32)
 
-    monkeypatch.setattr(emb, "_MODEL_CACHE", {})
+    emb.clear_model_cache()
     monkeypatch.setattr(emb, "_get_model", lambda name: _FakeModel())
     vec = emb.compute_embedding("hello", "fake-model")
     assert vec.shape == (384,)
@@ -359,6 +359,66 @@ def test_productivity_rolling(tmp_path: Path) -> None:
     out = productivity.extract_productivity_features(base, 300, prior)
     assert out["rolling_7d_count"] >= 2
     assert out["days_since_last_article"] == pytest.approx(1.0, rel=0.01)
+
+
+def test_write_features_empty_list_writes_zero_rows(tmp_path: Path) -> None:
+    from forensics.storage.parquet import read_features, write_features
+
+    path = tmp_path / "empty.parquet"
+    write_features([], path)
+    df = read_features(path)
+    assert df.height == 0
+
+
+def test_extract_all_features_writes_embedding_batch_not_per_article_npy(
+    tmp_path: Path,
+    sample_author: Author,
+    forensics_config_path: Path,
+    nlp,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from forensics.config import get_settings
+    from forensics.features import embeddings as emb_mod
+    from forensics.features import pipeline as pl
+
+    get_settings.cache_clear()
+    emb_mod.clear_model_cache()
+
+    def _fake_vec(text: str, model_name: str) -> np.ndarray:
+        return np.linspace(0, 1, 8, dtype=np.float32)
+
+    monkeypatch.setattr(emb_mod, "compute_embedding", _fake_vec)
+    monkeypatch.setattr("forensics.features.pipeline.spacy.load", lambda name: nlp)
+
+    db_path = tmp_path / "articles.db"
+    init_db(db_path)
+    good = _long_text()
+    with Repository(db_path) as repo:
+        repo.upsert_author(sample_author)
+        for i in range(2):
+            url = f"https://www.mediaite.com/2024/06/{i + 1:02d}/emb/"
+            a = Article(
+                id=f"emb-{i}",
+                author_id=sample_author.id,
+                url=url,
+                title=f"E{i}",
+                published_date=datetime(2024, 6, i + 1, tzinfo=UTC),
+                clean_text=good,
+                word_count=len(good.split()),
+                content_hash=f"eh{i}",
+            )
+            repo.upsert_article(a)
+
+    n = pl.extract_all_features(
+        db_path,
+        get_settings(),
+        skip_embeddings=False,
+        project_root=tmp_path,
+    )
+    assert n == 2
+    slug_dir = tmp_path / "data" / "embeddings" / sample_author.slug
+    assert (slug_dir / "batch.npz").is_file()
+    assert list(slug_dir.glob("*.npy")) == []
 
 
 def test_write_features_roundtrip(tmp_path: Path, sample_author: Author) -> None:

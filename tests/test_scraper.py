@@ -15,6 +15,7 @@ from forensics.models.article import Article
 from forensics.models.author import AuthorManifest
 from forensics.scraper.crawler import (
     _int_header,
+    author_config_from_manifest,
     iter_manifests_from_users_json,
     load_authors_manifest,
     stable_article_id,
@@ -54,6 +55,23 @@ def test_user_dict_to_manifest() -> None:
     assert m.slug == "test-user"
     assert m.total_posts == 7
     assert m.discovered_at == when
+
+
+def test_author_config_from_manifest() -> None:
+    when = datetime(2025, 1, 2, tzinfo=UTC)
+    m = AuthorManifest(
+        wp_id=9,
+        name="Pat Example",
+        slug="pat-example",
+        total_posts=12,
+        discovered_at=when,
+    )
+    cfg = author_config_from_manifest(m)
+    assert cfg.name == "Pat Example"
+    assert cfg.slug == "pat-example"
+    assert cfg.outlet == "mediaite.com"
+    assert cfg.role == "target"
+    assert cfg.archive_url == "https://www.mediaite.com/author/pat-example/"
 
 
 def test_iter_manifests_from_users_json() -> None:
