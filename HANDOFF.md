@@ -705,3 +705,64 @@ uv run forensics --help                       -> lists 'calibrate' command
 #### Risks & Next Steps
 - Downstream ws6 report overhaul can surface `CalibrationReport` metrics; the JSON schema is stable (`sensitivity`, `specificity`, `precision`, `f1_score`, `median_date_error_days`, `n_trials`, `trials`).
 - Positive trials currently run sequentially; they are independent and could be `asyncio.gather`’d if wall-clock matters. Holding off until a real calibration run demonstrates the cost.
+
+---
+
+### Phase 12 Unit 5 — ws7-operational-qol
+**Status:** Complete
+**Date:** 2026-04-22
+**Agent/Session:** ws7-operational-qol worker (Opus 4.7, resumed from partial state)
+
+#### What Was Done
+- Finished `src/forensics/storage/duckdb_queries.py::export_to_duckdb(db_path, output, *, include_features=True, include_analysis=True) -> ExportReport` — a single-file DuckDB export. Uses DuckDB's `sqlite` extension to materialise `authors` and `articles` from `data/articles.db`, optionally folds in `data/features/*.parquet` (via `read_parquet` with `union_by_name=true`), and optionally flattens `data/analysis/*_result.json` into an `analysis_results` table (polars → DuckDB `register` round-trip so nested fields are JSON-encoded). `ExportReport` captures `output_path`, `bytes_written`, and `tables: dict[str, int]`. Reuses the existing `_validated_sqlite_path_for_attach` helper for `ATTACH` injection protection (P3-SEC-002).
+- Added two CLI commands in `src/forensics/cli/__init__.py`:
+  - `forensics validate [--check-endpoints]` — parses `config.toml`, runs `run_all_preflight_checks(settings)` (not the stale untyped tuple form; matches v0.2.0 signature), prints PASS/WARN/FAIL per check, optionally probes `https://www.mediaite.com/wp-json/wp/v2/types` + `http://localhost:11434/api/tags` (3s timeout, reported as warnings only). Exits `1` on config parse error or any preflight hard-fail, `0` otherwise.
+  - `forensics export [-o PATH] [--features/--no-features] [--analysis/--no-analysis]` — resolves `data/articles.db` from the project root, calls `export_to_duckdb(...)`, prints the `ExportReport`, exits `1` when the SQLite source is missing.
+- `.gitignore` now covers runtime artefacts: `data/preregistration/`, `data/calibration/`, `data/survey/`, and `*.duckdb` (in addition to the existing `data/*.duckdb`).
+- Deleted the stale `data/preregistration/preregistration_lock.json` left over from the Unit 2 smoke test — now permanently ignored by the new `.gitignore` rule.
+- Tests in `tests/integration/test_cli.py`:
+  - `test_validate_help` — asserts `--check-endpoints` surfaces in help.
+  - `test_validate_config_command` — monkeypatches `forensics.preflight.run_all_preflight_checks` to a clean-pass report, asserts exit 0 and "Config parsed" line.
+  - `test_validate_detects_config_error` — writes a broken `config.toml`, asserts exit 1 + "Config error".
+  - `test_export_help` — asserts `--output`, `--no-features`, `--no-analysis` appear.
+  - `test_export_to_duckdb_smoke` — seeds SQLite via `Repository.upsert_author` + `upsert_article`, runs `export_to_duckdb` with features/analysis disabled, opens the output `.duckdb` read-only and asserts `authors` + `articles` row counts.
+
+#### Files Modified
+- `src/forensics/storage/duckdb_queries.py`
+- `src/forensics/cli/__init__.py`
+- `tests/integration/test_cli.py`
+- `.gitignore`
+- `docs/RUNBOOK.md`
+- `HANDOFF.md`
+
+#### Files Deleted
+- `data/preregistration/preregistration_lock.json` (stale smoke-test artefact)
+
+#### Verification Evidence
+```
+uv run ruff format --check .                        → 136 files already formatted
+uv run ruff check .                                  → All checks passed!
+uv run pytest tests/integration/test_cli.py -v -k "validate or export" → 5 passed
+uv run pytest tests/ -v                              → 267 passed, 18 skipped (spaCy), 2 deselected
+uv run forensics validate --help                    → shows --check-endpoints
+uv run forensics validate                            → exit 1 (spaCy + placeholder authors FAIL, expected in staging env)
+uv run forensics export --help                       → shows --output/-o, --no-features, --no-analysis
+uv run forensics export --output /tmp/forensics_export_smoke.duckdb → wrote 274432 bytes, authors:0, articles:0
+duckdb SHOW TABLES on the export                     → [('articles',), ('authors',)]
+uv run forensics --help                              → 'validate' and 'export' commands visible
+```
+
+#### Decisions Made
+- Kept the `Repository` context-manager contract: the smoke test uses `with Repository(db_path) as repo:` and lets the context commit. No repository changes required.
+- `export_to_duckdb` derives `features_dir` / `analysis_dir` from `db_path.parent` (so a test with `tmp_path/data/articles.db` naturally looks at `tmp_path/data/features` and `tmp_path/data/analysis`). Matches the convention used throughout the repo.
+- Analysis JSONs are flattened (one row per `*_result.json`) with nested structures (`change_points`, `convergence_windows`, `drift_scores`, `hypothesis_tests`) serialised to JSON strings — DuckDB has no first-class nested-JSON column and this keeps `SELECT * FROM analysis_results` queryable without extension-specific syntax.
+- The `forensics validate` endpoint probes are reported as PASS/WARN but never affect the exit code, per prompt §7a ("reports as warnings"). Exit code is driven solely by config parse + preflight hard-fails.
+- `check_endpoints` uses a synchronous `httpx.get` per endpoint rather than `asyncio.run(...)` — there are only two probes, both short-timeout, and a sync path keeps the command free of async ceremony.
+- The `export_to_duckdb` CLI resolves relative `--output` against `get_project_root()`; absolute paths are respected as-is (so `/tmp/...` works for ad-hoc smoke tests).
+
+#### Unresolved Questions
+- None blocking. Follow-up ideas: `forensics validate --strict` to mirror `preflight --strict` (promote warnings to failures); `forensics export --survey` to also fold `data/survey/run_*/survey_results.json` once ws6 starts consuming that artefact.
+
+#### Risks & Next Steps
+- ws2 (TUI wizard) and ws6 (report overhaul) should not need any repository changes from this unit. The `export_to_duckdb` function is a stable read-only consumer of the DB + parquet shards + analysis JSON; adding tables in the future is additive.
+- The Ollama probe URL is hard-coded to `http://localhost:11434`; if the runbook ever recommends a non-default host, expose it via `AnalysisConfig` or an env var.
