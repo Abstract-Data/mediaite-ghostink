@@ -11,13 +11,14 @@ from typing import Annotated, assert_never
 import typer
 
 from forensics.cli._helpers import guard_placeholder_authors
-from forensics.config import config_fingerprint, get_project_root, get_settings
+from forensics.config import DEFAULT_DB_RELATIVE, get_project_root, get_settings
 from forensics.config.settings import ForensicsSettings
+from forensics.pipeline_context import PipelineContext
 from forensics.scraper.crawler import collect_article_metadata, discover_authors
 from forensics.scraper.dedup import deduplicate_articles
 from forensics.scraper.fetcher import archive_raw_year_dirs, fetch_articles
 from forensics.storage.export import export_articles_jsonl
-from forensics.storage.repository import Repository, insert_analysis_run
+from forensics.storage.repository import Repository
 
 logger = logging.getLogger(__name__)
 
@@ -277,7 +278,7 @@ async def dispatch_scrape(
     settings = get_settings()
     root = get_project_root()
     manifest_path = root / "data/authors_manifest.jsonl"
-    db_path = root / "data/articles.db"
+    db_path = root / DEFAULT_DB_RELATIVE
 
     if dry_run and not fetch:
         logger.error("--dry-run is only valid with --fetch")
@@ -288,14 +289,11 @@ async def dispatch_scrape(
     if not all_authors and (scrape_like or default_full):
         guard_placeholder_authors(settings)
 
-    try:
-        insert_analysis_run(
-            db_path,
-            config_hash=config_fingerprint(),
-            description="forensics scrape",
-        )
-    except OSError as exc:
-        logger.warning("Could not record analysis_runs row: %s", exc)
+    PipelineContext.resolve().record_audit(
+        "forensics scrape",
+        optional=True,
+        log=logger,
+    )
 
     mode = _resolve_scrape_mode(discover, metadata, fetch, dedup, archive)
     if mode is None:

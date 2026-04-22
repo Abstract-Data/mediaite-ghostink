@@ -75,3 +75,48 @@ def test_record_audit_required_propagates(tmp_path: Path, monkeypatch) -> None:
         assert "denied" in str(exc)
     else:
         raise AssertionError("expected OSError")
+
+
+def test_config_fingerprint_returns_none_when_no_config(tmp_path: Path, monkeypatch) -> None:
+    """Without config.toml and FORENSICS_CONFIG_FILE, fingerprint is None (not a sentinel)."""
+    from forensics.config.fingerprint import config_fingerprint
+
+    monkeypatch.delenv("FORENSICS_CONFIG_FILE", raising=False)
+    monkeypatch.setattr(
+        "forensics.config.fingerprint.get_project_root",
+        lambda: tmp_path,
+    )
+    assert config_fingerprint() is None
+
+
+def test_record_audit_skips_row_when_fingerprint_none(tmp_path: Path, monkeypatch, caplog) -> None:
+    """When fingerprint is None, no analysis_runs row is written (NOT NULL schema preserved)."""
+    import logging
+
+    monkeypatch.delenv("FORENSICS_CONFIG_FILE", raising=False)
+    monkeypatch.setattr(
+        "forensics.pipeline_context.get_project_root",
+        lambda: tmp_path,
+    )
+    monkeypatch.setattr(
+        "forensics.config.fingerprint.get_project_root",
+        lambda: tmp_path,
+    )
+    db_path = tmp_path / "data" / "articles.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    init_db(db_path)
+
+    caplog.set_level(logging.WARNING)
+    ctx = PipelineContext.resolve()
+    assert ctx.config_hash is None
+    rid = ctx.record_audit("no-config run", optional=True)
+
+    assert rid is None
+    assert "pipeline audit skipped" in caplog.text
+
+    conn = sqlite3.connect(db_path)
+    try:
+        count = conn.execute("SELECT COUNT(*) FROM analysis_runs").fetchone()[0]
+    finally:
+        conn.close()
+    assert count == 0

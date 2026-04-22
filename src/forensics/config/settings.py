@@ -16,6 +16,10 @@ from pydantic_settings import (
     TomlConfigSettingsSource,
 )
 
+# Canonical relative location of the SQLite corpus under the project root.
+# Single source of truth for all modules that resolve the DB path.
+DEFAULT_DB_RELATIVE = Path("data") / "articles.db"
+
 
 def _project_root() -> Path:
     here = Path(__file__).resolve()
@@ -164,7 +168,7 @@ class ForensicsSettings(BaseSettings):
     @property
     def db_path(self) -> Path:
         """Default SQLite corpus path under the project root."""
-        return _project_root() / "data" / "articles.db"
+        return _project_root() / DEFAULT_DB_RELATIVE
 
     @classmethod
     def settings_customise_sources(

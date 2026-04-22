@@ -6,7 +6,7 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 
-from forensics.config import get_project_root
+from forensics.config import DEFAULT_DB_RELATIVE, get_project_root
 from forensics.config.fingerprint import config_fingerprint
 from forensics.storage.repository import insert_analysis_run
 
@@ -19,14 +19,14 @@ class PipelineContext:
 
     root: Path
     db_path: Path
-    config_hash: str
+    config_hash: str | None
 
     @classmethod
     def resolve(cls) -> PipelineContext:
         root = get_project_root()
         return cls(
             root=root,
-            db_path=root / "data" / "articles.db",
+            db_path=root / DEFAULT_DB_RELATIVE,
             config_hash=config_fingerprint(),
         )
 
@@ -43,8 +43,19 @@ class PipelineContext:
         and ``None`` is returned (matches extract / ``forensics all`` behavior).
         When ``optional`` is False, errors propagate (matches analyze paths
         that embed ``run_id`` into ``run_metadata.json``).
+
+        If ``config_hash`` is ``None`` (no TOML config found) the audit row is
+        skipped and ``None`` is returned — this preserves the ``config_hash
+        NOT NULL`` schema constraint on ``analysis_runs``.
         """
         lg = log or logger
+        if self.config_hash is None:
+            lg.warning(
+                "pipeline audit skipped for %r: no config.toml found "
+                "(set FORENSICS_CONFIG_FILE or create config.toml to enable auditing)",
+                description,
+            )
+            return None
         if optional:
             try:
                 rid = insert_analysis_run(

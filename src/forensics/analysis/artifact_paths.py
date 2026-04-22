@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from forensics.config import DEFAULT_DB_RELATIVE
+
 
 @dataclass(frozen=True, slots=True)
 class AnalysisArtifactPaths:
@@ -59,9 +61,10 @@ class AnalysisArtifactPaths:
     @classmethod
     def from_project(cls, project_root: Path, db_path: Path | None = None) -> AnalysisArtifactPaths:
         """Default layout under ``project_root/data``."""
+        resolved_db = db_path if db_path is not None else project_root / DEFAULT_DB_RELATIVE
         return cls.from_layout(
             project_root,
-            db_path or project_root / "data" / "articles.db",
+            resolved_db,
             project_root / "data" / "features",
             project_root / "data" / "embeddings",
         )

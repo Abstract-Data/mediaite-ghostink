@@ -8,6 +8,7 @@ import warnings
 
 from forensics.config.fingerprint import config_fingerprint
 from forensics.config.settings import (
+    DEFAULT_DB_RELATIVE,
     AnalysisConfig,
     AuthorConfig,
     ForensicsSettings,
@@ -42,6 +43,7 @@ class _SettingsProxy:
 settings = _SettingsProxy()
 
 __all__ = [
+    "DEFAULT_DB_RELATIVE",
     "config_fingerprint",
     "AnalysisConfig",
     "AuthorConfig",
