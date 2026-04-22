@@ -382,6 +382,89 @@ async def test_fetch_success_persists_body_and_raw_path(
 
 
 @pytest.mark.asyncio
+async def test_fetch_resume_skip_after_parse_does_not_orphan_raw_file(
+    tmp_path: Path,
+    sample_author: Author,
+    sample_article: Article,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A concurrent winner populating the DB between parse and persist must not
+    leave a raw/{year}/{id}.html file on disk.
+
+    Simulates the race by having ``_resume_skip_fetch`` report False on the
+    first (pre-parse) call and True on the second (pre-persist) call — matching
+    the real timeline where another worker wrote ``clean_text`` mid-flight.
+    """
+    db_path = tmp_path / "articles.db"
+    with Repository(db_path) as repo:
+        repo.upsert_author(sample_author)
+        repo.upsert_article(sample_article)
+
+    row = UnfetchedArticle(
+        sample_article.id,
+        str(sample_article.url),
+        "X",
+        sample_article.published_date,
+    )
+
+    async def fake_request_success(
+        client: object,
+        limiter: object,
+        scraping: object,
+        method: str,
+        url: str,
+        **kwargs: object,
+    ) -> httpx.Response:
+        return httpx.Response(200, text=_minimal_html(), request=httpx.Request(method, url))
+
+    monkeypatch.setattr(fetcher_mod, "request_with_retry", fake_request_success)
+
+    # First call (pre-parse, inside first db_lock): False → keep going.
+    # Second call (pre-persist, inside second db_lock): True → skip persistence.
+    skip_calls = {"n": 0}
+    real_skip = fetcher_mod._resume_skip_fetch
+
+    def racing_skip(article):
+        skip_calls["n"] += 1
+        if skip_calls["n"] == 1:
+            return real_skip(article)  # False for the freshly-seeded article
+        return True  # pretend another worker won
+
+    monkeypatch.setattr(fetcher_mod, "_resume_skip_fetch", racing_skip)
+
+    scraping = ScrapingConfig(
+        rate_limit_seconds=0.0,
+        rate_limit_jitter=0.0,
+        max_concurrent=2,
+        max_retries=0,
+        retry_backoff_seconds=0.01,
+    )
+
+    with Repository(db_path) as repo:
+        ctx = _article_html_ctx(repo, tmp_path, scraping)
+        async with httpx.AsyncClient() as client:
+            await _fetch_one_article_html(client, row, ctx=ctx)
+
+    assert skip_calls["n"] == 2, "both skip checks must fire (pre-parse and pre-persist)"
+
+    # No raw HTML file was written — this would fail before the TOCTOU fix.
+    raw_dir = tmp_path / "data" / "raw"
+    orphans = list(raw_dir.rglob("*.html")) if raw_dir.is_dir() else []
+    assert orphans == [], f"resume-skip race left orphan files: {orphans}"
+
+    # And no side JSONL lines either.
+    for side in (tmp_path / "c.jsonl", tmp_path / "w.jsonl"):
+        assert not side.exists() or side.read_text(encoding="utf-8") == ""
+
+    # The DB row is untouched (article still has empty clean_text).
+    with Repository(db_path) as repo:
+        art = repo.get_article_by_id(sample_article.id)
+    assert art is not None
+    assert art.clean_text == ""
+    assert ctx.done_count[0] == 0
+
+
+@pytest.mark.asyncio
 async def test_parallel_fetches_complete_all_tasks(
     tmp_path: Path,
     sample_author: Author,
