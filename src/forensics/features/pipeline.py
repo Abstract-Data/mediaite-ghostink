@@ -30,6 +30,19 @@ from forensics.storage.repository import Repository, init_db
 
 logger = logging.getLogger(__name__)
 
+# Expected failures from extractors, numpy I/O, and sentence-transformers encode.
+_FEATURE_EXTRACTION_ERRORS: tuple[type[BaseException], ...] = (
+    ArithmeticError,
+    AttributeError,
+    LookupError,
+    MemoryError,
+    OSError,
+    RecursionError,
+    RuntimeError,
+    TypeError,
+    ValueError,
+)
+
 
 def _recent_peer_texts(
     articles_chrono: list[Article],
@@ -208,7 +221,7 @@ def extract_all_features(
                             )
                         )
                     processed += 1
-                except Exception as exc:
+                except _FEATURE_EXTRACTION_ERRORS as exc:
                     batch_failed += 1
                     failed += 1
                     logger.exception(

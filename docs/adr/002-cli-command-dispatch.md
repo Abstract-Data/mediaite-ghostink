@@ -3,11 +3,11 @@
 - **Status:** Accepted
 - **Date:** 2026-04-20
 - **Deciders:** John Eakin
-- **Trigger:** All three review reports flagged `_async_scrape` in `cli.py` as a critical code smell — 117 lines, ~18 cyclomatic complexity, 7 mutually exclusive flag-combination branches with duplicated workflow logic (RF-CPLX-001, P2-CQ-2, Dev Assessment §2).
+- **Trigger:** All three review reports flagged the legacy argparse scrape dispatch in the old monolithic `cli.py` as a critical code smell — 117 lines, ~18 cyclomatic complexity, 7 mutually exclusive flag-combination branches with duplicated workflow logic (RF-CPLX-001, P2-CQ-2, Dev Assessment §2). That module was removed in favor of the Typer package under `src/forensics/cli/`.
 
 ## Context
 
-The `scrape` subcommand in `src/forensics/cli.py` accepts five boolean flags (`--discover`, `--metadata`, `--fetch`, `--dedup`, `--archive`) plus `--dry-run`. The current implementation handles flag combinations with sequential `if` blocks that compute boolean expressions from the 5 flags:
+The `scrape` subcommand (Typer app in `src/forensics/cli/scrape.py`, routable core `dispatch_scrape`) accepts five boolean flags (`--discover`, `--metadata`, `--fetch`, `--dedup`, `--archive`) plus `--dry-run`. The implementation described here handled flag combinations with sequential `if` blocks that compute boolean expressions from the 5 flags:
 
 ```python
 d = bool(args.discover)

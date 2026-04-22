@@ -48,6 +48,7 @@ async def _metadata_only(
     manifest_path: Path,
     *,
     repo: Repository | None = None,
+    all_authors: bool = False,
 ) -> int:
     if not manifest_path.is_file():
         logger.error(
@@ -56,10 +57,14 @@ async def _metadata_only(
         )
         return 1
     if repo is not None:
-        inserted = await collect_article_metadata(db_path, settings, repo=repo)
+        inserted = await collect_article_metadata(
+            db_path, settings, repo=repo, all_authors=all_authors
+        )
     else:
         with Repository(db_path) as r:
-            inserted = await collect_article_metadata(db_path, settings, repo=r)
+            inserted = await collect_article_metadata(
+                db_path, settings, repo=r, all_authors=all_authors
+            )
     logger.info("metadata: inserted %d new article row(s) into %s", inserted, db_path)
     return 0
 
@@ -114,6 +119,7 @@ async def _discover_and_metadata(
     manifest_path: Path,
     *,
     force_refresh: bool,
+    all_authors: bool = False,
 ) -> int:
     n_authors = await discover_authors(settings, force_refresh=force_refresh)
     if n_authors:
@@ -124,7 +130,9 @@ async def _discover_and_metadata(
         logger.error("author manifest missing after discover: %s", manifest_path)
         return 1
     with Repository(db_path) as repo:
-        inserted = await collect_article_metadata(db_path, settings, repo=repo)
+        inserted = await collect_article_metadata(
+            db_path, settings, repo=repo, all_authors=all_authors
+        )
     logger.info("metadata: inserted %d new article row(s) into %s", inserted, db_path)
     return 0
 
@@ -136,6 +144,7 @@ async def _full_pipeline(
     manifest_path: Path,
     *,
     force_refresh: bool,
+    all_authors: bool = False,
 ) -> int:
     n_authors = await discover_authors(settings, force_refresh=force_refresh)
     if n_authors:
@@ -146,7 +155,9 @@ async def _full_pipeline(
         logger.error("author manifest missing after discover: %s", manifest_path)
         return 1
     with Repository(db_path) as repo:
-        inserted = await collect_article_metadata(db_path, settings, repo=repo)
+        inserted = await collect_article_metadata(
+            db_path, settings, repo=repo, all_authors=all_authors
+        )
         logger.info("metadata: inserted %d new article row(s) into %s", inserted, db_path)
         fetched = await fetch_articles(db_path, settings, dry_run=False, repo=repo)
     logger.info("fetch: processed %d article(s)", fetched)
@@ -169,6 +180,7 @@ async def dispatch_scrape(
     archive: bool,
     dry_run: bool,
     force_refresh: bool,
+    all_authors: bool = False,
 ) -> int:
     """Route flag combinations to the appropriate pipeline function.
 
@@ -183,7 +195,9 @@ async def dispatch_scrape(
         logger.error("--dry-run is only valid with --fetch")
         return 1
 
-    if discover or metadata or fetch or not (discover or metadata or fetch or dedup or archive):
+    scrape_like = discover or metadata or fetch
+    default_full = not (scrape_like or dedup or archive)
+    if not all_authors and (scrape_like or default_full):
         guard_placeholder_authors(settings)
 
     try:
@@ -218,13 +232,22 @@ async def dispatch_scrape(
             settings, manifest_path, force_refresh=force_refresh
         ),
         (False, True, False, False, False): lambda: _metadata_only(
-            db_path, settings, manifest_path
+            db_path, settings, manifest_path, all_authors=all_authors
         ),
         (True, True, False, False, False): lambda: _discover_and_metadata(
-            db_path, settings, manifest_path, force_refresh=force_refresh
+            db_path,
+            settings,
+            manifest_path,
+            force_refresh=force_refresh,
+            all_authors=all_authors,
         ),
         (False, False, False, False, False): lambda: _full_pipeline(
-            db_path, root, settings, manifest_path, force_refresh=force_refresh
+            db_path,
+            root,
+            settings,
+            manifest_path,
+            force_refresh=force_refresh,
+            all_authors=all_authors,
         ),
     }
 
@@ -248,6 +271,7 @@ async def _dispatch(
     archive: bool,
     dry_run: bool,
     force_refresh: bool,
+    all_authors: bool = False,
 ) -> int:
     """Deprecated alias for :func:`dispatch_scrape` (tests and older imports)."""
     return await dispatch_scrape(
@@ -258,6 +282,7 @@ async def _dispatch(
         archive=archive,
         dry_run=dry_run,
         force_refresh=force_refresh,
+        all_authors=all_authors,
     )
 
 
@@ -285,6 +310,13 @@ def scrape(
         bool,
         typer.Option("--force-refresh", help="With --discover: overwrite manifest"),
     ] = False,
+    all_authors: Annotated[
+        bool,
+        typer.Option(
+            "--all-authors",
+            help="Collect metadata for every author in the manifest (ignore config.toml list)",
+        ),
+    ] = False,
 ) -> None:
     """Crawl and fetch articles for configured authors."""
     rc = asyncio.run(
@@ -296,6 +328,7 @@ def scrape(
             archive=archive,
             dry_run=dry_run,
             force_refresh=force_refresh,
+            all_authors=all_authors,
         )
     )
     raise typer.Exit(code=rc)

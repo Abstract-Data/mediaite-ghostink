@@ -80,6 +80,8 @@ def _load_or_compute_changepoints(
     features_dir: Path,
     analysis_dir: Path,
     settings: ForensicsSettings,
+    *,
+    feature_frame: pl.DataFrame | None = None,
 ) -> list[ChangePoint]:
     cp_json = analysis_dir / f"{slug}_changepoints.json"
     if cp_json.is_file():
@@ -89,7 +91,9 @@ def _load_or_compute_changepoints(
     p = features_dir / f"{slug}.parquet"
     if au is None or not p.is_file():
         return []
-    dfc = _feature_frame_for_author(features_dir, slug, au.id)
+    dfc = feature_frame
+    if dfc is None:
+        dfc = _feature_frame_for_author(features_dir, slug, au.id)
     if dfc is None:
         return []
     return analyze_author_feature_changepoints(dfc, author_id=au.id, settings=settings)
@@ -182,6 +186,7 @@ def compare_target_to_controls(
             df_t = load_feature_frame_sorted(target_path)
 
         control_frames: list[pl.DataFrame] = []
+        control_feature_frames: dict[str, pl.DataFrame] = {}
         for slug in control_ids:
             au = repo.get_author_by_slug(slug)
             if au is None:
@@ -192,6 +197,7 @@ def compare_target_to_controls(
                 logger.warning("compare: skip missing features slug=%s", slug)
                 continue
             control_frames.append(dfc)
+            control_feature_frames[slug] = dfc
 
         pooled = pl.concat(control_frames) if control_frames else pl.DataFrame()
 
@@ -220,7 +226,12 @@ def compare_target_to_controls(
 
         for slug in control_ids:
             control_change_points[slug] = _load_or_compute_changepoints(
-                slug, repo, features_dir, analysis_dir, settings
+                slug,
+                repo,
+                features_dir,
+                analysis_dir,
+                settings,
+                feature_frame=control_feature_frames.get(slug),
             )
 
             drift_path = analysis_dir / f"{slug}_drift.json"

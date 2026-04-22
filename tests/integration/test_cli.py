@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
+import re
+
 from typer.testing import CliRunner
 
 from forensics.cli import app
 
 runner = CliRunner()
+
+
+def _plain_help(output: str) -> str:
+    """Rich/Typer help uses ANSI sequences; strip them for substring assertions."""
+    return re.sub(r"\x1b\[[0-9;]*m", "", output)
 
 
 def test_cli_help_exits_cleanly() -> None:
@@ -25,6 +32,7 @@ def test_cli_version() -> None:
 def test_scrape_help_lists_flags() -> None:
     result = runner.invoke(app, ["scrape", "--help"])
     assert result.exit_code == 0
+    text = _plain_help(result.output)
     for flag in (
         "--discover",
         "--metadata",
@@ -33,13 +41,15 @@ def test_scrape_help_lists_flags() -> None:
         "--archive",
         "--dry-run",
         "--force-refresh",
+        "--all-authors",
     ):
-        assert flag in result.output, f"missing {flag} in scrape help"
+        assert flag in text, f"missing {flag} in scrape help"
 
 
 def test_extract_help_lists_flags() -> None:
     result = runner.invoke(app, ["extract", "--help"])
     assert result.exit_code == 0
+    text = _plain_help(result.output)
     for flag in (
         "--author",
         "--skip-embeddings",
@@ -47,12 +57,13 @@ def test_extract_help_lists_flags() -> None:
         "--no-binoculars",
         "--device",
     ):
-        assert flag in result.output, f"missing {flag} in extract help"
+        assert flag in text, f"missing {flag} in extract help"
 
 
 def test_analyze_help_lists_flags() -> None:
     result = runner.invoke(app, ["analyze", "--help"])
     assert result.exit_code == 0
+    text = _plain_help(result.output)
     for flag in (
         "--changepoint",
         "--timeseries",
@@ -64,14 +75,15 @@ def test_analyze_help_lists_flags() -> None:
         "--verify-corpus",
         "--author",
     ):
-        assert flag in result.output, f"missing {flag} in analyze help"
+        assert flag in text, f"missing {flag} in analyze help"
 
 
 def test_report_help_lists_flags() -> None:
     result = runner.invoke(app, ["report", "--help"])
     assert result.exit_code == 0
+    text = _plain_help(result.output)
     for flag in ("--notebook", "--format", "--verify"):
-        assert flag in result.output, f"missing {flag} in report help"
+        assert flag in text, f"missing {flag} in report help"
 
 
 def test_all_help_exits_cleanly() -> None:

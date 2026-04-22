@@ -34,7 +34,8 @@ def clear_model_cache() -> None:
     _MODEL_CACHE.clear()
 
 
-def _resolve_device(device: str | None) -> str:
+def resolve_torch_device(device: str | None) -> str:
+    """Pick ``cpu`` or ``cuda`` for optional extras; ``cpu`` when torch is missing."""
     if device in ("cpu", "cuda"):
         return device
     try:
@@ -50,7 +51,7 @@ def load_reference_model(
     device: str | None = None,
 ) -> tuple[Any, Any]:
     """Lazy-load the reference LM (default: GPT-2) and tokenizer."""
-    resolved_device = _resolve_device(device)
+    resolved_device = resolve_torch_device(device)
     cache_key = (model_name, revision, resolved_device)
     if cache_key in _MODEL_CACHE:
         return _MODEL_CACHE[cache_key]

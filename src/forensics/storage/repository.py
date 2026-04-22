@@ -96,6 +96,20 @@ def _migrate_articles_columns(conn: sqlite3.Connection) -> None:
         conn.execute(stmt)
 
 
+def _author_row_to_model(row: sqlite3.Row) -> Author:
+    """Map an ``authors`` table row to :class:`Author`."""
+    return Author(
+        id=row["id"],
+        name=row["name"],
+        slug=row["slug"],
+        outlet=row["outlet"],
+        role=row["role"],
+        baseline_start=date.fromisoformat(str(row["baseline_start"])),
+        baseline_end=date.fromisoformat(str(row["baseline_end"])),
+        archive_url=row["archive_url"],
+    )
+
+
 def _row_to_article(row: sqlite3.Row) -> Article:
     metadata_raw = row["metadata"]
     metadata: dict[str, object] = json.loads(metadata_raw) if metadata_raw else {}
@@ -182,32 +196,14 @@ class Repository:
         row = conn.execute("SELECT * FROM authors WHERE id = ?", (author_id,)).fetchone()
         if row is None:
             return None
-        return Author(
-            id=row["id"],
-            name=row["name"],
-            slug=row["slug"],
-            outlet=row["outlet"],
-            role=row["role"],
-            baseline_start=date.fromisoformat(str(row["baseline_start"])),
-            baseline_end=date.fromisoformat(str(row["baseline_end"])),
-            archive_url=row["archive_url"],
-        )
+        return _author_row_to_model(row)
 
     def get_author_by_slug(self, slug: str) -> Author | None:
         conn = self._require_conn()
         row = conn.execute("SELECT * FROM authors WHERE slug = ?", (slug,)).fetchone()
         if row is None:
             return None
-        return Author(
-            id=row["id"],
-            name=row["name"],
-            slug=row["slug"],
-            outlet=row["outlet"],
-            role=row["role"],
-            baseline_start=date.fromisoformat(str(row["baseline_start"])),
-            baseline_end=date.fromisoformat(str(row["baseline_end"])),
-            archive_url=row["archive_url"],
-        )
+        return _author_row_to_model(row)
 
     def list_articles_for_extraction(self, *, author_id: str | None = None) -> list[Article]:
         """Return articles eligible for feature extraction (Phase 4 selection rules)."""

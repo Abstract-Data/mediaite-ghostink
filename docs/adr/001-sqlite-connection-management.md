@@ -63,7 +63,7 @@ class Repository:
 ### Migration Path
 
 1. Create `Repository` class alongside existing functions (Phase 1 — non-breaking).
-2. Update `cli.py` and `fetcher.py` to instantiate `Repository` and pass it through (Phase 2).
+2. Update the CLI package (`src/forensics/cli/`, especially scrape dispatch) and `fetcher.py` to instantiate `Repository` and pass it through (Phase 2).
 3. Deprecate and remove the standalone functions (Phase 3).
 4. Each phase must have passing tests before proceeding.
 
@@ -82,7 +82,7 @@ Enable `PRAGMA journal_mode=WAL` on every connection. This allows concurrent rea
 - **Eliminates** the data clump (`db_path` in every function signature).
 - **Enables** transactional grouping for batch operations.
 - **Enables** WAL mode configuration in a single place.
-- **Requires** updating all callers (cli.py, crawler.py, fetcher.py, dedup.py) — estimated 2–3 hours.
+- **Requires** updating all callers (CLI package, `crawler.py`, `fetcher.py`, `dedup.py`) — estimated 2–3 hours.
 - **Requires** updating all tests that use repository functions directly.
 - The `fetcher.py` `db_lock` pattern can be simplified since the Repository handles connection safety.
 

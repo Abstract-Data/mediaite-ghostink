@@ -10,6 +10,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from forensics.features.probability import resolve_torch_device
+
 logger = logging.getLogger(__name__)
 
 _PAIR_CACHE: dict[tuple[str, str, str], tuple[Any, Any, Any]] = {}
@@ -47,10 +49,7 @@ def load_binoculars_models(
         )
         return None
 
-    if device in ("cpu", "cuda"):
-        resolved = device
-    else:
-        resolved = "cuda" if torch.cuda.is_available() else "cpu"
+    resolved = resolve_torch_device(device)
 
     if resolved == "cpu":
         logger.warning(
