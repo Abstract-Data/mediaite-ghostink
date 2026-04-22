@@ -35,6 +35,7 @@ def _run_compare_only_flow(
     root: Path,
     author: str | None,
 ) -> None:
+    from forensics.analysis.artifact_paths import AnalysisArtifactPaths
     from forensics.analysis.orchestrator import run_compare_only
 
     rid = insert_analysis_run(
@@ -52,7 +53,8 @@ def _run_compare_only_flow(
         "author": author,
     }
     _write_run_metadata(analysis_dir, rid=rid, meta=meta)
-    run_compare_only(settings, project_root=root, db_path=db_path, author_slug=author)
+    paths = AnalysisArtifactPaths.from_project(root, db_path)
+    run_compare_only(settings, paths=paths, author_slug=author)
     logger.info("analyze: compare-only complete author=%s", author or "all")
 
 
@@ -114,18 +116,16 @@ def _run_full_analysis_stage(
     root: Path,
     author: str | None,
 ) -> None:
+    from forensics.analysis.artifact_paths import AnalysisArtifactPaths
     from forensics.analysis.orchestrator import run_full_analysis
 
-    asyncio.run(
-        run_full_analysis(
-            db_path,
-            root / "data" / "features",
-            root / "data" / "embeddings",
-            settings,
-            project_root=root,
-            author_slug=author,
-        )
+    paths = AnalysisArtifactPaths.from_layout(
+        root,
+        db_path,
+        root / "data" / "features",
+        root / "data" / "embeddings",
     )
+    asyncio.run(run_full_analysis(paths, settings, author_slug=author))
 
 
 def _run_ai_baseline_stage(

@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import json
 import logging
-from pathlib import Path
 from typing import Any
 
 import numpy as np
 import polars as pl
 from scipy import stats
 
+from forensics.analysis.artifact_paths import AnalysisArtifactPaths
 from forensics.analysis.changepoint import PELT_FEATURE_COLUMNS, analyze_author_feature_changepoints
 from forensics.analysis.convergence import compute_convergence_scores
 from forensics.analysis.drift import (
@@ -61,23 +61,22 @@ def _numeric_feature_columns(df: pl.DataFrame) -> list[str]:
 def _load_or_compute_changepoints(
     slug: str,
     repo: Repository,
-    features_dir: Path,
-    analysis_dir: Path,
+    paths: AnalysisArtifactPaths,
     settings: ForensicsSettings,
     *,
     feature_frame: pl.DataFrame | None = None,
 ) -> list[ChangePoint]:
-    cp_json = analysis_dir / f"{slug}_changepoints.json"
+    cp_json = paths.analysis_dir / f"{slug}_changepoints.json"
     if cp_json.is_file():
         raw = json.loads(cp_json.read_text(encoding="utf-8"))
         return [ChangePoint.model_validate(x) for x in raw]
     au = repo.get_author_by_slug(slug)
-    p = features_dir / f"{slug}.parquet"
+    p = paths.features_dir / f"{slug}.parquet"
     if au is None or not p.is_file():
         return []
     dfc = feature_frame
     if dfc is None:
-        dfc = load_feature_frame_for_author(features_dir, slug, au.id)
+        dfc = load_feature_frame_for_author(paths.features_dir, slug, au.id)
     if dfc is None:
         return []
     return analyze_author_feature_changepoints(dfc, author_id=au.id, settings=settings)
@@ -86,18 +85,15 @@ def _load_or_compute_changepoints(
 def _velocity_and_baseline_for_slug(
     slug: str,
     repo: Repository,
-    analysis_dir: Path,
-    embeddings_dir: Path,
-    db_path: Path,
-    project_root: Path,
+    paths: AnalysisArtifactPaths,
     settings: ForensicsSettings,
 ) -> tuple[list[tuple[str, float]], list[tuple[Any, float]]]:
     """Return ``(vel_tuples, baseline_curve)`` from disk or by recomputing from embeddings."""
-    drift_path = analysis_dir / f"{slug}_drift.json"
+    drift_path = paths.analysis_dir / f"{slug}_drift.json"
     baseline_curve: list = []
     vel_tuples: list[tuple[str, float]] = []
 
-    curve_path = analysis_dir / f"{slug}_baseline_curve.json"
+    curve_path = paths.analysis_dir / f"{slug}_baseline_curve.json"
     if curve_path.is_file():
         for row in json.loads(curve_path.read_text(encoding="utf-8")):
             ts = parse_datetime(row["published_at"])
@@ -108,7 +104,7 @@ def _velocity_and_baseline_for_slug(
         ds = DriftScores.model_validate_json(drift_path.read_text(encoding="utf-8"))
 
     if ds and ds.monthly_centroid_velocities:
-        npz_path = analysis_dir / f"{slug}_centroids.npz"
+        npz_path = paths.analysis_dir / f"{slug}_centroids.npz"
         months: list[str] = []
         if npz_path.is_file():
             data = np.load(npz_path)
@@ -121,9 +117,9 @@ def _velocity_and_baseline_for_slug(
         try:
             pairs = load_article_embeddings(
                 slug,
-                embeddings_dir,
-                db_path,
-                project_root=project_root,
+                paths.embeddings_dir,
+                paths.db_path,
+                project_root=paths.project_root,
             )
             if len(pairs) >= 2:
                 monthly = compute_monthly_centroids(pairs)
@@ -142,14 +138,14 @@ def _velocity_and_baseline_for_slug(
 
 def _load_target_author_and_frame(
     repo: Repository,
-    features_dir: Path,
+    paths: AnalysisArtifactPaths,
     target_id: str,
 ) -> tuple[Author, pl.DataFrame]:
     target_author = repo.get_author_by_slug(target_id)
     if target_author is None:
         msg = f"Unknown target slug: {target_id}"
         raise ValueError(msg)
-    target_path = features_dir / f"{target_id}.parquet"
+    target_path = paths.features_dir / f"{target_id}.parquet"
     if not target_path.is_file():
         msg = f"Missing features for target: {target_path}"
         raise ValueError(msg)
@@ -161,7 +157,7 @@ def _load_target_author_and_frame(
 
 def _load_control_frames_and_pooled(
     repo: Repository,
-    features_dir: Path,
+    paths: AnalysisArtifactPaths,
     control_ids: list[str],
 ) -> tuple[pl.DataFrame, dict[str, pl.DataFrame]]:
     control_frames: list[pl.DataFrame] = []
@@ -171,7 +167,7 @@ def _load_control_frames_and_pooled(
         if au is None:
             logger.warning("compare: skip unknown control slug=%s", slug)
             continue
-        dfc = load_feature_frame_for_author(features_dir, slug, au.id)
+        dfc = load_feature_frame_for_author(paths.features_dir, slug, au.id)
         if dfc is None:
             logger.warning("compare: skip missing features slug=%s", slug)
             continue
@@ -209,11 +205,7 @@ def _two_sample_feature_comparisons(
 def _summarize_control_authors(
     control_ids: list[str],
     repo: Repository,
-    features_dir: Path,
-    analysis_dir: Path,
-    embeddings_dir: Path,
-    db_path: Path,
-    project_root: Path,
+    paths: AnalysisArtifactPaths,
     settings: ForensicsSettings,
     control_feature_frames: dict[str, pl.DataFrame],
 ) -> tuple[
@@ -229,13 +221,12 @@ def _summarize_control_authors(
         control_change_points[slug] = _load_or_compute_changepoints(
             slug,
             repo,
-            features_dir,
-            analysis_dir,
+            paths,
             settings,
             feature_frame=control_feature_frames.get(slug),
         )
 
-        drift_path = analysis_dir / f"{slug}_drift.json"
+        drift_path = paths.analysis_dir / f"{slug}_drift.json"
         if drift_path.is_file():
             raw_drift = drift_path.read_text(encoding="utf-8")
             control_drift_scores[slug] = DriftScores.model_validate_json(raw_drift)
@@ -245,10 +236,7 @@ def _summarize_control_authors(
         vel_tuples, baseline_curve = _velocity_and_baseline_for_slug(
             slug,
             repo,
-            analysis_dir,
-            embeddings_dir,
-            db_path,
-            project_root,
+            paths,
             settings,
         )
         cps = control_change_points[slug]
@@ -266,14 +254,11 @@ def _editorial_signal_for_target(
     target_author: Author,
     df_t: pl.DataFrame,
     repo: Repository,
-    analysis_dir: Path,
-    embeddings_dir: Path,
-    db_path: Path,
-    project_root: Path,
+    paths: AnalysisArtifactPaths,
     settings: ForensicsSettings,
     control_windows: dict[str, list[ConvergenceWindow]],
 ) -> float:
-    target_cp_path = analysis_dir / f"{target_id}_changepoints.json"
+    target_cp_path = paths.analysis_dir / f"{target_id}_changepoints.json"
     if target_cp_path.is_file():
         raw_cp = json.loads(target_cp_path.read_text(encoding="utf-8"))
         target_cps = [ChangePoint.model_validate(x) for x in raw_cp]
@@ -287,10 +272,7 @@ def _editorial_signal_for_target(
     target_vel, target_curve = _velocity_and_baseline_for_slug(
         target_id,
         repo,
-        analysis_dir,
-        embeddings_dir,
-        db_path,
-        project_root,
+        paths,
         settings,
     )
 
@@ -306,29 +288,21 @@ def _editorial_signal_for_target(
 def compare_target_to_controls(
     target_id: str,
     control_ids: list[str],
-    features_dir: Path,
-    db_path: Path,
+    paths: AnalysisArtifactPaths,
     *,
     settings: ForensicsSettings,
-    analysis_dir: Path,
-    embeddings_dir: Path,
-    project_root: Path,
 ) -> dict[str, Any]:
     """Two-sample tests (target vs pooled controls) plus cached change-point / drift summaries."""
-    with Repository(db_path) as repo:
-        target_author, df_t = _load_target_author_and_frame(repo, features_dir, target_id)
+    with Repository(paths.db_path) as repo:
+        target_author, df_t = _load_target_author_and_frame(repo, paths, target_id)
         pooled, control_feature_frames = _load_control_frames_and_pooled(
-            repo, features_dir, control_ids
+            repo, paths, control_ids
         )
         feature_comparisons = _two_sample_feature_comparisons(df_t, pooled)
         control_change_points, control_drift_scores, control_windows = _summarize_control_authors(
             control_ids,
             repo,
-            features_dir,
-            analysis_dir,
-            embeddings_dir,
-            db_path,
-            project_root,
+            paths,
             settings,
             control_feature_frames,
         )
@@ -337,10 +311,7 @@ def compare_target_to_controls(
             target_author,
             df_t,
             repo,
-            analysis_dir,
-            embeddings_dir,
-            db_path,
-            project_root,
+            paths,
             settings,
             control_windows,
         )

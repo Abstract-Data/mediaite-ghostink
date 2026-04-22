@@ -14,6 +14,7 @@ from uuid import uuid4
 import numpy as np
 import polars as pl
 
+from forensics.analysis.artifact_paths import AnalysisArtifactPaths
 from forensics.analysis.changepoint import (
     analyze_author_feature_changepoints,
 )
@@ -118,12 +119,9 @@ def _run_hypothesis_tests_for_changepoints(
 def _run_per_author_analysis(
     slug: str,
     repo: Repository,
-    features_dir: Path,
-    embeddings_dir: Path,
+    paths: AnalysisArtifactPaths,
     config: ForensicsSettings,
     *,
-    project_root: Path,
-    analysis_dir: Path,
     probability_trajectory_by_slug: dict[str, ProbabilityTrajectory],
 ) -> tuple[AnalysisResult, list[ChangePoint], list, list] | None:
     """Changepoint, drift, convergence, and hypothesis testing for one author slug."""
@@ -131,7 +129,7 @@ def _run_per_author_analysis(
     if author is None:
         logger.warning("analysis: unknown slug=%s", slug)
         return None
-    feat_path = features_dir / f"{slug}.parquet"
+    feat_path = paths.features_dir / f"{slug}.parquet"
     if not feat_path.is_file():
         logger.warning("analysis: skip %s (missing %s)", slug, feat_path)
         return None
@@ -155,9 +153,9 @@ def _run_per_author_analysis(
     try:
         pairs = load_article_embeddings(
             slug,
-            embeddings_dir,
+            paths.embeddings_dir,
             repo.db_path,
-            project_root=project_root,
+            project_root=paths.project_root,
         )
     except (ValueError, OSError) as exc:
         logger.info("analysis: no embeddings for %s (%s)", slug, exc)
@@ -168,8 +166,8 @@ def _run_per_author_analysis(
         author.id,
         pairs,
         config,
-        project_root=project_root,
-        analysis_dir=analysis_dir,
+        project_root=paths.project_root,
+        analysis_dir=paths.analysis_dir,
     )
     if drift_res is not None:
         monthly, drift, _umap, baseline_curve, vels, ai_conv = drift_res
@@ -223,12 +221,8 @@ def _run_target_control_comparisons(
     controls: list[str],
     results: dict[str, AnalysisResult],
     *,
-    features_dir: Path,
-    db_path: Path,
+    paths: AnalysisArtifactPaths,
     config: ForensicsSettings,
-    analysis_dir: Path,
-    embeddings_dir: Path,
-    project_root: Path,
 ) -> dict[str, Any]:
     comparison_payload: dict[str, Any] = {"targets": {}}
     for tid in targets:
@@ -238,12 +232,8 @@ def _run_target_control_comparisons(
             report = compare_target_to_controls(
                 tid,
                 controls,
-                features_dir,
-                db_path,
+                paths,
                 settings=config,
-                analysis_dir=analysis_dir,
-                embeddings_dir=embeddings_dir,
-                project_root=project_root,
             )
             comparison_payload["targets"][tid] = report
         except (ValueError, OSError) as exc:
@@ -299,34 +289,27 @@ def assemble_analysis_result(
 
 
 async def run_full_analysis(
-    db_path: Path,
-    features_dir: Path,
-    embeddings_dir: Path,
+    paths: AnalysisArtifactPaths,
     config: ForensicsSettings,
     *,
-    project_root: Path,
     author_slug: str | None = None,
     probability_trajectory_by_slug: dict[str, ProbabilityTrajectory] | None = None,
 ) -> dict[str, AnalysisResult]:
     """Run changepoint + drift + convergence + hypothesis tests; write JSON artifacts."""
-    analysis_dir = project_root / "data" / "analysis"
-    analysis_dir.mkdir(parents=True, exist_ok=True)
+    paths.analysis_dir.mkdir(parents=True, exist_ok=True)
 
     slugs = [author_slug] if author_slug else [a.slug for a in config.authors]
     prob_map = probability_trajectory_by_slug or {}
 
     results: dict[str, AnalysisResult] = {}
 
-    with Repository(db_path) as repo:
+    with Repository(paths.db_path) as repo:
         for slug in slugs:
             per_author = _run_per_author_analysis(
                 slug,
                 repo,
-                features_dir,
-                embeddings_dir,
+                paths,
                 config,
-                project_root=project_root,
-                analysis_dir=analysis_dir,
                 probability_trajectory_by_slug=prob_map,
             )
             if per_author is None:
@@ -335,7 +318,7 @@ async def run_full_analysis(
             results[slug] = assembled
             _write_per_author_json_artifacts(
                 slug,
-                analysis_dir,
+                paths.analysis_dir,
                 change_points,
                 convergence_windows,
                 assembled,
@@ -354,22 +337,18 @@ async def run_full_analysis(
         targets,
         controls,
         results,
-        features_dir=features_dir,
-        db_path=db_path,
+        paths=paths,
         config=config,
-        analysis_dir=analysis_dir,
-        embeddings_dir=embeddings_dir,
-        project_root=project_root,
     )
 
-    (analysis_dir / "comparison_report.json").write_text(
+    (paths.analysis_dir / "comparison_report.json").write_text(
         json.dumps(comparison_payload, indent=2, default=str),
         encoding="utf-8",
     )
 
-    _merge_run_metadata(analysis_dir, results, comparison_payload)
+    _merge_run_metadata(paths.analysis_dir, results, comparison_payload)
 
-    write_corpus_custody(db_path, analysis_dir)
+    write_corpus_custody(paths.db_path, paths.analysis_dir)
 
     return results
 
@@ -377,14 +356,10 @@ async def run_full_analysis(
 def run_compare_only(
     config: ForensicsSettings,
     *,
-    project_root: Path,
-    db_path: Path,
+    paths: AnalysisArtifactPaths,
     author_slug: str | None = None,
 ) -> dict[str, Any]:
     """Regenerate ``comparison_report.json`` from on-disk artifacts."""
-    features_dir = project_root / "data" / "features"
-    embeddings_dir = project_root / "data" / "embeddings"
-    analysis_dir = project_root / "data" / "analysis"
     controls = [a.slug for a in config.authors if a.role == "control"]
     targets = [a.slug for a in config.authors if a.role == "target"]
     if author_slug:
@@ -395,15 +370,11 @@ def run_compare_only(
             out["targets"][tid] = compare_target_to_controls(
                 tid,
                 controls,
-                features_dir,
-                db_path,
+                paths,
                 settings=config,
-                analysis_dir=analysis_dir,
-                embeddings_dir=embeddings_dir,
-                project_root=project_root,
             )
         except (ValueError, OSError) as exc:
             logger.warning("compare-only: failed for %s (%s)", tid, exc)
-    report_path = analysis_dir / "comparison_report.json"
+    report_path = paths.analysis_dir / "comparison_report.json"
     report_path.write_text(json.dumps(out, indent=2, default=str), encoding="utf-8")
     return out

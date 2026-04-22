@@ -11,14 +11,15 @@ import logging
 from typing import Any
 
 from forensics.features.probability import resolve_torch_device
+from forensics.utils.model_cache import KeyedModelCache
 
 logger = logging.getLogger(__name__)
 
-_PAIR_CACHE: dict[tuple[str, str, str], tuple[Any, Any, Any]] = {}
+_BINOC_PAIR_CACHE = KeyedModelCache()
 
 
 def clear_pair_cache() -> None:
-    _PAIR_CACHE.clear()
+    _BINOC_PAIR_CACHE.clear()
 
 
 def load_binoculars_models(
@@ -58,24 +59,23 @@ def load_binoculars_models(
         )
 
     cache_key = (base_name, instruct_name, resolved)
-    if cache_key in _PAIR_CACHE:
-        return _PAIR_CACHE[cache_key]
 
-    logger.info(
-        "Loading Binoculars pair base=%s instruct=%s on %s",
-        base_name,
-        instruct_name,
-        resolved,
-    )
-    tokenizer = AutoTokenizer.from_pretrained(base_name)
-    dtype = torch.float16 if resolved == "cuda" else torch.float32
-    model_base = AutoModelForCausalLM.from_pretrained(base_name, torch_dtype=dtype)
-    model_inst = AutoModelForCausalLM.from_pretrained(instruct_name, torch_dtype=dtype)
-    model_base.to(resolved).eval()
-    model_inst.to(resolved).eval()
+    def load() -> tuple[Any, Any, Any]:
+        logger.info(
+            "Loading Binoculars pair base=%s instruct=%s on %s",
+            base_name,
+            instruct_name,
+            resolved,
+        )
+        tokenizer = AutoTokenizer.from_pretrained(base_name)
+        dtype = torch.float16 if resolved == "cuda" else torch.float32
+        model_base = AutoModelForCausalLM.from_pretrained(base_name, torch_dtype=dtype)
+        model_inst = AutoModelForCausalLM.from_pretrained(instruct_name, torch_dtype=dtype)
+        model_base.to(resolved).eval()
+        model_inst.to(resolved).eval()
+        return model_base, model_inst, tokenizer
 
-    _PAIR_CACHE[cache_key] = (model_base, model_inst, tokenizer)
-    return model_base, model_inst, tokenizer
+    return _BINOC_PAIR_CACHE.get_or_load(cache_key, load)
 
 
 def compute_binoculars_score(

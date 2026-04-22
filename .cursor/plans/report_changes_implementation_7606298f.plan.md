@@ -49,10 +49,10 @@ todos:
     status: completed
   - id: RF-SMELL-003_RF-SMELL-004_RF-SMELL-005_parameter-objects
     content: "[WAIT | WAVE-4 after RF-CPLX-001 + RF-CPLX-002] RF-SMELL-003/RF-SMELL-004/RF-SMELL-005 parameter cohesion: introduce context/option dataclasses to replace long signatures and repeated path/settings clumps incrementally."
-    status: pending
+    status: completed
   - id: RF-SMELL-002_model-cache-abstraction
     content: "[WAIT | WAVE-4 after RF-DRY-005/RF-SMELL-006/RF-SMELL-001] RF-SMELL-002 shared model cache: add reusable cache utility and migrate embeddings/probability/binoculars caching to it."
-    status: pending
+    status: completed
   - id: P2-PERF-001_embedding-storage-batching
     content: "[WAIT | WAVE-5 after RF-SMELL-003/RF-SMELL-004/RF-SMELL-005] P2-PERF-001 embedding storage scalability: replace per-article .npy write pattern with batched format and backward-compatible read support."
     status: pending

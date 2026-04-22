@@ -169,7 +169,7 @@ def test_embedding_shape(monkeypatch: pytest.MonkeyPatch) -> None:
         def encode(self, text: str, show_progress_bar: bool = False) -> np.ndarray:
             return np.zeros(384, dtype=np.float32)
 
-    monkeypatch.setattr(emb, "_MODEL_CACHE", {})
+    emb.clear_model_cache()
     monkeypatch.setattr(emb, "_get_model", lambda name: _FakeModel())
     vec = emb.compute_embedding("hello", "fake-model")
     assert vec.shape == (384,)
