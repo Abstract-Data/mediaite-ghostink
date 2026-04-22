@@ -70,9 +70,7 @@ def _load_embedding_row(
                     return None
                 mat = np.asarray(z[EMBEDDING_BATCH_KEY_VECTORS], dtype=np.float32)
                 if mat.ndim != 2 or mat.shape[0] != len(ids_list):
-                    logger.warning(
-                        "Malformed embedding batch (shape mismatch): %s", abs_path
-                    )
+                    logger.warning("Malformed embedding batch (shape mismatch): %s", abs_path)
                     return None
                 id_map = {ids_list[i]: i for i in range(len(ids_list))}
             elif "article_ids" in keys and EMBEDDING_BATCH_KEY_VECTORS in keys:
@@ -154,9 +152,7 @@ def compute_baseline_similarity_curve(
     baseline_centroid = base_vecs.mean(axis=0)
     curve: list[tuple[datetime, float]] = []
     for row in ordered:
-        sim = _cosine_similarity(
-            np.asarray(row.embedding, dtype=np.float64), baseline_centroid
-        )
+        sim = _cosine_similarity(np.asarray(row.embedding, dtype=np.float64), baseline_centroid)
         curve.append((row.published_at, sim))
     return curve
 

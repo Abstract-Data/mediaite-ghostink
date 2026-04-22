@@ -182,9 +182,7 @@ def test_monthly_centroids() -> None:
     pairs: list[ArticleEmbedding] = []
     for i, dt in enumerate(stamps):
         pairs.append(
-            ArticleEmbedding(
-                published_at=dt, embedding=np.ones(4, dtype=np.float32) * float(i)
-            )
+            ArticleEmbedding(published_at=dt, embedding=np.ones(4, dtype=np.float32) * float(i))
         )
     out = compute_monthly_centroids(pairs)
     assert len(out) == 3
@@ -237,9 +235,7 @@ def test_baseline_similarity_drift() -> None:
     pairs = []
     for i in range(10):
         noise = np.array([0.0, float(i) * 0.2], dtype=np.float32)
-        pairs.append(
-            ArticleEmbedding(published_at=base + timedelta(days=i), embedding=b + noise)
-        )
+        pairs.append(ArticleEmbedding(published_at=base + timedelta(days=i), embedding=b + noise))
     curve = compute_baseline_similarity_curve(pairs, baseline_count=3)
     assert curve[0][1] >= curve[-1][1]
 

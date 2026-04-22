@@ -177,7 +177,14 @@ def test_lda_document_corpus_skips_empty_and_caps_tail() -> None:
 def test_lda_document_corpus_empty_current() -> None:
     from forensics.features import content as c
 
-    assert c._lda_document_corpus("  \n", ["hello world " * 5], max_peer_documents=10, max_chars_per_document=100) == []
+    peers = ["hello world " * 5]
+    out = c._lda_document_corpus(
+        "  \n",
+        peers,
+        max_peer_documents=10,
+        max_chars_per_document=100,
+    )
+    assert out == []
 
 
 def test_discrete_distribution_entropy() -> None:

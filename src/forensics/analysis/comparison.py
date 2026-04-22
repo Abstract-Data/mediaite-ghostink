@@ -290,9 +290,7 @@ def compare_target_to_controls(
     """Two-sample tests (target vs pooled controls) plus cached change-point / drift summaries."""
     with Repository(paths.db_path) as repo:
         target_author, df_t = _load_target_author_and_frame(repo, paths, target_id)
-        pooled, control_feature_frames = _load_control_frames_and_pooled(
-            repo, paths, control_ids
-        )
+        pooled, control_feature_frames = _load_control_frames_and_pooled(repo, paths, control_ids)
         feature_comparisons = _two_sample_feature_comparisons(df_t, pooled)
         control_change_points, control_drift_scores, control_windows = _summarize_control_authors(
             control_ids,

@@ -255,9 +255,7 @@ def compute_convergence_scores(
             start_d, end_d, vel_by_month, v_mean, v_std, v_thr
         )
         sim_signal = _embedding_similarity_signal(sim_by_date, start_d, end_d)
-        ai_signal = (
-            _ai_curve_signal(ai_by_month, months_in) if ai_convergence_curve else 0.0
-        )
+        ai_signal = _ai_curve_signal(ai_by_month, months_in) if ai_convergence_curve else 0.0
 
         b_parts = [peak_signal, sim_signal]
         if ai_convergence_curve:

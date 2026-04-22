@@ -67,7 +67,7 @@ todos:
     status: completed
   - id: T10-final-verify
     content: "[ALL AGENTS] TIER10 after T09 merged - ruff, pytest --cov, CLI smoke, full PR checklist"
-    status: pending
+    status: completed
 isProject: true
 ---
 

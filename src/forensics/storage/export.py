@@ -46,9 +46,7 @@ async def append_jsonl_async(path: Path, record: dict[str, Any]) -> None:
         await asyncio.to_thread(_write)
 
 
-def export_articles_jsonl(
-    db_path: Path, output_path: Path, *, batch_size: int = 500
-) -> int:
+def export_articles_jsonl(db_path: Path, output_path: Path, *, batch_size: int = 500) -> int:
     """Write all articles as JSON lines; returns number of records.
 
     Streams from SQLite so memory stays proportional to ``batch_size`` rather than

@@ -237,9 +237,7 @@ async def _run_scrape_mode(
         case ScrapeMode.DISCOVER_ONLY:
             return await _discover_only(settings, manifest_path, force_refresh=force_refresh)
         case ScrapeMode.METADATA_ONLY:
-            return await _metadata_only(
-                db_path, settings, manifest_path, all_authors=all_authors
-            )
+            return await _metadata_only(db_path, settings, manifest_path, all_authors=all_authors)
         case ScrapeMode.DISCOVER_AND_METADATA:
             return await _discover_and_metadata(
                 db_path,

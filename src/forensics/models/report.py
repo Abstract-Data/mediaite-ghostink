@@ -60,6 +60,7 @@ def classify_finding_strength(
 # TODO(phase-8): ``ReportManifest`` is a minimal stub; wire writers when the
 # report CLI persists manifests alongside rendered books.
 
+
 class ReportManifest(BaseModel):
     run_id: str
     title: str
