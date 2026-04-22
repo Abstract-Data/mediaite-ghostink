@@ -224,6 +224,15 @@ class Repository:
             return None
         return _author_row_to_model(row)
 
+    def all_authors(self) -> list[Author]:
+        """Return every author in the database ordered by slug.
+
+        Use inside an active ``with Repository(...)`` context (ADR-001).
+        """
+        conn = self._require_conn()
+        rows = conn.execute("SELECT * FROM authors ORDER BY slug").fetchall()
+        return [_author_row_to_model(row) for row in rows]
+
     def list_articles_for_extraction(self, *, author_id: str | None = None) -> list[Article]:
         """Return articles eligible for feature extraction (Phase 4 selection rules)."""
         parts = [
