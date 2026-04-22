@@ -9,8 +9,13 @@ from pathlib import Path
 from forensics.config.settings import get_project_root
 
 
-def config_fingerprint() -> str:
-    """Short hash of the active TOML config file for ``analysis_runs``."""
+def config_fingerprint() -> str | None:
+    """Short hash of the active TOML config file for ``analysis_runs``.
+
+    Returns ``None`` when no config file is found — callers must skip the
+    ``analysis_runs`` row rather than persist a sentinel hash that would
+    collide across unrelated config-less runs.
+    """
     raw = os.environ.get("FORENSICS_CONFIG_FILE", "").strip()
     candidates: list[Path] = [Path(raw).expanduser()] if raw else []
     candidates.append(get_project_root() / "config.toml")
@@ -18,4 +23,4 @@ def config_fingerprint() -> str:
         if path.is_file():
             digest = hashlib.sha256(path.read_bytes()).hexdigest()
             return digest[:48]
-    return "no_config_file"
+    return None
