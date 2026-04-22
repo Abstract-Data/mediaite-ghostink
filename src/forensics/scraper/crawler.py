@@ -21,12 +21,7 @@ from forensics.config.settings import (
 from forensics.models.article import Article
 from forensics.models.author import Author, AuthorManifest
 from forensics.scraper.client import create_scraping_client
-from forensics.scraper.fetcher import (
-    RateLimiter,
-    append_scrape_error,
-    request_with_retry,
-    scrape_error_record,
-)
+from forensics.scraper.fetcher import RateLimiter, log_scrape_error, request_with_retry
 from forensics.storage.repository import Repository
 from forensics.utils.datetime import parse_wp_datetime
 
@@ -199,16 +194,13 @@ async def discover_authors(
                 phase="discover_users",
             )
             if not resp.is_success:
-                await append_scrape_error(
+                await log_scrape_error(
                     errors,
-                    scrape_error_record(
-                        url,
-                        resp.status_code,
-                        resp.reason_phrase,
-                        "discover_users",
-                    ),
+                    url,
+                    resp.status_code,
+                    f"{resp.reason_phrase} (users page {page})",
+                    "discover_users",
                 )
-                logger.warning("Failed users page %s: HTTP %s", page, resp.status_code)
                 break
             tp = _int_header(resp, "X-WP-TotalPages", 1)
             if tp is not None:
@@ -246,14 +238,12 @@ async def discover_authors(
                     tt = _int_header(cresp, "X-WP-Total", 0)
                     total_posts = tt if tt is not None else 0
                 else:
-                    await append_scrape_error(
+                    await log_scrape_error(
                         errors,
-                        scrape_error_record(
-                            count_url,
-                            cresp.status_code,
-                            cresp.reason_phrase,
-                            "discover_count",
-                        ),
+                        count_url,
+                        cresp.status_code,
+                        cresp.reason_phrase,
+                        "discover_count",
                     )
                 try:
                     return user_dict_to_manifest(
@@ -336,14 +326,12 @@ async def collect_article_metadata(
                     )
                 except Exception as exc:  # noqa: BLE001 — isolate per-author failures
                     logger.exception("metadata ingestion failed for author slug=%s", cfg.slug)
-                    await append_scrape_error(
+                    await log_scrape_error(
                         errors,
-                        scrape_error_record(
-                            cfg.archive_url,
-                            None,
-                            f"{cfg.slug}: {exc!r}",
-                            "metadata_author",
-                        ),
+                        cfg.archive_url,
+                        None,
+                        f"{cfg.slug}: {exc!r}",
+                        "metadata_author",
                     )
                     return 0
 
@@ -369,10 +357,12 @@ async def _ingest_author_posts(
 ) -> int:
     manifest_row = by_slug.get(cfg.slug)
     if manifest_row is None:
-        logger.warning("Author slug %s not in manifest; skipping metadata", cfg.slug)
-        await append_scrape_error(
+        await log_scrape_error(
             errors_path,
-            scrape_error_record("", None, f"slug_not_in_manifest:{cfg.slug}", "metadata"),
+            "",
+            None,
+            f"slug_not_in_manifest:{cfg.slug}",
+            "metadata",
         )
         return 0
 
@@ -411,16 +401,13 @@ async def _ingest_author_posts(
             phase="metadata",
         )
         if not resp.is_success:
-            await append_scrape_error(
+            await log_scrape_error(
                 errors_path,
-                scrape_error_record(
-                    url,
-                    resp.status_code,
-                    resp.reason_phrase,
-                    "metadata",
-                ),
+                url,
+                resp.status_code,
+                f"{resp.reason_phrase} (author={cfg.slug} posts page {page})",
+                "metadata",
             )
-            logger.warning("Failed posts for %s page %s: HTTP %s", cfg.slug, page, resp.status_code)
             break
         tp = _int_header(resp, "X-WP-TotalPages", 1)
         if tp is not None:

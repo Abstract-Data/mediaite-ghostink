@@ -93,6 +93,17 @@ def scrape_error_record(
     }
 
 
+async def log_scrape_error(
+    path: Path,
+    url: str,
+    status_code: int | None,
+    error: str,
+    phase: str,
+) -> None:
+    """Append one structured scrape error (``scrape_error_record`` shape)."""
+    await append_scrape_error(path, scrape_error_record(url, status_code, error, phase))
+
+
 def _retry_after_seconds(response: httpx.Response) -> float | None:
     raw = response.headers.get("Retry-After")
     if raw is None:
@@ -125,10 +136,7 @@ async def request_with_retry(
             response = await client.request(method, url, **kwargs)
         except httpx.RequestError as exc:
             if attempt >= max_retries:
-                await append_scrape_error(
-                    errors_path,
-                    scrape_error_record(url, None, repr(exc), phase),
-                )
+                await log_scrape_error(errors_path, url, None, repr(exc), phase)
                 raise
             sleep_s = backoff_base * (2**attempt)
             logger.warning("Request error %s (attempt %s): %s", url, attempt + 1, exc)
@@ -137,23 +145,18 @@ async def request_with_retry(
             continue
 
         if response.status_code == 404:
-            await append_scrape_error(
-                errors_path,
-                scrape_error_record(url, 404, "Not Found", phase),
-            )
+            await log_scrape_error(errors_path, url, 404, "Not Found", phase)
             return response
 
         if response.status_code == 429:
             wait429 = _retry_after_seconds(response) or 30.0
             if attempt >= max_retries:
-                await append_scrape_error(
+                await log_scrape_error(
                     errors_path,
-                    scrape_error_record(
-                        url,
-                        429,
-                        "Too Many Requests (exhausted retries)",
-                        phase,
-                    ),
+                    url,
+                    429,
+                    "Too Many Requests (exhausted retries)",
+                    phase,
                 )
                 return response
             logger.warning("429 for %s; sleeping %.1fs", url, wait429)
@@ -163,14 +166,12 @@ async def request_with_retry(
 
         if 500 <= response.status_code < 600:
             if attempt >= max_retries:
-                await append_scrape_error(
+                await log_scrape_error(
                     errors_path,
-                    scrape_error_record(
-                        url,
-                        response.status_code,
-                        response.reason_phrase,
-                        phase,
-                    ),
+                    url,
+                    response.status_code,
+                    response.reason_phrase,
+                    phase,
                 )
                 return response
             sleep_s = backoff_base * (2**attempt)
@@ -242,7 +243,10 @@ async def _build_successful_fetch_outside_lock(
     coauth: Path,
     warns: Path,
 ) -> None:
-    """Parse HTML, write raw file, merge metadata, append side JSONL; mutates ``article`` (no DB)."""
+    """Parse HTML, write raw file, merge metadata, append side JSONL.
+
+    Mutates ``article`` (no DB).
+    """
     raw_path = _write_raw_html_file(root, year, article_id, html)
     clean = extract_article_text(html)
     meta_extra = extract_metadata(html)
@@ -333,14 +337,12 @@ async def _fetch_one_article_html(
             return
 
         if not _is_mediaite_host(final_host):
-            await append_scrape_error(
+            await log_scrape_error(
                 errors,
-                scrape_error_record(
-                    str(row.url),
-                    response.status_code,
-                    f"redirect_off_domain:{final_host}",
-                    "html_fetch",
-                ),
+                str(row.url),
+                response.status_code,
+                f"redirect_off_domain:{final_host}",
+                "html_fetch",
             )
             async with db_lock:
                 article = await asyncio.to_thread(repo.get_article_by_id, row.article_id)

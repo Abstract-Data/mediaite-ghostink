@@ -1,7 +1,8 @@
-# ADR-002: Scraper storage concurrency — writer-queue vs aiosqlite
+# ADR-004: Scraper storage concurrency — writer-queue vs aiosqlite
 
 - **Status:** Proposed (no implementation until explicitly approved)
 - **Date:** 2026-04-21
+- **Note:** Unified under `docs/adr/` as ADR-004 because ADR-002 is reserved for [storage layer](./ADR-002-storage-layer-sqlite-parquet-duckdb.md).
 - **Scope:** Forensics scraper pipeline after incremental Phases A–C (narrow `db_lock` sections, `asyncio.to_thread` for short SQL, parallel discovery/metadata where bounded, streaming dedup/export). This ADR addresses the *next* structural step if further throughput or simplicity is required.
 
 ## Context

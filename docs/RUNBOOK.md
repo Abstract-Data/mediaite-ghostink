@@ -190,15 +190,26 @@ uv run pytest tests/ -v --cov=src --cov-report=term-missing
 uv run pytest tests/ -v --hypothesis-show-statistics
 ```
 
-## Git Workflow
+## Git workflow (GitButler)
+
+Use GitButler CLI (`but`) for writes (commit, push, branch, merge, stash, rebase-style edits). The full command map and recipes live in the repo-local skill:
+
+- `.claude/skills/gitbutler/SKILL.md` (Claude Code)
+- `.cursor/skills/gitbutler/SKILL.md` (Cursor — same mirror)
+
+Notion playbook add-on (parallel agents, `but status --json`, `--json --status-after`): `.claude/skills/gitbutler-workflow/SKILL.md` (mirrored under `.cursor/skills/gitbutler-workflow/`).
+
+Project-specific notes (forge target, PRs) are in `AGENTS.md` under **Learned Workspace Facts** (GitButler bullet).
 
 ```bash
-# Before every commit
+# Preflight before you commit (quality bar — run with git or but read-only)
 uv run ruff format .
 uv run ruff check . --fix
 uv run pytest tests/ -v
 
-# Conventional commit prefixes
+# Then use but for the actual commit/push (see gitbutler skill — e.g. but status -fv, but commit ... --status-after; optional JSON flow in gitbutler-workflow skill)
+
+# Conventional commit prefixes for messages
 # feat: fix: refactor: test: docs: chore:
 ```
 

@@ -457,6 +457,8 @@ See `prompts/README.md` for the full versioning contract, bump rules, and releas
 - Tasks database: https://www.notion.so/abstractdata/mediaite-ghostink-tasks
 - Project page: https://www.notion.so/abstractdata/Colby-Hall-AI-Use-Investigation-34a7d7f56298807a8e38e05e30edc3d5
 - Client page: https://www.notion.so/abstractdata/Mediaite-2f47d7f5629880659e33d3eed6e2b498
+- GitButler skill template (Claude Code + Cursor): https://www.notion.so/34a7d7f56298816eae8be56c8fd8c4aa
+- GitButler playbook — virtual branches for parallel agent work: https://www.notion.so/34a7d7f56298816fa6d2cd77b6cebfc8
 
 ## Learned User Preferences
 
@@ -470,6 +472,8 @@ See `prompts/README.md` for the full versioning contract, bump rules, and releas
 - Git remote `origin` targets **Abstract-Data/mediaite-ghostink** on GitHub; `git remote -v` may show an SSH form if HTTPS URLs are rewritten in Git config.
 - **`requires-python`** in `pyproject.toml` is **`>=3.13,<3.14`** so the declared scientific and ML dependency set resolves against published wheels.
 - Phase 2 discovery and metadata scraping persist **`data/authors_manifest.jsonl`**, **`data/scrape_errors.jsonl`**, and **`data/articles.db`** at the repository root (paths resolved via `get_project_root()`).
-- GitButler (`but`) from this repo: authenticate the forge once (`but config forge auth`); for GitHub PRs ensure the integration target is **`origin/main`** (not `gb-local/main`). If `but config target` refuses while virtual branches are applied, `but unapply` the stack first, set the target, then `but apply` again before `but push` / `but pr new`.
+- GitButler (`but`): follow the repo-local skill at `.claude/skills/gitbutler/SKILL.md` (mirrored at `.cursor/skills/gitbutler/SKILL.md`). For the Notion playbook add-on (parallel agents, JSON workflow), see `.claude/skills/gitbutler-workflow/SKILL.md` (mirrored under `.cursor/skills/gitbutler-workflow/`). From this repo: authenticate the forge once (`but config forge auth`); for GitHub PRs ensure the integration target is **`origin/main`** (not `gb-local/main`). If `but config target` refuses while virtual branches are applied, `but unapply` the stack first, set the target, then `but apply` again before `but push` / `but pr new`.
 - The `forensics` console script imports the **`forensics.cli` package** (`src/forensics/cli/` Typer app); the old monolithic `src/forensics/cli.py` was removed after the Typer migration—treat package modules as the CLI source of truth when updating docs or tracing dispatch.
 - `forensics scrape --all-authors` walks **every** author in `data/authors_manifest.jsonl` for metadata (and skips the placeholder guard on scrape-like invocations); `extract` / `analyze` / reporting still resolve study authors from `config.toml` via `resolve_author_rows` unless narrowed with `--author`.
+- README-aligned local modeling and reporting expect **`uv run python -m spacy download en_core_web_md`** for extraction and **Quarto on `PATH`** when running **`forensics report`** or **`forensics all`** (plus non-placeholder `config.toml` authors for guarded scrape paths).
+- In `collect_article_metadata`, author ingestion runs **concurrently** up to **`scraping.max_concurrent`**, all tasks share one **`RateLimiter`**, SQLite writes go through a per-run **`asyncio.Lock`**, and per-author failures append to **`data/scrape_errors.jsonl`** without stopping the whole batch.

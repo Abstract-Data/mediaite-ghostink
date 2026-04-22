@@ -36,7 +36,7 @@ todos:
     content: "Phase C3: Tests comparing old vs streaming dedup output on existing fixtures; export line-count parity test."
     status: completed
   - id: phaseD
-    content: "Phase D: Write ADR-002 in docs/decisions/ comparing writer-queue vs aiosqlite, recommend writer-queue, do NOT implement until approved."
+    content: "Phase D: Write ADR-004 in docs/adr/ comparing writer-queue vs aiosqlite, recommend writer-queue, do NOT implement until approved."
     status: completed
 isProject: false
 ---
@@ -175,7 +175,7 @@ Benefits: memory drops from O(corpus_size × avg_article_bytes) to O(corpus_size
 
 ## Phase D: Structural decision memo (no code)
 
-Deliverable: a short doc at `docs/decisions/ADR-002-scraper-storage-concurrency.md` capturing the tradeoffs between the two candidates, with a recommendation. Do NOT implement until you approve.
+Deliverable: a short doc at `docs/adr/ADR-004-scraper-storage-concurrency.md` capturing the tradeoffs between the two candidates, with a recommendation. Do NOT implement until you approve.
 
 ### Candidate 1: Writer-queue pattern (producer/consumer)
 - Fetch coroutines push completed `Article` updates onto an `asyncio.Queue`.

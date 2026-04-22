@@ -1,0 +1,14 @@
+{
+  "family": "phase12-survey-tui-hardening",
+  "current_version": "0.1.0",
+  "versions": [
+    {
+      "version": "0.1.0",
+      "date": "2026-04-21",
+      "status": "pending",
+      "model": "claude-opus-4-6",
+      "file": "v0.1.0.md",
+      "changelog_entry": "Initial prompt: survey/blind run mode, interactive TUI setup wizard, preflight hardening, calibration suite, pre-registration locking, permutation significance tests, natural control cohort, report overhaul, evidence narratives, operational QoL (checkpoint/resume, config validation, DuckDB export)."
+    }
+  ]
+}
