@@ -313,6 +313,35 @@ def test_drift_scores_assembly() -> None:
     assert ds.intra_period_variance_trend == [0.3, 0.2]
 
 
+def test_drift_scores_ai_baseline_none_when_no_convergence() -> None:
+    """Without an AI baseline, ai_baseline_similarity must be None — not 0.0.
+
+    Distinguishes "no measurement" from a real zero convergence reading.
+    """
+    from forensics.analysis.drift import compute_drift_scores
+
+    base = datetime(2024, 1, 1, tzinfo=UTC)
+    curve = [(base + timedelta(days=i), 1.0 - 0.01 * i) for i in range(3)]
+
+    ds_none = compute_drift_scores(
+        "author-1",
+        curve,
+        None,
+        [0.01, 0.02],
+        [("2024-01", 0.3)],
+    )
+    assert ds_none.ai_baseline_similarity is None
+
+    ds_empty = compute_drift_scores(
+        "author-1",
+        curve,
+        [],
+        [0.01, 0.02],
+        [("2024-01", 0.3)],
+    )
+    assert ds_empty.ai_baseline_similarity is None
+
+
 def test_extract_lda_topic_keywords_runs() -> None:
     from forensics.baseline.topics import extract_lda_topic_keywords
 
