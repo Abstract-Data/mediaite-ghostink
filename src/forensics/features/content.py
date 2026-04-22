@@ -6,7 +6,7 @@ import math
 import re
 from collections import Counter
 from functools import lru_cache
-from typing import Any
+from typing import Any, Final
 
 import numpy as np
 from sklearn.decomposition import LatentDirichletAllocation
@@ -15,6 +15,10 @@ from sklearn.metrics.pairwise import cosine_similarity
 from spacy.tokens import Doc
 
 from forensics.config.settings import AnalysisConfig
+
+# Self-similarity requires a minimum peer set; fewer peers yields noisy or
+# degenerate cosine scores that harm downstream convergence detection.
+MIN_PEERS_FOR_SIMILARITY: Final[int] = 5
 
 
 def _shannon_bigrams_trigrams(words: list[str]) -> tuple[float, float]:
@@ -47,8 +51,16 @@ def _self_similarity_cached(current: str, peers: tuple[str, ...]) -> float:
     return float(sims.mean())
 
 
-def _self_similarity(current: str, peers: list[str]) -> float:
+def _self_similarity(current: str, peers: list[str]) -> float | None:
+    """TF-IDF cosine similarity of ``current`` vs ``peers``.
+
+    Returns ``None`` when fewer than :data:`MIN_PEERS_FOR_SIMILARITY` usable
+    peers are available — early-career authors lack the peer history needed
+    for a meaningful self-similarity signal.
+    """
     usable = [p for p in peers if p and p.strip()]
+    if len(usable) < MIN_PEERS_FOR_SIMILARITY:
+        return None
     return _self_similarity_cached(current, tuple(usable))
 
 
@@ -208,6 +220,8 @@ def extract_content_features(
     return {
         "bigram_entropy": bi,
         "trigram_entropy": tri,
+        # ``self_similarity_*`` may be ``None`` when peer set is smaller than
+        # ``MIN_PEERS_FOR_SIMILARITY`` — downstream code must treat as null.
         "self_similarity_30d": sim30,
         "self_similarity_90d": sim90,
         "topic_diversity_score": topic_div,

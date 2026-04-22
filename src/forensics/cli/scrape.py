@@ -148,7 +148,9 @@ async def _fetch_dedup_export(
             n = await fetch_articles(db_path, settings, dry_run=dry_run, repo=r)
     logger.info("fetch: processed %d article(s)%s", n, " (dry-run)" if dry_run else "")
     if not dry_run:
-        dup_ids = deduplicate_articles(db_path)
+        dup_ids = deduplicate_articles(
+            db_path, hamming_threshold=settings.scraping.simhash_threshold
+        )
         logger.info("dedup: marked %d article(s) as near-duplicates", len(dup_ids))
         ex = _export_jsonl(db_path, root)
         logger.info("export: wrote %d article(s) to data/articles.jsonl", ex)
@@ -203,7 +205,9 @@ async def _full_pipeline(
         logger.info("metadata: inserted %d new article row(s) into %s", inserted, db_path)
         fetched = await fetch_articles(db_path, settings, dry_run=False, repo=repo)
     logger.info("fetch: processed %d article(s)", fetched)
-    dup_ids = deduplicate_articles(db_path)
+    dup_ids = deduplicate_articles(
+        db_path, hamming_threshold=settings.scraping.simhash_threshold
+    )
     logger.info("dedup: marked %d article(s) as near-duplicates", len(dup_ids))
     ex = _export_jsonl(db_path, root)
     logger.info("export: wrote %d article(s) to data/articles.jsonl", ex)
@@ -227,7 +231,9 @@ async def _run_scrape_mode(
             logger.info("archive: compressed %d year directory(ies) under data/raw/", n)
             return 0
         case ScrapeMode.DEDUP_ONLY:
-            dup_ids = deduplicate_articles(db_path)
+            dup_ids = deduplicate_articles(
+                db_path, hamming_threshold=settings.scraping.simhash_threshold
+            )
             logger.info("dedup: marked %d article(s) as near-duplicates", len(dup_ids))
             return 0
         case ScrapeMode.FETCH_ONLY:

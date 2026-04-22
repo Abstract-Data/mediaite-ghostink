@@ -10,6 +10,13 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import numpy as np
+from rich.progress import (
+    BarColumn,
+    Progress,
+    SpinnerColumn,
+    TextColumn,
+    TimeElapsedColumn,
+)
 
 from forensics.analysis.utils import resolve_author_rows
 from forensics.config import get_project_root
@@ -157,104 +164,132 @@ def extract_all_features(
         failed = 0
         manifest_records: list[EmbeddingRecord] = []
 
-        for author_id, seq in by_author.items():
-            author = repo.get_author(author_id)
-            slug = author.slug if author else author_id
-            author_name = author.name if author else author_id
-            out_features: list[FeatureVector] = []
-            embed_dir_author = embed_root / slug
-            embed_batch: list[tuple[str, datetime, np.ndarray]] = []
+        progress = Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+            TimeElapsedColumn(),
+            transient=False,
+        )
+        progress.start()
+        try:
+            for author_id, seq in by_author.items():
+                author = repo.get_author(author_id)
+                slug = author.slug if author else author_id
+                author_name = author.name if author else author_id
+                out_features: list[FeatureVector] = []
+                embed_dir_author = embed_root / slug
+                embed_batch: list[tuple[str, datetime, np.ndarray]] = []
 
-            batch = len(seq)
-            batch_failed = 0
-
-            for idx, article in enumerate(seq):
-                if processed and processed % 50 == 0:
-                    logger.info(
-                        "Extracting features: %d articles (%s)",
-                        processed,
-                        author_name,
-                    )
-                try:
-                    doc = nlp(article.clean_text)
-                    lex = lexical.extract_lexical_features(article.clean_text, doc)
-                    pos = pos_patterns.extract_pos_pattern_features(doc)
-                    struct = structural.extract_structural_features(article.clean_text, doc)
-                    recent30 = _recent_peer_texts(seq, idx, 30)
-                    recent90 = _recent_peer_texts(seq, idx, 90)
-                    cont = content.extract_content_features(
-                        article.clean_text,
-                        doc,
-                        recent30,
-                        recent90,
-                        analysis=settings.analysis,
-                    )
-                    prior_tuples = [(a.published_date, a.word_count) for a in seq[:idx]]
-                    prod = productivity.extract_productivity_features(
-                        article.published_date,
-                        article.word_count,
-                        prior_tuples,
-                    )
-                    read = readability.extract_readability_features(article.clean_text)
-
-                    fv = build_feature_vector_from_extractors(
-                        article,
-                        lex=lex,
-                        struct=struct,
-                        cont=cont,
-                        prod=prod,
-                        read=read,
-                        pos=pos,
-                    )
-                    out_features.append(fv)
-
-                    if not skip_embeddings:
-                        vec = embeddings.compute_embedding(article.clean_text, model_name)
-                        embed_batch.append(
-                            (article.id, article.published_date, np.asarray(vec, dtype=np.float32))
-                        )
-                    processed += 1
-                except _FEATURE_EXTRACTION_ERRORS as exc:
-                    batch_failed += 1
-                    failed += 1
-                    logger.exception(
-                        "Feature extraction failed for article %s (%s: %s)",
-                        article.id,
-                        type(exc).__name__,
-                        exc,
-                    )
-                    if batch and (batch_failed / batch) > max_fail_ratio:
-                        msg = (
-                            f"Feature extraction abort: >{max_fail_ratio:.0%} failures in author "
-                            f"batch slug={slug} ({batch_failed}/{batch})"
-                        )
-                        raise RuntimeError(msg) from exc
-
-            if not skip_embeddings and embed_batch:
-                embed_dir_author.mkdir(parents=True, exist_ok=True)
-                rel_batch = Path("data") / "embeddings" / slug / AUTHOR_EMBEDDING_BATCH_BASENAME
-                abs_batch = root / rel_batch
-                mat = np.stack([row[2] for row in embed_batch], axis=0)
-                write_author_embedding_batch(
-                    abs_batch,
-                    [row[0] for row in embed_batch],
-                    mat,
+                batch = len(seq)
+                batch_failed = 0
+                task_id = progress.add_task(
+                    f"Extracting {author_name}", total=batch
                 )
-                for aid, ts, vec in embed_batch:
-                    manifest_records.append(
-                        EmbeddingRecord(
-                            article_id=aid,
-                            author_id=author_id,
-                            timestamp=ts,
-                            model_name=model_name,
-                            model_version=model_version,
-                            embedding_path=str(rel_batch),
-                            embedding_dim=int(vec.shape[0]),
-                        )
-                    )
 
-            if out_features:
-                write_features(out_features, features_dir / f"{slug}.parquet")
+                for idx, article in enumerate(seq):
+                    if processed and processed % 50 == 0:
+                        logger.debug(
+                            "Extracting features: %d articles (%s)",
+                            processed,
+                            author_name,
+                        )
+                    try:
+                        doc = nlp(article.clean_text)
+                        lex = lexical.extract_lexical_features(article.clean_text, doc)
+                        pos = pos_patterns.extract_pos_pattern_features(doc)
+                        struct = structural.extract_structural_features(
+                            article.clean_text, doc
+                        )
+                        recent30 = _recent_peer_texts(seq, idx, 30)
+                        recent90 = _recent_peer_texts(seq, idx, 90)
+                        cont = content.extract_content_features(
+                            article.clean_text,
+                            doc,
+                            recent30,
+                            recent90,
+                            analysis=settings.analysis,
+                        )
+                        prior_tuples = [
+                            (a.published_date, a.word_count) for a in seq[:idx]
+                        ]
+                        prod = productivity.extract_productivity_features(
+                            article.published_date,
+                            article.word_count,
+                            prior_tuples,
+                        )
+                        read = readability.extract_readability_features(article.clean_text)
+
+                        fv = build_feature_vector_from_extractors(
+                            article,
+                            lex=lex,
+                            struct=struct,
+                            cont=cont,
+                            prod=prod,
+                            read=read,
+                            pos=pos,
+                        )
+                        out_features.append(fv)
+
+                        if not skip_embeddings:
+                            vec = embeddings.compute_embedding(article.clean_text, model_name)
+                            embed_batch.append(
+                                (
+                                    article.id,
+                                    article.published_date,
+                                    np.asarray(vec, dtype=np.float32),
+                                )
+                            )
+                        processed += 1
+                    except _FEATURE_EXTRACTION_ERRORS as exc:
+                        batch_failed += 1
+                        failed += 1
+                        logger.exception(
+                            "Feature extraction failed for article %s (%s: %s)",
+                            article.id,
+                            type(exc).__name__,
+                            exc,
+                        )
+                        if batch and (batch_failed / batch) > max_fail_ratio:
+                            msg = (
+                                f"Feature extraction abort: >{max_fail_ratio:.0%} "
+                                f"failures in author batch slug={slug} "
+                                f"({batch_failed}/{batch})"
+                            )
+                            raise RuntimeError(msg) from exc
+                    finally:
+                        progress.update(task_id, advance=1)
+
+                if not skip_embeddings and embed_batch:
+                    embed_dir_author.mkdir(parents=True, exist_ok=True)
+                    rel_batch = (
+                        Path("data") / "embeddings" / slug / AUTHOR_EMBEDDING_BATCH_BASENAME
+                    )
+                    abs_batch = root / rel_batch
+                    mat = np.stack([row[2] for row in embed_batch], axis=0)
+                    write_author_embedding_batch(
+                        abs_batch,
+                        [row[0] for row in embed_batch],
+                        mat,
+                    )
+                    for aid, ts, vec in embed_batch:
+                        manifest_records.append(
+                            EmbeddingRecord(
+                                article_id=aid,
+                                author_id=author_id,
+                                timestamp=ts,
+                                model_name=model_name,
+                                model_version=model_version,
+                                embedding_path=str(rel_batch),
+                                embedding_dim=int(vec.shape[0]),
+                            )
+                        )
+
+                if out_features:
+                    write_features(out_features, features_dir / f"{slug}.parquet")
+        finally:
+            progress.stop()
 
         if not skip_embeddings:
             write_embeddings_manifest(manifest_records, embed_root / "manifest.jsonl")

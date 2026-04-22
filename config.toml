@@ -27,6 +27,8 @@ user_agent = "AI-Writing-Forensics/1.0 (research)"
 max_concurrent = 3
 max_retries = 3
 retry_backoff_seconds = 5.0
+# Near-duplicate threshold (hamming distance over 128-bit simhash); lower is stricter.
+simhash_threshold = 3
 
 [analysis]
 rolling_windows = [30, 90]

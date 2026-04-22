@@ -34,9 +34,29 @@ logger = logging.getLogger(__name__)
 
 
 def run_all_pipeline() -> int:
-    """Run the default full pipeline; returns process exit code."""
+    """Run the default full pipeline; returns process exit code.
+
+    The pipeline refuses to start when preflight checks hard-fail (returns
+    exit code ``2``) — this prevents cascading errors deeper in the run when
+    the environment is known to be broken.
+    """
+    from forensics.preflight import run_all_preflight_checks
+
+    settings = get_settings()
+    report = run_all_preflight_checks(settings)
+    if report.has_failures:
+        for failure in report.failures():
+            logger.error("preflight FAIL: %s — %s", failure.name, failure.message)
+        logger.error("Fix preflight failures before running the pipeline.")
+        return 2
+    for warning in report.warnings():
+        logger.warning("preflight WARN: %s — %s", warning.name, warning.message)
+
     root = get_project_root()
     db_path = root / "data" / "articles.db"
+    PipelineContext.resolve().record_audit(
+        "forensics all — preflight", optional=True, log=logger
+    )
     PipelineContext.resolve().record_audit("forensics all", optional=True, log=logger)
 
     code = asyncio.run(
@@ -53,7 +73,6 @@ def run_all_pipeline() -> int:
     if code != 0:
         return code
 
-    settings = get_settings()
     extract_all_features(db_path, settings, author_slug=None, skip_embeddings=False)
 
     try:

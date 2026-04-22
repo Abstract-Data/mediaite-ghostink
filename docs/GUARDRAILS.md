@@ -100,6 +100,24 @@ Each Sign has:
 - Reason: The 117-line `_async_scrape` function with ~18 cyclomatic complexity was flagged as the single most critical refactoring issue. Adding Phase 4–7 flags to this pattern would make it unmaintainable.
 - Provenance: Agent-learned — 2026-04-20 code review (RF-CPLX-001, P2-CQ-2).
 
+**Sign: Hand-Built Data Paths Instead of Centralized Helpers**
+- Trigger: Code constructs paths like `project_root / "data" / "features" / f"{slug}.parquet"` or `project_root / "data" / "analysis" / ...` manually instead of using `AnalysisArtifactPaths` methods.
+- Instruction: Always use `AnalysisArtifactPaths.features_parquet(slug)`, `.analysis_json(slug)`, `.drift_dir(slug)`, etc. If the method doesn't exist, add it to `AnalysisArtifactPaths` first. Never hand-build paths to `data/` subdirectories.
+- Reason: Flagged in 3 of 5 review runs (RF-DRY-003). Hand-built paths create shotgun surgery when directory layout changes and are a recurring source of DRY violations.
+- Provenance: Agent-learned — 2026-04-22 cross-run pattern analysis (5 reviews).
+
+**Sign: Inlined Feature Frame Loading Instead of Utility**
+- Trigger: Code calls `pl.scan_parquet(path).filter(pl.col("author_id") == ...)` or equivalent outside of `analysis/utils.py`.
+- Instruction: Use `load_feature_frame_for_author()` from `forensics.analysis.utils`. If the utility doesn't meet your needs, extend it — don't duplicate inline.
+- Reason: Flagged in 3 of 5 review runs (RF-DRY-002). The load-filter-fallback pattern was duplicated in 5 locations.
+- Provenance: Agent-learned — 2026-04-22 cross-run pattern analysis.
+
+**Sign: C901 Suppression Added Without Decomposition Plan**
+- Trigger: A new `per-file-ignores` entry for C901 is added to `pyproject.toml` without a corresponding decomposition task.
+- Instruction: Before adding a C901 suppression, first attempt to decompose the complex function. If decomposition is deferred, add an inline `# TODO(phase13): decompose — see RF-CX-NNN` comment AND create a tracking issue. Never suppress C901 silently.
+- Reason: C901 suppressions grew from 7 to 9 across review runs without corresponding reduction effort. Each suppression hides real complexity debt.
+- Provenance: Agent-learned — 2026-04-22 cross-run pattern analysis.
+
 ## Agent and Change Management
 
 - Follow `AGENTS.md` in dev mode and `AGENTS.staging.md` in staging mode.

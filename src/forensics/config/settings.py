@@ -55,6 +55,9 @@ class ScrapingConfig(BaseModel):
     max_concurrent: int = 3
     max_retries: int = 3
     retry_backoff_seconds: float = 5.0
+    # Hamming-distance threshold passed to ``deduplicate_articles``.
+    # Lower is stricter; 0 disables near-duplicate collapsing entirely.
+    simhash_threshold: int = Field(default=3, ge=0, le=64)
 
 
 class AnalysisConfig(BaseModel):
