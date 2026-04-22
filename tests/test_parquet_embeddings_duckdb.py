@@ -324,3 +324,164 @@ def test_load_article_embeddings_rejects_legacy_object_npz_batch(
         project_root=root,
     )
     assert pairs == []
+
+
+def test_load_article_embeddings_skips_batch_missing_required_keys(
+    tmp_path: Path,
+    sample_author,
+) -> None:
+    """Malformed archive without UTF-8 packing keys is ignored (P1-TEST-001)."""
+    from forensics.analysis.drift import load_article_embeddings
+    from forensics.storage.repository import Repository, init_db
+
+    root = tmp_path
+    db_path = root / "data" / "articles.db"
+    init_db(db_path)
+    with Repository(db_path) as repo:
+        repo.upsert_author(sample_author)
+
+    emb_root = root / "data" / "embeddings"
+    slug_dir = emb_root / sample_author.slug
+    slug_dir.mkdir(parents=True)
+    bad = slug_dir / "only_vectors.npz"
+    np.savez_compressed(bad, vectors=np.ones((1, 3), dtype=np.float32))
+    rec = EmbeddingRecord(
+        article_id="x1",
+        author_id=sample_author.id,
+        timestamp=datetime(2024, 7, 1, tzinfo=UTC),
+        model_name="m",
+        model_version="v",
+        embedding_path=f"data/embeddings/{sample_author.slug}/only_vectors.npz",
+        embedding_dim=3,
+    )
+    write_embeddings_manifest([rec], emb_root / "manifest.jsonl")
+    pairs = load_article_embeddings(
+        sample_author.slug,
+        emb_root,
+        db_path,
+        project_root=root,
+    )
+    assert pairs == []
+
+
+def test_load_article_embeddings_skips_batch_vector_row_mismatch(
+    tmp_path: Path,
+    sample_author,
+) -> None:
+    """When packed id count does not match matrix rows, batch is rejected (P1-TEST-001)."""
+    from forensics.analysis.drift import load_article_embeddings
+    from forensics.storage.repository import Repository, init_db
+
+    root = tmp_path
+    db_path = root / "data" / "articles.db"
+    init_db(db_path)
+    with Repository(db_path) as repo:
+        repo.upsert_author(sample_author)
+
+    emb_root = root / "data" / "embeddings"
+    slug_dir = emb_root / sample_author.slug
+    slug_dir.mkdir(parents=True)
+    mismatch = slug_dir / "mismatch.npz"
+    np.savez_compressed(
+        mismatch,
+        article_id_lengths=np.array([2, 2], dtype=np.int32),
+        article_id_bytes=np.frombuffer(b"aaaabbbb", dtype=np.uint8),
+        vectors=np.ones((3, 4), dtype=np.float32),
+    )
+    rec = EmbeddingRecord(
+        article_id="aaaa",
+        author_id=sample_author.id,
+        timestamp=datetime(2024, 7, 2, tzinfo=UTC),
+        model_name="m",
+        model_version="v",
+        embedding_path=f"data/embeddings/{sample_author.slug}/mismatch.npz",
+        embedding_dim=4,
+    )
+    write_embeddings_manifest([rec], emb_root / "manifest.jsonl")
+    pairs = load_article_embeddings(
+        sample_author.slug,
+        emb_root,
+        db_path,
+        project_root=root,
+    )
+    assert pairs == []
+
+
+def test_load_article_embeddings_skips_article_missing_from_batch(
+    tmp_path: Path,
+    sample_author,
+) -> None:
+    """Manifest row pointing at batch file but unknown article_id yields no row (P1-TEST-001)."""
+    from forensics.analysis.drift import load_article_embeddings
+    from forensics.storage.repository import Repository, init_db
+
+    root = tmp_path
+    db_path = root / "data" / "articles.db"
+    init_db(db_path)
+    with Repository(db_path) as repo:
+        repo.upsert_author(sample_author)
+
+    emb_root = root / "data" / "embeddings"
+    slug_dir = emb_root / sample_author.slug
+    slug_dir.mkdir(parents=True)
+    batch_path = slug_dir / "batch.npz"
+    write_author_embedding_batch(
+        batch_path,
+        ["in-batch"],
+        np.ones((1, 5), dtype=np.float32),
+    )
+    rec = EmbeddingRecord(
+        article_id="not-in-batch",
+        author_id=sample_author.id,
+        timestamp=datetime(2024, 7, 3, tzinfo=UTC),
+        model_name="m",
+        model_version="v",
+        embedding_path=f"data/embeddings/{sample_author.slug}/batch.npz",
+        embedding_dim=5,
+    )
+    write_embeddings_manifest([rec], emb_root / "manifest.jsonl")
+    pairs = load_article_embeddings(
+        sample_author.slug,
+        emb_root,
+        db_path,
+        project_root=root,
+    )
+    assert pairs == []
+
+
+def test_load_article_embeddings_skips_corrupt_npy_file(
+    tmp_path: Path,
+    sample_author,
+) -> None:
+    """Non-numeric bytes behind a ``.npy`` path are skipped without raising (P1-TEST-001)."""
+    from forensics.analysis.drift import load_article_embeddings
+    from forensics.storage.repository import Repository, init_db
+
+    root = tmp_path
+    db_path = root / "data" / "articles.db"
+    init_db(db_path)
+    with Repository(db_path) as repo:
+        repo.upsert_author(sample_author)
+
+    emb_root = root / "data" / "embeddings"
+    slug_dir = emb_root / sample_author.slug
+    slug_dir.mkdir(parents=True)
+    corrupt = slug_dir / "bad.npy"
+    corrupt.write_text("not a numpy array", encoding="utf-8")
+    rec = EmbeddingRecord(
+        article_id="c1",
+        author_id=sample_author.id,
+        timestamp=datetime(2024, 7, 4, tzinfo=UTC),
+        model_name="m",
+        model_version="v",
+        embedding_path=f"data/embeddings/{sample_author.slug}/bad.npy",
+        embedding_dim=99,
+    )
+    write_embeddings_manifest([rec], emb_root / "manifest.jsonl")
+    pairs = load_article_embeddings(
+        sample_author.slug,
+        emb_root,
+        db_path,
+        project_root=root,
+    )
+    assert pairs == []

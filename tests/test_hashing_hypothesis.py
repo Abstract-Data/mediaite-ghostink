@@ -1,4 +1,4 @@
-"""Property-based checks for hashing helpers (P3-TEST-3)."""
+"""Property-based checks for hashing helpers (P3-TEST-001)."""
 
 from __future__ import annotations
 

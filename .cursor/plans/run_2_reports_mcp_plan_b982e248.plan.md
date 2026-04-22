@@ -58,7 +58,7 @@ todos:
     status: completed
   - id: T07-agent4-tests
     content: "[AGENT 4] TIER7 after T06 merged - P1-TEST-001 + P3-TEST-003 (parallel sessions only if different test files)"
-    status: in_progress
+    status: completed
   - id: T08-agent5-rf-dead-002
     content: "[AGENT 5] TIER8 after T04b stable + no cli conflict - RF-DEAD-002 __init__ export policy"
     status: pending
