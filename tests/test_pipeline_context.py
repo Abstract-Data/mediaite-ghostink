@@ -120,3 +120,21 @@ def test_record_audit_skips_row_when_fingerprint_none(tmp_path: Path, monkeypatc
     finally:
         conn.close()
     assert count == 0
+
+
+def test_resolve_accepts_explicit_root(tmp_path: Path, monkeypatch) -> None:
+    """Callers that already resolved ``root`` can avoid a second ``get_project_root`` lookup."""
+    monkeypatch.setattr(
+        "forensics.pipeline_context.get_project_root",
+        lambda: (_ for _ in ()).throw(AssertionError("get_project_root should not be called")),
+    )
+    db_path = tmp_path / "data" / "articles.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    init_db(db_path)
+    monkeypatch.setenv("FORENSICS_CONFIG_FILE", str(tmp_path / "config.toml"))
+    (tmp_path / "config.toml").write_text("[scraping]\nrate_limit_seconds = 1\n", encoding="utf-8")
+
+    ctx = PipelineContext.resolve(root=tmp_path)
+    assert ctx.root == tmp_path
+    assert ctx.db_path == tmp_path / "data" / "articles.db"
+    assert ctx.config_hash is not None

@@ -21,6 +21,7 @@ from forensics.config.settings import (
 )
 from forensics.models.article import Article
 from forensics.models.author import Author, AuthorManifest
+from forensics.progress import PipelineObserver
 from forensics.scraper.client import create_scraping_client
 from forensics.scraper.fetcher import RateLimiter, log_scrape_error, request_with_retry
 from forensics.scraper.parser import extract_article_text_from_rest
@@ -351,6 +352,7 @@ async def collect_article_metadata(
     all_authors: bool = False,
     post_year_min: int | None = None,
     post_year_max: int | None = None,
+    observer: PipelineObserver | None = None,
 ) -> int:
     """
     Upsert authors and their posts (metadata only) into SQLite.
@@ -401,9 +403,12 @@ async def collect_article_metadata(
         author_sem = asyncio.Semaphore(max(1, scraping.max_concurrent))
 
         async def _ingest_one(cfg: AuthorConfig) -> int:
+            inserted_here = 0
             async with author_sem:
+                if observer is not None:
+                    observer.metadata_author_started(cfg.slug)
                 try:
-                    return await _ingest_author_posts(
+                    inserted_here = await _ingest_author_posts(
                         client,
                         limiter,
                         scraping,
@@ -423,7 +428,10 @@ async def collect_article_metadata(
                         f"{cfg.slug}: {exc!r}",
                         "metadata_author",
                     )
-                    return 0
+                finally:
+                    if observer is not None:
+                        observer.metadata_author_done(cfg.slug, inserted_here)
+            return inserted_here
 
         async with create_scraping_client(scraping) as client:
             results = await asyncio.gather(*(_ingest_one(cfg) for cfg in author_cfgs))

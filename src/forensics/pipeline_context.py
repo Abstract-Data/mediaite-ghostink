@@ -22,11 +22,12 @@ class PipelineContext:
     config_hash: str | None
 
     @classmethod
-    def resolve(cls) -> PipelineContext:
-        root = get_project_root()
+    def resolve(cls, *, root: Path | None = None) -> PipelineContext:
+        """Build context for ``root`` (default: :func:`forensics.config.get_project_root`)."""
+        resolved = root if root is not None else get_project_root()
         return cls(
-            root=root,
-            db_path=root / DEFAULT_DB_RELATIVE,
+            root=resolved,
+            db_path=resolved / DEFAULT_DB_RELATIVE,
             config_hash=config_fingerprint(),
         )
 
