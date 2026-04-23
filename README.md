@@ -44,6 +44,37 @@ Pull requests receive a **CI report** comment (pytest summary and line coverage 
 
 The codebase implements two complementary lenses (see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and [`docs/adr/ADR-001-hybrid-forensics-methodology.md`](docs/adr/ADR-001-hybrid-forensics-methodology.md)):
 
+```mermaid
+flowchart TB
+  subgraph corpus[Corpus]
+    WP[WordPress REST + HTML]
+    DB[("SQLite articles.db")]
+    WP --> DB
+  end
+  subgraph features[Feature plane]
+    F["Lexical + structural + content + productivity"]
+    E[384-d sentence embeddings]
+    DB --> F
+    DB --> E
+  end
+  subgraph lensA["Pipeline A: stylometry"]
+    CP[Change-points + rolling stats + convergence]
+    HT[Hypothesis tests + effect sizes + FDR]
+    F --> CP --> HT
+  end
+  subgraph lensB["Pipeline B: embedding drift"]
+    DR[Centroid velocity + cosine decay + variance]
+    E --> DR
+  end
+  subgraph out[Outputs]
+    ART[Analysis JSON + custody + metadata]
+    REP[Quarto HTML / PDF]
+    HT --> ART
+    DR --> ART
+    ART --> REP
+  end
+```
+
 | Track | Role |
 |--------|------|
 | **Pipeline A — Statistical stylometry** | Lexical, structural, content, and productivity features over time; change-point methods (PELT, BOCPD, and related tests), rolling statistics, convergence windows, classical tests, effect sizes, and multiple-comparison correction. |
@@ -57,6 +88,16 @@ Optional tracks (extras and config):
 | **Phase 10 — AI baseline generation** | Local **Ollama** models (configurable) generate synthetic articles for controlled comparison (`uv sync --extra baseline`). |
 
 Outputs include SQLite + Parquet + DuckDB-friendly artifacts, JSONL exports, analysis JSON under `data/analysis/`, optional probability and baseline trees under `data/probability/` and `data/ai_baseline/`, and Quarto-driven reports under `data/reports/`.
+
+```mermaid
+flowchart LR
+  S[Scrape] --> X[Extract]
+  X --> N[Analyze]
+  N --> P[Report]
+  S -. optional .-> P9[Phase 9 probability]
+  X -. optional .-> P9
+  N -. optional .-> P10[Phase 10 AI baseline]
+```
 
 ---
 
@@ -174,11 +215,62 @@ This project is structured for **auditable, staged** research: each stage reads 
 
 Canonical paths are summarized in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#data-and-file-outputs).
 
+```mermaid
+flowchart TB
+  subgraph stages[Stages]
+    direction TB
+    T1[1 Scrape]
+    T2[2 Extract]
+    T3[3 Analyze]
+    T4[4 Report]
+    T1 --> T2 --> T3 --> T4
+  end
+  subgraph artifacts[Primary artifacts]
+    direction TB
+    M[authors_manifest.jsonl]
+    DB[("data/articles.db")]
+    FE["data/features/ Parquet tables"]
+    EM[data/embeddings/]
+    AN["data/analysis/ JSON + corpus_custody.json"]
+    RP[data/reports/]
+  end
+  T1 --> M
+  T1 --> DB
+  T2 --> FE
+  T2 --> EM
+  T3 --> AN
+  T4 --> RP
+```
+
 ### Integrity and hashing
 
 - **Per-article `content_hash`** — SHA-256 of normalized article text at ingest (see `forensics.utils.hashing.content_hash`); stored in SQLite for tamper-evident comparison of body text.
 - **`corpus_custody.json`** — Written under `data/analysis/` after analysis (`write_corpus_custody`): records a **corpus-level hash** derived from ordered per-article `content_hash` values so later runs can detect corpus drift.
 - **`compute_config_hash`** — Deterministic hash of the full resolved **`ForensicsSettings`** payload (excluding derived paths) for tying reports to a configuration snapshot (`get_run_metadata` / run metadata patterns).
+
+```mermaid
+flowchart LR
+  subgraph ingest[Ingest integrity]
+    TXT[Normalized article text]
+    H1[SHA-256 content_hash]
+    TXT --> H1
+    H1 --> ROW[(articles row)]
+  end
+  subgraph freeze[Post-analysis freeze]
+    ROW --> CH[Ordered concat of content_hash]
+    CH --> CORP[corpus_custody.json]
+    CFG[ForensicsSettings] --> CFH[config hash]
+    CFH --> META[run_metadata.json]
+    CORP --> META
+  end
+  subgraph check[Verification]
+    LIVE[Recompute live corpus hash]
+    CORP --> CMP{Matches?}
+    LIVE --> CMP
+    CMP -->|yes| OK[Continue report or analyze]
+    CMP -->|no| BAD[Exit non-zero]
+  end
+```
 
 ### Verification commands
 
@@ -232,6 +324,19 @@ These flags document the **intended** custody posture. **`verify_corpus_hash`** 
 - **Configuration:** [`src/forensics/config/settings.py`](src/forensics/config/settings.py) loads **`config.toml`** at the project root with **`FORENSICS_`** environment overrides (pydantic-settings). Override the TOML path with **`FORENSICS_CONFIG_FILE`**.
 
 Storage and model contracts are summarized in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and ADRs under [`docs/adr/`](docs/adr/).
+
+```mermaid
+flowchart TB
+  API[WordPress REST API]
+  API --> SQL[(SQLite write store)]
+  SQL --> PQ[Parquet feature store]
+  SQL --> J[articles.jsonl export]
+  SQL --> DD[DuckDB analytical layer]
+  PQ --> DD
+  DD --> NB[Notebooks + Quarto]
+  J --> NB
+  NB --> OUT[HTML / PDF reports]
+```
 
 ---
 
