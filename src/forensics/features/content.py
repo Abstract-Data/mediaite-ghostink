@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import math
 import re
-from collections import Counter
-from functools import lru_cache
+from collections import Counter, OrderedDict
 from typing import Any, Final
 
 import numpy as np
@@ -19,6 +19,22 @@ from forensics.config.settings import AnalysisConfig
 # Self-similarity requires a minimum peer set; fewer peers yields noisy or
 # degenerate cosine scores that harm downstream convergence detection.
 MIN_PEERS_FOR_SIMILARITY: Final[int] = 5
+
+# Bounded LRU for TF-IDF self-similarity. Keys use a digest of ``peers`` so the
+# cache does not retain long peer strings (only ``current`` is held per entry).
+_SELF_SIM_CACHE_MAX: Final[int] = 256
+_self_similarity_cache: OrderedDict[tuple[str, bytes], float] = OrderedDict()
+
+
+def _peer_tuple_fingerprint(peers: tuple[str, ...]) -> bytes:
+    """Stable, order-sensitive digest of peer texts for cache keys."""
+    h = hashlib.blake2b(digest_size=32)
+    h.update(len(peers).to_bytes(4, "big", signed=False))
+    for p in peers:
+        b = p.encode("utf-8", errors="surrogatepass")
+        h.update(len(b).to_bytes(4, "big", signed=False))
+        h.update(b)
+    return h.digest()
 
 
 def _shannon_bigrams_trigrams(words: list[str]) -> tuple[float, float]:
@@ -39,16 +55,29 @@ def _shannon_bigrams_trigrams(words: list[str]) -> tuple[float, float]:
     return entropy_ngrams(2), entropy_ngrams(3)
 
 
-@lru_cache(maxsize=256)
-def _self_similarity_cached(current: str, peers: tuple[str, ...]) -> float:
-    """TF-IDF mean cosine sim of ``current`` to each peer; peers key must be hashable."""
+def _self_similarity_tfidf_mean(current: str, peers: tuple[str, ...]) -> float:
+    """TF-IDF mean cosine similarity of ``current`` to each peer (uncached core)."""
     if not peers:
         return 0.0
-    # Fresh vectorizer per compute: ``fit_transform`` mutates state; safe under concurrency.
     vec = TfidfVectorizer(max_features=4096, min_df=1)
     mat = vec.fit_transform([current, *peers])
     sims = cosine_similarity(mat[0:1], mat[1:])[0]
     return float(sims.mean())
+
+
+def _self_similarity_cached(current: str, peers: tuple[str, ...]) -> float:
+    """TF-IDF mean cosine sim; LRU keyed by ``current`` + digest of ``peers``."""
+    key = (current, _peer_tuple_fingerprint(peers))
+    cache = _self_similarity_cache
+    if key in cache:
+        cache.move_to_end(key)
+        return cache[key]
+    value = _self_similarity_tfidf_mean(current, peers)
+    cache[key] = value
+    cache.move_to_end(key)
+    while len(cache) > _SELF_SIM_CACHE_MAX:
+        cache.popitem(last=False)
+    return value
 
 
 def _self_similarity(current: str, peers: list[str]) -> float | None:

@@ -398,7 +398,7 @@ uv run pytest tests/ -q --tb=line
 #### What Was Done
 - Fixed the FeatureVector Parquet dict round-trip: `_accept_legacy_flat_payload` now JSON-decodes `function_word_distribution`, `punctuation_profile`, `pos_bigram_top30`, and `clause_initial_top10` when they come back as strings from Parquet. Before this fix, reconstructing a `FeatureVector` from a DataFrame row silently failed (Pydantic received `str` where `dict[str, float]` was expected).
 - Added `tests/test_features.py::test_feature_vector_parquet_dict_field_roundtrip` pinning the write → read → model_validate path with non-empty dict fields.
-- Added `tests/test_analysis.py::test_bocpd_vectorized_matches_reference`: runs the PR's new vectorized BOCPD side-by-side with an O(n²) reference, asserting matched indices and posterior probabilities on both a mean-shift and a flat signal.
+- Added `tests/test_analysis.py::test_bocpd_vectorized_matches_reference` (since extended): parametrized seeds; compares `detect_bocpd` to an embedded O(n²) scalar reference on Gaussian noise for multiple series lengths, hazard rates, and thresholds (see also `test_bocpd_long_signal_runs_quickly`, marked slow).
 - Added `tests/test_features.py::test_feature_pipeline_aborts_when_failure_ratio_exceeded` covering the new `feature_extraction_max_failure_ratio` abort path.
 - Strengthened `tests/test_lexical_hypothesis.py`: added three real invariants (TTR=1 when all unique, hapax=0 when every token repeats, TTR non-increasing under duplication) on top of the pre-existing bounds check.
 - Removed the unused `AnalyzeFlags` dataclass from `src/forensics/cli/analyze.py` and inlined its fields as keyword args in `_resolve_mode_flags`.
@@ -1481,3 +1481,47 @@ git log --follow docs/adr/ADR-005-sqlite-connection-management.md
 #### Risks & Next Steps
 - Git history for the three renamed ADRs is preserved via rename detection (`git log --follow` continues to show prior commits).
 - If additional agents update prompt `phase12-survey-tui-hardening/current.md` in the future, they should bump the version and update the ADR references in the new snapshot at that time.
+
+---
+
+### Phase 12–13 gap closure — prompts, controls doc, F1 cache
+**Status:** Complete
+**Date:** 2026-04-22
+**Agent/Session:** Cursor agent (gap-closure todo batch)
+
+#### What Was Done
+- Marked Phase 12 prompt family **completed** (`current.md` status + `versions.json` with `completed_date`) and documented shipped vs follow-up scope for `validate_against_controls`.
+- Expanded `ControlValidation` / `validate_against_controls` docstrings in `scoring.py` and added a “Shipped vs prompt prose” note in Phase 12 `current.md`.
+- Replaced `@lru_cache` on full peer tuples in `content.py` with a bounded `OrderedDict` LRU keyed by `(current, blake2b digest of peers)`; added `tests/unit/test_content_self_similarity_cache.py`.
+- Aligned **HANDOFF** BOCPD test bullet with the actual parametrized reference test; ticked Phase 13 `current.md` Definition of Done (dated **2026-04-22** closure note; prompt status left **active**) and documented **python-project-review** substitute verification (no in-repo CLI for that skill name).
+
+#### Files Modified
+- `prompts/phase12-survey-tui-hardening/current.md` — status completed, control-validation scope note.
+- `prompts/phase12-survey-tui-hardening/versions.json` — `completed` + `completed_date` for 0.1.0 / 0.2.0.
+- `prompts/phase13-review-remediation/current.md` — Definition of Done checkboxes ticked with dated **2026-04-22** closure note + python-project-review recording; prompt **Status** remains `active` (this batch was docs/cache/scoring alignment, not a claim that every Phase 13 code step is finished).
+- `src/forensics/survey/scoring.py` — docstrings for shipped control validation scope.
+- `src/forensics/features/content.py` — digest-keyed LRU self-similarity cache.
+- `tests/unit/test_content_self_similarity_cache.py` — new unit tests.
+- `HANDOFF.md` — BOCPD handoff correction + this block.
+
+#### Verification Evidence
+```
+uv run ruff check .
+# All checks passed!
+
+uv run ruff format --check .
+# 156 files already formatted
+
+uv run pytest tests/ -q
+# Required test coverage of 65.0% reached. Total coverage: 65.42%
+# (18 skipped: en_core_web_md not installed — expected in minimal env)
+```
+
+#### Decisions Made
+- **python-project-review:** Treated as the external Cursor/project-alignment skill named in the Phase 13 prompt, not a repo script; HANDOFF records pytest + ruff as substitute verification for this batch.
+
+#### Unresolved Questions
+- None for this documentation and cache-keying scope.
+
+#### Risks & Next Steps
+- If stakeholders want per-feature control tests, implement as a new tracked task (load feature frames + two-sample tests); composite-only `ControlValidation` remains the shipped contract until then.

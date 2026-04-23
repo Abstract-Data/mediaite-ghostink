@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import time
 from datetime import UTC, datetime, timedelta
 
 import numpy as np
 import polars as pl
 import pytest
+from scipy.special import logsumexp
 
 from forensics.analysis.changepoint import (
     PELT_FEATURE_COLUMNS,
@@ -60,6 +62,86 @@ def test_bocpd_gradual_shift() -> None:
     probs_first = [p for t, p in raw if t <= n // 2]
     assert probs_second, f"expected BOCPD detections in second half, got {raw[:10]}"
     assert max(probs_second) >= max(probs_first or [0.0])
+
+
+def _detect_bocpd_scalar_reference(
+    signal: np.ndarray,
+    hazard_rate: float = 1 / 250.0,
+    threshold: float = 0.5,
+) -> list[tuple[int, float]]:
+    """O(n²) reference matching :func:`detect_bocpd` inner segment loop (for parity tests)."""
+    x = np.asarray(signal, dtype=float).ravel()
+    n = len(x)
+    if n < 6:
+        return []
+
+    sigma2 = float(np.var(x[: min(80, n)]))
+    if sigma2 < 1e-12:
+        sigma2 = 1e-12
+    inv_sig2 = 1.0 / sigma2
+    mu0 = float(np.mean(x[: min(10, n)]))
+    v0 = sigma2 * 4.0
+    inv_v0 = 1.0 / v0
+    log_h = float(np.log(hazard_rate))
+    log_1mh = float(np.log(max(1e-12, 1.0 - hazard_rate)))
+
+    log_pi = np.array([0.0])
+    changepoints: list[tuple[int, float]] = []
+    cumsum = np.concatenate((np.zeros(1, dtype=float), np.cumsum(x, dtype=float)))
+
+    for t in range(1, n):
+        xt = x[t]
+        max_s = t
+        log_pi = np.asarray(log_pi, dtype=float)
+        if log_pi.size < max_s:
+            log_pi = np.concatenate([log_pi, np.full(max_s - log_pi.size, -np.inf)])
+
+        log_preds = np.empty(max_s, dtype=float)
+        for s in range(1, max_s + 1):
+            sum_s = float(cumsum[t] - cumsum[t - s])
+            length = float(s)
+            inv_v = inv_v0 + length * inv_sig2
+            m = (inv_v0 * mu0 + inv_sig2 * sum_s) / inv_v
+            var_pred = 1.0 / inv_v + sigma2
+            log_preds[s - 1] = -0.5 * (np.log(2 * np.pi * var_pred) + (xt - m) ** 2 / var_pred)
+
+        log_evidence = logsumexp(log_pi[:max_s] + log_preds)
+        log_pi_new = np.full(t + 1, -np.inf)
+        log_pi_new[0] = log_h + log_evidence
+        log_pi_new[1 : t + 1] = log_1mh + log_pi[:t] + log_preds[:t]
+        log_pi_new -= logsumexp(log_pi_new)
+        log_pi = log_pi_new
+
+        p_cp = float(np.exp(log_pi_new[0]))
+        if p_cp >= threshold:
+            changepoints.append((t, p_cp))
+
+    return changepoints
+
+
+@pytest.mark.parametrize("seed", [0, 1, 2, 42])
+def test_bocpd_vectorized_matches_reference(seed: int) -> None:
+    rng = np.random.default_rng(seed)
+    for n in (24, 48, 80):
+        signal = rng.normal(0.0, 1.0, n).astype(float)
+        for hazard in (1 / 80.0, 1 / 250.0):
+            for th in (0.15, 0.5):
+                got = detect_bocpd(signal, hazard_rate=hazard, threshold=th)
+                ref = _detect_bocpd_scalar_reference(signal, hazard_rate=hazard, threshold=th)
+                assert got == ref, f"mismatch seed={seed} n={n} h={hazard} th={th}"
+
+
+@pytest.mark.slow
+def test_bocpd_long_signal_runs_quickly() -> None:
+    """Vectorized BOCPD stays practical on longer series (skipped in default CI; no O(n²) ref)."""
+    rng = np.random.default_rng(99)
+    n = 4000
+    signal = rng.normal(0.0, 0.5, n)
+    t0 = time.perf_counter()
+    out = detect_bocpd(signal, hazard_rate=1 / 500.0, threshold=0.55)
+    elapsed = time.perf_counter() - t0
+    assert elapsed < 5.0, f"BOCPD too slow: {elapsed:.2f}s for n={n}"
+    assert isinstance(out, list)
 
 
 def test_cohens_d_calculation() -> None:

@@ -41,7 +41,13 @@ class SurveyScore:
 
 @dataclass(frozen=True)
 class ControlValidation:
-    """Summary of the natural control cohort used to validate flagged authors."""
+    """Summary of the natural control cohort (shipped Phase 12 scope).
+
+    This is a lightweight robustness check: counts and composite-score aggregates
+    for the control slug set. Per-feature distributional tests (Welch, Mann–Whitney
+    on time-aligned feature frames) are **out of scope** for this release; open a
+    separate methodology task if those comparisons are required.
+    """
 
     num_controls: int
     mean_composite: float
@@ -242,10 +248,16 @@ def validate_against_controls(
     scores: dict[str, SurveyScore],
     control_slugs: list[str],
 ) -> ControlValidation:
-    """Summarise the control cohort to provide a robustness check.
+    """Summarise the natural control cohort (composite-level only).
 
-    Returns the size, mean composite, and max composite of the control group —
-    flagged authors can then be compared against this baseline distribution.
+    **Shipped behaviour:** aggregates control cohort size, mean composite score,
+    max composite, and sorted control slugs so flagged authors can be reasoned
+    about against a newsroom baseline.
+
+    **Not included:** loading per-author feature Parquets and running per-feature
+    two-sample tests (as sketched in older Phase 12 prose). Defer that work
+    explicitly if product owners need stronger control-vs-flagged separation
+    than composite summaries provide.
     """
     control_set = set(control_slugs)
     control_scores = [s.composite for slug, s in scores.items() if slug in control_set]

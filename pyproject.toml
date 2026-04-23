@@ -107,6 +107,6 @@ omit = [
 [tool.coverage.report]
 # Denominator includes features + storage (P1-TEST-001); optional-heavy paths (probability,
 # live fetches) keep aggregate modest — raise gradually as tests land.
-fail_under = 50
+fail_under = 65
 show_missing = true
 skip_covered = false
