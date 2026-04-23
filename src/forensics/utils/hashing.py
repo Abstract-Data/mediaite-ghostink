@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 
+import xxhash
+
 
 def content_hash(text: str) -> str:
     """SHA-256 hex digest of the normalized string."""
@@ -16,9 +18,16 @@ def simhash_hamming(a: int, b: int) -> int:
 
 
 def simhash(text: str, hashbits: int = 128) -> int:
-    """Character n-gram simhash for near-duplicate detection (up to 256 bits)."""
-    if hashbits < 1 or hashbits > 256:
-        msg = "hashbits must be between 1 and 256"
+    """Character n-gram simhash for near-duplicate detection (up to 128 bits).
+
+    Uses xxhash-128 per n-gram instead of SHA-256 for a ~10–50× speedup on the
+    fingerprinting step (P3-PERF-001). The mathematical properties (Hamming
+    distance is preserved under near-duplicate perturbations) are unchanged;
+    the hash values themselves are not comparable to pre-migration fingerprints
+    and any stored ``dedup_simhash`` columns need to be recomputed.
+    """
+    if hashbits < 1 or hashbits > 128:
+        msg = "hashbits must be between 1 and 128"
         raise ValueError(msg)
     grams: list[str] = []
     cleaned = text.replace("\n", " ")
@@ -31,10 +40,9 @@ def simhash(text: str, hashbits: int = 128) -> int:
         grams = [cleaned or "\x00"]
     vector = [0] * hashbits
     for gram in grams:
-        digest = hashlib.sha256(gram.encode("utf-8")).digest()
-        value = int.from_bytes(digest, "big")
+        value = xxhash.xxh128(gram.encode("utf-8")).intdigest()
         for i in range(hashbits):
-            if value & (1 << (255 - i)):
+            if value & (1 << (127 - i)):
                 vector[i] += 1
             else:
                 vector[i] -= 1

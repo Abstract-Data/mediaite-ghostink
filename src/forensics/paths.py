@@ -132,11 +132,16 @@ def load_feature_frame_for_author(
     slug: str,
     author_id: str,
 ) -> pl.DataFrame | None:
-    """Load sorted features for one author from ``{slug}.parquet`` if present."""
+    """Load sorted features for one author from ``{slug}.parquet`` if present.
+
+    Pushes the ``author_id`` predicate into the lazy scan so the Parquet
+    reader can project only the relevant row groups (P2-PERF-002).
+    """
     path = features_dir / f"{slug}.parquet"
     if not path.is_file():
         return None
-    dfc = load_feature_frame_sorted(path).filter(pl.col("author_id") == author_id)
+    lf = load_feature_frame_sorted(path)
+    dfc = lf.filter(pl.col("author_id") == author_id).collect()
     if dfc.is_empty():
         logger.warning(
             "No feature rows for author_id=%s in %s (slug=%s); loading full parquet "
@@ -145,7 +150,7 @@ def load_feature_frame_for_author(
             path.name,
             slug,
         )
-        dfc = load_feature_frame_sorted(path)
+        dfc = lf.collect()
     return dfc
 
 

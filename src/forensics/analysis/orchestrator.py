@@ -126,10 +126,10 @@ def _run_per_author_analysis(
         logger.warning("analysis: skip %s (missing %s)", slug, feat_path)
         return None
 
-    df = load_feature_frame_sorted(feat_path)
-    df_author = df.filter(pl.col("author_id") == author.id)
+    lf_all = load_feature_frame_sorted(feat_path)
+    df_author = lf_all.filter(pl.col("author_id") == author.id).collect()
     if df_author.is_empty():
-        df_author = df
+        df_author = lf_all.collect()
 
     change_points = analyze_author_feature_changepoints(
         df_author,
