@@ -1002,3 +1002,48 @@ uv run forensics analyze --help # exits 0, flags unchanged (--changepoint/--time
 #### Risks & Next Steps
 - Zero public API change — every caller lives inside `analyze.py`. Downstream commits can layer on without worrying about this boundary.
 - If future work needs per-stage settings overrides (e.g. a different config for `_run_drift_stage`), `AnalyzeContext` can gain a `with_settings(...)` helper that returns a mutated copy via `dataclasses.replace` — call sites already thread the same object, so no signature churn is required.
+
+---
+
+### Phase 13 Unit 2 — `timeseries.py` consolidation
+**Status:** Complete
+**Date:** 2026-04-22
+**Agent/Session:** Phase 13 parallel batch, Unit 2
+
+#### What Was Done
+- **A2** — Removed the duplicate `parse_datetime` pass at L246 inside `run_timeseries_analysis`. `detect_bursts(...)` now reuses the already-parsed `timestamps` list that was computed once at the top of the per-author loop (eliminates a wasted O(N) parse of ISO-8601 strings per author).
+- **A3** — Replaced the hand-built `project_root / "data" / "features" / f"{author.slug}.parquet"` with `AnalysisArtifactPaths.features_parquet(slug)`. The `AnalysisArtifactPaths` instance is also used to derive `analysis_dir`, aligning this stage with `comparison.py` and `drift.py` callers.
+- **B2** — Dropped the `read_features(...) + filter(pl.col("author_id") == author.id)` pair in favor of the shared `load_feature_frame_for_author(features_dir, slug, author_id)` helper from `forensics.analysis.utils`. The helper subsumes the missing-file check, sorted-load, and the empty-filter fallback (same log-then-fall-back behaviour as before, just centrally).
+- Swapped the direct `from forensics.storage.parquet import read_features` import for the utility + artifact paths imports; the file no longer needs the raw parquet reader.
+
+#### Files Modified
+- `src/forensics/analysis/timeseries.py` — three consolidation changes (A2, A3, B2) described above.
+
+#### Verification Evidence
+```
+$ uv run ruff format --check .
+149 files already formatted
+
+$ uv run ruff check .
+All checks passed!
+
+$ uv run pytest tests/test_analysis.py -v --no-cov
+25 passed in 62.95s
+
+$ uv run pytest tests/ -v
+274 passed, 19 skipped, 2 deselected in 30.40s  (coverage 57.57% — above 50% floor)
+
+$ uv run forensics --help
+(lists extract, analyze, report, preflight, lock-preregistration, validate, export, all, setup, scrape, survey, calibrate)
+```
+
+#### Decisions Made
+- `AnalysisArtifactPaths.from_project(project_root, db_path)` is constructed inside `run_timeseries_analysis` from the existing `project_root` parameter. The function signature is unchanged — no caller (CLI `_run_timeseries_stage`) needs to be touched. This matches how the unit brief scoped the work (timeseries.py only).
+- The `_timeseries.parquet` and `_bursts.json` filenames are still composed manually from `analysis_dir`. `AnalysisArtifactPaths` does not currently expose helpers for these two artifacts, and adding new helper methods is out of scope for Unit 2 (artifact_paths.py belongs to Unit ? — not this unit). A follow-up could add `timeseries_parquet(slug)` / `bursts_json(slug)` helpers and route both through the same consolidation pattern.
+- `load_feature_frame_for_author` logs its own warning when the author-id filter removes every row (falls back to unfiltered frame). That log is slightly more specific than what this file used to emit, so the behaviour is strictly better (no regression, more informative).
+
+#### Unresolved Questions
+- None for this unit. The three mechanical changes are contained within the file; no cross-unit coordination required.
+
+#### Risks & Next Steps
+- No behavioural change expected — the refactor is semantics-preserving. If a downstream consumer relied on `read_features` being imported in `timeseries.py` (e.g. for monkeypatching in a test), they will need to patch `forensics.analysis.utils.load_feature_frame_sorted` or `forensics.storage.parquet.read_features` at its definition site. No such test existed at the time of this change (verified via `grep` and full test run).

@@ -11,10 +11,10 @@ from typing import Any
 import numpy as np
 import polars as pl
 
+from forensics.analysis.artifact_paths import AnalysisArtifactPaths
 from forensics.analysis.changepoint import PELT_FEATURE_COLUMNS
-from forensics.analysis.utils import resolve_author_rows
+from forensics.analysis.utils import load_feature_frame_for_author, resolve_author_rows
 from forensics.config.settings import ForensicsSettings
-from forensics.storage.parquet import read_features
 from forensics.storage.repository import Repository
 from forensics.utils.datetime import parse_datetime
 
@@ -183,7 +183,8 @@ def run_timeseries_analysis(
     author_slug: str | None = None,
 ) -> dict[str, Any]:
     """Write ``data/analysis/{slug}_timeseries.parquet`` with rolling + STL per numeric feature."""
-    analysis_dir = project_root / "data" / "analysis"
+    paths = AnalysisArtifactPaths.from_project(project_root, db_path)
+    analysis_dir = paths.analysis_dir
     analysis_dir.mkdir(parents=True, exist_ok=True)
     windows = settings.analysis.rolling_windows or [30, 90]
 
@@ -194,14 +195,11 @@ def run_timeseries_analysis(
     numeric_cols = list(PELT_FEATURE_COLUMNS)
 
     for author in author_rows:
-        feat_path = project_root / "data" / "features" / f"{author.slug}.parquet"
-        if not feat_path.is_file():
+        feat_path = paths.features_parquet(author.slug)
+        df_a = load_feature_frame_for_author(paths.features_dir, author.slug, author.id)
+        if df_a is None:
             logger.warning("Skipping timeseries for %s: missing %s", author.slug, feat_path)
             continue
-        df = read_features(feat_path).sort("timestamp")
-        df_a = df.filter(pl.col("author_id") == author.id)
-        if df_a.is_empty():
-            df_a = df
         ts_list = df_a["timestamp"].to_list()
         timestamps = [parse_datetime(t) for t in ts_list]
         rows: list[dict[str, Any]] = []
@@ -243,9 +241,8 @@ def run_timeseries_analysis(
             ).write_parquet(out_path)
         summary["authors"].append(author.slug)
         summary["timeseries_files"].append(str(out_path))
-        pub_ts = [parse_datetime(t) for t in ts_list]
         burst_path = analysis_dir / f"{author.slug}_bursts.json"
-        bursts = detect_bursts(pub_ts, s=2.0)
+        bursts = detect_bursts(timestamps, s=2.0)
         burst_path.write_text(
             json.dumps(
                 [
