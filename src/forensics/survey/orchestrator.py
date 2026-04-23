@@ -64,6 +64,8 @@ class SurveyReport:
     results: list[SurveyResult] = field(default_factory=list)
     natural_controls: list[str] = field(default_factory=list)
     run_dir: Path | None = None
+    #: Set when the run stops before normal completion (e.g. scrape failure).
+    aborted_reason: str | None = None
 
 
 def _compute_config_hash(settings: ForensicsSettings) -> str:
@@ -90,6 +92,11 @@ def _load_checkpoint(run_dir: Path) -> set[str]:
         logger.warning("survey: could not parse checkpoint %s (%s)", path, exc)
         return set()
     return set(data.get("completed_slugs", []))
+
+
+def survey_completion_exit_code(report: SurveyReport) -> int:
+    """Return a process exit code for callers that treat survey abort as failure (e.g. TUI)."""
+    return 1 if report.aborted_reason else 0
 
 
 def _write_checkpoint(report: SurveyReport) -> None:
@@ -293,6 +300,7 @@ async def run_survey(
         if rc != 0:
             logger.error("survey: scrape failed with exit code %d", rc)
             report.results = []
+            report.aborted_reason = "scrape_failed"
             _write_checkpoint(report)
             _write_survey_results(report)
             return report
@@ -306,6 +314,7 @@ async def run_survey(
         qualified = [q for q in qualified if q.author.slug == author]
         if not qualified:
             logger.error("survey: author %s not found among qualifying authors", author)
+            report.aborted_reason = "author_not_found"
             _write_checkpoint(report)
             _write_survey_results(report)
             return report

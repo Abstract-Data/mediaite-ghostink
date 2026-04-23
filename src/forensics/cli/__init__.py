@@ -327,6 +327,22 @@ def dashboard_cmd(
         )
         raise typer.Exit(code=1)
 
+    if not survey and (
+        skip_scrape
+        or resume is not None
+        or author is not None
+        or min_articles is not None
+        or min_span_days is not None
+        or post_year_min is not None
+        or post_year_max is not None
+    ):
+        typer.echo(
+            "Survey-only options (--skip-scrape, --resume, --author, --min-articles, "
+            "--min-span-days, --post-year-min, --post-year-max) require --survey.",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+
     from dataclasses import replace
 
     from forensics.config import get_project_root, get_settings

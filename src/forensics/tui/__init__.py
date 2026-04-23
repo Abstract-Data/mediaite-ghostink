@@ -54,8 +54,7 @@ def main_dashboard(
         )
         return 1
 
-    run_dashboard_interactive(survey_mode=survey_mode, survey_kwargs=survey_kwargs)
-    return 0
+    return run_dashboard_interactive(survey_mode=survey_mode, survey_kwargs=survey_kwargs)
 
 
 __all__ = ["main", "main_dashboard"]

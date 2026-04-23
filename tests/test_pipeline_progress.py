@@ -105,8 +105,29 @@ def test_dashboard_cli_rejects_no_progress(forensics_config_path: Path) -> None:
     runner = CliRunner()
     r = runner.invoke(app, ["--no-progress", "dashboard"])
     assert r.exit_code == 1
-    combined = (r.stdout or "") + (r.stderr or "")
-    assert "no-progress" in combined.lower() or "omit" in combined.lower()
+    err = (r.stderr or "").lower()
+    assert "omit" in err
+    assert "no-progress" in err
+
+
+def test_dashboard_cli_survey_flags_require_survey(forensics_config_path: Path) -> None:
+    from typer.testing import CliRunner
+
+    from forensics.cli import app
+
+    runner = CliRunner()
+    r = runner.invoke(app, ["dashboard", "--skip-scrape"])
+    assert r.exit_code == 2
+    assert "survey" in (r.stderr or "").lower()
+
+
+def test_survey_completion_exit_code() -> None:
+    from forensics.survey.orchestrator import SurveyReport, survey_completion_exit_code
+
+    ok = SurveyReport()
+    assert survey_completion_exit_code(ok) == 0
+    bad = SurveyReport(aborted_reason="scrape_failed")
+    assert survey_completion_exit_code(bad) == 1
 
 
 def test_run_author_batches_skips_rich_when_disabled(
@@ -136,6 +157,44 @@ def test_run_author_batches_skips_rich_when_disabled(
         skip_embeddings=True,
         use_rich_progress=False,
     )
+
+
+@pytest.mark.asyncio
+async def test_pipeline_dashboard_worker_error_exits_one() -> None:
+    pytest.importorskip("textual")
+
+    from forensics.progress.observer import PipelineObserver
+    from forensics.tui.pipeline_app import PipelineDashboardApp
+
+    def _runner(_obs: PipelineObserver) -> int:
+        raise RuntimeError("simulated pipeline failure")
+
+    app = PipelineDashboardApp(pipeline_runner=_runner)
+    async with app.run_test(size=(80, 24)) as pilot:
+        for _ in range(60):
+            await pilot.pause(0.05)
+            if not app.is_running:
+                break
+    assert app.return_code == 1
+
+
+@pytest.mark.asyncio
+async def test_pipeline_dashboard_nonzero_runner_auto_exit_code() -> None:
+    pytest.importorskip("textual")
+
+    from forensics.progress.observer import PipelineObserver
+    from forensics.tui.pipeline_app import PipelineDashboardApp
+
+    def _runner(_obs: PipelineObserver) -> int:
+        return 7
+
+    app = PipelineDashboardApp(pipeline_runner=_runner)
+    async with app.run_test(size=(80, 24)) as pilot:
+        for _ in range(60):
+            await pilot.pause(0.05)
+            if not app.is_running:
+                break
+    assert app.return_code == 7
 
 
 @pytest.mark.asyncio
