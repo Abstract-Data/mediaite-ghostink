@@ -16,6 +16,7 @@ from forensics.analysis.artifact_paths import AnalysisArtifactPaths
 from forensics.config import get_project_root, get_settings
 from forensics.config.settings import ForensicsSettings
 from forensics.pipeline_context import PipelineContext
+from forensics.preregistration import verify_preregistration
 
 logger = logging.getLogger(__name__)
 
@@ -187,6 +188,8 @@ def run_analyze(
             raise typer.Exit(code=1)
         logger.info("corpus hash verified (%s)", message)
 
+    preregistration = verify_preregistration(settings)
+
     if compare and not (changepoint or timeseries or drift or ai_baseline or convergence):
         _run_compare_only_flow(ctx)
         return
@@ -212,6 +215,7 @@ def run_analyze(
         "drift": do_drift,
         "convergence_full": do_full_analysis,
         "author": author,
+        "preregistration_status": preregistration.status,
     }
     _write_run_metadata(analysis_dir, rid=rid, meta=meta)
 

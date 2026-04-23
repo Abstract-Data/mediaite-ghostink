@@ -39,6 +39,10 @@ min_articles_for_period = 5
 embedding_model = "sentence-transformers/all-MiniLM-L6-v2"
 embedding_model_version = "v2.0"
 changepoint_methods = ["pelt", "bocpd"]
+# Convergence permutation null (Phase 12 §5b) — logs empirical p-values; off by default (CPU).
+# convergence_use_permutation = false
+# convergence_permutation_iterations = 1000
+# convergence_permutation_seed = 42
 
 [survey]
 # Phase 12 §1 — blind newsroom-wide survey mode thresholds.

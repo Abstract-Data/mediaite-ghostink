@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from forensics.config import get_settings
 from forensics.preregistration import (
     VerificationResult,
@@ -130,3 +132,42 @@ def test_lock_is_idempotent(forensics_config_path: Path, tmp_path: Path) -> None
     # Thresholds unchanged → canonical hash stable
     assert first_hash == second_hash
     assert verify_preregistration(settings, lock_path=out).status == "ok"
+
+
+def test_run_analyze_invokes_verify_preregistration(
+    forensics_config_path: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``run_analyze`` always calls ``verify_preregistration`` before stages."""
+    import importlib
+
+    analyze_mod = importlib.import_module("forensics.cli.analyze")
+    from forensics.storage.repository import init_db
+
+    data = tmp_path / "data"
+    data.mkdir(parents=True, exist_ok=True)
+    init_db(data / "articles.db")
+
+    calls: list[object] = []
+
+    def fake_verify(settings_arg: object) -> VerificationResult:
+        calls.append(settings_arg)
+        return VerificationResult(
+            status="missing",
+            message="no lock",
+            lock_path=tmp_path / "preregistration" / "preregistration_lock.json",
+        )
+
+    monkeypatch.setattr(analyze_mod, "verify_preregistration", fake_verify)
+    monkeypatch.setattr(analyze_mod, "get_project_root", lambda: tmp_path)
+    monkeypatch.setattr(analyze_mod, "_run_timeseries_stage", lambda *a, **k: None)
+    monkeypatch.setattr(analyze_mod, "_run_full_analysis_stage", lambda *a, **k: None)
+
+    analyze_mod.run_analyze()
+
+    assert len(calls) == 1
+    assert calls[0] is get_settings()
+
+    meta_path = tmp_path / "data" / "analysis" / "run_metadata.json"
+    assert meta_path.is_file()
+    raw = json.loads(meta_path.read_text(encoding="utf-8"))
+    assert raw.get("preregistration_status") == "missing"

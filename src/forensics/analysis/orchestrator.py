@@ -167,6 +167,7 @@ def _run_per_author_analysis(
         vel_tuples = [(monthly[i + 1][0], vels[i]) for i in range(len(vels))]
 
     prob = probability_trajectory_by_slug.get(slug)
+    ac = config.analysis
     convergence_windows = compute_convergence_scores(
         change_points,
         vel_tuples,
@@ -174,6 +175,9 @@ def _run_per_author_analysis(
         ai_convergence_curve=ai_conv,
         probability_trajectory=prob,
         settings=config,
+        use_permutation=ac.convergence_use_permutation,
+        n_permutations=ac.convergence_permutation_iterations,
+        permutation_seed=ac.convergence_permutation_seed,
     )
 
     ts_list = df_author["timestamp"].to_list()

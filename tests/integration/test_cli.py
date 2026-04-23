@@ -234,3 +234,45 @@ def test_export_to_duckdb_smoke(tmp_path, sample_author, sample_article) -> None
         assert conn.execute("SELECT COUNT(*) FROM articles").fetchone()[0] == 1
     finally:
         conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Phase 12 §10 — survey / calibrate / preflight / lock / setup CLI surface
+# ---------------------------------------------------------------------------
+
+
+def test_survey_help_lists_flags() -> None:
+    result = runner.invoke(app, ["survey", "--help"])
+    assert result.exit_code == 0
+    text = _plain_help(result.output)
+    for flag in ("--dry-run", "--resume", "--skip-scrape", "--author", "--min-articles"):
+        assert flag in text, f"missing {flag} in survey help"
+
+
+def test_calibrate_help_lists_flags() -> None:
+    result = runner.invoke(app, ["calibrate", "--help"])
+    assert result.exit_code == 0
+    text = _plain_help(result.output)
+    for flag in ("--positive-trials", "--negative-trials", "--author", "--dry-run"):
+        assert flag in text, f"missing {flag} in calibrate help"
+
+
+def test_preflight_help_lists_strict() -> None:
+    result = runner.invoke(app, ["preflight", "--help"])
+    assert result.exit_code == 0
+    text = _plain_help(result.output)
+    assert "--strict" in text
+
+
+def test_lock_preregistration_help() -> None:
+    result = runner.invoke(app, ["lock-preregistration", "--help"])
+    assert result.exit_code == 0
+    text = _plain_help(result.output)
+    assert "lock" in text.lower() or "pre-registration" in text.lower()
+
+
+def test_setup_help() -> None:
+    result = runner.invoke(app, ["setup", "--help"])
+    assert result.exit_code == 0
+    text = _plain_help(result.output)
+    assert "setup" in text.lower() or "wizard" in text.lower()
