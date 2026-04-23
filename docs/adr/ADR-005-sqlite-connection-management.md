@@ -1,4 +1,4 @@
-# ADR-001: SQLite Connection Management Strategy
+# ADR-005: SQLite Connection Management Strategy
 
 - **Status:** Accepted
 - **Date:** 2026-04-20

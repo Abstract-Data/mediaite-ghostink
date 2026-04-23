@@ -418,7 +418,7 @@ settings = Settings()
 - Break stage boundaries or data model contracts without approval
 - Re-implement utilities that already exist in `forensics/utils/` — check before writing private helpers
 - Create module-level `asyncio.Lock`, `asyncio.Event`, or `asyncio.Semaphore` instances eagerly at import time — use lazy initialization or pass as parameters
-- Open a new SQLite connection per repository call — use the `Repository` class pattern (see ADR-001)
+- Open a new SQLite connection per repository call — use the `Repository` class pattern (see ADR-005)
 - Construct `data/` paths manually — use `AnalysisArtifactPaths` methods (see GUARDRAILS Sign)
 - Duplicate the `if repo is not None: ... else: with Repository(db_path)` pattern — use `ensure_repo()` (see Phase 13)
 - Add C901 suppressions to `pyproject.toml` without a decomposition plan or tracking comment
