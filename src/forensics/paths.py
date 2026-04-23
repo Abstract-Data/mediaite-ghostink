@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import date, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -107,12 +108,21 @@ class AnalysisArtifactPaths:
         )
 
 
-def intervals_overlap(a0, a1, b0, b1) -> bool:
+def intervals_overlap(
+    a0: datetime | date,
+    a1: datetime | date,
+    b0: datetime | date,
+    b1: datetime | date,
+) -> bool:
     """Return True if closed intervals ``[a0, a1]`` and ``[b0, b1]`` intersect."""
     return a0 <= b1 and b0 <= a1
 
 
-def closed_interval_contains(value, lo, hi) -> bool:
+def closed_interval_contains(
+    value: datetime | date,
+    lo: datetime | date,
+    hi: datetime | date,
+) -> bool:
     """Return True if ``lo <= value <= hi`` for mutually orderable operands (e.g. dates)."""
     return lo <= value <= hi
 

@@ -39,6 +39,10 @@ class DriftScores(BaseModel):
     @property
     def velocity_acceleration_ratio(self) -> float:
         """(late-early)/early split of ``monthly_centroid_velocities`` clamped to [0, 1]."""
+        # Deferred import breaks the models → analysis → models cycle
+        # (``forensics.analysis.utils`` re-exports helpers that themselves
+        # reference models in this module). Keeping it local to the property
+        # avoids the import happening at module-load time.
         from forensics.analysis.utils import compute_velocity_acceleration
 
         return compute_velocity_acceleration(self.monthly_centroid_velocities)

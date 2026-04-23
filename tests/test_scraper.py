@@ -219,7 +219,13 @@ def test_extract_metadata_fixture() -> None:
 
 def test_looks_coauthored() -> None:
     assert looks_coauthored("Alice and Bob")
+    assert looks_coauthored("Alice & Bob")
+    assert looks_coauthored("Alice with Bob")
+    assert looks_coauthored("Alice, Bob")
+    assert looks_coauthored("Alice AND Bob")
     assert not looks_coauthored("Alice Smith")
+    assert not looks_coauthored("")
+    assert not looks_coauthored("   ")
 
 
 def test_mediaite_host_detection() -> None:

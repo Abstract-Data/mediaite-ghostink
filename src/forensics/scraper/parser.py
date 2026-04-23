@@ -135,9 +135,13 @@ def extract_metadata(html: str) -> dict[str, Any]:
     return meta
 
 
+_COAUTHOR_DELIMITERS: tuple[str, ...] = (" and ", " & ", " with ", ", ")
+
+
 def looks_coauthored(author_text: str) -> bool:
-    """Heuristic: multiple bylines often use `` and `` between names."""
+    """Heuristic: multiple bylines use ``and``, ``&``, ``with``, or comma-separated names."""
     t = author_text.strip()
     if not t:
         return False
-    return " and " in t.lower()
+    low = t.lower()
+    return any(sep in low for sep in _COAUTHOR_DELIMITERS)

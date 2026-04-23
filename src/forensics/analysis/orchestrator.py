@@ -345,10 +345,7 @@ def run_compare_only(
     author_slug: str | None = None,
 ) -> dict[str, Any]:
     """Regenerate ``comparison_report.json`` from on-disk artifacts."""
-    controls = [a.slug for a in config.authors if a.role == "control"]
-    targets = [a.slug for a in config.authors if a.role == "target"]
-    if author_slug:
-        targets = [author_slug] if author_slug in targets else [author_slug]
+    targets, controls = _resolve_targets_and_controls(config, author_slug)
     out: dict[str, Any] = {"targets": {}}
     for tid in targets:
         try:

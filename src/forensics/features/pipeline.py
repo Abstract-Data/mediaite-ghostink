@@ -45,14 +45,15 @@ from forensics.storage.repository import Repository
 
 logger = logging.getLogger(__name__)
 
-# Expected failures from extractors, numpy I/O, and sentence-transformers encode.
-_FEATURE_EXTRACTION_ERRORS: tuple[type[BaseException], ...] = (
+# Recoverable failures from extractors, numpy I/O, and sentence-transformers encode.
+# MemoryError and RecursionError are intentionally excluded — they indicate
+# process-level failure and should halt the pipeline rather than be counted as
+# per-article extraction errors.
+_RECOVERABLE_EXTRACTION_ERRORS: tuple[type[Exception], ...] = (
     ArithmeticError,
     AttributeError,
     LookupError,
-    MemoryError,
     OSError,
-    RecursionError,
     RuntimeError,
     TypeError,
     ValueError,
@@ -276,7 +277,7 @@ def _process_author_batch(
                     )
                 )
             result.processed += 1
-        except _FEATURE_EXTRACTION_ERRORS as exc:
+        except _RECOVERABLE_EXTRACTION_ERRORS as exc:
             batch_failed += 1
             result.failed += 1
             logger.exception(

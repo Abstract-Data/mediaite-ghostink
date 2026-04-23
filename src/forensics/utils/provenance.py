@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
-from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -88,7 +87,7 @@ def verify_corpus_hash(db_path: Path, analysis_dir: Path) -> tuple[bool, str]:
     return True, "Corpus hash matches custody record."
 
 
-def audit_scrape_timestamps(db_path: Path) -> Mapping[str, Any]:
+def audit_scrape_timestamps(db_path: Path) -> dict[str, Any]:
     """Summarize ``scraped_at`` coverage for chain-of-custody notebooks."""
     if not db_path.is_file():
         return {

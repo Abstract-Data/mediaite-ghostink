@@ -17,6 +17,19 @@ from forensics.models.analysis import ChangePoint, ConvergenceWindow
 
 logger = logging.getLogger(__name__)
 
+# Named convergence-scoring constants (RF-SMELL-003 / audit for pre-registration lock).
+PIPELINE_SCORE_PASS_THRESHOLD: float = 0.5
+"""Both pipeline A and pipeline B scores must exceed this for the window to pass on A/B alone."""
+
+EMBEDDING_DROP_EPSILON: float = 0.05
+"""Denominator epsilon for the head-vs-tail embedding similarity drop ratio."""
+
+AI_CURVE_NORMALIZATION_DIVISOR: float = 0.5
+"""Divisor that normalizes the AI-curve delta (last - first) to the [0, 1] score range."""
+
+AI_SINGLE_VALUE_FALLBACK: float = 0.25
+"""Fallback score when only one month of AI-curve data is available in the window."""
+
 
 @dataclass
 class ProbabilityTrajectory:
@@ -174,15 +187,17 @@ def _embedding_similarity_signal(
     head = float(np.mean(sim_window[: max(1, len(sim_window) // 3)]))
     tail = float(np.mean(sim_window[-max(1, len(sim_window) // 3) :]))
     drop = head - tail
-    return float(min(1.0, max(0.0, drop / (abs(head) + 0.05))))
+    return float(min(1.0, max(0.0, drop / (abs(head) + EMBEDDING_DROP_EPSILON))))
 
 
 def _ai_curve_signal(ai_by_month: dict[str, float], months_in: list[str]) -> float:
     ai_vals = [ai_by_month[m] for m in months_in if m in ai_by_month]
     if len(ai_vals) >= 2:
-        return float(min(1.0, max(0.0, (ai_vals[-1] - ai_vals[0]) / 0.5)))
+        return float(
+            min(1.0, max(0.0, (ai_vals[-1] - ai_vals[0]) / AI_CURVE_NORMALIZATION_DIVISOR))
+        )
     if len(ai_vals) == 1:
-        return 0.25
+        return AI_SINGLE_VALUE_FALLBACK
     return 0.0
 
 
@@ -314,7 +329,10 @@ def _score_single_window(
         )
 
     passes_ratio = ratio >= input_.min_feature_ratio
-    passes_ab = pipeline_a_score > 0.5 and pipeline_b_score > 0.5
+    passes_ab = (
+        pipeline_a_score > PIPELINE_SCORE_PASS_THRESHOLD
+        and pipeline_b_score > PIPELINE_SCORE_PASS_THRESHOLD
+    )
     if not (passes_ratio or passes_ab):
         return None
 
