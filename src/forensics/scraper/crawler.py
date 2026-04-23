@@ -22,7 +22,7 @@ from forensics.models.article import Article
 from forensics.models.author import Author, AuthorManifest
 from forensics.scraper.client import create_scraping_client
 from forensics.scraper.fetcher import RateLimiter, log_scrape_error, request_with_retry
-from forensics.storage.repository import Repository
+from forensics.storage.repository import Repository, ensure_repo
 from forensics.utils.datetime import parse_wp_datetime
 
 logger = logging.getLogger(__name__)
@@ -339,10 +339,8 @@ async def collect_article_metadata(
             results = await asyncio.gather(*(_ingest_one(cfg) for cfg in author_cfgs))
         return sum(results)
 
-    if repo is not None:
-        return await _run(repo)
-    with Repository(db_path) as owned:
-        return await _run(owned)
+    with ensure_repo(db_path, repo) as r:
+        return await _run(r)
 
 
 async def _ingest_author_posts(

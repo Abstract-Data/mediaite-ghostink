@@ -17,7 +17,7 @@ from forensics.scraper.crawler import collect_article_metadata, discover_authors
 from forensics.scraper.dedup import deduplicate_articles
 from forensics.scraper.fetcher import archive_raw_year_dirs, fetch_articles
 from forensics.storage.export import export_articles_jsonl
-from forensics.storage.repository import Repository, insert_analysis_run
+from forensics.storage.repository import Repository, ensure_repo, insert_analysis_run
 
 logger = logging.getLogger(__name__)
 
@@ -98,15 +98,10 @@ async def _metadata_only(
             manifest_path,
         )
         return 1
-    if repo is not None:
+    with ensure_repo(db_path, repo) as r:
         inserted = await collect_article_metadata(
-            db_path, settings, repo=repo, all_authors=all_authors
+            db_path, settings, repo=r, all_authors=all_authors
         )
-    else:
-        with Repository(db_path) as r:
-            inserted = await collect_article_metadata(
-                db_path, settings, repo=r, all_authors=all_authors
-            )
     logger.info("metadata: inserted %d new article row(s) into %s", inserted, db_path)
     return 0
 
@@ -118,11 +113,8 @@ async def _fetch_only(
     dry_run: bool,
     repo: Repository | None = None,
 ) -> int:
-    if repo is not None:
-        n = await fetch_articles(db_path, settings, dry_run=dry_run, repo=repo)
-    else:
-        with Repository(db_path) as r:
-            n = await fetch_articles(db_path, settings, dry_run=dry_run, repo=r)
+    with ensure_repo(db_path, repo) as r:
+        n = await fetch_articles(db_path, settings, dry_run=dry_run, repo=r)
     suffix = " (dry-run)" if dry_run else ""
     logger.info(
         "fetch: %s %d article(s)%s",
@@ -141,11 +133,8 @@ async def _fetch_dedup_export(
     dry_run: bool,
     repo: Repository | None = None,
 ) -> int:
-    if repo is not None:
-        n = await fetch_articles(db_path, settings, dry_run=dry_run, repo=repo)
-    else:
-        with Repository(db_path) as r:
-            n = await fetch_articles(db_path, settings, dry_run=dry_run, repo=r)
+    with ensure_repo(db_path, repo) as r:
+        n = await fetch_articles(db_path, settings, dry_run=dry_run, repo=r)
     logger.info("fetch: processed %d article(s)%s", n, " (dry-run)" if dry_run else "")
     if not dry_run:
         dup_ids = deduplicate_articles(
@@ -164,6 +153,7 @@ async def _discover_and_metadata(
     *,
     force_refresh: bool,
     all_authors: bool = False,
+    repo: Repository | None = None,
 ) -> int:
     n_authors = await discover_authors(settings, force_refresh=force_refresh)
     if n_authors:
@@ -173,9 +163,9 @@ async def _discover_and_metadata(
     if not manifest_path.is_file():
         logger.error("author manifest missing after discover: %s", manifest_path)
         return 1
-    with Repository(db_path) as repo:
+    with ensure_repo(db_path, repo) as r:
         inserted = await collect_article_metadata(
-            db_path, settings, repo=repo, all_authors=all_authors
+            db_path, settings, repo=r, all_authors=all_authors
         )
     logger.info("metadata: inserted %d new article row(s) into %s", inserted, db_path)
     return 0
@@ -190,19 +180,17 @@ async def _full_pipeline(
     force_refresh: bool,
     all_authors: bool = False,
 ) -> int:
-    n_authors = await discover_authors(settings, force_refresh=force_refresh)
-    if n_authors:
-        logger.info("discover: wrote %d author(s) to %s", n_authors, manifest_path)
-    else:
-        logger.info("discover: skipped or unchanged (%s)", manifest_path)
-    if not manifest_path.is_file():
-        logger.error("author manifest missing after discover: %s", manifest_path)
-        return 1
     with Repository(db_path) as repo:
-        inserted = await collect_article_metadata(
-            db_path, settings, repo=repo, all_authors=all_authors
+        rc = await _discover_and_metadata(
+            db_path,
+            settings,
+            manifest_path,
+            force_refresh=force_refresh,
+            all_authors=all_authors,
+            repo=repo,
         )
-        logger.info("metadata: inserted %d new article row(s) into %s", inserted, db_path)
+        if rc != 0:
+            return rc
         fetched = await fetch_articles(db_path, settings, dry_run=False, repo=repo)
     logger.info("fetch: processed %d article(s)", fetched)
     dup_ids = deduplicate_articles(db_path, hamming_threshold=settings.scraping.simhash_threshold)

@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import json
 import sqlite3
-import uuid
 from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
 from datetime import UTC, date, datetime
 from pathlib import Path
 from types import TracebackType
 from typing import NamedTuple
+from uuid import uuid4
 
 from forensics.models.article import Article
 from forensics.models.author import Author
@@ -499,7 +500,7 @@ class Repository:
 
     def insert_analysis_run_row(self, *, config_hash: str, description: str = "") -> str:
         """Insert one ``analysis_runs`` row; returns new run id."""
-        rid = str(uuid.uuid4())
+        rid = str(uuid4())
         ts = datetime.now(UTC).isoformat()
         conn = self._require_conn()
         conn.execute(
@@ -507,6 +508,16 @@ class Repository:
             (rid, ts, config_hash, description),
         )
         return rid
+
+
+@contextmanager
+def ensure_repo(db_path: Path, repo: Repository | None = None) -> Iterator[Repository]:
+    """Yield an active :class:`Repository`, opening one if not provided."""
+    if repo is not None:
+        yield repo
+    else:
+        with Repository(db_path) as owned:
+            yield owned
 
 
 def init_db(db_path: Path) -> None:
