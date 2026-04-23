@@ -918,3 +918,45 @@ replaced with a JSON + AST validation pass.
 #### Risks & Next Steps
 - Downstream consumers should pass a `SurveyScore` when they want the narrative numbers to match an already-rendered ranking table; otherwise the narrative re-scores from scratch, which is still deterministic but could in theory drift if scoring.py thresholds change between rank-time and narrative-time.
 - Per-author drill-down notebooks 05-07 default to `author_slug = "all"` — cells currently read `settings.authors[0]`. Wiring the `author_slug` parameter into the existing author selection is left as a follow-up so this commit stays scoped to the parameter contract.
+
+---
+
+### Phase 13 Unit 5 — read_features lazy scan
+**Status:** Complete
+**Date:** 2026-04-22
+**Agent/Session:** phase13/unit-5-read-features-lazy
+
+#### What Was Done
+- Migrated `read_features` in `src/forensics/storage/parquet.py` from eager `pl.read_parquet(path)` to a lazy scan `pl.scan_parquet(path).collect()`.
+- Return type preserved as `pl.DataFrame` to keep callers unchanged. Internal benefit: query planner can push down projections/filters before materialization.
+
+#### Files Modified
+- `src/forensics/storage/parquet.py` — updated `read_features` to use `scan_parquet().collect()` and refreshed the docstring.
+
+#### Verification Evidence
+```
+uv run ruff format --check .
+  -> 149 files already formatted
+
+uv run ruff check .
+  -> All checks passed!
+
+uv run pytest tests/ -v
+  -> 274 passed, 19 skipped, 2 deselected, 1 warning in 80.57s
+  -> Required test coverage of 50.0% reached. Total coverage: 57.57%
+
+uv run pytest tests/ -k "parquet or feature" -v
+  -> 35 passed, 19 skipped, 241 deselected in 404.74s
+
+uv run forensics --help
+  -> CLI loads and lists commands correctly.
+```
+
+#### Decisions Made
+- Kept the `pl.DataFrame` return type (did not expose a `LazyFrame`) to preserve API compatibility per the Phase 13 Unit 5 brief. The lazy scan benefit is internal to the call site.
+
+#### Unresolved Questions
+- None.
+
+#### Risks & Next Steps
+- Future enhancement: expose a `scan_features` helper returning `pl.LazyFrame` for callers that can chain more operations before collecting. Out of scope for this unit.

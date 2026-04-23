@@ -40,8 +40,8 @@ def write_features(features: list[FeatureVector], output_path: Path) -> None:
 
 
 def read_features(path: Path) -> pl.DataFrame:
-    """Load a feature Parquet table."""
-    return pl.read_parquet(path)
+    """Load a feature Parquet table via lazy scan (collected eagerly to preserve API)."""
+    return pl.scan_parquet(path).collect()
 
 
 def load_feature_frame_sorted(features_path: Path) -> pl.DataFrame:
