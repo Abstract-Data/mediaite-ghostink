@@ -1,4 +1,4 @@
-# ADR-003: Scraper / storage boundary (P2-ARCH-3)
+# ADR-007: Scraper / storage boundary (P2-ARCH-3)
 
 - **Status:** Accepted (partial)
 - **Date:** 2026-04-21
@@ -34,5 +34,5 @@ These rules are enforceable by inspection — any call site injecting `repo` liv
 ## Related
 
 - Code Review Report: P2-ARCH-3
-- ADR-001 (session-scoped `Repository`)
-- ADR-002 (CLI dispatch patterns)
+- ADR-005 (session-scoped `Repository`)
+- ADR-006 (CLI dispatch patterns)

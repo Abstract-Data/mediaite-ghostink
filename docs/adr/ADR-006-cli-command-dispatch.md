@@ -1,4 +1,4 @@
-# ADR-002: CLI Command Dispatch Pattern
+# ADR-006: CLI Command Dispatch Pattern
 
 - **Status:** Accepted
 - **Date:** 2026-04-20

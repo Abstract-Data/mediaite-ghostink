@@ -361,7 +361,7 @@ uv run ruff check . && uv run ruff format --check .             # all clean
 - `src/forensics/features/assembler.py` (new), `pipeline.py`, `readability.py`, `probability_pipeline.py` — assembler + extraction abort threshold + narrower exceptions.
 - `src/forensics/cli/*`, `src/forensics/pipeline.py`, `src/forensics/reporting.py` — dispatch/registry patterns, `run_all_pipeline`, typed report args.
 - `src/forensics/scraper/{crawler,dedup,fetcher}.py` — optional `Repository` injection for hybrid decoupling.
-- `docs/adr/001-sqlite-connection-management.md`, `docs/adr/003-deferred-scraper-storage-decoupling.md`, `docs/GUARDRAILS.md`, `docs/TESTING.md`.
+- `docs/adr/ADR-005-sqlite-connection-management.md`, `docs/adr/ADR-007-deferred-scraper-storage-decoupling.md`, `docs/GUARDRAILS.md`, `docs/TESTING.md`.
 - `tests/*.py`, `tests/test_lexical_hypothesis.py` (new).
 
 #### Verification Evidence
@@ -378,9 +378,9 @@ uv run pytest tests/ -q --tb=line
 ```
 
 #### Decisions Made
-- `Repository` must be used as `with Repository(path) as repo:` everywhere (production + tests); aligns with ADR-001 and removes connection-per-call anti-pattern.
+- `Repository` must be used as `with Repository(path) as repo:` everywhere (production + tests); aligns with ADR-005 and removes connection-per-call anti-pattern.
 - `FeatureVector` nested Pydantic models retain Parquet compatibility via `to_flat_dict` / legacy flat ingestion.
-- Scraper/storage “decoupling” is hybrid: injectable `Repository` while keeping persistence responsibilities in scraper modules (ADR-003 partial accepted).
+- Scraper/storage “decoupling” is hybrid: injectable `Repository` while keeping persistence responsibilities in scraper modules (ADR-007 partial accepted).
 
 #### Unresolved Questions
 - None for this implementation scope.
@@ -403,7 +403,7 @@ uv run pytest tests/ -q --tb=line
 - Strengthened `tests/test_lexical_hypothesis.py`: added three real invariants (TTR=1 when all unique, hapax=0 when every token repeats, TTR non-increasing under duplication) on top of the pre-existing bounds check.
 - Removed the unused `AnalyzeFlags` dataclass from `src/forensics/cli/analyze.py` and inlined its fields as keyword args in `_resolve_mode_flags`.
 - Moved LDA tunables (`lda_num_topics`, `lda_n_keywords`) into `AnalysisConfig`; `sample_topic_keywords` now resolves them from settings when callers omit them (back-compat preserved).
-- Documented injected-`Repository` lifetime and partial-failure semantics in `docs/adr/003-deferred-scraper-storage-decoupling.md`.
+- Documented injected-`Repository` lifetime and partial-failure semantics in `docs/adr/ADR-007-deferred-scraper-storage-decoupling.md`.
 - Finished the DRY pass in `src/forensics/analysis/drift.py`: `run_drift_analysis` now uses `resolve_author_rows` instead of inlining slug→author resolution.
 - Hardened `Repository.rewrite_raw_paths_after_archive`: validates `year` as a 4-digit int and rejects tails containing path separators or `..`.
 - Converted `load_feature_frame_sorted` in `src/forensics/storage/parquet.py` to `pl.scan_parquet(...).sort(...).collect()` so the planner can push operations down.
@@ -416,7 +416,7 @@ uv run pytest tests/ -q --tb=line
 - `src/forensics/cli/analyze.py` — remove `AnalyzeFlags`.
 - `src/forensics/config/settings.py` — add `lda_num_topics`, `lda_n_keywords`.
 - `src/forensics/baseline/topics.py` — resolve LDA params from settings.
-- `docs/adr/003-deferred-scraper-storage-decoupling.md` — injection contract.
+- `docs/adr/ADR-007-deferred-scraper-storage-decoupling.md` — injection contract.
 - `tests/test_features.py`, `tests/test_analysis.py`, `tests/test_lexical_hypothesis.py` — new tests + strengthened invariants.
 
 #### Verification Evidence
@@ -610,7 +610,7 @@ uv run forensics --help   → lock-preregistration visible
 **Agent/Session:** claude-opus-4-7 (ws1)
 
 #### What Was Done
-- Added `Repository.all_authors()` (ADR-001 compliant — uses `_require_conn`, reuses `_author_row_to_model`).
+- Added `Repository.all_authors()` (ADR-005 compliant — uses `_require_conn`, reuses `_author_row_to_model`).
 - Introduced `SurveyConfig` on `ForensicsSettings` (with `Field(default_factory=SurveyConfig)`, per v0.2.0 audit) and a `[survey]` section in `config.toml`.
 - New `src/forensics/survey/` package:
   - `qualification.py` — `QualificationCriteria` (+ `.from_settings`), `QualifiedAuthor`, `qualify_authors(db_path, criteria, *, today=None)` filters by volume / date-span / avg word count / publishing frequency / recent activity.
@@ -1417,3 +1417,67 @@ uv run forensics scrape --help   -> all scrape flags listed as expected
 
 #### Risks & Next Steps
 - Other Phase 13 units touch overlapping files (`cli/scrape.py`, `scraper/fetcher.py`). Merge conflicts are expected at boundaries; `_persist_and_log` in particular is a structural change inside `_fetch_one_article_html` that may require rebase fix-up if another unit refactors the same function. No public API surface changed — downstream callers of `fetch_articles`, `collect_article_metadata`, `dispatch_scrape` see identical signatures and behavior.
+
+---
+
+### Phase 13 Unit 11 — ADR naming consolidation (E3)
+**Status:** Complete
+**Date:** 2026-04-22
+**Agent/Session:** claude-opus-4-7 — phase13/unit-11-adr-naming
+
+#### What Was Done
+- Investigated all 7 files under `docs/adr/` and confirmed the numeric-only files (`001-*`, `002-*`, `003-*`) and the `ADR-NNN-*` files are DISTINCT ADRs (different decisions). They were **not** duplicates — the numbering was a collision because both naming schemes started at `001`.
+- Renamed the three numeric-only files using `git mv` to continue the sequence under the canonical `ADR-NNN-*` scheme:
+  - `docs/adr/001-sqlite-connection-management.md` → `docs/adr/ADR-005-sqlite-connection-management.md`
+  - `docs/adr/002-cli-command-dispatch.md` → `docs/adr/ADR-006-cli-command-dispatch.md`
+  - `docs/adr/003-deferred-scraper-storage-decoupling.md` → `docs/adr/ADR-007-deferred-scraper-storage-decoupling.md`
+- Updated the `# ADR-NNN:` title line inside each renamed file to match the new number.
+- Updated cross-references inside `docs/adr/ADR-007-deferred-scraper-storage-decoupling.md` (`ADR-001` → `ADR-005`, `ADR-002` → `ADR-006`).
+- Updated mutable references across the repo to point to the new ADR numbers:
+  - `src/forensics/storage/repository.py` — two docstring comments (`ADR-001` → `ADR-005`).
+  - `AGENTS.md` — one rule reference (`see ADR-001` → `see ADR-005`).
+  - `docs/GUARDRAILS.md` — two Sign references (`ADR-001` → `ADR-005`, `ADR-002` → `ADR-006`).
+  - `HANDOFF.md` — six historical references updated (both filename paths and inline `ADR-NNN` citations) so future readers are directed to the correct ADR.
+
+#### Files Modified
+- `docs/adr/ADR-005-sqlite-connection-management.md` — renamed from `001-*`; title line updated.
+- `docs/adr/ADR-006-cli-command-dispatch.md` — renamed from `002-*`; title line updated.
+- `docs/adr/ADR-007-deferred-scraper-storage-decoupling.md` — renamed from `003-*`; title + Related-section cross-refs updated.
+- `src/forensics/storage/repository.py` — docstring comments updated (`ADR-001` → `ADR-005`) at lines 76 and 230.
+- `AGENTS.md` — line 421 reference updated.
+- `docs/GUARDRAILS.md` — lines 87 and 99 Sign references updated.
+- `HANDOFF.md` — lines 364, 381, 383, 406, 419, 613 references updated.
+
+#### Verification Evidence
+```
+uv run ruff format --check .
+# 149 files already formatted
+
+uv run ruff check .
+# All checks passed!
+
+uv run pytest tests/ --no-cov -p no:cacheprovider --color=no
+# 282 passed, 18 skipped, 2 deselected, 1 warning in 21.31s
+
+rg "docs/adr/0\d{2}-" .
+# (no matches)
+
+rg "001-sqlite-connection|002-cli-command|003-deferred-scraper" .
+# (no matches)
+
+git log --follow docs/adr/ADR-005-sqlite-connection-management.md
+# git rename detection preserves history through `git mv`.
+```
+
+#### Decisions Made
+- Preferred scheme is `ADR-NNN-kebab-title.md` (ADR prefix, 3-digit zero-padded number, kebab-case title) per the Phase 13 prompt.
+- Since all 7 ADRs are semantically distinct decisions (connection management ≠ hybrid methodology; CLI dispatch ≠ storage layer; scraper-decoupling ≠ scraper-concurrency), **none** were deleted as duplicates. The numeric-only files were renumbered to `ADR-005`, `ADR-006`, `ADR-007` to continue the existing sequence.
+- Cross-references in **immutable prompt artifacts** (`prompts/phase12-survey-tui-hardening/v0.2.0.md`, `current.md`, `CHANGELOG.md`) were deliberately **NOT** updated. Those files are bound by the prompt versioning immutability contract (see `prompts/README.md` §Immutability Contract) and their historical references to "ADR-001 pattern" describe the state of the repo at the time of that release. Any future consumer tracing `ADR-001` from that doc will find the hybrid-forensics-methodology ADR — semantically wrong, but the only way to preserve both the prompt contract and the renamed ADRs. If this becomes a recurring footgun, a new prompt version should be released rather than editing the existing snapshot.
+- `.cursor/plans/*` files already referenced the correct `ADR-NNN-*` filenames and did not need modification.
+
+#### Unresolved Questions
+- None.
+
+#### Risks & Next Steps
+- Git history for the three renamed ADRs is preserved via rename detection (`git log --follow` continues to show prior commits).
+- If additional agents update prompt `phase12-survey-tui-hardening/current.md` in the future, they should bump the version and update the ADR references in the new snapshot at that time.

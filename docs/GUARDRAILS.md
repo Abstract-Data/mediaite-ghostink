@@ -84,7 +84,7 @@ Each Sign has:
 
 **Sign: Repository Used Outside an Active Session**
 - Trigger: Code calls `Repository(db_path).upsert_*` without entering `with Repository(db_path) as repo:` (or passes `db_path` into ad-hoc `sqlite3.connect` helpers outside `repository.py`).
-- Instruction: Always use ``with Repository(path) as repo:`` for SQLite writes/reads. For scrape orchestration, prefer injecting the same `repo` into `collect_article_metadata` / `fetch_articles` when multiple operations should share one transaction. See ADR-001.
+- Instruction: Always use ``with Repository(path) as repo:`` for SQLite writes/reads. For scrape orchestration, prefer injecting the same `repo` into `collect_article_metadata` / `fetch_articles` when multiple operations should share one transaction. See ADR-005.
 - Reason: Session-scoped connections enable WAL + DEFERRED transactions and batch commits; using a closed or non-entered repository raises `RuntimeError` and prevents silent autocommit sprawl.
 - Provenance: Agent-learned — 2026-04-20 code review (P1-ARCH-1, RF-SMELL-001), updated 2026-04-21 after `Repository` context manager landed.
 
@@ -96,7 +96,7 @@ Each Sign has:
 
 **Sign: God Function Exceeding 50 Lines in CLI/Orchestration**
 - Trigger: Any function in `forensics/cli/` or `pipeline.py` exceeds 50 lines (excluding docstrings and blank lines), or a single function handles more than 3 distinct flag/command combinations via sequential `if` blocks.
-- Instruction: Decompose into a command registry or strategy mapping (see ADR-002). Each pipeline operation should be a separate callable registered in a dispatch table. New phases must slot in via registration, not by adding more `if` branches.
+- Instruction: Decompose into a command registry or strategy mapping (see ADR-006). Each pipeline operation should be a separate callable registered in a dispatch table. New phases must slot in via registration, not by adding more `if` branches.
 - Reason: The 117-line `_async_scrape` function with ~18 cyclomatic complexity was flagged as the single most critical refactoring issue. Adding Phase 4–7 flags to this pattern would make it unmaintainable.
 - Provenance: Agent-learned — 2026-04-20 code review (RF-CPLX-001, P2-CQ-2).
 

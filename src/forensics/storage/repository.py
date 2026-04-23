@@ -74,7 +74,7 @@ CREATE TABLE IF NOT EXISTS analysis_runs (
 
 
 def _connect(db_path: Path) -> sqlite3.Connection:
-    """Open SQLite with DEFERRED transactions, WAL, and busy timeout (ADR-001).
+    """Open SQLite with DEFERRED transactions, WAL, and busy timeout (ADR-005).
 
     ``check_same_thread=False`` allows the connection to be used from asyncio worker
     threads while callers serialize access (e.g. ``db_lock`` in the scraper fetcher).
@@ -228,7 +228,7 @@ class Repository:
     def all_authors(self) -> list[Author]:
         """Return every author in the database ordered by slug.
 
-        Use inside an active ``with Repository(...)`` context (ADR-001).
+        Use inside an active ``with Repository(...)`` context (ADR-005).
         """
         conn = self._require_conn()
         rows = conn.execute("SELECT * FROM authors ORDER BY slug").fetchall()
