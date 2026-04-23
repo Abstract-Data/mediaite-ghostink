@@ -107,6 +107,16 @@ _FLAT_DICT_FIELDS: frozenset[str] = frozenset(
 )
 
 
+_FAMILIES: tuple[tuple[type[BaseModel], str], ...] = (
+    (LexicalFeatures, "lexical"),
+    (StructuralFeatures, "structural"),
+    (ReadabilityFeatures, "readability"),
+    (ContentFeatures, "content"),
+    (ProductivityFeatures, "productivity"),
+    (PosShapeFeatures, "pos"),
+)
+
+
 def _maybe_decode_dict_field(value: Any) -> Any:
     """Round-trip compat: Parquet stores dict fields as JSON strings; decode on read."""
     if isinstance(value, str):
@@ -145,25 +155,14 @@ class FeatureVector(BaseModel):
             if dict_field in flat:
                 flat[dict_field] = _maybe_decode_dict_field(flat[dict_field])
         out: dict[str, Any] = {}
-        lex_f = {f: flat.pop(f) for f in LexicalFeatures.model_fields if f in flat}
-        str_f = {f: flat.pop(f) for f in StructuralFeatures.model_fields if f in flat}
-        read_f = {f: flat.pop(f) for f in ReadabilityFeatures.model_fields if f in flat}
-        cont_f = {f: flat.pop(f) for f in ContentFeatures.model_fields if f in flat}
-        prod_f = {f: flat.pop(f) for f in ProductivityFeatures.model_fields if f in flat}
-        pos_f = {f: flat.pop(f) for f in PosShapeFeatures.model_fields if f in flat}
+        buckets: dict[str, dict[str, Any]] = {
+            key: {f: flat.pop(f) for f in family_cls.model_fields if f in flat}
+            for family_cls, key in _FAMILIES
+        }
         out.update(flat)
-        if lex_f:
-            out["lexical"] = lex_f
-        if str_f:
-            out["structural"] = str_f
-        if read_f:
-            out["readability"] = read_f
-        if cont_f:
-            out["content"] = cont_f
-        if prod_f:
-            out["productivity"] = prod_f
-        if pos_f:
-            out["pos"] = pos_f
+        for key, bucket in buckets.items():
+            if bucket:
+                out[key] = bucket
         return out
 
     def to_flat_dict(self) -> dict[str, Any]:

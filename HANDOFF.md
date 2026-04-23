@@ -1217,3 +1217,47 @@ uv run --extra dev forensics --help
 
 #### Risks & Next Steps
 - None. Tests run in the default collection (no `slow` marker) and are independent of external resources.
+
+---
+
+### Phase 13 Unit 8 — Feature model validator DRY
+**Status:** Complete
+**Date:** 2026-04-22
+**Agent/Session:** Phase 13 Unit 8 (worktree agent-ac200781)
+
+#### What Was Done
+- Replaced 6 sequential `flat.pop(...)` family-field extraction blocks and 6 `if lex_f: out["lexical"] = lex_f` post-assignments in `_accept_legacy_flat_payload` with a single `_FAMILIES` tuple and two small loops. Behaviour preserved: same keys (`lexical`, `structural`, `readability`, `content`, `productivity`, `pos`), same pop semantics, same order, same empty-bucket filtering.
+- Removed the `"src/forensics/models/features.py" = ["C901"]` per-file suppression from `pyproject.toml`; ruff now passes `C901` without it.
+
+#### Files Modified
+- `src/forensics/models/features.py` — introduced `_FAMILIES: tuple[tuple[type[BaseModel], str], ...]` constant; collapsed 6 pop lines + 6 if-assign lines into two small loops driven by the constant.
+- `pyproject.toml` — removed the `C901` per-file ignore for `models/features.py`.
+
+#### Verification Evidence
+```
+$ uv run ruff format --check .
+149 files already formatted
+
+$ uv run ruff check .
+All checks passed!
+
+$ uv run python -m pytest tests/
+282 passed, 18 skipped, 2 deselected, 1 warning in 74.07s
+Required test coverage of 50.0% reached. Total coverage: 60.96%
+
+$ uv run python -m pytest tests/ -k "features or model" -v
+11 passed, 18 skipped in 129.88s  (spaCy en_core_web_md not installed → skips expected)
+
+$ uv run forensics --help
+Shows full command list (extract, analyze, report, preflight, ...).
+```
+
+#### Decisions Made
+- Kept `_nested_keys()` as-is. Although its six strings are identical to the `_FAMILIES` output keys, the task scope was narrowly `_accept_legacy_flat_payload`; keeping the two constants separate preserves the exact observable behaviour of the early-return short-circuit (`any(k in data for k in _nested_keys())`) without introducing import-order surprises. A follow-up can DRY `_nested_keys` to derive from `_FAMILIES` if desired.
+- Typed the family tuple as `tuple[tuple[type[BaseModel], str], ...]` rather than the plan's looser `tuple[type, str]`. Pydantic's family classes all subclass `BaseModel`, and this gives better static-type hinting for `model_fields` access.
+
+#### Unresolved Questions
+- None.
+
+#### Risks & Next Steps
+- C901 suppression removal is load-bearing on the simplification — future edits that re-raise the validator's complexity will fail ruff. Keep the FAMILIES-loop pattern.
