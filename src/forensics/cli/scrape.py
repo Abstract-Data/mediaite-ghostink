@@ -12,10 +12,11 @@ from typing import Annotated, assert_never
 import typer
 
 from forensics.cli._helpers import guard_placeholder_authors
+from forensics.cli.state import get_cli_state
 from forensics.config import DEFAULT_DB_RELATIVE, get_project_root, get_settings
 from forensics.config.settings import ForensicsSettings
 from forensics.pipeline_context import PipelineContext
-from forensics.progress import PipelineObserver, PipelineStage
+from forensics.progress import PipelineObserver, PipelineStage, managed_rich_observer
 from forensics.scraper.crawler import (
     collect_article_metadata,
     discover_authors,
@@ -495,6 +496,7 @@ async def dispatch_scrape(
 
 @scrape_app.callback(invoke_without_command=True)
 def scrape(
+    ctx: typer.Context,
     discover: Annotated[
         bool, typer.Option("--discover", help="Run WordPress author discovery only")
     ] = False,
@@ -546,18 +548,21 @@ def scrape(
     ] = None,
 ) -> None:
     """Crawl and fetch articles for configured authors."""
-    rc = asyncio.run(
-        dispatch_scrape(
-            discover=discover,
-            metadata=metadata,
-            fetch=fetch,
-            dedup=dedup,
-            archive=archive,
-            dry_run=dry_run,
-            force_refresh=force_refresh,
-            all_authors=all_authors,
-            post_year_min=post_year_min,
-            post_year_max=post_year_max,
+    show = get_cli_state(ctx).show_progress
+    with managed_rich_observer(show) as observer:
+        rc = asyncio.run(
+            dispatch_scrape(
+                discover=discover,
+                metadata=metadata,
+                fetch=fetch,
+                dedup=dedup,
+                archive=archive,
+                dry_run=dry_run,
+                force_refresh=force_refresh,
+                all_authors=all_authors,
+                post_year_min=post_year_min,
+                post_year_max=post_year_max,
+                observer=observer,
+            )
         )
-    )
     raise typer.Exit(code=rc)

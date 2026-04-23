@@ -21,6 +21,7 @@ from forensics.analysis.orchestrator import run_full_analysis
 from forensics.config.settings import ForensicsSettings
 from forensics.features.pipeline import extract_all_features
 from forensics.models.analysis import AnalysisResult
+from forensics.progress import PipelineObserver, PipelineRunPhase, live_ui_mode
 from forensics.storage.json_io import write_json_artifact
 from forensics.survey.qualification import (
     QualificationCriteria,
@@ -158,6 +159,7 @@ async def _process_author(
     db_path: Path,
     settings: ForensicsSettings,
     project_root: Path,
+    show_rich_progress: bool = True,
 ) -> SurveyResult:
     slug = qa.author.slug
     result = SurveyResult(
@@ -172,6 +174,7 @@ async def _process_author(
             settings,
             author_slug=slug,
             project_root=project_root,
+            show_rich_progress=show_rich_progress,
         )
 
         paths = AnalysisArtifactPaths.from_project(project_root, db_path)
@@ -203,6 +206,8 @@ async def run_survey(
     criteria: QualificationCriteria | None = None,
     post_year_min: int | None = None,
     post_year_max: int | None = None,
+    observer: PipelineObserver | None = None,
+    show_rich_progress: bool = True,
 ) -> SurveyReport:
     """Execute the blind survey pipeline.
 
@@ -230,6 +235,9 @@ async def run_survey(
         post_year_min: Optional inclusive year lower bound for the scrape step
             (with ``post_year_max``); overrides ``settings.scraping`` when set.
         post_year_max: Optional inclusive year upper bound for the scrape step.
+        observer: Optional scrape / survey progress observer (Rich or Textual).
+        show_rich_progress: When false, disables the per-author Rich extract bar
+            (and should match ``observer is None`` for plain logging).
     """
     from forensics.config import get_project_root
 
@@ -256,24 +264,32 @@ async def run_survey(
         )
 
     effective_criteria = criteria or QualificationCriteria.from_settings(settings.survey)
+    rich_extract = show_rich_progress and live_ui_mode(observer) != "textual"
 
     if not skip_scrape and not dry_run:
         # Survey mode uses the discovered manifest, not config.toml authors.
         from forensics.cli.scrape import dispatch_scrape
 
         logger.info("survey: running full scrape pipeline first (all authors)")
-        rc = await dispatch_scrape(
-            discover=False,
-            metadata=False,
-            fetch=False,
-            dedup=False,
-            archive=False,
-            dry_run=False,
-            force_refresh=False,
-            all_authors=True,
-            post_year_min=post_year_min,
-            post_year_max=post_year_max,
-        )
+        if observer is not None:
+            observer.pipeline_run_phase_start(PipelineRunPhase.SCRAPE)
+        try:
+            rc = await dispatch_scrape(
+                discover=False,
+                metadata=False,
+                fetch=False,
+                dedup=False,
+                archive=False,
+                dry_run=False,
+                force_refresh=False,
+                all_authors=True,
+                post_year_min=post_year_min,
+                post_year_max=post_year_max,
+                observer=observer,
+            )
+        finally:
+            if observer is not None:
+                observer.pipeline_run_phase_end(PipelineRunPhase.SCRAPE)
         if rc != 0:
             logger.error("survey: scrape failed with exit code %d", rc)
             report.results = []
@@ -329,47 +345,61 @@ async def run_survey(
             qa.total_articles,
         )
 
-        result = await _process_author(
-            qa,
-            db_path=db,
-            settings=settings,
-            project_root=root,
-        )
+        if observer is not None:
+            observer.survey_author_started(slug, idx, total)
+        result: SurveyResult | None = None
+        try:
+            result = await _process_author(
+                qa,
+                db_path=db,
+                settings=settings,
+                project_root=root,
+                show_rich_progress=rich_extract,
+            )
+        finally:
+            if observer is not None:
+                observer.survey_author_finished(slug, result.error if result else None)
         report.results.append(result)
         _write_checkpoint(report)
 
-    _rank_results(report)
+    if observer is not None:
+        observer.pipeline_run_phase_start(PipelineRunPhase.SURVEY_FINALIZE)
+    try:
+        _rank_results(report)
 
-    score_map: dict[str, SurveyScore] = {
-        r.author_slug: r.score for r in report.results if r.score is not None
-    }
-    # Error entries — mark as ERROR so identify_natural_controls skips them.
-    for r in report.results:
-        if r.error is not None and r.author_slug not in score_map:
-            score_map[r.author_slug] = SurveyScore(
-                composite=-1.0,
-                strength=SignalStrength.ERROR,
-                pipeline_a_score=0.0,
-                pipeline_b_score=0.0,
-                pipeline_c_score=None,
-                convergence_score=0.0,
-                num_convergence_windows=0,
-                strongest_window_ratio=0.0,
-                max_effect_size=0.0,
-                evidence_summary=r.error,
-            )
+        score_map: dict[str, SurveyScore] = {
+            r.author_slug: r.score for r in report.results if r.score is not None
+        }
+        # Error entries — mark as ERROR so identify_natural_controls skips them.
+        for r in report.results:
+            if r.error is not None and r.author_slug not in score_map:
+                score_map[r.author_slug] = SurveyScore(
+                    composite=-1.0,
+                    strength=SignalStrength.ERROR,
+                    pipeline_a_score=0.0,
+                    pipeline_b_score=0.0,
+                    pipeline_c_score=None,
+                    convergence_score=0.0,
+                    num_convergence_windows=0,
+                    strongest_window_ratio=0.0,
+                    max_effect_size=0.0,
+                    evidence_summary=r.error,
+                )
 
-    report.natural_controls = identify_natural_controls(score_map)
-    validation = validate_against_controls(score_map, report.natural_controls)
-    logger.info(
-        "survey: complete — %d processed, %d errors, %d natural controls "
-        "(mean composite=%.3f, max=%.3f)",
-        len(report.results),
-        sum(1 for r in report.results if r.error),
-        validation.num_controls,
-        validation.mean_composite,
-        validation.max_composite,
-    )
+        report.natural_controls = identify_natural_controls(score_map)
+        validation = validate_against_controls(score_map, report.natural_controls)
+        logger.info(
+            "survey: complete — %d processed, %d errors, %d natural controls "
+            "(mean composite=%.3f, max=%.3f)",
+            len(report.results),
+            sum(1 for r in report.results if r.error),
+            validation.num_controls,
+            validation.mean_composite,
+            validation.max_composite,
+        )
 
-    _write_survey_results(report)
+        _write_survey_results(report)
+    finally:
+        if observer is not None:
+            observer.pipeline_run_phase_end(PipelineRunPhase.SURVEY_FINALIZE)
     return report

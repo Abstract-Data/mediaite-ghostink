@@ -17,6 +17,16 @@ class PipelineStage(StrEnum):
     ARCHIVE = "archive"
 
 
+class PipelineRunPhase(StrEnum):
+    """End-to-end pipeline / survey phases (above individual scrape stages)."""
+
+    SCRAPE = "scrape"
+    EXTRACT = "extract"
+    ANALYZE = "analyze"
+    REPORT = "report"
+    SURVEY_FINALIZE = "survey_finalize"
+
+
 @runtime_checkable
 class PipelineObserver(Protocol):
     """Optional callbacks for scrape dispatch and sub-stages (thread-safe callers required)."""
@@ -36,6 +46,18 @@ class PipelineObserver(Protocol):
     def fetch_progress(self, done: int, total: int) -> None:
         """Article fetch progress (``done`` inclusive, ``total`` rows in this run)."""
 
+    def pipeline_run_phase_start(self, phase: PipelineRunPhase) -> None:
+        """Notify that a coarse pipeline phase (scrape / extract / …) has begun."""
+
+    def pipeline_run_phase_end(self, phase: PipelineRunPhase) -> None:
+        """Notify that a coarse pipeline phase has finished."""
+
+    def survey_author_started(self, slug: str, index: int, total: int) -> None:
+        """Survey loop is about to process ``slug`` (``index`` of ``total``)."""
+
+    def survey_author_finished(self, slug: str, error: str | None = None) -> None:
+        """Survey loop finished ``slug``; ``error`` set when processing failed."""
+
 
 class NoOpPipelineObserver:
     """Default observer; all methods are no-ops."""
@@ -53,6 +75,18 @@ class NoOpPipelineObserver:
         return None
 
     def fetch_progress(self, _done: int, _total: int) -> None:
+        return None
+
+    def pipeline_run_phase_start(self, _phase: PipelineRunPhase) -> None:
+        return None
+
+    def pipeline_run_phase_end(self, _phase: PipelineRunPhase) -> None:
+        return None
+
+    def survey_author_started(self, _slug: str, _index: int, _total: int) -> None:
+        return None
+
+    def survey_author_finished(self, _slug: str, _error: str | None = None) -> None:
         return None
 
 

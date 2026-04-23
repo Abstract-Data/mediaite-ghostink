@@ -32,7 +32,7 @@ def test_run_all_pipeline_returns_2_on_preflight_failures() -> None:
         checks=(PreflightCheck("disk", "fail", "no space"),),
     )
     with mock.patch("forensics.preflight.run_all_preflight_checks", return_value=report):
-        assert run_all_pipeline() == 2
+        assert run_all_pipeline(show_progress=False) == 2
 
 
 def test_run_all_pipeline_logs_warnings_but_continues() -> None:
@@ -56,7 +56,7 @@ def test_run_all_pipeline_logs_warnings_but_continues() -> None:
         mock.patch("forensics.pipeline.run_analyze"),
         mock.patch("forensics.pipeline.run_report", return_value=0) as rr,
     ):
-        assert run_all_pipeline() == 0
+        assert run_all_pipeline(show_progress=False) == 0
     ex.assert_called_once()
     rr.assert_called_once()
     assert isinstance(rr.call_args.args[0], ReportArgs)
@@ -78,7 +78,7 @@ def test_run_all_pipeline_propagates_scrape_exit_code() -> None:
         mock.patch("forensics.pipeline.dispatch_scrape", side_effect=_fail_dispatch),
         mock.patch("forensics.pipeline.extract_all_features") as ex,
     ):
-        assert run_all_pipeline() == 3
+        assert run_all_pipeline(show_progress=False) == 3
     ex.assert_not_called()
 
 
@@ -99,7 +99,7 @@ def test_run_all_pipeline_maps_typer_exit_from_analyze() -> None:
         mock.patch("forensics.pipeline.run_analyze", side_effect=typer.Exit(5)),
         mock.patch("forensics.pipeline.run_report") as rr,
     ):
-        assert run_all_pipeline() == 5
+        assert run_all_pipeline(show_progress=False) == 5
     rr.assert_not_called()
 
 
@@ -120,5 +120,5 @@ def test_run_all_pipeline_typer_exit_zero_from_analyze_still_reports() -> None:
         mock.patch("forensics.pipeline.run_analyze", side_effect=typer.Exit(0)),
         mock.patch("forensics.pipeline.run_report", return_value=0) as rr,
     ):
-        assert run_all_pipeline() == 0
+        assert run_all_pipeline(show_progress=False) == 0
     rr.assert_called_once()

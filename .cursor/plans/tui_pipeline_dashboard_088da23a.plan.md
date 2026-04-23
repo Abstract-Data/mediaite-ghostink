@@ -13,13 +13,13 @@ todos:
     status: completed
   - id: survey-all-hooks
     content: Plumb observer through run_survey and run_all_pipeline; coordinate Rich vs Textual (only one active)
-    status: pending
+    status: completed
   - id: rich-cli-default
     content: RichPipelineObserver for normal `forensics all` / `survey` / scrape; root or shared `--no-progress` disables Rich + any live bars; extend extract's Rich usage to respect the same flag
-    status: pending
+    status: completed
   - id: textual-app
     content: New Textual PipelineDashboardApp + Typer `forensics dashboard` (tui extra); Worker thread + call_from_thread updates
-    status: pending
+    status: in_progress
   - id: tests
     content: Unit tests for observer emissions; assert `--no-progress` yields no Rich Progress; optional Textual pilot smoke gated on textual extra
     status: pending

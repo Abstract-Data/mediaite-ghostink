@@ -9,6 +9,8 @@ from typing import Annotated
 
 import typer
 
+from forensics.cli.state import ForensicsCliState, get_cli_state
+
 app = typer.Typer(
     name="forensics",
     help="AI Writing Forensics Pipeline",
@@ -28,6 +30,7 @@ def _version_callback(value: bool) -> None:
 
 @app.callback()
 def _root(
+    ctx: typer.Context,
     version: Annotated[
         bool | None,
         typer.Option(
@@ -39,8 +42,16 @@ def _root(
         ),
     ] = None,
     verbose: Annotated[bool, typer.Option("--verbose", "-v", help="Enable DEBUG logging")] = False,
+    no_progress: Annotated[
+        bool,
+        typer.Option(
+            "--no-progress",
+            help="Disable Rich progress bars and pipeline observers (CI, logs, minimal TTY).",
+        ),
+    ] = False,
 ) -> None:
     """AI Writing Forensics Pipeline."""
+    ctx.obj = ForensicsCliState(show_progress=not no_progress)
     level = logging.DEBUG if verbose else logging.INFO
     logging.basicConfig(level=level, format="%(levelname)s %(name)s: %(message)s")
 
@@ -248,12 +259,13 @@ def export_data(
 
 
 @app.command(name="all")
-def run_all() -> None:
+def run_all(ctx: typer.Context) -> None:
     """Run full pipeline end-to-end: scrape → extract → analyze → report."""
     from forensics.pipeline import run_all_pipeline
 
     logger = logging.getLogger(__name__)
-    rc = run_all_pipeline()
+    st = get_cli_state(ctx)
+    rc = run_all_pipeline(show_progress=st.show_progress)
     if rc != 0:
         logger.error("pipeline exited with code %d", rc)
         raise typer.Exit(code=rc)
