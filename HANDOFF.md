@@ -1261,3 +1261,65 @@ Shows full command list (extract, analyze, report, preflight, ...).
 
 #### Risks & Next Steps
 - C901 suppression removal is load-bearing on the simplification — future edits that re-raise the validator's complexity will fail ruff. Keep the FAMILIES-loop pattern.
+
+---
+
+### Phase 13 Unit 3 — features/pipeline.py Decomposition (C1 + A3 + D5)
+**Status:** Complete
+**Date:** 2026-04-22
+**Agent/Session:** Phase 13 parallel batch, Unit 3 (worktree agent-af8f7409)
+
+#### What Was Done
+- **C1** — Decomposed the 183-line `extract_all_features` god-function into focused helpers:
+  - `_extract_features_for_article(article, idx, seq, nlp, settings) -> FeatureVector` — pure per-article feature computation; runs all six extractors and the assembler; no DB writes, no logging ceremony, no author-level state. Extractor errors propagate.
+  - `_process_author_batch(author_id, articles_seq, nlp, settings, *, slug, author_name, paths, skip_embeddings, progress, processed_before_batch) -> _AuthorBatchResult` — author-level iteration that calls `_extract_features_for_article`, computes embeddings, owns the per-batch failure ratio guard, and writes the per-author NPZ via `_write_author_embedding_artifacts`.
+  - `_run_author_batches(...)` — outer loop that iterates authors, delegates to `_process_author_batch`, writes per-author Parquet, and aggregates totals + manifest records.
+  - `extract_all_features(...)` — orchestration only: resolve paths, archive mismatched embeddings, load articles, delegate to `_run_author_batches`, write the manifest, return the count. Body is ~35 code lines (well under the ≤40 target).
+  - Supporting helpers extracted: `_load_spacy_model`, `_group_articles_by_author`, `_make_progress`, `_write_author_embedding_artifacts`, `_AuthorBatchResult` dataclass.
+- **A3** — Replaced the hand-built `project_root / "data" / "features" / f"{slug}.parquet"` with `AnalysisArtifactPaths.features_parquet(slug)` (the idiomatic `comparison.py:142` pattern). Also routed `features_dir` / `embeddings_dir` / manifest paths through `AnalysisArtifactPaths.from_project(root, db_path)`. The NPZ artifact helper now derives its relative path from `paths.embeddings_dir.relative_to(paths.project_root)` instead of hardcoding `Path("data") / "embeddings"`, keeping the manifest string byte-identical.
+- **D5** — Removed the `"src/forensics/features/pipeline.py" = ["C901"]` entry from `[tool.ruff.lint.per-file-ignores]` in `pyproject.toml`. Ruff C901 passes cleanly — no helper crosses the cyclomatic threshold.
+
+#### Files Modified
+- `src/forensics/features/pipeline.py` — full decomposition: 183-line `extract_all_features` → 35-line orchestrator + 4 focused helpers + per-author artifact writer + `_AuthorBatchResult` dataclass; new `AnalysisArtifactPaths` usage.
+- `pyproject.toml` — removed the C901 suppression line for `features/pipeline.py`.
+
+#### Verification Evidence
+```
+$ uv run ruff format --check .
+149 files already formatted
+
+$ uv run ruff check .
+All checks passed!
+
+$ uv run python -m pytest tests/ --no-cov
+282 passed, 18 skipped, 2 deselected, 1 warning in 25.92s
+  (same count as pre-refactor baseline; the 18 skipped are the integration
+   tests that require en_core_web_md, which is not installed on the shared host.)
+
+$ uv run pytest tests/ --cov=src/forensics/features --cov-report=term-missing
+features/pipeline.py coverage: 19% (unchanged vs pre-refactor — the only tests
+  that exercise the orchestrator need spaCy). Project total: 61.12% (fail_under=50).
+
+$ uv run forensics --help         # top-level CLI intact
+$ uv run forensics extract --help # extract subcommand intact and lists original flags
+
+$ uv run python -c "from forensics.features.pipeline import extract_all_features; \
+    import inspect; print(inspect.signature(extract_all_features))"
+(db_path: 'Path', settings: 'ForensicsSettings', *, author_slug: 'str | None' = None,
+ skip_embeddings: 'bool' = False, project_root: 'Path | None' = None) -> 'int'
+  (public signature byte-identical to pre-refactor.)
+```
+
+#### Decisions Made
+- Kept all per-article extractor error handling inside `_process_author_batch` so the failure-ratio guard semantics (per-author batch, raises `RuntimeError` with the exact historical message format) stay bit-identical. The pure `_extract_features_for_article` helper simply raises on any extractor error and lets the batch function own the accounting.
+- Threaded `processed_before_batch: int` from orchestrator → batch helper so the `processed % 50 == 0` debug log retains its global-counter frequency rather than resetting per author.
+- Passed `paths: AnalysisArtifactPaths` through `_process_author_batch` and `_write_author_embedding_artifacts` instead of `root: Path`, per the simplify review — removes duplicated path construction and keeps all `data/` layout knowledge behind the paths abstraction.
+- Introduced a small private `_AuthorBatchResult` dataclass (features + embedding records + counters) for a named return type instead of a 4-tuple; the prompt allowed `tuple[...]`, but the dataclass is easier to extend and doesn't leak field order into the orchestrator loop.
+- Removed the C901 suppression: Ruff passes with `C901` active, confirming no helper exceeds the complexity threshold.
+
+#### Unresolved Questions
+- The orchestrator integration tests in `tests/test_features.py` that would exercise the decomposed call tree require the `en_core_web_md` spaCy model (~40 MB). They remain skipped in this worktree exactly as in the pre-refactor baseline. The decomposition does not change skip behavior.
+
+#### Risks & Next Steps
+- Semantics preserved: public signature, return type, error-handling types, failure-ratio guard message, NPZ layout, manifest relative path, and debug-log cadence are all identical to pre-refactor. Downstream consumers (`cli/extract.py`, `survey/orchestrator.py`, `calibration/runner.py`, `pipeline.py`) need no changes.
+- Future operators can now test the three helpers independently — `_extract_features_for_article` is pure and takes a spaCy Language + settings, so a fakes-only unit test can hit it without the full CLI. A follow-up could add such tests to lift the 19% coverage on `pipeline.py`.
