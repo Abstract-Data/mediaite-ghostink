@@ -32,7 +32,7 @@ class ConvergenceWindow(BaseModel):
 class DriftScores(BaseModel):
     author_id: str
     baseline_centroid_similarity: float
-    ai_baseline_similarity: float
+    ai_baseline_similarity: float | None = None
     monthly_centroid_velocities: list[float]
     intra_period_variance_trend: list[float]
 

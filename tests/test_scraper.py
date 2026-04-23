@@ -24,7 +24,12 @@ from forensics.scraper.crawler import (
     stable_article_id,
 )
 from forensics.scraper.dedup import deduplicate_articles
-from forensics.scraper.fetcher import RateLimiter, _is_mediaite_host, request_with_retry
+from forensics.scraper.fetcher import (
+    RateLimiter,
+    _is_mediaite_host,
+    _write_raw_html_file,
+    request_with_retry,
+)
 from forensics.scraper.parser import extract_article_text, extract_metadata, looks_coauthored
 from forensics.storage.repository import Repository
 from forensics.utils.datetime import parse_wp_datetime
@@ -218,6 +223,34 @@ def test_mediaite_host_detection() -> None:
     assert _is_mediaite_host("www.mediaite.com")
     assert _is_mediaite_host("mediaite.com")
     assert not _is_mediaite_host("lawandcrime.com")
+
+
+@pytest.mark.parametrize(
+    "bad_id",
+    ["../evil", "a/b", "..\\evil", "x\\y", "foo/../bar", ".."],
+)
+def test_write_raw_html_file_rejects_unsafe_article_id(tmp_path: Path, bad_id: str) -> None:
+    """Defense-in-depth: reject any article_id that could escape data/raw/{year}/."""
+    with pytest.raises(ValueError, match="unsafe article_id"):
+        _write_raw_html_file(tmp_path, 2025, bad_id, "<html/>")
+    # and nothing was written anywhere under data/raw/
+    assert not (tmp_path / "data").exists() or not any(
+        p.is_file() for p in (tmp_path / "data").rglob("*")
+    )
+
+
+def test_write_raw_html_file_accepts_uuid_id(tmp_path: Path) -> None:
+    """Baseline: a normal UUID5-shaped id writes exactly one file under data/raw/{year}/."""
+    rel = _write_raw_html_file(
+        tmp_path,
+        2025,
+        "0c1e8c0e-1234-5abc-8def-0123456789ab",
+        "<html>ok</html>",
+    )
+    assert rel == "raw/2025/0c1e8c0e-1234-5abc-8def-0123456789ab.html"
+    out = tmp_path / "data" / "raw" / "2025" / "0c1e8c0e-1234-5abc-8def-0123456789ab.html"
+    assert out.is_file()
+    assert out.read_text(encoding="utf-8") == "<html>ok</html>"
 
 
 def test_simhash_near_duplicate_distance() -> None:
