@@ -67,7 +67,11 @@ async def test_scrape_dedup_only(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     monkeypatch.setattr(scrape_mod, "get_project_root", lambda: tmp_path)
-    monkeypatch.setattr(scrape_mod, "deduplicate_articles", lambda db: ["a", "b"])
+    monkeypatch.setattr(
+        scrape_mod,
+        "deduplicate_articles",
+        lambda db, *, hamming_threshold=3: ["a", "b"],
+    )
 
     with caplog.at_level(logging.INFO, logger="forensics.cli.scrape"):
         rc = await scrape_mod.dispatch_scrape(

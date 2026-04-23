@@ -54,9 +54,7 @@ def run_all_pipeline() -> int:
 
     root = get_project_root()
     db_path = root / "data" / "articles.db"
-    PipelineContext.resolve().record_audit(
-        "forensics all — preflight", optional=True, log=logger
-    )
+    PipelineContext.resolve().record_audit("forensics all — preflight", optional=True, log=logger)
     PipelineContext.resolve().record_audit("forensics all", optional=True, log=logger)
 
     code = asyncio.run(

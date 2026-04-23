@@ -184,9 +184,7 @@ def extract_all_features(
 
                 batch = len(seq)
                 batch_failed = 0
-                task_id = progress.add_task(
-                    f"Extracting {author_name}", total=batch
-                )
+                task_id = progress.add_task(f"Extracting {author_name}", total=batch)
 
                 for idx, article in enumerate(seq):
                     if processed and processed % 50 == 0:
@@ -199,9 +197,7 @@ def extract_all_features(
                         doc = nlp(article.clean_text)
                         lex = lexical.extract_lexical_features(article.clean_text, doc)
                         pos = pos_patterns.extract_pos_pattern_features(doc)
-                        struct = structural.extract_structural_features(
-                            article.clean_text, doc
-                        )
+                        struct = structural.extract_structural_features(article.clean_text, doc)
                         recent30 = _recent_peer_texts(seq, idx, 30)
                         recent90 = _recent_peer_texts(seq, idx, 90)
                         cont = content.extract_content_features(
@@ -211,9 +207,7 @@ def extract_all_features(
                             recent90,
                             analysis=settings.analysis,
                         )
-                        prior_tuples = [
-                            (a.published_date, a.word_count) for a in seq[:idx]
-                        ]
+                        prior_tuples = [(a.published_date, a.word_count) for a in seq[:idx]]
                         prod = productivity.extract_productivity_features(
                             article.published_date,
                             article.word_count,
@@ -263,9 +257,7 @@ def extract_all_features(
 
                 if not skip_embeddings and embed_batch:
                     embed_dir_author.mkdir(parents=True, exist_ok=True)
-                    rel_batch = (
-                        Path("data") / "embeddings" / slug / AUTHOR_EMBEDDING_BATCH_BASENAME
-                    )
+                    rel_batch = Path("data") / "embeddings" / slug / AUTHOR_EMBEDDING_BATCH_BASENAME
                     abs_batch = root / rel_batch
                     mat = np.stack([row[2] for row in embed_batch], axis=0)
                     write_author_embedding_batch(
