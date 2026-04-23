@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Callable
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -13,11 +14,11 @@ import polars as pl
 import ruptures as rpt
 from scipy.special import logsumexp
 
+from forensics.analysis.artifact_paths import AnalysisArtifactPaths
 from forensics.analysis.statistics import cohens_d
-from forensics.analysis.utils import resolve_author_rows
+from forensics.analysis.utils import load_feature_frame_for_author, resolve_author_rows
 from forensics.config.settings import ForensicsSettings
 from forensics.models.analysis import ChangePoint, ConvergenceWindow
-from forensics.storage.parquet import load_feature_frame_sorted
 from forensics.storage.repository import Repository
 from forensics.utils.datetime import parse_datetime
 
@@ -113,8 +114,7 @@ def detect_bocpd(
         log_evidence = logsumexp(log_pi[:max_s] + log_pred)
         log_pi_new = np.full(t + 1, -np.inf)
         log_pi_new[0] = log_h + log_evidence
-        for new_len in range(2, t + 2):
-            log_pi_new[new_len - 1] = log_1mh + log_pi[new_len - 2] + log_pred[new_len - 2]
+        log_pi_new[1 : t + 1] = log_1mh + log_pi[:t] + log_pred[:t]
         log_pi_new -= logsumexp(log_pi_new)
         log_pi = log_pi_new
 
@@ -138,49 +138,25 @@ def _breakpoint_timestamp(timestamps: list[datetime], idx: int) -> datetime:
     return timestamps[idx]
 
 
-def changepoints_from_pelt(
+def _changepoints_from_breaks(
     feature_name: str,
     author_id: str,
     values: np.ndarray,
     timestamps: list[datetime],
-    pen: float,
+    raw_breaks: list[int],
+    *,
+    method: str,
+    confidence_for_break: Callable[[int, np.ndarray, np.ndarray, float], float],
 ) -> list[ChangePoint]:
-    breaks = detect_pelt(values, pen=pen)
-    out: list[ChangePoint] = []
-    y = np.asarray(values, dtype=float).ravel()
-    for b in breaks:
-        if b <= 0 or b >= len(y):
-            continue
-        before, after = y[:b], y[b:]
-        d = cohens_d(before, after)
-        m_before, m_after = float(np.mean(before)), float(np.mean(after))
-        direction: str = "increase" if m_after >= m_before else "decrease"
-        out.append(
-            ChangePoint(
-                feature_name=feature_name,
-                author_id=author_id,
-                timestamp=_breakpoint_timestamp(timestamps, b),
-                confidence=_pelt_confidence_from_effect(d),
-                method="pelt",
-                effect_size_cohens_d=float(d),
-                direction=direction,  # type: ignore[arg-type]
-            )
-        )
-    return out
+    """Translate raw break indices into ``ChangePoint`` objects.
 
-
-def changepoints_from_bocpd(
-    feature_name: str,
-    author_id: str,
-    values: np.ndarray,
-    timestamps: list[datetime],
-    hazard_rate: float,
-    threshold: float,
-) -> list[ChangePoint]:
-    raw = detect_bocpd(values, hazard_rate=hazard_rate, threshold=threshold)
+    Both PELT and BOCPD emit integer break indices and need the same
+    slice-split-then-cohens-d treatment; ``confidence_for_break`` is the only
+    method-specific piece (PELT uses ``|d|/(|d|+1)``, BOCPD uses the posterior).
+    """
     y = np.asarray(values, dtype=float).ravel()
     out: list[ChangePoint] = []
-    for idx, prob in raw:
+    for idx in raw_breaks:
         if idx <= 0 or idx >= len(y):
             continue
         before, after = y[:idx], y[idx:]
@@ -192,13 +168,53 @@ def changepoints_from_bocpd(
                 feature_name=feature_name,
                 author_id=author_id,
                 timestamp=_breakpoint_timestamp(timestamps, idx),
-                confidence=float(min(1.0, max(0.0, prob))),
-                method="bocpd",
+                confidence=confidence_for_break(idx, before, after, d),
+                method=method,
                 effect_size_cohens_d=float(d),
                 direction=direction,  # type: ignore[arg-type]
             )
         )
     return out
+
+
+def changepoints_from_pelt(
+    feature_name: str,
+    author_id: str,
+    values: np.ndarray,
+    timestamps: list[datetime],
+    pen: float,
+) -> list[ChangePoint]:
+    breaks = detect_pelt(values, pen=pen)
+    return _changepoints_from_breaks(
+        feature_name,
+        author_id,
+        values,
+        timestamps,
+        breaks,
+        method="pelt",
+        confidence_for_break=lambda _idx, _before, _after, d: _pelt_confidence_from_effect(d),
+    )
+
+
+def changepoints_from_bocpd(
+    feature_name: str,
+    author_id: str,
+    values: np.ndarray,
+    timestamps: list[datetime],
+    hazard_rate: float,
+    threshold: float,
+) -> list[ChangePoint]:
+    raw = detect_bocpd(values, hazard_rate=hazard_rate, threshold=threshold)
+    probs: dict[int, float] = dict(raw)
+    return _changepoints_from_breaks(
+        feature_name,
+        author_id,
+        values,
+        timestamps,
+        list(probs),
+        method="bocpd",
+        confidence_for_break=lambda idx, _before, _after, _d: float(min(1.0, max(0.0, probs[idx]))),
+    )
 
 
 def find_convergence_windows(
@@ -294,7 +310,8 @@ def run_changepoint_analysis(
     author_slug: str | None = None,
 ) -> dict[str, Any]:
     """Load Parquet per author; write changepoint and convergence JSON under data/analysis/."""
-    analysis_dir = project_root / "data" / "analysis"
+    paths = AnalysisArtifactPaths.from_project(project_root, db_path)
+    analysis_dir = paths.analysis_dir
     analysis_dir.mkdir(parents=True, exist_ok=True)
 
     with Repository(db_path) as repo:
@@ -303,14 +320,14 @@ def run_changepoint_analysis(
     summary: dict[str, Any] = {"authors": [], "changepoint_files": [], "convergence_files": []}
 
     for author in author_rows:
-        feat_path = project_root / "data" / "features" / f"{author.slug}.parquet"
+        feat_path = paths.features_parquet(author.slug)
         if not feat_path.is_file():
             logger.warning("Skipping author %s: missing %s", author.slug, feat_path)
             continue
-        df = load_feature_frame_sorted(feat_path)
-        df_author = df.filter(pl.col("author_id") == author.id)
-        if df_author.is_empty():
-            df_author = df
+        df_author = load_feature_frame_for_author(paths.features_dir, author.slug, author.id)
+        if df_author is None:
+            logger.warning("Skipping author %s: no rows in %s", author.slug, feat_path)
+            continue
         cps = analyze_author_feature_changepoints(df_author, author_id=author.id, settings=settings)
         conv = find_convergence_windows(
             cps,
@@ -318,8 +335,8 @@ def run_changepoint_analysis(
             settings=settings,
         )
 
-        cp_path = analysis_dir / f"{author.slug}_changepoints.json"
-        conv_path = analysis_dir / f"{author.slug}_convergence.json"
+        cp_path = paths.changepoints_json(author.slug)
+        conv_path = paths.convergence_json(author.slug)
         cp_path.write_text(
             json.dumps([c.model_dump(mode="json") for c in cps], indent=2, default=str),
             encoding="utf-8",

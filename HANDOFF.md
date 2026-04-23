@@ -1047,3 +1047,87 @@ $ uv run forensics --help
 
 #### Risks & Next Steps
 - No behavioural change expected — the refactor is semantics-preserving. If a downstream consumer relied on `read_features` being imported in `timeseries.py` (e.g. for monkeypatching in a test), they will need to patch `forensics.analysis.utils.load_feature_frame_sorted` or `forensics.storage.parquet.read_features` at its definition site. No such test existed at the time of this change (verified via `grep` and full test run).
+
+---
+
+### Phase 13 Unit 1 — changepoint.py consolidation
+**Status:** Complete
+**Date:** 2026-04-22
+**Agent/Session:** Phase 13 Unit 1 (`phase13/unit-1-changepoint` worktree)
+
+#### What Was Done
+- **A1 — Vectorized BOCPD inner loop.** Replaced the per-iteration Python for-loop
+  inside `detect_bocpd` (~L116) with a single NumPy slice assignment
+  `log_pi_new[1 : t + 1] = log_1mh + log_pi[:t] + log_pred[:t]`. Numerically
+  equivalent to the previous implementation, but eliminates a per-timestep loop
+  over segment lengths.
+- **A3 — Consolidated Parquet path construction.** `run_changepoint_analysis`
+  now builds paths via `AnalysisArtifactPaths.from_project(...)` and calls
+  `paths.features_parquet(slug)`, `paths.changepoints_json(slug)`,
+  `paths.convergence_json(slug)` instead of hand-rolled
+  `project_root / "data" / ...` joins. Matches the idiom already used in
+  `comparison.py:142`.
+- **B2 — Routed through `load_feature_frame_for_author`.** Replaced the inline
+  `load_feature_frame_sorted(feat_path) → filter(author_id)` fallback logic with
+  a single call to `load_feature_frame_for_author(paths.features_dir, slug, id)`
+  from `analysis/utils.py`. The helper already encapsulates the
+  filter-then-fallback behaviour. Dropped the now-unused
+  `load_feature_frame_sorted` import.
+- **B3 — Extracted `_changepoints_from_breaks` helper.** Both
+  `changepoints_from_pelt` and `changepoints_from_bocpd` previously duplicated
+  the break-index → slice → `cohens_d` → `ChangePoint` pipeline. Extracted a
+  shared private helper that accepts the raw break indices plus a
+  method-specific `confidence_for_break` callable. PELT passes its
+  `_pelt_confidence_from_effect(d)` lambda; BOCPD captures the
+  posterior-probability lookup dict in its closure. Public function signatures
+  and return types are unchanged.
+
+#### Files Modified
+- `src/forensics/analysis/changepoint.py` — four consolidation edits above,
+  plus `Callable` import from `collections.abc` and added
+  `AnalysisArtifactPaths` / `load_feature_frame_for_author` imports, removed
+  unused `load_feature_frame_sorted` import.
+
+#### Verification Evidence
+```
+$ uv run ruff format --check .
+149 files already formatted
+
+$ uv run ruff check .
+All checks passed!
+
+$ uv run pytest tests/ -v
+274 passed, 19 skipped, 2 deselected, 1 warning in 500.83s
+Required test coverage of 50.0% reached. Total coverage: 57.62%
+
+$ uv run pytest tests/ -k "changepoint or bocpd or pelt" -v
+6 passed, 1 skipped, 288 deselected in 6.34s
+
+$ uv run forensics --help        # prints top-level command list OK
+$ uv run forensics analyze --help  # prints analyze subcommand OK
+```
+
+#### Decisions Made
+- Chose a callable-plus-closure design for the confidence callback rather than
+  passing a pre-computed confidence list, because BOCPD needs to look up the
+  posterior by original index (break indices may skip values when filtered by
+  the `idx <= 0 or idx >= len(y)` guard). The `dict(raw)` mapping captured in
+  the closure keeps this O(1) and keeps the call-sites tiny.
+- Preserved the `load_feature_frame_for_author` fallback warning (parquet file
+  exists but has no rows for this author — falls back to the full frame and
+  logs). This matches the prior behaviour where `df_author = df` was used when
+  the author-filtered frame was empty.
+- Kept the `if df_author is None` guard even though the helper returns `None`
+  only when the parquet file is missing (which we already checked just above);
+  it costs nothing and guards against a rare race condition.
+
+#### Unresolved Questions
+- None within this unit's scope.
+
+#### Risks & Next Steps
+- A1 changes the BOCPD inner loop from scalar to vectorized; floating-point
+  summation order may differ by ~1 ULP. The existing `test_bocpd_gradual_shift`
+  test passed unchanged. If extreme numerical reproducibility is required,
+  callers should version-pin their expected fixtures.
+- Other Phase 13 units operate on different files; no cross-unit conflicts
+  expected.
