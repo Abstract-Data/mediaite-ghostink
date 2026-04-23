@@ -7,9 +7,12 @@ interruption.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
+import os
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -158,6 +161,44 @@ def _rank_results(report: SurveyReport) -> None:
         key=lambda r: r.score.composite if r.score else -1.0,
         reverse=True,
     )
+
+
+def _process_author_worker(
+    qa: QualifiedAuthor,
+    db_path: Path,
+    settings: ForensicsSettings,
+    project_root: Path,
+) -> SurveyResult:
+    """Top-level picklable wrapper for ProcessPoolExecutor workers.
+
+    Subprocess workers inherit no asyncio loop and no Rich Live display, so this
+    always disables the in-process progress UI and drives ``_process_author``
+    with its own ``asyncio.run``.
+    """
+    return asyncio.run(
+        _process_author(
+            qa,
+            db_path=db_path,
+            settings=settings,
+            project_root=project_root,
+            show_rich_progress=False,
+        )
+    )
+
+
+def _survey_worker_count(requested: int | None) -> int:
+    """Resolve the per-author parallelism from ``requested`` / env / CPU count.
+
+    Defaults to ``min(8, os.cpu_count() or 1)`` so the survey saturates an
+    M-series Mac without thrashing on lower-core hosts. ``SURVEY_AUTHOR_WORKERS``
+    overrides, and an explicit argument beats both.
+    """
+    if requested is not None and requested > 0:
+        return requested
+    env = os.environ.get("SURVEY_AUTHOR_WORKERS")
+    if env and env.isdigit() and int(env) > 0:
+        return int(env)
+    return max(1, min(8, os.cpu_count() or 1))
 
 
 async def _process_author(
@@ -340,36 +381,92 @@ async def run_survey(
         return report
 
     total = len(qualified)
-    for idx, qa in enumerate(qualified, start=1):
-        slug = qa.author.slug
-        if slug in completed_slugs:
-            logger.info("survey: [%d/%d] skipping %s (already completed)", idx, total, slug)
-            continue
+    pending = [qa for qa in qualified if qa.author.slug not in completed_slugs]
+    for qa in qualified:
+        if qa.author.slug in completed_slugs:
+            logger.info("survey: skipping %s (already completed)", qa.author.slug)
 
+    workers = _survey_worker_count(None)
+    use_parallel = workers > 1 and len(pending) > 1
+
+    if use_parallel:
+        # Process authors concurrently via a ProcessPoolExecutor. Each worker runs
+        # its own asyncio loop inside _process_author_worker; the Rich live UI is
+        # disabled to avoid fighting over stdout between subprocesses.
         logger.info(
-            "survey: [%d/%d] processing %s (%d articles)",
-            idx,
-            total,
-            slug,
-            qa.total_articles,
+            "survey: processing %d author(s) with %d parallel workers",
+            len(pending),
+            workers,
         )
-
-        if observer is not None:
-            observer.survey_author_started(slug, idx, total)
-        result: SurveyResult | None = None
-        try:
-            result = await _process_author(
-                qa,
-                db_path=db,
-                settings=settings,
-                project_root=root,
-                show_rich_progress=rich_extract,
-            )
-        finally:
+        slug_to_idx = {qa.author.slug: i for i, qa in enumerate(qualified, start=1)}
+        for qa in pending:
             if observer is not None:
-                observer.survey_author_finished(slug, result.error if result else None)
-        report.results.append(result)
-        _write_checkpoint(report)
+                observer.survey_author_started(
+                    qa.author.slug, slug_to_idx[qa.author.slug], total
+                )
+        with ProcessPoolExecutor(max_workers=workers) as executor:
+            future_to_qa = {
+                executor.submit(
+                    _process_author_worker, qa, db, settings, root
+                ): qa
+                for qa in pending
+            }
+            for future in as_completed(future_to_qa):
+                qa = future_to_qa[future]
+                slug = qa.author.slug
+                idx = slug_to_idx[slug]
+                try:
+                    result = future.result()
+                except Exception as exc:  # noqa: BLE001
+                    logger.error("survey: worker crashed on %s (%s)", slug, exc, exc_info=True)
+                    result = SurveyResult(
+                        author_slug=slug,
+                        author_name=qa.author.name,
+                        qualification=qa,
+                        error=str(exc),
+                    )
+                logger.info(
+                    "survey: [%d/%d] finished %s (%d articles)%s",
+                    idx,
+                    total,
+                    slug,
+                    qa.total_articles,
+                    f" [ERROR: {result.error}]" if result.error else "",
+                )
+                if observer is not None:
+                    observer.survey_author_finished(slug, result.error)
+                report.results.append(result)
+                _write_checkpoint(report)
+    else:
+        for idx, qa in enumerate(qualified, start=1):
+            slug = qa.author.slug
+            if slug in completed_slugs:
+                continue
+
+            logger.info(
+                "survey: [%d/%d] processing %s (%d articles)",
+                idx,
+                total,
+                slug,
+                qa.total_articles,
+            )
+
+            if observer is not None:
+                observer.survey_author_started(slug, idx, total)
+            result: SurveyResult | None = None
+            try:
+                result = await _process_author(
+                    qa,
+                    db_path=db,
+                    settings=settings,
+                    project_root=root,
+                    show_rich_progress=rich_extract,
+                )
+            finally:
+                if observer is not None:
+                    observer.survey_author_finished(slug, result.error if result else None)
+            report.results.append(result)
+            _write_checkpoint(report)
 
     if observer is not None:
         observer.pipeline_run_phase_start(PipelineRunPhase.SURVEY_FINALIZE)

@@ -12,6 +12,11 @@
         "severity": "blocker"
       },
       {
+        "name": "Merge-Conflict Artifact Blocker",
+        "command": "python3 .claude/hooks/merge_artifact_blocker.py",
+        "severity": "blocker"
+      },
+      {
         "name": "Router Boundary Check",
         "command": "bash .claude/hooks/router-boundary-check.sh",
         "severity": "warning"
