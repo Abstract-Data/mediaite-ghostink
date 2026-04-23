@@ -1,14 +1,22 @@
 {
   "family": "phase13-review-remediation",
-  "current_version": "0.1.0",
+  "current_version": "1.0.0",
   "versions": [
     {
       "version": "0.1.0",
       "date": "2026-04-22",
-      "status": "active",
+      "status": "deprecated",
       "model": "claude-opus-4-6",
       "file": "v0.1.0.md",
       "changelog_entry": "Initial prompt: 20-step implementation plan across 6 phases (Quick Wins, DRY Extraction, Decomposition, Testing, Structural, Cache Fix) addressing all 16 refactoring issues and 9 code review findings from the Apr 22, 2026 review reports."
+    },
+    {
+      "version": "1.0.0",
+      "date": "2026-04-23",
+      "status": "active",
+      "model": "claude-opus-4-6",
+      "file": "v1.0.0.md",
+      "changelog_entry": "Fresh implementation plan based on Run 7 review reports. 27 steps across 7 phases (A-G). All items from v0.1.0 that were already implemented are removed; new findings from Runs 6-7 added. No deferrals. Major additions: ConvergenceInput API collapse, HypothesisTest freeze, xxhash migration, LazyFrame return refactor."
     }
   ]
 }
