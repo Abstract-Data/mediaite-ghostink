@@ -262,6 +262,40 @@ class ConvergenceInput:
             n_permutations=n_permutations,
         )
 
+    @classmethod
+    def from_settings(
+        cls,
+        change_points: list[ChangePoint],
+        centroid_velocities: list[tuple[str, float]],
+        baseline_similarity_curve: list[tuple[datetime, float]],
+        settings: ForensicsSettings,
+        *,
+        ai_convergence_curve: list[tuple[str, float]] | None = None,
+        probability_trajectory: ProbabilityTrajectory | None = None,
+        total_feature_count: int | None = None,
+    ) -> ConvergenceInput:
+        """Build a ``ConvergenceInput`` using permutation knobs drawn from settings.
+
+        This is the common case for callers with a populated ``ForensicsSettings``;
+        it reads ``convergence_use_permutation`` /
+        ``convergence_permutation_iterations`` / ``convergence_permutation_seed``
+        from ``settings.analysis`` instead of forcing every call site to re-thread
+        those three attributes.
+        """
+        ac = settings.analysis
+        return cls.build(
+            change_points,
+            centroid_velocities,
+            baseline_similarity_curve,
+            settings=settings,
+            ai_convergence_curve=ai_convergence_curve,
+            probability_trajectory=probability_trajectory,
+            total_feature_count=total_feature_count,
+            use_permutation=ac.convergence_use_permutation,
+            n_permutations=ac.convergence_permutation_iterations,
+            permutation_seed=ac.convergence_permutation_seed,
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class _VelocityStats:
@@ -394,49 +428,27 @@ def _run_permutation_test(
     )
 
 
-def compute_convergence_scores(
-    change_points: list[ChangePoint],
-    centroid_velocities: list[tuple[str, float]],
-    baseline_similarity_curve: list[tuple[datetime, float]],
-    window_days: int = 90,
-    min_feature_ratio: float = 0.6,
-    *,
-    total_feature_count: int | None = None,
-    ai_convergence_curve: list[tuple[str, float]] | None = None,
-    probability_trajectory: ProbabilityTrajectory | None = None,
-    settings: ForensicsSettings | None = None,
-    use_permutation: bool = False,
-    permutation_seed: int = 42,
-    n_permutations: int = 1000,
-) -> list[ConvergenceWindow]:
+def compute_convergence_scores(input_: ConvergenceInput) -> list[ConvergenceWindow]:
     """Quantify agreement between Pipeline A (stylometry), Pipeline B (embeddings), and C.
 
-    When ``use_permutation`` is True, each returned window's convergence ratio
+    When ``input_.use_permutation`` is True, each returned window's convergence ratio
     is additionally evaluated via a permutation test over the change-point
     timestamps. The empirical p-value is logged but does not alter the returned
     windows — the default path is unchanged.
+
+    Construct ``input_`` via :meth:`ConvergenceInput.from_settings` for the common
+    case (a populated ``ForensicsSettings``) or :meth:`ConvergenceInput.build` for
+    full control over the permutation knobs.
     """
-    input_ = ConvergenceInput.build(
-        change_points,
-        centroid_velocities,
-        baseline_similarity_curve,
-        window_days=window_days,
-        min_feature_ratio=min_feature_ratio,
-        total_feature_count=total_feature_count,
-        ai_convergence_curve=ai_convergence_curve,
-        probability_trajectory=probability_trajectory,
-        settings=settings,
-        use_permutation=use_permutation,
-        permutation_seed=permutation_seed,
-        n_permutations=n_permutations,
-    )
     if input_.total_feature_count <= 0:
         return []
 
-    velocity_stats = _precompute_velocity_stats(centroid_velocities)
-    sim_by_date = _baseline_curve_as_dates(baseline_similarity_curve)
-    ai_by_month = dict(ai_convergence_curve) if ai_convergence_curve else {}
-    starts = _window_start_candidates(change_points, sim_by_date, centroid_velocities)
+    velocity_stats = _precompute_velocity_stats(input_.centroid_velocities)
+    sim_by_date = _baseline_curve_as_dates(input_.baseline_similarity_curve)
+    ai_by_month = dict(input_.ai_convergence_curve) if input_.ai_convergence_curve else {}
+    starts = _window_start_candidates(
+        input_.change_points, sim_by_date, input_.centroid_velocities
+    )
     if not starts:
         return []
 

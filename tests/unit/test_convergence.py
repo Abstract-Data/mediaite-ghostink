@@ -15,7 +15,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from forensics.analysis.convergence import compute_convergence_scores
+from forensics.analysis.convergence import ConvergenceInput, compute_convergence_scores
 from forensics.models.analysis import ChangePoint
 
 
@@ -41,10 +41,12 @@ def _cp(
 def test_no_changepoints_returns_empty() -> None:
     """With no change points and no auxiliary signals, the result is empty."""
     result = compute_convergence_scores(
-        change_points=[],
-        centroid_velocities=[],
-        baseline_similarity_curve=[],
-        total_feature_count=5,
+        ConvergenceInput.build(
+            change_points=[],
+            centroid_velocities=[],
+            baseline_similarity_curve=[],
+            total_feature_count=5,
+        )
     )
     assert result == []
 
@@ -55,11 +57,13 @@ def test_single_changepoint_single_feature_emits_window() -> None:
     cps = [_cp("ttr", cp_time)]
 
     result = compute_convergence_scores(
-        change_points=cps,
-        centroid_velocities=[],
-        baseline_similarity_curve=[],
-        window_days=90,
-        total_feature_count=1,
+        ConvergenceInput.build(
+            change_points=cps,
+            centroid_velocities=[],
+            baseline_similarity_curve=[],
+            window_days=90,
+            total_feature_count=1,
+        )
     )
 
     assert len(result) == 1
@@ -77,12 +81,14 @@ def test_multi_feature_alignment_within_window_detected() -> None:
     cps = [_cp(name, base + timedelta(days=i * 3)) for i, name in enumerate(feature_names)]
 
     result = compute_convergence_scores(
-        change_points=cps,
-        centroid_velocities=[],
-        baseline_similarity_curve=[],
-        window_days=30,
-        min_feature_ratio=0.6,
-        total_feature_count=5,
+        ConvergenceInput.build(
+            change_points=cps,
+            centroid_velocities=[],
+            baseline_similarity_curve=[],
+            window_days=30,
+            min_feature_ratio=0.6,
+            total_feature_count=5,
+        )
     )
 
     assert result, "expected at least one convergence window"
@@ -104,12 +110,14 @@ def test_changepoints_outside_window_no_convergence() -> None:
     ]
 
     result = compute_convergence_scores(
-        change_points=cps,
-        centroid_velocities=[],
-        baseline_similarity_curve=[],
-        window_days=30,
-        min_feature_ratio=0.6,
-        total_feature_count=5,
+        ConvergenceInput.build(
+            change_points=cps,
+            centroid_velocities=[],
+            baseline_similarity_curve=[],
+            window_days=30,
+            min_feature_ratio=0.6,
+            total_feature_count=5,
+        )
     )
 
     assert result == []
@@ -121,10 +129,12 @@ def test_empty_feature_total_returns_empty() -> None:
     cps = [_cp("ttr", cp_time), _cp("mattr", cp_time + timedelta(days=2))]
 
     result = compute_convergence_scores(
-        change_points=cps,
-        centroid_velocities=[],
-        baseline_similarity_curve=[],
-        total_feature_count=0,
+        ConvergenceInput.build(
+            change_points=cps,
+            centroid_velocities=[],
+            baseline_similarity_curve=[],
+            total_feature_count=0,
+        )
     )
 
     assert result == []
@@ -133,9 +143,11 @@ def test_empty_feature_total_returns_empty() -> None:
 def test_fully_empty_inputs_graceful() -> None:
     """All-empty inputs (no CPs, no velocities, no curve, zero total) do not crash."""
     result = compute_convergence_scores(
-        change_points=[],
-        centroid_velocities=[],
-        baseline_similarity_curve=[],
-        total_feature_count=0,
+        ConvergenceInput.build(
+            change_points=[],
+            centroid_velocities=[],
+            baseline_similarity_curve=[],
+            total_feature_count=0,
+        )
     )
     assert result == []

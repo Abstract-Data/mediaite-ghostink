@@ -16,8 +16,8 @@ from forensics.analysis.changepoint import (
     cohens_d,
     detect_bocpd,
     detect_pelt,
-    find_convergence_windows,
 )
+from forensics.analysis.convergence import ConvergenceInput, compute_convergence_scores
 from forensics.analysis.timeseries import (
     chow_test,
     compute_rolling_stats,
@@ -167,7 +167,16 @@ def test_convergence_window() -> None:
         )
         for i in range(5)
     ]
-    wins = find_convergence_windows(cps, window_days=30, min_features=0.6, total_features=8)
+    wins = compute_convergence_scores(
+        ConvergenceInput.build(
+            change_points=cps,
+            centroid_velocities=[],
+            baseline_similarity_curve=[],
+            window_days=30,
+            min_feature_ratio=0.6,
+            total_feature_count=8,
+        )
+    )
     assert wins
     assert len(wins[0].features_converging) == 5
 

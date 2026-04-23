@@ -16,7 +16,7 @@ from forensics.analysis.changepoint import PELT_FEATURE_COLUMNS
 from forensics.analysis.utils import load_feature_frame_for_author, resolve_author_rows
 from forensics.config.settings import ForensicsSettings
 from forensics.storage.repository import Repository
-from forensics.utils.datetime import parse_datetime
+from forensics.utils.datetime import parse_datetime, timestamps_from_frame
 
 logger = logging.getLogger(__name__)
 
@@ -200,8 +200,7 @@ def run_timeseries_analysis(
         if df_a is None:
             logger.warning("Skipping timeseries for %s: missing %s", author.slug, feat_path)
             continue
-        ts_list = df_a["timestamp"].to_list()
-        timestamps = [parse_datetime(t) for t in ts_list]
+        timestamps = timestamps_from_frame(df_a)
         rows: list[dict[str, Any]] = []
         for col in numeric_cols:
             if col not in df_a.columns:

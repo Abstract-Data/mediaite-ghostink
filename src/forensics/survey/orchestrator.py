@@ -226,7 +226,7 @@ async def _process_author(
         )
 
         paths = AnalysisArtifactPaths.from_project(project_root, db_path)
-        analysis_map = await run_full_analysis(
+        analysis_map = run_full_analysis(
             paths,
             settings,
             author_slug=slug,

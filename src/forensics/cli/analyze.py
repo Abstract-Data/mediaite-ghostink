@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 from dataclasses import dataclass
@@ -126,7 +125,7 @@ def _run_drift_stage(ctx: AnalyzeContext) -> None:
 def _run_full_analysis_stage(ctx: AnalyzeContext) -> None:
     from forensics.analysis.orchestrator import run_full_analysis
 
-    asyncio.run(run_full_analysis(ctx.paths, ctx.settings, author_slug=ctx.author_slug))
+    run_full_analysis(ctx.paths, ctx.settings, author_slug=ctx.author_slug)
 
 
 def _run_ai_baseline_stage(

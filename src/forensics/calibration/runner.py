@@ -262,7 +262,7 @@ async def _run_trial_analysis(
         project_root=trial_root,
     )
     paths = AnalysisArtifactPaths.from_project(trial_root, trial_db)
-    analysis_map = await run_full_analysis(paths, settings, author_slug=author.slug)
+    analysis_map = run_full_analysis(paths, settings, author_slug=author.slug)
     return analysis_map.get(author.slug)
 
 

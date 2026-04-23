@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -18,10 +18,10 @@ from forensics.analysis.artifact_paths import AnalysisArtifactPaths
 from forensics.analysis.statistics import cohens_d
 from forensics.analysis.utils import load_feature_frame_for_author, resolve_author_rows
 from forensics.config.settings import ForensicsSettings
-from forensics.models.analysis import ChangePoint, ConvergenceWindow
+from forensics.models.analysis import ChangePoint
 from forensics.storage.json_io import write_json_artifact
 from forensics.storage.repository import Repository
-from forensics.utils.datetime import parse_datetime
+from forensics.utils.datetime import timestamps_from_frame
 
 logger = logging.getLogger(__name__)
 
@@ -255,51 +255,6 @@ def changepoints_from_bocpd(
     )
 
 
-def find_convergence_windows(
-    change_points: list[ChangePoint],
-    window_days: int = 90,
-    min_features: float = 0.6,
-    total_features: int | None = None,
-    *,
-    settings: ForensicsSettings | None = None,
-) -> list[ConvergenceWindow]:
-    """Bin change points into calendar windows; flag windows with enough distinct features."""
-    if not change_points:
-        return []
-    if settings is not None:
-        window_days = settings.analysis.convergence_window_days
-        min_features = settings.analysis.convergence_min_feature_ratio
-    total = total_features if total_features is not None else len(PELT_FEATURE_COLUMNS)
-    if total <= 0:
-        return []
-
-    start_dates = sorted({cp.timestamp.date() for cp in change_points})
-    windows: list[ConvergenceWindow] = []
-    for start_d in start_dates:
-        end_limit = start_d + timedelta(days=window_days)
-        feats: set[str] = set()
-        last_d = start_d
-        for cp in change_points:
-            d = cp.timestamp.date()
-            if start_d <= d <= end_limit:
-                feats.add(cp.feature_name)
-                if d > last_d:
-                    last_d = d
-        ratio = len(feats) / float(total)
-        if ratio >= min_features:
-            windows.append(
-                ConvergenceWindow(
-                    start_date=start_d,
-                    end_date=last_d,
-                    features_converging=sorted(feats),
-                    convergence_ratio=ratio,
-                    pipeline_a_score=ratio,
-                    pipeline_b_score=0.0,
-                )
-            )
-    return windows
-
-
 def analyze_author_feature_changepoints(
     df: pl.DataFrame,
     *,
@@ -313,8 +268,7 @@ def analyze_author_feature_changepoints(
     bocpd_threshold = settings.analysis.bocpd_threshold
     out: list[ChangePoint] = []
 
-    ts_list = df["timestamp"].to_list()
-    timestamps = [parse_datetime(t) for t in ts_list]
+    timestamps = timestamps_from_frame(df)
 
     for col in PELT_FEATURE_COLUMNS:
         if col not in df.columns:
@@ -366,11 +320,19 @@ def run_changepoint_analysis(
         if df_author is None:
             logger.warning("Skipping author %s: no rows in %s", author.slug, feat_path)
             continue
+        # Deferred import breaks the changepoint ↔ convergence cycle (convergence.py
+        # depends on ``PELT_FEATURE_COLUMNS`` from this module).
+        from forensics.analysis.convergence import ConvergenceInput, compute_convergence_scores
+
         cps = analyze_author_feature_changepoints(df_author, author_id=author.id, settings=settings)
-        conv = find_convergence_windows(
-            cps,
-            total_features=len(PELT_FEATURE_COLUMNS),
-            settings=settings,
+        conv = compute_convergence_scores(
+            ConvergenceInput.from_settings(
+                cps,
+                [],
+                [],
+                settings,
+                total_feature_count=len(PELT_FEATURE_COLUMNS),
+            )
         )
 
         cp_path = paths.changepoints_json(author.slug)

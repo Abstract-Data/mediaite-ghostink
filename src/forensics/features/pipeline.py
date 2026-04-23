@@ -42,6 +42,7 @@ from forensics.storage.parquet import (
     write_features,
 )
 from forensics.storage.repository import Repository
+from forensics.utils.model_cache import KeyedModelCache
 
 logger = logging.getLogger(__name__)
 
@@ -119,15 +120,28 @@ def _resolve_project_root(db_path: Path, project_root: Path | None) -> Path:
     return get_project_root()
 
 
-def _load_spacy_model(model_name: str = "en_core_web_md") -> Any:
-    """Load the requested spaCy pipeline or raise."""
-    try:
-        import spacy
+_SPACY_MODEL_CACHE = KeyedModelCache()
 
-        return spacy.load(model_name)
-    except OSError as exc:
-        logger.error("spaCy model %s is required: %s", model_name, exc)
-        raise
+
+def _load_spacy_model(model_name: str = "en_core_web_md") -> Any:
+    """Load the requested spaCy pipeline (or return a cached handle) or raise."""
+
+    def _load() -> Any:
+        try:
+            import spacy
+
+            logger.info("Loading spaCy model: %s", model_name)
+            return spacy.load(model_name)
+        except OSError as exc:
+            logger.error("spaCy model %s is required: %s", model_name, exc)
+            raise
+
+    return _SPACY_MODEL_CACHE.get_or_load(model_name, _load)
+
+
+def clear_spacy_model_cache() -> None:
+    """Drop cached spaCy pipelines (tests)."""
+    _SPACY_MODEL_CACHE.clear()
 
 
 def _extract_features_for_article(
