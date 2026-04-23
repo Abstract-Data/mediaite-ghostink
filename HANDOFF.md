@@ -1323,3 +1323,54 @@ $ uv run python -c "from forensics.features.pipeline import extract_all_features
 #### Risks & Next Steps
 - Semantics preserved: public signature, return type, error-handling types, failure-ratio guard message, NPZ layout, manifest relative path, and debug-log cadence are all identical to pre-refactor. Downstream consumers (`cli/extract.py`, `survey/orchestrator.py`, `calibration/runner.py`, `pipeline.py`) need no changes.
 - Future operators can now test the three helpers independently — `_extract_features_for_article` is pure and takes a spaCy Language + settings, so a fakes-only unit test can hit it without the full CLI. A follow-up could add such tests to lift the 19% coverage on `pipeline.py`.
+
+---
+
+### Phase 13 Unit 4 — Drift summary extraction (B4 + D5)
+**Status:** Complete
+**Date:** 2026-04-22
+**Agent/Session:** phase13/unit-4-drift-summary
+
+#### What Was Done
+- Introduced `DriftSummary` frozen dataclass (`velocities: list[tuple[str, float]]`, `baseline_curve: list[tuple[datetime, float]]`) in `src/forensics/analysis/drift.py`.
+- Added `load_drift_summary(slug, paths, *, settings)` that prefers cached drift artifacts (`*_drift.json`, `*_centroids.npz`, `*_baseline_curve.json`) and falls back to recomputing from embeddings when the velocity cache is missing. Cache parsing is factored into two private helpers (`_load_cached_baseline_curve`, `_load_cached_velocities`).
+- Replaced the private `_velocity_and_baseline_for_slug` helper in `src/forensics/analysis/comparison.py` with `load_drift_summary`. Two call sites updated; unused imports removed (`compute_baseline_similarity_curve`, `compute_monthly_centroids`, `load_article_embeddings`, `track_centroid_velocity`, `parse_datetime`). `_editorial_signal_for_target` no longer needs the `Repository` argument.
+- Added `tests/unit/test_drift_summary.py` with four unit tests: cached-prefers path, fallback month labels when centroids NPZ is missing, recompute-from-embeddings path, and the fully-empty state.
+- Removed `"src/forensics/analysis/drift.py" = ["C901"]` from `pyproject.toml`'s per-file ignores; `ruff check .` still passes.
+
+#### Files Modified
+- `src/forensics/analysis/drift.py` — new `DriftSummary` dataclass + `load_drift_summary` + cache helpers.
+- `src/forensics/analysis/comparison.py` — delegate to `load_drift_summary`; drop private helper; trim imports; drop now-unused `repo` parameter.
+- `pyproject.toml` — remove C901 suppression for drift.py.
+- `tests/unit/test_drift_summary.py` — new unit tests.
+
+#### Verification Evidence
+```
+$ uv run ruff format --check .
+150 files already formatted
+
+$ uv run ruff check .
+All checks passed!
+
+$ uv run pytest tests/ -v
+278 passed, 19 skipped, 2 deselected in 28.63s
+
+$ uv run pytest tests/ -k "drift or comparison" -v
+12 passed, 1 skipped, 286 deselected in 6.79s
+
+$ uv run forensics --help
+(prints full Typer help; commands intact)
+```
+
+#### Decisions Made
+- `DriftSummary` mirrors the two data shapes `_velocity_and_baseline_for_slug` previously returned so `compute_convergence_scores` can consume `summary.velocities` / `summary.baseline_curve` unchanged.
+- Fall-back semantics preserve the original behavior: when cached velocities exist we trust them and do NOT recompute the baseline curve from embeddings (the original `if/else` did the same). Only when the velocity cache is missing do we recompute both.
+- Kept `DriftScores` / `monthly_centroid_velocities` shape untouched — the refactor is pure consolidation of a loader; no schema contract changes.
+- Kept `_load_cached_*` helpers private (single caller) but module-level for testability and to avoid nested-function complexity.
+
+#### Unresolved Questions
+- None.
+
+#### Risks & Next Steps
+- `load_drift_summary` now opens the manifest directly whenever the drift cache is absent (inherited from `load_article_embeddings`). That is unchanged behavior vs. the previous helper but the caller in `_summarize_control_authors` still passes through an open `Repository` context — no behavioral regression, but future cleanup could hoist all drift-related loading out of `with Repository(...)` if desired.
+- C901 suppression removed for drift.py — future edits that push any function over McCabe 10 will fail lint. That was the intended outcome of D5.
