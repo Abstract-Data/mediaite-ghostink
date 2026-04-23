@@ -441,6 +441,54 @@ async def collect_article_metadata(
         return await _run(r)
 
 
+def _ingest_single_post(post: object, author_id: str) -> Article | None:
+    """Parse one WordPress ``wp/v2/posts`` element into an ``Article``.
+
+    Pure function: no I/O, no locks, no async. Returns ``None`` if the item
+    isn't a dict (the WP API occasionally returns stub rows on rate-limit).
+    Kept small so the ingest loop in :func:`_ingest_author_posts` stays
+    readable and the parse step is independently testable (RF-CPLX-002).
+    """
+    if not isinstance(post, dict):
+        return None
+    return _wp_post_to_article(post, author_id)
+
+
+async def _persist_page_articles(
+    articles: list[Article],
+    repo: Repository,
+    scraping: ScrapingConfig,
+    db_lock: asyncio.Lock,
+) -> int:
+    """Upsert one page's worth of articles under a single ``db_lock`` acquisition.
+
+    Previously each article took its own lock; batching per page reduces lock
+    churn without changing behaviour. The existence check remains inside the
+    lock because it's part of the insert-vs-upgrade decision.
+    """
+    inserted = 0
+    async with db_lock:
+        for article in articles:
+            url_s = str(article.url)
+            exists = await asyncio.to_thread(repo.article_url_exists, url_s)
+            if not exists:
+                await asyncio.to_thread(repo.upsert_article, article)
+                inserted += 1
+            elif scraping.bulk_fetch_mode and article.clean_text:
+                # Resume case: metadata-only row already present — upgrade it
+                # with the body text we just got from content.rendered.
+                existing = await asyncio.to_thread(repo.get_article_by_id, article.id)
+                if existing is not None and not existing.clean_text.strip():
+                    upgraded = existing.with_updates(
+                        clean_text=article.clean_text,
+                        word_count=article.word_count,
+                        content_hash=article.content_hash,
+                        scraped_at=article.scraped_at,
+                    )
+                    await asyncio.to_thread(repo.upsert_article, upgraded)
+    return inserted
+
+
 async def _ingest_author_posts(
     client: httpx.AsyncClient,
     limiter: RateLimiter,
@@ -517,30 +565,19 @@ async def _ingest_author_posts(
         raw = resp.json()
         if not isinstance(raw, list) or not raw:
             break
-        posts = raw
-        for post in posts:
-            if not isinstance(post, dict):
+
+        page_articles: list[Article] = []
+        for post in raw:
+            article = _ingest_single_post(post, author_id)
+            if article is None:
                 continue
-            article = _wp_post_to_article(post, author_id)
             published_dates.append(article.published_date)
-            url_s = str(article.url)
-            async with db_lock:
-                exists = await asyncio.to_thread(repo.article_url_exists, url_s)
-                if not exists:
-                    await asyncio.to_thread(repo.upsert_article, article)
-                    inserted_here += 1
-                elif scraping.bulk_fetch_mode and article.clean_text:
-                    # Resume case: metadata-only row already present, upgrade it with
-                    # the body text we just got from content.rendered.
-                    existing = await asyncio.to_thread(repo.get_article_by_id, article.id)
-                    if existing is not None and not existing.clean_text.strip():
-                        upgraded = existing.with_updates(
-                            clean_text=article.clean_text,
-                            word_count=article.word_count,
-                            content_hash=article.content_hash,
-                            scraped_at=article.scraped_at,
-                        )
-                        await asyncio.to_thread(repo.upsert_article, upgraded)
+            page_articles.append(article)
+
+        if page_articles:
+            inserted_here += await _persist_page_articles(
+                page_articles, repo, scraping, db_lock
+            )
         page += 1
 
     n_indexed = len(published_dates)

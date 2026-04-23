@@ -175,6 +175,45 @@ def detect_bursts(
     return bursts
 
 
+def _padded_column(values: list[float], length: int) -> list[float | None]:
+    """Pad ``values`` to ``length`` with ``None`` (used by rolling/STL outputs)."""
+    if len(values) >= length:
+        return [float(v) if v is not None else None for v in values[:length]]
+    out: list[float | None] = [float(v) if v is not None else None for v in values]
+    out.extend([None] * (length - len(values)))
+    return out
+
+
+def _compute_feature_timeseries(
+    author_id: str,
+    col: str,
+    timestamps: list[datetime],
+    floats: list[float],
+    windows: list[int],
+) -> pl.DataFrame:
+    """Build one author×feature timeseries frame using columnar operations.
+
+    Replaces the inner ``for i in range(len(timestamps))`` dict-append loop
+    with a single ``pl.DataFrame`` construction (RF-CPLX-003).
+    """
+    n = len(timestamps)
+    roll = compute_rolling_stats(timestamps, floats, windows=windows)
+    stl = stl_decompose(timestamps, floats, period=min(30, max(3, n // 3)))
+    data: dict[str, Any] = {
+        "author_id": [author_id] * n,
+        "feature": [col] * n,
+        "timestamp": [t.isoformat() for t in timestamps],
+        "value": floats,
+    }
+    for w, parts in roll.items():
+        data[f"rolling_{w}d_mean"] = _padded_column(parts["mean"], n)
+        data[f"rolling_{w}d_std"] = _padded_column(parts["std"], n)
+    data["stl_trend"] = _padded_column(stl["trend"], n)
+    data["stl_seasonal"] = _padded_column(stl["seasonal"], n)
+    data["stl_residual"] = _padded_column(stl["residual"], n)
+    return pl.DataFrame(data)
+
+
 def run_timeseries_analysis(
     db_path: Path,
     settings: ForensicsSettings,
@@ -201,7 +240,7 @@ def run_timeseries_analysis(
             logger.warning("Skipping timeseries for %s: missing %s", author.slug, feat_path)
             continue
         timestamps = timestamps_from_frame(df_a)
-        rows: list[dict[str, Any]] = []
+        feature_frames: list[pl.DataFrame] = []
         for col in numeric_cols:
             if col not in df_a.columns:
                 continue
@@ -209,26 +248,13 @@ def run_timeseries_analysis(
             floats = [float(v) if v is not None else float("nan") for v in vals]
             if not floats:
                 continue
-            roll = compute_rolling_stats(timestamps, floats, windows=windows)
-            stl = stl_decompose(timestamps, floats, period=min(30, max(3, len(floats) // 3)))
-            for i in range(len(timestamps)):
-                rec: dict[str, Any] = {
-                    "author_id": author.id,
-                    "feature": col,
-                    "timestamp": timestamps[i].isoformat(),
-                    "value": floats[i],
-                }
-                for w, parts in roll.items():
-                    rec[f"rolling_{w}d_mean"] = parts["mean"][i] if i < len(parts["mean"]) else None
-                    rec[f"rolling_{w}d_std"] = parts["std"][i] if i < len(parts["std"]) else None
-                rec["stl_trend"] = stl["trend"][i] if i < len(stl["trend"]) else None
-                rec["stl_seasonal"] = stl["seasonal"][i] if i < len(stl["seasonal"]) else None
-                rec["stl_residual"] = stl["residual"][i] if i < len(stl["residual"]) else None
-                rows.append(rec)
+            feature_frames.append(
+                _compute_feature_timeseries(author.id, col, timestamps, floats, windows)
+            )
 
         out_path = analysis_dir / f"{author.slug}_timeseries.parquet"
-        if rows:
-            pl.DataFrame(rows).write_parquet(out_path)
+        if feature_frames:
+            pl.concat(feature_frames, how="vertical_relaxed").write_parquet(out_path)
         else:
             pl.DataFrame(
                 {
