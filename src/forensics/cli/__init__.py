@@ -281,6 +281,84 @@ def setup_wizard() -> None:
         raise typer.Exit(code=rc)
 
 
+@app.command(name="dashboard")
+def dashboard_cmd(
+    ctx: typer.Context,
+    survey: Annotated[
+        bool,
+        typer.Option("--survey", help="Run blind survey flow (finalize instead of report)."),
+    ] = False,
+    skip_scrape: Annotated[
+        bool,
+        typer.Option("--skip-scrape", help="Survey only: skip scrape and use existing corpus."),
+    ] = False,
+    resume: Annotated[
+        str | None,
+        typer.Option("--resume", metavar="RUN_ID", help="Survey only: resume a prior run id."),
+    ] = None,
+    author: Annotated[
+        str | None,
+        typer.Option("--author", metavar="SLUG", help="Survey only: single author slug."),
+    ] = None,
+    min_articles: Annotated[
+        int | None,
+        typer.Option("--min-articles", help="Survey only: override minimum article count."),
+    ] = None,
+    min_span_days: Annotated[
+        int | None,
+        typer.Option("--min-span-days", help="Survey only: override minimum date span (days)."),
+    ] = None,
+    post_year_min: Annotated[
+        int | None,
+        typer.Option("--post-year-min", help="Survey scrape: inclusive min calendar year."),
+    ] = None,
+    post_year_max: Annotated[
+        int | None,
+        typer.Option("--post-year-max", help="Survey scrape: inclusive max calendar year."),
+    ] = None,
+) -> None:
+    """Full-screen pipeline dashboard (``tui`` extra). Incompatible with ``--no-progress``."""
+    st = get_cli_state(ctx)
+    if not st.show_progress:
+        typer.echo(
+            "The dashboard needs an interactive terminal. "
+            "Omit --no-progress, or use `forensics all` / `forensics survey` with --no-progress.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    from dataclasses import replace
+
+    from forensics.config import get_project_root, get_settings
+    from forensics.survey.qualification import QualificationCriteria
+    from forensics.tui import main_dashboard
+
+    root = get_project_root()
+    db_path = root / "data" / "articles.db"
+    survey_kw: dict = {
+        "project_root": root,
+        "db_path": db_path,
+        "resume": resume,
+        "skip_scrape": skip_scrape,
+        "author": author,
+        "post_year_min": post_year_min,
+        "post_year_max": post_year_max,
+    }
+    if survey:
+        settings = get_settings()
+        overrides: dict[str, int] = {}
+        if min_articles is not None:
+            overrides["min_articles"] = min_articles
+        if min_span_days is not None:
+            overrides["min_span_days"] = min_span_days
+        criteria = replace(QualificationCriteria.from_settings(settings.survey), **overrides)
+        survey_kw["criteria"] = criteria
+
+    rc = main_dashboard(survey_mode=survey, survey_kwargs=survey_kw if survey else None)
+    if rc != 0:
+        raise typer.Exit(code=rc)
+
+
 def main() -> int:
     """Entrypoint called by pyproject.toml [project.scripts]."""
     try:

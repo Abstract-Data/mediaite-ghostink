@@ -19,10 +19,10 @@ todos:
     status: completed
   - id: textual-app
     content: New Textual PipelineDashboardApp + Typer `forensics dashboard` (tui extra); Worker thread + call_from_thread updates
-    status: in_progress
+    status: completed
   - id: tests
     content: Unit tests for observer emissions; assert `--no-progress` yields no Rich Progress; optional Textual pilot smoke gated on textual extra
-    status: pending
+    status: completed
 isProject: false
 ---
 
