@@ -1131,3 +1131,46 @@ $ uv run forensics analyze --help  # prints analyze subcommand OK
   callers should version-pin their expected fixtures.
 - Other Phase 13 units operate on different files; no cross-unit conflicts
   expected.
+
+---
+
+### Phase 13 Unit 9 — Convergence unit tests
+**Status:** Complete
+**Date:** 2026-04-22
+**Agent/Session:** phase13/unit-9-convergence-tests
+
+#### What Was Done
+- Added 6 targeted unit tests for `compute_convergence_scores` in `src/forensics/analysis/convergence.py`, covering: empty inputs, single-changepoint → single window, multi-feature alignment within window, multi-feature misalignment outside window, `total_feature_count=0` guard, fully-empty input guard.
+- Tests construct `ChangePoint` instances inline via a small local helper and assert on concrete window dates/ratios so they are deterministic and independent of external resources.
+
+#### Files Modified
+- `tests/unit/test_convergence.py` — new file, 6 tests.
+
+#### Verification Evidence
+```
+$ uv run ruff format --check .
+150 files already formatted
+
+$ uv run ruff check .
+All checks passed!
+
+$ uv run python -m pytest tests/unit/test_convergence.py -v --no-cov
+6 passed in 1.10s
+
+$ uv run python -m pytest tests/ -v --no-cov
+288 passed, 18 skipped, 2 deselected in 286.01s
+
+$ uv run forensics --help
+(CLI prints help successfully)
+```
+
+#### Decisions Made
+- Used a local `_cp(...)` helper rather than a pytest fixture because each test varies the feature name / timestamp independently — avoids parameter sprawl in the fixture signature.
+- Asserted window start dates and ratios rather than the internal score composition. The composition depends on multi-pipeline weighted aggregates; anchoring to `start_date`, `end_date`, `features_converging`, and `convergence_ratio` keeps the tests resilient to scoring refactors.
+- Used `total_feature_count=1` for the single-CP case so `ratio == 1.0` → `passes_ratio` is True without needing auxiliary velocity/similarity signals.
+
+#### Unresolved Questions
+- None. The public API (`compute_convergence_scores`) is pinned; the private helpers (`_stylometry_weights_in_window`, etc.) are exercised transitively.
+
+#### Risks & Next Steps
+- If future work moves `compute_convergence_scores`' defaults into `AnalysisConfig` only (removing the positional kwargs), the single-CP and multi-feature tests will need to switch to a `settings=` fixture instead of explicit kwargs.
