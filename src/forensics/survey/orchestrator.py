@@ -201,6 +201,8 @@ async def run_survey(
     skip_scrape: bool = False,
     author: str | None = None,
     criteria: QualificationCriteria | None = None,
+    post_year_min: int | None = None,
+    post_year_max: int | None = None,
 ) -> SurveyReport:
     """Execute the blind survey pipeline.
 
@@ -225,6 +227,9 @@ async def run_survey(
         author: Optional author slug — survey only this author (debugging).
         criteria: Optional qualification override; defaults to
             ``QualificationCriteria.from_settings(settings.survey)``.
+        post_year_min: Optional inclusive year lower bound for the scrape step
+            (with ``post_year_max``); overrides ``settings.scraping`` when set.
+        post_year_max: Optional inclusive year upper bound for the scrape step.
     """
     from forensics.config import get_project_root
 
@@ -266,6 +271,8 @@ async def run_survey(
             dry_run=False,
             force_refresh=False,
             all_authors=True,
+            post_year_min=post_year_min,
+            post_year_max=post_year_max,
         )
         if rc != 0:
             logger.error("survey: scrape failed with exit code %d", rc)

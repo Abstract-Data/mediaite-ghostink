@@ -15,7 +15,11 @@ from forensics.cli._helpers import guard_placeholder_authors
 from forensics.config import DEFAULT_DB_RELATIVE, get_project_root, get_settings
 from forensics.config.settings import ForensicsSettings
 from forensics.pipeline_context import PipelineContext
-from forensics.scraper.crawler import collect_article_metadata, discover_authors
+from forensics.scraper.crawler import (
+    collect_article_metadata,
+    discover_authors,
+    resolve_posts_year_window,
+)
 from forensics.scraper.dedup import deduplicate_articles
 from forensics.scraper.fetcher import archive_raw_year_dirs, fetch_articles
 from forensics.storage.export import export_articles_jsonl
@@ -73,9 +77,19 @@ def _export_jsonl(db_path: Path, root: Path) -> int:
 
 
 async def _discover_only(
-    settings: ForensicsSettings, manifest_path: Path, *, force_refresh: bool
+    settings: ForensicsSettings,
+    manifest_path: Path,
+    *,
+    force_refresh: bool,
+    post_year_min: int | None = None,
+    post_year_max: int | None = None,
 ) -> int:
-    n = await discover_authors(settings, force_refresh=force_refresh)
+    n = await discover_authors(
+        settings,
+        force_refresh=force_refresh,
+        post_year_min=post_year_min,
+        post_year_max=post_year_max,
+    )
     if n:
         logger.info("discover: wrote %d author(s) to %s", n, manifest_path)
     else:
@@ -93,6 +107,8 @@ async def _metadata_only(
     *,
     repo: Repository | None = None,
     all_authors: bool = False,
+    post_year_min: int | None = None,
+    post_year_max: int | None = None,
 ) -> int:
     if not manifest_path.is_file():
         logger.error(
@@ -102,7 +118,12 @@ async def _metadata_only(
         return 1
     with ensure_repo(db_path, repo) as r:
         inserted = await collect_article_metadata(
-            db_path, settings, repo=r, all_authors=all_authors
+            db_path,
+            settings,
+            repo=r,
+            all_authors=all_authors,
+            post_year_min=post_year_min,
+            post_year_max=post_year_max,
         )
     logger.info("metadata: inserted %d new article row(s) into %s", inserted, db_path)
     return 0
@@ -156,8 +177,15 @@ async def _discover_and_metadata(
     force_refresh: bool,
     all_authors: bool = False,
     repo: Repository | None = None,
+    post_year_min: int | None = None,
+    post_year_max: int | None = None,
 ) -> int:
-    n_authors = await discover_authors(settings, force_refresh=force_refresh)
+    n_authors = await discover_authors(
+        settings,
+        force_refresh=force_refresh,
+        post_year_min=post_year_min,
+        post_year_max=post_year_max,
+    )
     if n_authors:
         logger.info("discover: wrote %d author(s) to %s", n_authors, manifest_path)
     else:
@@ -167,7 +195,12 @@ async def _discover_and_metadata(
         return 1
     with ensure_repo(db_path, repo) as r:
         inserted = await collect_article_metadata(
-            db_path, settings, repo=r, all_authors=all_authors
+            db_path,
+            settings,
+            repo=r,
+            all_authors=all_authors,
+            post_year_min=post_year_min,
+            post_year_max=post_year_max,
         )
     logger.info("metadata: inserted %d new article row(s) into %s", inserted, db_path)
     return 0
@@ -181,6 +214,8 @@ async def _full_pipeline(
     *,
     force_refresh: bool,
     all_authors: bool = False,
+    post_year_min: int | None = None,
+    post_year_max: int | None = None,
 ) -> int:
     with Repository(db_path) as repo:
         rc = await _discover_and_metadata(
@@ -190,6 +225,8 @@ async def _full_pipeline(
             force_refresh=force_refresh,
             all_authors=all_authors,
             repo=repo,
+            post_year_min=post_year_min,
+            post_year_max=post_year_max,
         )
         if rc != 0:
             return rc
@@ -224,6 +261,8 @@ async def _run_scrape_mode(
     dry_run: bool,
     force_refresh: bool,
     all_authors: bool,
+    post_year_min: int | None,
+    post_year_max: int | None,
 ) -> int:
     """Dispatch ``mode`` to its handler (RF-PATTERN-001).
 
@@ -232,6 +271,7 @@ async def _run_scrape_mode(
     ``assert_never`` still guards against new enum members landing without a
     corresponding dispatch entry.
     """
+    py_min, py_max = post_year_min, post_year_max
     dispatch: dict[ScrapeMode, Callable[[], Awaitable[int]]] = {
         ScrapeMode.ARCHIVE_ONLY: lambda: _archive_only(root, db_path),
         ScrapeMode.DEDUP_ONLY: lambda: _dedup_only(db_path, settings),
@@ -240,10 +280,19 @@ async def _run_scrape_mode(
             db_path, root, settings, dry_run=dry_run
         ),
         ScrapeMode.DISCOVER_ONLY: lambda: _discover_only(
-            settings, manifest_path, force_refresh=force_refresh
+            settings,
+            manifest_path,
+            force_refresh=force_refresh,
+            post_year_min=py_min,
+            post_year_max=py_max,
         ),
         ScrapeMode.METADATA_ONLY: lambda: _metadata_only(
-            db_path, settings, manifest_path, all_authors=all_authors
+            db_path,
+            settings,
+            manifest_path,
+            all_authors=all_authors,
+            post_year_min=py_min,
+            post_year_max=py_max,
         ),
         ScrapeMode.DISCOVER_AND_METADATA: lambda: _discover_and_metadata(
             db_path,
@@ -251,6 +300,8 @@ async def _run_scrape_mode(
             manifest_path,
             force_refresh=force_refresh,
             all_authors=all_authors,
+            post_year_min=py_min,
+            post_year_max=py_max,
         ),
         ScrapeMode.FULL_PIPELINE: lambda: _full_pipeline(
             db_path,
@@ -259,6 +310,8 @@ async def _run_scrape_mode(
             manifest_path,
             force_refresh=force_refresh,
             all_authors=all_authors,
+            post_year_min=py_min,
+            post_year_max=py_max,
         ),
     }
     handler = dispatch.get(mode)
@@ -277,6 +330,8 @@ async def dispatch_scrape(
     dry_run: bool,
     force_refresh: bool,
     all_authors: bool = False,
+    post_year_min: int | None = None,
+    post_year_max: int | None = None,
 ) -> int:
     """Route flag combinations to the appropriate pipeline function.
 
@@ -287,6 +342,16 @@ async def dispatch_scrape(
     manifest_path = root / "data/authors_manifest.jsonl"
     db_path = root / DEFAULT_DB_RELATIVE
 
+    try:
+        year_win = resolve_posts_year_window(
+            settings.scraping,
+            override_min=post_year_min,
+            override_max=post_year_max,
+        )
+    except ValueError as exc:
+        logger.error("%s", exc)
+        return 1
+
     if dry_run and not fetch:
         logger.error("--dry-run is only valid with --fetch")
         return 1
@@ -296,8 +361,11 @@ async def dispatch_scrape(
     if not all_authors and (scrape_like or default_full):
         guard_placeholder_authors(settings)
 
+    audit_desc = "forensics scrape"
+    if year_win is not None:
+        audit_desc += f" post_years={year_win[0]}-{year_win[1]}"
     PipelineContext.resolve().record_audit(
-        "forensics scrape",
+        audit_desc,
         optional=True,
         log=logger,
     )
@@ -318,6 +386,8 @@ async def dispatch_scrape(
         dry_run=dry_run,
         force_refresh=force_refresh,
         all_authors=all_authors,
+        post_year_min=post_year_min,
+        post_year_max=post_year_max,
     )
 
 
@@ -352,6 +422,26 @@ def scrape(
             help="Collect metadata for every author in the manifest (ignore config.toml list)",
         ),
     ] = False,
+    post_year_min: Annotated[
+        int | None,
+        typer.Option(
+            "--post-year-min",
+            help=(
+                "Inclusive calendar year for WordPress posts (with --post-year-max); "
+                "overrides config when set"
+            ),
+        ),
+    ] = None,
+    post_year_max: Annotated[
+        int | None,
+        typer.Option(
+            "--post-year-max",
+            help=(
+                "Inclusive calendar year for WordPress posts (with --post-year-min); "
+                "overrides config when set"
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Crawl and fetch articles for configured authors."""
     rc = asyncio.run(
@@ -364,6 +454,8 @@ def scrape(
             dry_run=dry_run,
             force_refresh=force_refresh,
             all_authors=all_authors,
+            post_year_min=post_year_min,
+            post_year_max=post_year_max,
         )
     )
     raise typer.Exit(code=rc)

@@ -211,3 +211,71 @@ async def test_collect_article_metadata_request_error_isolated_per_author(
     assert any(
         json.loads(line).get("phase") == "metadata_author" for line in err_text.strip().splitlines()
     )
+
+
+@pytest.mark.asyncio
+async def test_collect_article_metadata_wp_posts_include_after_before(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Year window adds WordPress ``after`` / ``before`` query parameters."""
+    discovered = datetime(2026, 3, 1, tzinfo=UTC)
+    manifests = [
+        AuthorManifest(
+            wp_id=7,
+            name="Solo",
+            slug="solo",
+            total_posts=10,
+            discovered_at=discovered,
+        )
+    ]
+    manifest_path = tmp_path / "authors_manifest.jsonl"
+    _write_manifest(manifest_path, manifests)
+    author_cfgs = [_author_config_from_manifest(m) for m in manifests]
+    settings = ForensicsSettings(
+        authors=author_cfgs,
+        scraping=ScrapingConfig(
+            post_year_min=2021,
+            post_year_max=2022,
+            max_concurrent=2,
+            max_retries=1,
+            rate_limit_seconds=0.0,
+            rate_limit_jitter=0.0,
+            retry_backoff_seconds=0.01,
+        ),
+    )
+
+    db_path = tmp_path / "articles.db"
+    init_db(db_path)
+    errors_path = tmp_path / "scrape_errors.jsonl"
+
+    inner_posts = _posts_handler()
+
+    def capturing_handler(request: httpx.Request) -> httpx.Response:
+        u = str(request.url)
+        if "/wp/v2/posts" in u:
+            qs = parse_qs(urlparse(u).query)
+            assert "after" in qs
+            assert qs["after"][0].startswith("2021-01-01")
+            assert "before" in qs
+            assert qs["before"][0].startswith("2023-01-01")
+        return inner_posts(request)
+
+    def fake_client(scraping: ScrapingConfig):
+        return httpx.AsyncClient(
+            transport=httpx.MockTransport(capturing_handler),
+            headers=client_headers(scraping),
+            timeout=30.0,
+            follow_redirects=True,
+        )
+
+    monkeypatch.setattr(crawler_mod, "get_project_root", lambda: tmp_path)
+    monkeypatch.setattr(crawler_mod, "create_scraping_client", fake_client)
+
+    inserted = await collect_article_metadata(
+        db_path,
+        settings,
+        manifest_path=manifest_path,
+        errors_path=errors_path,
+    )
+    assert inserted == 6  # 1 author × 3 pages × 2 posts/page

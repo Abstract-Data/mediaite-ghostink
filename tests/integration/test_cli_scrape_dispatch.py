@@ -141,13 +141,7 @@ async def test_scrape_discover_only_zero_authors(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    async def fake_discover(
-        settings,
-        *,
-        force_refresh: bool = False,
-        manifest_path=None,
-        errors_path=None,
-    ):
+    async def fake_discover(settings, *, force_refresh: bool = False, **kwargs: object) -> int:
         return 0
 
     monkeypatch.setattr(scrape_mod, "get_project_root", lambda: tmp_path)
@@ -211,13 +205,7 @@ async def test_scrape_discover_placeholder_ok_with_all_authors(
     get_settings.cache_clear()
     monkeypatch.setattr(scrape_mod, "get_project_root", lambda: tmp_path)
 
-    async def fake_discover(
-        settings,
-        *,
-        force_refresh: bool = False,
-        manifest_path=None,
-        errors_path=None,
-    ):
+    async def fake_discover(settings, *, force_refresh: bool = False, **kwargs: object) -> int:
         return 0
 
     monkeypatch.setattr(scrape_mod, "discover_authors", fake_discover)
@@ -257,3 +245,28 @@ async def test_scrape_rejects_placeholder_template_authors(
             force_refresh=False,
         )
     get_settings.cache_clear()
+
+
+@pytest.mark.asyncio
+async def test_scrape_dispatch_rejects_partial_post_year_cli(
+    tmp_path: Path,
+    forensics_config_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Only one of --post-year-min / --post-year-max is invalid before any stage runs."""
+    monkeypatch.setattr(scrape_mod, "get_project_root", lambda: tmp_path)
+    with caplog.at_level("ERROR", logger="forensics.cli.scrape"):
+        rc = await scrape_mod.dispatch_scrape(
+            discover=True,
+            metadata=False,
+            fetch=False,
+            dedup=False,
+            archive=False,
+            dry_run=False,
+            force_refresh=False,
+            post_year_min=2020,
+            post_year_max=None,
+        )
+    assert rc == 1
+    assert "min and max" in caplog.text.lower()

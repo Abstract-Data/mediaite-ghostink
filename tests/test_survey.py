@@ -406,14 +406,18 @@ def _patch_orchestrator_side_effects(
     dispatch_result: int = 0,
 ) -> dict[str, list[str]]:
     """Replace scrape/extract/analysis hooks with in-memory stubs."""
-    calls: dict[str, list[str]] = {
+    calls: dict[str, list] = {
         "scrape": [],
         "extract": [],
         "analyze": [],
+        "dispatch_kwargs": [],
     }
 
     async def fake_dispatch_scrape(**kwargs) -> int:
         calls["scrape"].append("invoked")
+        calls["dispatch_kwargs"].append(
+            {k: kwargs[k] for k in ("post_year_min", "post_year_max", "all_authors") if k in kwargs}
+        )
         return dispatch_result
 
     def fake_extract(db_path, settings, *, author_slug=None, **kwargs) -> int:
@@ -553,6 +557,39 @@ def test_survey_orchestrator_resume_skips_completed(
     assert report.run_id == run_id
     assert calls["analyze"] == ["bob-choi"]
     assert calls["extract"] == ["bob-choi"]
+
+
+def test_survey_forwards_post_year_bounds_to_dispatch_scrape(
+    tmp_db: Path,
+    settings,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Survey scrape step passes post year overrides into dispatch_scrape."""
+    _seed_qualified_corpus(tmp_db, ["alice-byrne"])
+    calls = _patch_orchestrator_side_effects(monkeypatch)
+
+    asyncio.run(
+        run_survey(
+            settings,
+            project_root=tmp_path,
+            db_path=tmp_db,
+            skip_scrape=False,
+            post_year_min=2019,
+            post_year_max=2022,
+            criteria=QualificationCriteria(
+                min_articles=50,
+                min_span_days=365,
+                min_articles_per_year=5.0,
+                require_recent_activity=False,
+            ),
+        )
+    )
+
+    assert calls["scrape"] == ["invoked"]
+    assert calls["dispatch_kwargs"] == [
+        {"post_year_min": 2019, "post_year_max": 2022, "all_authors": True}
+    ]
 
 
 def test_survey_report_is_instance_of_SurveyReport(

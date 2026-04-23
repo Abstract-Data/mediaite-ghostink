@@ -9,6 +9,7 @@ from unittest import mock
 
 import httpx
 import pytest
+from pydantic import ValidationError
 
 from forensics.config.settings import ScrapingConfig
 from forensics.models.article import Article
@@ -21,6 +22,8 @@ from forensics.scraper.crawler import (
     _stable_author_id,
     _user_dict_to_manifest,
     _wp_post_to_article,
+    posts_year_query_fragment,
+    resolve_posts_year_window,
     stable_article_id,
 )
 from forensics.scraper.dedup import deduplicate_articles
@@ -312,6 +315,46 @@ def test_deduplicate_articles_marks_second(tmp_db, sample_author) -> None:
         arts = {a.id: a for a in repo.get_all_articles()}
     assert arts[a1.id].is_duplicate is False
     assert arts[a2.id].is_duplicate is True
+
+
+def test_posts_year_query_fragment_uses_wp_after_before_bounds() -> None:
+    frag = posts_year_query_fragment(2019, 2025)
+    assert "&after=" in frag
+    assert "&before=" in frag
+    assert "2019-01-01T00%3A00%3A00Z" in frag
+    assert "2026-01-01T00%3A00%3A00Z" in frag
+
+
+def test_resolve_posts_year_window_unset() -> None:
+    s = ScrapingConfig()
+    assert resolve_posts_year_window(s) is None
+
+
+def test_resolve_posts_year_window_from_config() -> None:
+    s = ScrapingConfig(post_year_min=2020, post_year_max=2022)
+    assert resolve_posts_year_window(s) == (2020, 2022)
+
+
+def test_resolve_posts_year_window_cli_overrides_config() -> None:
+    s = ScrapingConfig(post_year_min=2010, post_year_max=2015)
+    assert resolve_posts_year_window(s, override_min=2019, override_max=2021) == (2019, 2021)
+
+
+def test_resolve_posts_year_window_partial_override_raises() -> None:
+    s = ScrapingConfig()
+    with pytest.raises(ValueError, match="both min and max"):
+        resolve_posts_year_window(s, override_min=2020, override_max=None)
+
+
+def test_resolve_posts_year_window_inverted_raises() -> None:
+    s = ScrapingConfig()
+    with pytest.raises(ValueError, match="max must be >="):
+        resolve_posts_year_window(s, override_min=2022, override_max=2020)
+
+
+def test_scraping_config_post_year_requires_both() -> None:
+    with pytest.raises(ValidationError):
+        ScrapingConfig(post_year_min=2020)
 
 
 def test_stable_article_id_upsert_same_url(tmp_db, sample_author) -> None:
