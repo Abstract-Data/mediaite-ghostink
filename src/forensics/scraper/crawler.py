@@ -575,9 +575,7 @@ async def _ingest_author_posts(
             page_articles.append(article)
 
         if page_articles:
-            inserted_here += await _persist_page_articles(
-                page_articles, repo, scraping, db_lock
-            )
+            inserted_here += await _persist_page_articles(page_articles, repo, scraping, db_lock)
         page += 1
 
     n_indexed = len(published_dates)

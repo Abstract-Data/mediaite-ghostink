@@ -165,9 +165,7 @@ async def _fetch_only(
 ) -> int:
     async def _work() -> int:
         with ensure_repo(db_path, repo) as r:
-            n = await fetch_articles(
-                db_path, settings, dry_run=dry_run, repo=r, observer=observer
-            )
+            n = await fetch_articles(db_path, settings, dry_run=dry_run, repo=r, observer=observer)
         suffix = " (dry-run)" if dry_run else ""
         logger.info(
             "fetch: %s %d article(s)%s",
@@ -191,9 +189,7 @@ async def _fetch_dedup_export(
 ) -> int:
     async def _fetch_work() -> int:
         with ensure_repo(db_path, repo) as r:
-            n = await fetch_articles(
-                db_path, settings, dry_run=dry_run, repo=r, observer=observer
-            )
+            n = await fetch_articles(db_path, settings, dry_run=dry_run, repo=r, observer=observer)
         logger.info("fetch: processed %d article(s)%s", n, " (dry-run)" if dry_run else "")
         return 0
 

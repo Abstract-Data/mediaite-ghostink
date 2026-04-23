@@ -276,9 +276,7 @@ def _process_author_batch(
                 author_name,
             )
         try:
-            fv = _extract_features_for_article(
-                article, idx, articles_seq, nlp, settings, doc=doc
-            )
+            fv = _extract_features_for_article(article, idx, articles_seq, nlp, settings, doc=doc)
             result.features.append(fv)
 
             if not skip_embeddings:

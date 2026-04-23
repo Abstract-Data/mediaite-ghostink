@@ -219,8 +219,7 @@ class PipelineDashboardApp(App[None]):
         rc = w.result
         self._worker_result_code = 0 if rc is None else int(rc)
         self._log_event(
-            f"Pipeline worker finished (exit code {self._worker_result_code}). "
-            "Press q to quit."
+            f"Pipeline worker finished (exit code {self._worker_result_code}). Press q to quit."
         )
         if self._worker_result_code != 0:
             self.exit(return_code=self._worker_result_code)

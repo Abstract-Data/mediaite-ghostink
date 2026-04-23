@@ -401,14 +401,10 @@ async def run_survey(
         slug_to_idx = {qa.author.slug: i for i, qa in enumerate(qualified, start=1)}
         for qa in pending:
             if observer is not None:
-                observer.survey_author_started(
-                    qa.author.slug, slug_to_idx[qa.author.slug], total
-                )
+                observer.survey_author_started(qa.author.slug, slug_to_idx[qa.author.slug], total)
         with ProcessPoolExecutor(max_workers=workers) as executor:
             future_to_qa = {
-                executor.submit(
-                    _process_author_worker, qa, db, settings, root
-                ): qa
+                executor.submit(_process_author_worker, qa, db, settings, root): qa
                 for qa in pending
             }
             for future in as_completed(future_to_qa):

@@ -446,9 +446,7 @@ def compute_convergence_scores(input_: ConvergenceInput) -> list[ConvergenceWind
     velocity_stats = _precompute_velocity_stats(input_.centroid_velocities)
     sim_by_date = _baseline_curve_as_dates(input_.baseline_similarity_curve)
     ai_by_month = dict(input_.ai_convergence_curve) if input_.ai_convergence_curve else {}
-    starts = _window_start_candidates(
-        input_.change_points, sim_by_date, input_.centroid_velocities
-    )
+    starts = _window_start_candidates(input_.change_points, sim_by_date, input_.centroid_velocities)
     if not starts:
         return []
 
