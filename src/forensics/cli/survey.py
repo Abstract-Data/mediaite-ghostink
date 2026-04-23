@@ -8,7 +8,9 @@ from typing import Annotated
 
 import typer
 
+from forensics.cli.state import get_cli_state
 from forensics.config import get_project_root, get_settings
+from forensics.progress import managed_rich_observer
 from forensics.survey.qualification import QualificationCriteria, qualify_authors
 
 survey_app = typer.Typer(
@@ -30,6 +32,7 @@ _STRENGTH_ICONS: dict[str, str] = {
 
 @survey_app.callback(invoke_without_command=True)
 def survey(
+    ctx: typer.Context,
     dry_run: Annotated[
         bool,
         typer.Option("--dry-run", help="List qualified authors without running analysis."),
@@ -126,19 +129,23 @@ def survey(
 
     from forensics.survey.orchestrator import run_survey
 
-    report = asyncio.run(
-        run_survey(
-            settings,
-            project_root=root,
-            db_path=db_path,
-            resume=resume,
-            skip_scrape=skip_scrape,
-            author=author,
-            criteria=criteria,
-            post_year_min=post_year_min,
-            post_year_max=post_year_max,
+    show = get_cli_state(ctx).show_progress
+    with managed_rich_observer(show) as observer:
+        report = asyncio.run(
+            run_survey(
+                settings,
+                project_root=root,
+                db_path=db_path,
+                resume=resume,
+                skip_scrape=skip_scrape,
+                author=author,
+                criteria=criteria,
+                post_year_min=post_year_min,
+                post_year_max=post_year_max,
+                observer=observer,
+                show_rich_progress=show,
+            )
         )
-    )
 
     typer.echo("")
     typer.echo("=" * 70)

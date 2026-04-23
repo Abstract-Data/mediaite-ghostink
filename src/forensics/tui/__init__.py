@@ -37,4 +37,24 @@ def main() -> int:
     return 0
 
 
-__all__ = ["main"]
+def main_dashboard(
+    *,
+    survey_mode: bool = False,
+    survey_kwargs: dict | None = None,
+) -> int:
+    """Launch the pipeline progress dashboard (requires the ``tui`` extra)."""
+    try:
+        from forensics.tui.pipeline_app import run_dashboard_interactive
+    except ImportError as exc:
+        print(
+            "forensics dashboard requires the 'tui' extra.\n"
+            "  Install with: uv sync --extra tui\n"
+            f"  (import failure: {exc})",
+            file=sys.stderr,
+        )
+        return 1
+
+    return run_dashboard_interactive(survey_mode=survey_mode, survey_kwargs=survey_kwargs)
+
+
+__all__ = ["main", "main_dashboard"]

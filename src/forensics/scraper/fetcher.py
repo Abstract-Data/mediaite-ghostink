@@ -21,6 +21,7 @@ import httpx
 
 from forensics.config.settings import ForensicsSettings, ScrapingConfig, get_project_root
 from forensics.models.article import Article
+from forensics.progress import FetchProgressThrottle, PipelineObserver
 from forensics.scraper.client import create_scraping_client
 from forensics.scraper.parser import extract_article_text, extract_metadata, looks_coauthored
 from forensics.storage.export import append_jsonl_async
@@ -377,6 +378,8 @@ class ArticleHtmlFetchContext:
     done_lock: asyncio.Lock
     done_count: list[int]
     total: int
+    observer: PipelineObserver | None = None
+    fetch_throttle: FetchProgressThrottle | None = None
 
 
 async def _persist_and_log(
@@ -411,9 +414,12 @@ async def _persist_and_log(
 
     async with ctx.done_lock:
         ctx.done_count[0] += 1
+        done = ctx.done_count[0]
+        if ctx.fetch_throttle is not None and ctx.observer is not None:
+            ctx.fetch_throttle.maybe_emit(ctx.observer, done, ctx.total)
         logger.info(
             "Fetched %s/%s articles for %s%s",
-            ctx.done_count[0],
+            done,
             ctx.total,
             row.author_name,
             log_suffix,
@@ -494,9 +500,12 @@ async def _handle_success(
 
     async with ctx.done_lock:
         ctx.done_count[0] += 1
+        done = ctx.done_count[0]
+        if ctx.fetch_throttle is not None and ctx.observer is not None:
+            ctx.fetch_throttle.maybe_emit(ctx.observer, done, ctx.total)
         logger.info(
             "Fetched %s/%s articles for %s",
-            ctx.done_count[0],
+            done,
             ctx.total,
             row.author_name,
         )
@@ -581,6 +590,7 @@ async def fetch_articles(
     warnings_path: Path | None = None,
     coauthored_path: Path | None = None,
     repo: Repository | None = None,
+    observer: PipelineObserver | None = None,
 ) -> int:
     """
     Fetch HTML for articles with empty ``clean_text``, extract body, update SQLite.
@@ -609,6 +619,7 @@ async def fetch_articles(
         db_lock = asyncio.Lock()
         done_lock = asyncio.Lock()
         done_count = [0]
+        throttle = FetchProgressThrottle() if observer is not None else None
         html_ctx = ArticleHtmlFetchContext(
             repo=r,
             root=root,
@@ -622,6 +633,8 @@ async def fetch_articles(
             done_lock=done_lock,
             done_count=done_count,
             total=total,
+            observer=observer,
+            fetch_throttle=throttle,
         )
 
         async with create_scraping_client(scraping) as client:

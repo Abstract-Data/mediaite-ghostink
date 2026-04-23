@@ -216,7 +216,7 @@ def _process_author_batch(
     author_name: str,
     paths: AnalysisArtifactPaths,
     skip_embeddings: bool,
-    progress: Progress,
+    progress: Progress | None,
     processed_before_batch: int,
 ) -> _AuthorBatchResult:
     """Run feature extraction for every article of a single author.
@@ -235,7 +235,9 @@ def _process_author_batch(
 
     batch = len(articles_seq)
     batch_failed = 0
-    task_id = progress.add_task(f"Extracting {author_name}", total=batch)
+    task_id: int | None = None
+    if progress is not None:
+        task_id = progress.add_task(f"Extracting {author_name}", total=batch)
 
     for idx, article in enumerate(articles_seq):
         running_processed = processed_before_batch + result.processed
@@ -276,7 +278,8 @@ def _process_author_batch(
                 )
                 raise RuntimeError(msg) from exc
         finally:
-            progress.update(task_id, advance=1)
+            if progress is not None and task_id is not None:
+                progress.update(task_id, advance=1)
 
     if not skip_embeddings and embed_batch:
         result.embedding_records = _write_author_embedding_artifacts(
@@ -320,13 +323,15 @@ def _run_author_batches(
     settings: ForensicsSettings,
     paths: AnalysisArtifactPaths,
     skip_embeddings: bool,
+    use_rich_progress: bool = True,
 ) -> tuple[int, int, list[EmbeddingRecord]]:
     """Iterate authors, delegate per-batch work, and persist per-author Parquet output."""
     processed = 0
     failed = 0
     manifest_records: list[EmbeddingRecord] = []
-    progress = _make_progress()
-    progress.start()
+    progress = _make_progress() if use_rich_progress else None
+    if progress is not None:
+        progress.start()
     try:
         for author_id, seq in by_author.items():
             author = repo.get_author(author_id)
@@ -350,7 +355,8 @@ def _run_author_batches(
             if batch_result.features:
                 write_features(batch_result.features, paths.features_parquet(slug))
     finally:
-        progress.stop()
+        if progress is not None:
+            progress.stop()
     return processed, failed, manifest_records
 
 
@@ -361,6 +367,7 @@ def extract_all_features(
     author_slug: str | None = None,
     skip_embeddings: bool = False,
     project_root: Path | None = None,
+    show_rich_progress: bool = True,
 ) -> int:
     """
     Run feature extraction for all eligible articles (optionally one author).
@@ -398,6 +405,7 @@ def extract_all_features(
             settings=settings,
             paths=paths,
             skip_embeddings=skip_embeddings,
+            use_rich_progress=show_rich_progress,
         )
         if not skip_embeddings:
             write_embeddings_manifest(manifest_records, paths.embeddings_dir / "manifest.jsonl")

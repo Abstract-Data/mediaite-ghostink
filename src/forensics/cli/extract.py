@@ -7,6 +7,7 @@ from typing import Annotated
 
 import typer
 
+from forensics.cli.state import get_cli_state
 from forensics.config import get_project_root, get_settings
 from forensics.pipeline_context import PipelineContext
 
@@ -14,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 def extract(
+    ctx: typer.Context,
     author: Annotated[
         str | None,
         typer.Option("--author", metavar="SLUG", help="Limit to one author slug"),
@@ -46,12 +48,14 @@ def extract(
     db_path = root / "data" / "articles.db"
     PipelineContext.resolve().record_audit("forensics extract", optional=True, log=logger)
 
+    show = get_cli_state(ctx).show_progress
     try:
         n = extract_all_features(
             db_path,
             settings,
             author_slug=author,
             skip_embeddings=skip_embeddings,
+            show_rich_progress=show,
         )
     except ValueError as exc:
         logger.error("%s", exc)

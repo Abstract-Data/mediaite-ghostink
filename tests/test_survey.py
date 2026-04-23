@@ -18,6 +18,7 @@ from forensics.models.analysis import (
     DriftScores,
     HypothesisTest,
 )
+from forensics.progress import NoOpPipelineObserver, PipelineRunPhase
 from forensics.scraper.crawler import stable_article_id
 from forensics.storage.repository import Repository
 from forensics.survey import orchestrator as survey_orchestrator
@@ -590,6 +591,65 @@ def test_survey_forwards_post_year_bounds_to_dispatch_scrape(
     assert calls["dispatch_kwargs"] == [
         {"post_year_min": 2019, "post_year_max": 2022, "all_authors": True}
     ]
+
+
+class _SurveyObserverRecorder(NoOpPipelineObserver):
+    """Captures survey-level observer hooks for assertions."""
+
+    def __init__(self) -> None:
+        self.phases: list[str] = []
+        self.authors: list[tuple[str, int, int]] = []
+        self.finished: list[tuple[str, str | None]] = []
+
+    def pipeline_run_phase_start(self, phase: PipelineRunPhase) -> None:
+        self.phases.append(f"start:{phase.value}")
+
+    def pipeline_run_phase_end(self, phase: PipelineRunPhase) -> None:
+        self.phases.append(f"end:{phase.value}")
+
+    def survey_author_started(self, slug: str, index: int, total: int) -> None:
+        self.authors.append((slug, index, total))
+
+    def survey_author_finished(self, slug: str, error: str | None = None) -> None:
+        self.finished.append((slug, error))
+
+
+def test_survey_observer_hooks_fire_per_author(
+    tmp_db: Path,
+    settings,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """run_survey emits survey_author_* and finalize phase events when an observer is set."""
+    _seed_qualified_corpus(tmp_db, ["alice-byrne", "bob-choi"])
+    _patch_orchestrator_side_effects(monkeypatch)
+    obs = _SurveyObserverRecorder()
+
+    asyncio.run(
+        run_survey(
+            settings,
+            project_root=tmp_path,
+            db_path=tmp_db,
+            skip_scrape=True,
+            observer=obs,
+            show_rich_progress=False,
+            criteria=QualificationCriteria(
+                min_articles=50,
+                min_span_days=365,
+                min_articles_per_year=5.0,
+                require_recent_activity=False,
+            ),
+        )
+    )
+
+    assert obs.authors == [
+        ("alice-byrne", 1, 2),
+        ("bob-choi", 2, 2),
+    ]
+    assert len(obs.finished) == 2
+    assert all(sl in {"alice-byrne", "bob-choi"} and err is None for sl, err in obs.finished)
+    assert "start:survey_finalize" in obs.phases
+    assert "end:survey_finalize" in obs.phases
 
 
 def test_survey_report_is_instance_of_SurveyReport(

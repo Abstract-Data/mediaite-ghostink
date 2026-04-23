@@ -1,0 +1,28 @@
+/* Pipeline dashboard (separate from setup wizard). */
+
+#dashboard-title {
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+#phases {
+    height: auto;
+    margin-bottom: 1;
+}
+
+.phase {
+    width: 1fr;
+    padding: 0 1;
+    border: solid $primary;
+}
+
+#authors {
+    height: 1fr;
+    min-height: 5;
+    margin-bottom: 1;
+}
+
+#events {
+    height: 12;
+    border: solid $primary;
+}

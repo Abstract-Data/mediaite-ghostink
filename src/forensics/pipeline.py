@@ -28,17 +28,34 @@ from forensics.config import get_project_root, get_settings
 from forensics.features.pipeline import extract_all_features
 from forensics.models.report_args import ReportArgs
 from forensics.pipeline_context import PipelineContext
+from forensics.progress import (
+    PipelineObserver,
+    PipelineRunPhase,
+    live_ui_mode,
+    managed_rich_observer,
+)
 from forensics.reporting import run_report
 
 logger = logging.getLogger(__name__)
 
 
-def run_all_pipeline() -> int:
+def run_all_pipeline(
+    *,
+    show_progress: bool = True,
+    observer: PipelineObserver | None = None,
+) -> int:
     """Run the default full pipeline; returns process exit code.
 
     The pipeline refuses to start when preflight checks hard-fail (returns
     exit code ``2``) — this prevents cascading errors deeper in the run when
     the environment is known to be broken.
+
+    Args:
+        show_progress: When true and ``observer`` is ``None``, attach a
+            :class:`~forensics.progress.RichPipelineObserver` for scrape + phase labels.
+        observer: Optional pre-constructed observer (e.g. Rich session owned by the CLI).
+            When set, ``show_progress`` only controls the feature-extract Rich bar, not
+            observer construction.
     """
     from forensics.preflight import run_all_preflight_checks
 
@@ -57,31 +74,72 @@ def run_all_pipeline() -> int:
     PipelineContext.resolve().record_audit("forensics all — preflight", optional=True, log=logger)
     PipelineContext.resolve().record_audit("forensics all", optional=True, log=logger)
 
-    code = asyncio.run(
-        dispatch_scrape(
-            discover=False,
-            metadata=False,
-            fetch=False,
-            dedup=False,
-            archive=False,
-            dry_run=False,
-            force_refresh=False,
-        )
-    )
-    if code != 0:
-        return code
+    def _run(obs: PipelineObserver | None) -> int:
+        rich_extract = show_progress and live_ui_mode(obs) != "textual"
 
-    extract_all_features(db_path, settings, author_slug=None, skip_embeddings=False)
+        if obs is not None:
+            obs.pipeline_run_phase_start(PipelineRunPhase.SCRAPE)
+        try:
+            code = asyncio.run(
+                dispatch_scrape(
+                    discover=False,
+                    metadata=False,
+                    fetch=False,
+                    dedup=False,
+                    archive=False,
+                    dry_run=False,
+                    force_refresh=False,
+                    observer=obs,
+                )
+            )
+        finally:
+            if obs is not None:
+                obs.pipeline_run_phase_end(PipelineRunPhase.SCRAPE)
+        if code != 0:
+            return code
 
-    try:
-        run_analyze(timeseries=True, convergence=True)
-    except typer.Exit as exc:
-        if exc.exit_code:
-            return int(exc.exit_code or 1)
+        if obs is not None:
+            obs.pipeline_run_phase_start(PipelineRunPhase.EXTRACT)
+        try:
+            extract_all_features(
+                db_path,
+                settings,
+                author_slug=None,
+                skip_embeddings=False,
+                show_rich_progress=rich_extract,
+            )
+        finally:
+            if obs is not None:
+                obs.pipeline_run_phase_end(PipelineRunPhase.EXTRACT)
 
-    report_args = ReportArgs(
-        notebook=None,
-        report_format=settings.report.output_format,
-        verify=False,
-    )
-    return run_report(report_args)
+        if obs is not None:
+            obs.pipeline_run_phase_start(PipelineRunPhase.ANALYZE)
+        try:
+            try:
+                run_analyze(timeseries=True, convergence=True)
+            except typer.Exit as exc:
+                if exc.exit_code:
+                    return int(exc.exit_code or 1)
+        finally:
+            if obs is not None:
+                obs.pipeline_run_phase_end(PipelineRunPhase.ANALYZE)
+
+        if obs is not None:
+            obs.pipeline_run_phase_start(PipelineRunPhase.REPORT)
+        try:
+            report_args = ReportArgs(
+                notebook=None,
+                report_format=settings.report.output_format,
+                verify=False,
+            )
+            return run_report(report_args)
+        finally:
+            if obs is not None:
+                obs.pipeline_run_phase_end(PipelineRunPhase.REPORT)
+
+    if observer is not None:
+        return _run(observer)
+    if show_progress:
+        with managed_rich_observer(True) as obs:
+            return _run(obs)
+    return _run(None)

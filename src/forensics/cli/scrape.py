@@ -12,9 +12,11 @@ from typing import Annotated, assert_never
 import typer
 
 from forensics.cli._helpers import guard_placeholder_authors
+from forensics.cli.state import get_cli_state
 from forensics.config import DEFAULT_DB_RELATIVE, get_project_root, get_settings
 from forensics.config.settings import ForensicsSettings
 from forensics.pipeline_context import PipelineContext
+from forensics.progress import PipelineObserver, PipelineStage, managed_rich_observer
 from forensics.scraper.crawler import (
     collect_article_metadata,
     discover_authors,
@@ -71,6 +73,20 @@ def _resolve_scrape_mode(
     return _FLAG_TO_SCRAPE_MODE.get((discover, metadata, fetch, dedup, archive))
 
 
+async def _with_pipeline_stage(
+    observer: PipelineObserver | None,
+    stage: PipelineStage,
+    work: Callable[[], Awaitable[int]],
+) -> int:
+    if observer is not None:
+        observer.pipeline_stage_start(stage)
+    try:
+        return await work()
+    finally:
+        if observer is not None:
+            observer.pipeline_stage_end(stage)
+
+
 def _export_jsonl(db_path: Path, root: Path) -> int:
     out = root / "data/articles.jsonl"
     return export_articles_jsonl(db_path, out)
@@ -83,21 +99,25 @@ async def _discover_only(
     force_refresh: bool,
     post_year_min: int | None = None,
     post_year_max: int | None = None,
+    observer: PipelineObserver | None = None,
 ) -> int:
-    n = await discover_authors(
-        settings,
-        force_refresh=force_refresh,
-        post_year_min=post_year_min,
-        post_year_max=post_year_max,
-    )
-    if n:
-        logger.info("discover: wrote %d author(s) to %s", n, manifest_path)
-    else:
-        logger.info(
-            "discover: skipped (manifest exists). Use --force-refresh to overwrite. path=%s",
-            manifest_path,
+    async def _work() -> int:
+        n = await discover_authors(
+            settings,
+            force_refresh=force_refresh,
+            post_year_min=post_year_min,
+            post_year_max=post_year_max,
         )
-    return 0
+        if n:
+            logger.info("discover: wrote %d author(s) to %s", n, manifest_path)
+        else:
+            logger.info(
+                "discover: skipped (manifest exists). Use --force-refresh to overwrite. path=%s",
+                manifest_path,
+            )
+        return 0
+
+    return await _with_pipeline_stage(observer, PipelineStage.DISCOVER, _work)
 
 
 async def _metadata_only(
@@ -109,6 +129,7 @@ async def _metadata_only(
     all_authors: bool = False,
     post_year_min: int | None = None,
     post_year_max: int | None = None,
+    observer: PipelineObserver | None = None,
 ) -> int:
     if not manifest_path.is_file():
         logger.error(
@@ -116,17 +137,22 @@ async def _metadata_only(
             manifest_path,
         )
         return 1
-    with ensure_repo(db_path, repo) as r:
-        inserted = await collect_article_metadata(
-            db_path,
-            settings,
-            repo=r,
-            all_authors=all_authors,
-            post_year_min=post_year_min,
-            post_year_max=post_year_max,
-        )
-    logger.info("metadata: inserted %d new article row(s) into %s", inserted, db_path)
-    return 0
+
+    async def _work() -> int:
+        with ensure_repo(db_path, repo) as r:
+            inserted = await collect_article_metadata(
+                db_path,
+                settings,
+                repo=r,
+                all_authors=all_authors,
+                post_year_min=post_year_min,
+                post_year_max=post_year_max,
+                observer=observer,
+            )
+        logger.info("metadata: inserted %d new article row(s) into %s", inserted, db_path)
+        return 0
+
+    return await _with_pipeline_stage(observer, PipelineStage.METADATA, _work)
 
 
 async def _fetch_only(
@@ -135,17 +161,23 @@ async def _fetch_only(
     *,
     dry_run: bool,
     repo: Repository | None = None,
+    observer: PipelineObserver | None = None,
 ) -> int:
-    with ensure_repo(db_path, repo) as r:
-        n = await fetch_articles(db_path, settings, dry_run=dry_run, repo=r)
-    suffix = " (dry-run)" if dry_run else ""
-    logger.info(
-        "fetch: %s %d article(s)%s",
-        "would fetch" if dry_run else "processed",
-        n,
-        suffix,
-    )
-    return 0
+    async def _work() -> int:
+        with ensure_repo(db_path, repo) as r:
+            n = await fetch_articles(
+                db_path, settings, dry_run=dry_run, repo=r, observer=observer
+            )
+        suffix = " (dry-run)" if dry_run else ""
+        logger.info(
+            "fetch: %s %d article(s)%s",
+            "would fetch" if dry_run else "processed",
+            n,
+            suffix,
+        )
+        return 0
+
+    return await _with_pipeline_stage(observer, PipelineStage.FETCH, _work)
 
 
 async def _fetch_dedup_export(
@@ -155,17 +187,35 @@ async def _fetch_dedup_export(
     *,
     dry_run: bool,
     repo: Repository | None = None,
+    observer: PipelineObserver | None = None,
 ) -> int:
-    with ensure_repo(db_path, repo) as r:
-        n = await fetch_articles(db_path, settings, dry_run=dry_run, repo=r)
-    logger.info("fetch: processed %d article(s)%s", n, " (dry-run)" if dry_run else "")
-    if not dry_run:
+    async def _fetch_work() -> int:
+        with ensure_repo(db_path, repo) as r:
+            n = await fetch_articles(
+                db_path, settings, dry_run=dry_run, repo=r, observer=observer
+            )
+        logger.info("fetch: processed %d article(s)%s", n, " (dry-run)" if dry_run else "")
+        return 0
+
+    await _with_pipeline_stage(observer, PipelineStage.FETCH, _fetch_work)
+    if dry_run:
+        return 0
+
+    async def _dedup_work() -> int:
         dup_ids = deduplicate_articles(
             db_path, hamming_threshold=settings.scraping.simhash_threshold
         )
         logger.info("dedup: marked %d article(s) as near-duplicates", len(dup_ids))
+        return 0
+
+    await _with_pipeline_stage(observer, PipelineStage.DEDUP, _dedup_work)
+
+    async def _export_work() -> int:
         ex = _export_jsonl(db_path, root)
         logger.info("export: wrote %d article(s) to data/articles.jsonl", ex)
+        return 0
+
+    await _with_pipeline_stage(observer, PipelineStage.EXPORT, _export_work)
     return 0
 
 
@@ -179,31 +229,41 @@ async def _discover_and_metadata(
     repo: Repository | None = None,
     post_year_min: int | None = None,
     post_year_max: int | None = None,
+    observer: PipelineObserver | None = None,
 ) -> int:
-    n_authors = await discover_authors(
-        settings,
-        force_refresh=force_refresh,
-        post_year_min=post_year_min,
-        post_year_max=post_year_max,
-    )
-    if n_authors:
-        logger.info("discover: wrote %d author(s) to %s", n_authors, manifest_path)
-    else:
-        logger.info("discover: skipped or unchanged (%s)", manifest_path)
-    if not manifest_path.is_file():
-        logger.error("author manifest missing after discover: %s", manifest_path)
-        return 1
-    with ensure_repo(db_path, repo) as r:
-        inserted = await collect_article_metadata(
-            db_path,
+    async def _discover_work() -> int:
+        n_authors = await discover_authors(
             settings,
-            repo=r,
-            all_authors=all_authors,
+            force_refresh=force_refresh,
             post_year_min=post_year_min,
             post_year_max=post_year_max,
         )
-    logger.info("metadata: inserted %d new article row(s) into %s", inserted, db_path)
-    return 0
+        if n_authors:
+            logger.info("discover: wrote %d author(s) to %s", n_authors, manifest_path)
+        else:
+            logger.info("discover: skipped or unchanged (%s)", manifest_path)
+        return 0
+
+    await _with_pipeline_stage(observer, PipelineStage.DISCOVER, _discover_work)
+    if not manifest_path.is_file():
+        logger.error("author manifest missing after discover: %s", manifest_path)
+        return 1
+
+    async def _metadata_work() -> int:
+        with ensure_repo(db_path, repo) as r:
+            inserted = await collect_article_metadata(
+                db_path,
+                settings,
+                repo=r,
+                all_authors=all_authors,
+                post_year_min=post_year_min,
+                post_year_max=post_year_max,
+                observer=observer,
+            )
+        logger.info("metadata: inserted %d new article row(s) into %s", inserted, db_path)
+        return 0
+
+    return await _with_pipeline_stage(observer, PipelineStage.METADATA, _metadata_work)
 
 
 async def _full_pipeline(
@@ -216,6 +276,7 @@ async def _full_pipeline(
     all_authors: bool = False,
     post_year_min: int | None = None,
     post_year_max: int | None = None,
+    observer: PipelineObserver | None = None,
 ) -> int:
     with Repository(db_path) as repo:
         rc = await _discover_and_metadata(
@@ -227,28 +288,60 @@ async def _full_pipeline(
             repo=repo,
             post_year_min=post_year_min,
             post_year_max=post_year_max,
+            observer=observer,
         )
         if rc != 0:
             return rc
-        fetched = await fetch_articles(db_path, settings, dry_run=False, repo=repo)
-    logger.info("fetch: processed %d article(s)", fetched)
-    dup_ids = deduplicate_articles(db_path, hamming_threshold=settings.scraping.simhash_threshold)
-    logger.info("dedup: marked %d article(s) as near-duplicates", len(dup_ids))
-    ex = _export_jsonl(db_path, root)
-    logger.info("export: wrote %d article(s) to data/articles.jsonl", ex)
+
+        async def _fetch_work() -> int:
+            fetched = await fetch_articles(
+                db_path, settings, dry_run=False, repo=repo, observer=observer
+            )
+            logger.info("fetch: processed %d article(s)", fetched)
+            return 0
+
+        await _with_pipeline_stage(observer, PipelineStage.FETCH, _fetch_work)
+
+    async def _dedup_work() -> int:
+        dup_ids = deduplicate_articles(
+            db_path, hamming_threshold=settings.scraping.simhash_threshold
+        )
+        logger.info("dedup: marked %d article(s) as near-duplicates", len(dup_ids))
+        return 0
+
+    await _with_pipeline_stage(observer, PipelineStage.DEDUP, _dedup_work)
+
+    async def _export_work() -> int:
+        ex = _export_jsonl(db_path, root)
+        logger.info("export: wrote %d article(s) to data/articles.jsonl", ex)
+        return 0
+
+    await _with_pipeline_stage(observer, PipelineStage.EXPORT, _export_work)
     return 0
 
 
-async def _archive_only(root: Path, db_path: Path) -> int:
-    n = archive_raw_year_dirs(root, db_path)
-    logger.info("archive: compressed %d year directory(ies) under data/raw/", n)
-    return 0
+async def _archive_only(
+    root: Path, db_path: Path, *, observer: PipelineObserver | None = None
+) -> int:
+    async def _work() -> int:
+        n = archive_raw_year_dirs(root, db_path)
+        logger.info("archive: compressed %d year directory(ies) under data/raw/", n)
+        return 0
+
+    return await _with_pipeline_stage(observer, PipelineStage.ARCHIVE, _work)
 
 
-async def _dedup_only(db_path: Path, settings: ForensicsSettings) -> int:
-    dup_ids = deduplicate_articles(db_path, hamming_threshold=settings.scraping.simhash_threshold)
-    logger.info("dedup: marked %d article(s) as near-duplicates", len(dup_ids))
-    return 0
+async def _dedup_only(
+    db_path: Path, settings: ForensicsSettings, *, observer: PipelineObserver | None = None
+) -> int:
+    async def _work() -> int:
+        dup_ids = deduplicate_articles(
+            db_path, hamming_threshold=settings.scraping.simhash_threshold
+        )
+        logger.info("dedup: marked %d article(s) as near-duplicates", len(dup_ids))
+        return 0
+
+    return await _with_pipeline_stage(observer, PipelineStage.DEDUP, _work)
 
 
 async def _run_scrape_mode(
@@ -263,6 +356,7 @@ async def _run_scrape_mode(
     all_authors: bool,
     post_year_min: int | None,
     post_year_max: int | None,
+    observer: PipelineObserver | None,
 ) -> int:
     """Dispatch ``mode`` to its handler (RF-PATTERN-001).
 
@@ -272,12 +366,15 @@ async def _run_scrape_mode(
     corresponding dispatch entry.
     """
     py_min, py_max = post_year_min, post_year_max
+    obs = observer
     dispatch: dict[ScrapeMode, Callable[[], Awaitable[int]]] = {
-        ScrapeMode.ARCHIVE_ONLY: lambda: _archive_only(root, db_path),
-        ScrapeMode.DEDUP_ONLY: lambda: _dedup_only(db_path, settings),
-        ScrapeMode.FETCH_ONLY: lambda: _fetch_only(db_path, settings, dry_run=dry_run),
+        ScrapeMode.ARCHIVE_ONLY: lambda: _archive_only(root, db_path, observer=obs),
+        ScrapeMode.DEDUP_ONLY: lambda: _dedup_only(db_path, settings, observer=obs),
+        ScrapeMode.FETCH_ONLY: lambda: _fetch_only(
+            db_path, settings, dry_run=dry_run, observer=obs
+        ),
         ScrapeMode.FETCH_DEDUP_EXPORT: lambda: _fetch_dedup_export(
-            db_path, root, settings, dry_run=dry_run
+            db_path, root, settings, dry_run=dry_run, observer=obs
         ),
         ScrapeMode.DISCOVER_ONLY: lambda: _discover_only(
             settings,
@@ -285,6 +382,7 @@ async def _run_scrape_mode(
             force_refresh=force_refresh,
             post_year_min=py_min,
             post_year_max=py_max,
+            observer=obs,
         ),
         ScrapeMode.METADATA_ONLY: lambda: _metadata_only(
             db_path,
@@ -293,6 +391,7 @@ async def _run_scrape_mode(
             all_authors=all_authors,
             post_year_min=py_min,
             post_year_max=py_max,
+            observer=obs,
         ),
         ScrapeMode.DISCOVER_AND_METADATA: lambda: _discover_and_metadata(
             db_path,
@@ -302,6 +401,7 @@ async def _run_scrape_mode(
             all_authors=all_authors,
             post_year_min=py_min,
             post_year_max=py_max,
+            observer=obs,
         ),
         ScrapeMode.FULL_PIPELINE: lambda: _full_pipeline(
             db_path,
@@ -312,6 +412,7 @@ async def _run_scrape_mode(
             all_authors=all_authors,
             post_year_min=py_min,
             post_year_max=py_max,
+            observer=obs,
         ),
     }
     handler = dispatch.get(mode)
@@ -332,6 +433,7 @@ async def dispatch_scrape(
     all_authors: bool = False,
     post_year_min: int | None = None,
     post_year_max: int | None = None,
+    observer: PipelineObserver | None = None,
 ) -> int:
     """Route flag combinations to the appropriate pipeline function.
 
@@ -364,7 +466,7 @@ async def dispatch_scrape(
     audit_desc = "forensics scrape"
     if year_win is not None:
         audit_desc += f" post_years={year_win[0]}-{year_win[1]}"
-    PipelineContext.resolve().record_audit(
+    PipelineContext.resolve(root=root).record_audit(
         audit_desc,
         optional=True,
         log=logger,
@@ -388,11 +490,13 @@ async def dispatch_scrape(
         all_authors=all_authors,
         post_year_min=post_year_min,
         post_year_max=post_year_max,
+        observer=observer,
     )
 
 
 @scrape_app.callback(invoke_without_command=True)
 def scrape(
+    ctx: typer.Context,
     discover: Annotated[
         bool, typer.Option("--discover", help="Run WordPress author discovery only")
     ] = False,
@@ -444,18 +548,21 @@ def scrape(
     ] = None,
 ) -> None:
     """Crawl and fetch articles for configured authors."""
-    rc = asyncio.run(
-        dispatch_scrape(
-            discover=discover,
-            metadata=metadata,
-            fetch=fetch,
-            dedup=dedup,
-            archive=archive,
-            dry_run=dry_run,
-            force_refresh=force_refresh,
-            all_authors=all_authors,
-            post_year_min=post_year_min,
-            post_year_max=post_year_max,
+    show = get_cli_state(ctx).show_progress
+    with managed_rich_observer(show) as observer:
+        rc = asyncio.run(
+            dispatch_scrape(
+                discover=discover,
+                metadata=metadata,
+                fetch=fetch,
+                dedup=dedup,
+                archive=archive,
+                dry_run=dry_run,
+                force_refresh=force_refresh,
+                all_authors=all_authors,
+                post_year_min=post_year_min,
+                post_year_max=post_year_max,
+                observer=observer,
+            )
         )
-    )
     raise typer.Exit(code=rc)

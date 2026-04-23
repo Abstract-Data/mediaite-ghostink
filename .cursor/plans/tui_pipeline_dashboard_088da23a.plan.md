@@ -1,29 +1,45 @@
 ---
 name: TUI pipeline dashboard
-overview: Add an optional progress-observer path through scrape, survey, and `run_all_pipeline`, then build a new Textual dashboard (under the existing `tui` extra) that renders a live four-stage pipeline plus per-author scrape/survey progress. Do all implementation on a new GitButler virtual branch created with `but branch new`.
+overview: Add an optional progress-observer path through scrape, survey, and `run_all_pipeline`; a Textual dashboard (`forensics dashboard`, `tui` extra) for the full live pipeline view; and Rich-based progress as the default for ordinary CLI runs (`all`, `survey`, scrape) when not using that dashboard, with a CLI flag to disable all progress UI. Implement on a GitButler virtual branch (`but branch new`).
 todos:
   - id: but-branch
     content: Run `but status -fv` then `but branch new tui-pipeline-dashboard` (or chosen name); keep work on that virtual branch
-    status: pending
+    status: completed
   - id: progress-protocol
     content: "Add `forensics.progress` module: PipelineStage enum, PipelineObserver protocol, NoOp default"
-    status: pending
+    status: completed
   - id: scrape-hooks
     content: Plumb optional observer through dispatch_scrape → handlers; crawler metadata per-author done/started; fetch throttled progress
-    status: pending
+    status: completed
   - id: survey-all-hooks
-    content: Plumb observer through run_survey and run_all_pipeline; suppress or coordinate Rich progress in extract when observer active
-    status: pending
+    content: Plumb observer through run_survey and run_all_pipeline; coordinate Rich vs Textual (only one active)
+    status: completed
+  - id: rich-cli-default
+    content: RichPipelineObserver for normal `forensics all` / `survey` / scrape; root or shared `--no-progress` disables Rich + any live bars; extend extract's Rich usage to respect the same flag
+    status: completed
   - id: textual-app
     content: New Textual PipelineDashboardApp + Typer `forensics dashboard` (tui extra); Worker thread + call_from_thread updates
-    status: pending
+    status: completed
   - id: tests
-    content: Unit tests for observer emissions; optional Textual pilot smoke gated on textual extra
-    status: pending
+    content: Unit tests for observer emissions; assert `--no-progress` yields no Rich Progress; optional Textual pilot smoke gated on textual extra
+    status: completed
 isProject: false
 ---
 
 # Unified TUI pipeline dashboard
+
+## Post-pull verification (2026-04-23)
+
+Re-checked the tree after your pull. **No plan-affecting drift** was found:
+
+- [`src/forensics/pipeline.py`](src/forensics/pipeline.py) — Still `asyncio.run(dispatch_scrape(...))` → `extract_all_features` → `run_analyze` → `run_report`; no observer or progress API yet.
+- [`src/forensics/survey/orchestrator.py`](src/forensics/survey/orchestrator.py) — Survey still calls `dispatch_scrape(..., all_authors=True, post_year_min/max=...)` then the per-author `extract_all_features` / `run_full_analysis` loop with checkpoints; finalize remains rankings + `survey_results.json` (not `run_report`).
+- [`src/forensics/scraper/crawler.py`](src/forensics/scraper/crawler.py) — `collect_article_metadata` still uses a nested `_ingest_one` + `asyncio.gather` over `author_cfgs` (per-author hook point unchanged).
+- [`src/forensics/cli/__init__.py`](src/forensics/cli/__init__.py) — Subcommands unchanged; `forensics setup` maps to `setup_wizard()`; there is still **no** `dashboard` command — greenfield as planned.
+- [`pyproject.toml`](pyproject.toml) — `tui` extra (`textual`, `rich`) and `forensics-setup` script unchanged; no `forensics.progress` package yet.
+- [`tests/integration/test_cli_scrape_dispatch.py`](tests/integration/test_cli_scrape_dispatch.py) — Still present for scrape-dispatch integration tests.
+
+Hook table, GitButler branch workflow, Textual worker-thread note, and C901 note for `crawler.py` remain accurate.
 
 ## Context (what exists today)
 
@@ -60,13 +76,16 @@ flowchart LR
   analyze --> obs
   report --> obs
   obs --> textual[Textual Dashboard]
+  obs --> richObs[Rich CLI observer]
 ```
+
+When the user runs **`forensics dashboard`**, attach a **Textual**-backed observer only. When they run **`forensics all`**, **`forensics survey`**, **`forensics scrape`**, etc., attach **`RichPipelineObserver`** by default so stages and per-author work show **`rich.progress`** (and existing extract bars stay consistent). **`--no-progress`** turns off Rich observers and suppresses extract’s Rich bar — plain logging only (CI, redirected logs, minimal terminals).
 
 - **Thread/async safety**: Textual’s loop owns the UI. Long work should run in a **Textual `Worker`** (or a thread) that calls observer methods; the observer implementation uses `app.call_from_thread(...)` (or queues into the Textual app) to mutate widgets. Avoid running the whole asyncio scrape stack on the Textual loop without careful integration (nested loops); prefer **worker thread + `asyncio.run(dispatch_scrape(...))`** in that thread for scrape/survey sub-phases, with UI updates marshaled to the main thread.
 
 **Suggested module layout** (names illustrative):
 
-- [`src/forensics/progress/`](src/forensics/progress/) — `PipelineObserver` protocol, `PipelineStage` enum, `NoOpPipelineObserver`, maybe `RichPipelineObserver` for a non-TUI smoke mode.
+- [`src/forensics/progress/`](src/forensics/progress/) — `PipelineObserver` protocol, `PipelineStage` enum, `NoOpPipelineObserver`, **`RichPipelineObserver`** (default for non-dashboard CLI), **`TextualPipelineObserver`** or inline adapter in `tui/pipeline_app.py` for the dashboard.
 - Thread-safe **event aggregation** (e.g. “current author slug + sub-phase”) kept minimal to satisfy “per-author during survey scrape.”
 
 ### Hook points (minimal signature churn)
@@ -78,9 +97,16 @@ flowchart LR
 | [`fetch_articles`](src/forensics/scraper/fetcher.py) | Throttled `fetch_progress(done, total)` (e.g. every 1–2% or every N completions) to avoid UI flood. |
 | [`run_survey`](src/forensics/survey/orchestrator.py) | Survey-level stages; before/after `_process_author`; pass observer into `dispatch_scrape` when `not skip_scrape`. |
 | [`run_all_pipeline`](src/forensics/pipeline.py) | Wrap each macro stage; pass observer into `dispatch_scrape` and downstream if those functions accept `observer=...`. |
-| [`extract_all_features`](src/forensics/features/pipeline.py) | Either emit observer events alongside existing Rich `Progress`, or disable Rich when `observer` is non-noop to prevent double UI (recommended: **suppress Rich bar when observer is active**). |
+| [`extract_all_features`](src/forensics/features/pipeline.py) | **If** a pipeline observer is active: suppress the built-in Rich task bar when the observer is **Textual** or **Rich** (same information surfaced once). If `--no-progress`: no Rich bar and no observer. |
 
 All new parameters should default to **`None`** / no-op so existing CLI and tests unchanged.
+
+### CLI — Rich default and opt-out
+
+- Add **`--no-progress`** (name bikesheddable; alternatives `--plain`, `--no-ui`) on the **root** [`forensics` callback](src/forensics/cli/__init__.py) via `Typer` context (`ctx.obj` holding a small `CliRuntimeOptions(show_progress: bool)`), so every subcommand can read the same flag without duplicating it on ten Typer apps.
+- **Default** `show_progress=True`: long commands (`all`, `survey`, scrape full pipeline, extract if long enough) pass a **`RichPipelineObserver`** into the shared observer plumbing.
+- **`--no-progress`**: force **no** `RichPipelineObserver`, no Textual progress, and **disable** the per-author `rich.progress` block in `extract_all_features` (today it always shows when not single-author fast path — align with the global flag).
+- **`forensics dashboard`**: does not use the Rich default on stdout (Textual owns the screen); root `--no-progress` can still disable the dashboard launch with a clear error or fall back to log-only worker — document one behavior (recommend **error**: “use `forensics all --no-progress` for non-TUI without progress”).
 
 ## Textual / Rich dashboard UX
 
@@ -93,7 +119,9 @@ New **second** Textual app (keep wizard separate):
   - **Bottom**: `RichLog` or `Log` for tail events (errors, stage transitions); optional elapsed timer.
 - **Entry point**: extend [`src/forensics/tui/__init__.py`](src/forensics/tui/__init__.py) with `main_dashboard()` or add Typer subcommand under [`src/forensics/cli/__init__.py`](src/forensics/cli/__init__.py) e.g. `forensics dashboard` with `--survey` vs default **full pipeline**, reusing survey flags from [`src/forensics/cli/survey.py`](src/forensics/cli/survey.py) where practical (compose `run_survey` kwargs).
 
-**Optional**: `forensics dashboard --rich` using only `rich.live.Live` for CI/SSH without Textual — nice-to-have after Textual path works.
+**Non-dashboard runs**: users keep using `forensics all` / `survey` / `scrape` as today; they automatically get **Rich** stage and per-author bars unless **`--no-progress`**. No `tui` extra required for Rich (already available via Typer); Textual remains optional for **`dashboard`** only.
+
+**Optional later**: `forensics dashboard --rich-fallback` using `rich.live.Live` when Textual is unavailable — only if product asks; not required for this iteration.
 
 ## Testing
 
