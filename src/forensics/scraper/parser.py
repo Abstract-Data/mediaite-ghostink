@@ -48,6 +48,20 @@ def extract_article_text(html: str) -> str:
     return normalize_article_text(raw_text)
 
 
+def extract_article_text_from_rest(content_rendered: str) -> str:
+    """Extract body text from WP REST ``content.rendered`` (already body-scoped HTML)."""
+    if not content_rendered:
+        return ""
+    soup = BeautifulSoup(content_rendered, "lxml")
+    for tag in soup.find_all(["script", "style", "nav", "aside", "footer"]):
+        tag.decompose()
+    for el in soup.find_all(True):
+        classes = " ".join(el.get("class") or []).lower()
+        if any(s in classes for s in _REMOVE_CLASS_SUBSTRINGS):
+            el.decompose()
+    return normalize_article_text(soup.get_text(separator="\n"))
+
+
 def _meta_content(soup: BeautifulSoup, *, prop: str | None = None, name: str | None = None) -> str:
     if prop:
         tag = soup.find("meta", attrs={"property": prop})
