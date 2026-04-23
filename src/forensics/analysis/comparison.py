@@ -13,18 +13,12 @@ from scipy import stats
 from forensics.analysis.artifact_paths import AnalysisArtifactPaths
 from forensics.analysis.changepoint import PELT_FEATURE_COLUMNS, analyze_author_feature_changepoints
 from forensics.analysis.convergence import compute_convergence_scores
-from forensics.analysis.drift import (
-    compute_baseline_similarity_curve,
-    compute_monthly_centroids,
-    load_article_embeddings,
-    track_centroid_velocity,
-)
+from forensics.analysis.drift import load_drift_summary
 from forensics.analysis.utils import intervals_overlap, load_feature_frame_for_author
 from forensics.config.settings import ForensicsSettings
 from forensics.models.analysis import ChangePoint, ConvergenceWindow, DriftScores
 from forensics.models.author import Author
 from forensics.storage.repository import Repository
-from forensics.utils.datetime import parse_datetime
 
 logger = logging.getLogger(__name__)
 
@@ -79,55 +73,6 @@ def _load_or_compute_changepoints(
     if dfc is None:
         return []
     return analyze_author_feature_changepoints(dfc, author_id=au.id, settings=settings)
-
-
-def _velocity_and_baseline_for_slug(
-    slug: str,
-    repo: Repository,
-    paths: AnalysisArtifactPaths,
-    settings: ForensicsSettings,
-) -> tuple[list[tuple[str, float]], list[tuple[Any, float]]]:
-    """Return ``(vel_tuples, baseline_curve)`` from disk or by recomputing from embeddings."""
-    drift_path = paths.drift_json(slug)
-    baseline_curve: list = []
-    vel_tuples: list[tuple[str, float]] = []
-
-    curve_path = paths.baseline_curve_json(slug)
-    if curve_path.is_file():
-        for row in json.loads(curve_path.read_text(encoding="utf-8")):
-            ts = parse_datetime(row["published_at"])
-            baseline_curve.append((ts, float(row["similarity"])))
-
-    ds: DriftScores | None = None
-    if drift_path.is_file():
-        ds = DriftScores.model_validate_json(drift_path.read_text(encoding="utf-8"))
-
-    if ds and ds.monthly_centroid_velocities:
-        npz_path = paths.centroids_npz(slug)
-        months: list[str] = []
-        if npz_path.is_file():
-            data = np.load(npz_path)
-            months = [str(x) for x in data["months"].tolist()]
-        if len(months) >= 2:
-            vel_tuples = list(zip(months[1:], ds.monthly_centroid_velocities, strict=False))
-        else:
-            vel_tuples = [(f"m{i}", v) for i, v in enumerate(ds.monthly_centroid_velocities)]
-    else:
-        try:
-            pairs = load_article_embeddings(slug, paths)
-            if len(pairs) >= 2:
-                monthly = compute_monthly_centroids(pairs)
-                vels = track_centroid_velocity(monthly)
-                vel_tuples = [(monthly[i + 1][0], vels[i]) for i in range(len(vels))]
-                if not baseline_curve:
-                    baseline_curve = compute_baseline_similarity_curve(
-                        pairs,
-                        baseline_count=settings.analysis.baseline_embedding_count,
-                    )
-        except (ValueError, OSError) as exc:
-            logger.debug("compare: no embeddings for %s (%s)", slug, exc)
-
-    return vel_tuples, baseline_curve
 
 
 def _load_target_author_and_frame(
@@ -228,17 +173,12 @@ def _summarize_control_authors(
         else:
             control_drift_scores[slug] = None
 
-        vel_tuples, baseline_curve = _velocity_and_baseline_for_slug(
-            slug,
-            repo,
-            paths,
-            settings,
-        )
+        summary = load_drift_summary(slug, paths, settings=settings)
         cps = control_change_points[slug]
         control_windows[slug] = compute_convergence_scores(
             cps,
-            vel_tuples,
-            baseline_curve,
+            summary.velocities,
+            summary.baseline_curve,
             settings=settings,
         )
     return control_change_points, control_drift_scores, control_windows
@@ -248,7 +188,6 @@ def _editorial_signal_for_target(
     target_id: str,
     target_author: Author,
     df_t: pl.DataFrame,
-    repo: Repository,
     paths: AnalysisArtifactPaths,
     settings: ForensicsSettings,
     control_windows: dict[str, list[ConvergenceWindow]],
@@ -264,17 +203,11 @@ def _editorial_signal_for_target(
             settings=settings,
         )
 
-    target_vel, target_curve = _velocity_and_baseline_for_slug(
-        target_id,
-        repo,
-        paths,
-        settings,
-    )
-
+    summary = load_drift_summary(target_id, paths, settings=settings)
     target_windows = compute_convergence_scores(
         target_cps,
-        target_vel,
-        target_curve,
+        summary.velocities,
+        summary.baseline_curve,
         settings=settings,
     )
     return compute_signal_attribution(target_windows, control_windows)
@@ -303,7 +236,6 @@ def compare_target_to_controls(
             target_id,
             target_author,
             df_t,
-            repo,
             paths,
             settings,
             control_windows,

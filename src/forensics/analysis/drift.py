@@ -27,8 +27,24 @@ from forensics.storage.parquet import (
     unpack_article_ids_from_embedding_batch,
 )
 from forensics.storage.repository import Repository
+from forensics.utils.datetime import parse_datetime
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class DriftSummary:
+    """Cached-or-recomputed drift per author: monthly velocities + baseline curve.
+
+    ``velocities`` pairs each month label with its cosine distance from the previous
+    month's centroid (so ``velocities[0]`` describes the jump from month 0 to month 1).
+    ``baseline_curve`` is the per-article cosine similarity to the first-articles
+    centroid. Either may be empty when no cached artifact exists and embeddings are
+    unavailable.
+    """
+
+    velocities: list[tuple[str, float]]
+    baseline_curve: list[tuple[datetime, float]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -339,6 +355,73 @@ def load_ai_baseline_embeddings(author_slug: str, paths: AnalysisArtifactPaths) 
     for path in sorted(base.glob("*.npy")):
         out.append(np.load(path))
     return out
+
+
+def _load_cached_baseline_curve(path: Path) -> list[tuple[datetime, float]]:
+    if not path.is_file():
+        return []
+    return [
+        (parse_datetime(row["published_at"]), float(row["similarity"]))
+        for row in json.loads(path.read_text(encoding="utf-8"))
+    ]
+
+
+def _load_cached_velocities(
+    drift_path: Path,
+    centroids_path: Path,
+) -> list[tuple[str, float]]:
+    if not drift_path.is_file():
+        return []
+    scores = DriftScores.model_validate_json(drift_path.read_text(encoding="utf-8"))
+    if not scores.monthly_centroid_velocities:
+        return []
+    months: list[str] = []
+    if centroids_path.is_file():
+        months = [str(x) for x in np.load(centroids_path)["months"].tolist()]
+    if len(months) >= 2:
+        return list(zip(months[1:], scores.monthly_centroid_velocities, strict=False))
+    return [(f"m{i}", v) for i, v in enumerate(scores.monthly_centroid_velocities)]
+
+
+def load_drift_summary(
+    slug: str,
+    paths: AnalysisArtifactPaths,
+    *,
+    settings: ForensicsSettings,
+) -> DriftSummary:
+    """Drift velocities and baseline curve for ``slug``.
+
+    Prefers cached artifacts (``*_drift.json``, ``*_centroids.npz``, ``*_baseline_curve.json``)
+    written by :func:`run_drift_analysis`. Falls back to recomputing from raw embeddings
+    when cached velocities are missing. Missing embeddings produce empty fields rather than
+    raising.
+    """
+    baseline_curve = _load_cached_baseline_curve(paths.baseline_curve_json(slug))
+    velocities = _load_cached_velocities(
+        paths.drift_json(slug),
+        paths.centroids_npz(slug),
+    )
+    if velocities:
+        return DriftSummary(velocities=velocities, baseline_curve=baseline_curve)
+
+    try:
+        pairs = load_article_embeddings(slug, paths)
+    except (ValueError, OSError) as exc:
+        logger.debug("drift summary: no embeddings for %s (%s)", slug, exc)
+        return DriftSummary(velocities=velocities, baseline_curve=baseline_curve)
+
+    if len(pairs) < 2:
+        return DriftSummary(velocities=velocities, baseline_curve=baseline_curve)
+
+    monthly = compute_monthly_centroids(pairs)
+    vels = track_centroid_velocity(monthly)
+    velocities = [(monthly[i + 1][0], vels[i]) for i in range(len(vels))]
+    if not baseline_curve:
+        baseline_curve = compute_baseline_similarity_curve(
+            pairs,
+            baseline_count=settings.analysis.baseline_embedding_count,
+        )
+    return DriftSummary(velocities=velocities, baseline_curve=baseline_curve)
 
 
 def write_drift_artifacts(

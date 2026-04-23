@@ -84,7 +84,6 @@ ignore = []
 # C901 debt outside Agent 5 lanes (run-2 plan); remove entries as each area is refactored.
 [tool.ruff.lint.per-file-ignores]
 "src/forensics/analysis/convergence.py" = ["C901"]
-"src/forensics/analysis/drift.py" = ["C901"]
 "src/forensics/features/probability_pipeline.py" = ["C901"]
 "src/forensics/scraper/crawler.py" = ["C901"]
 "src/forensics/scraper/dedup.py" = ["C901"]
