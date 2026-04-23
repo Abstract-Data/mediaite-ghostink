@@ -960,3 +960,45 @@ uv run forensics --help
 
 #### Risks & Next Steps
 - Future enhancement: expose a `scan_features` helper returning `pl.LazyFrame` for callers that can chain more operations before collecting. Out of scope for this unit.
+
+---
+
+### Phase 13 Unit 7 — AnalyzeContext dataclass
+**Status:** Complete
+**Date:** 2026-04-22
+**Agent/Session:** Phase 13 parallel batch, Unit 7
+
+#### What Was Done
+- Introduced a frozen `AnalyzeContext` dataclass in `src/forensics/cli/analyze.py` bundling `db_path`, `settings`, `paths` (pre-built `AnalysisArtifactPaths`), and `author_slug`.
+- Added `AnalyzeContext.build()` classmethod that derives `AnalysisArtifactPaths` from the project layout once so stage runners no longer re-compute it.
+- Added a `root` property (delegates to `paths.project_root`) so call sites needing a raw project root (e.g. `run_changepoint_analysis(project_root=...)`) keep working without reintroducing the data clump.
+- Rewrote all five `_run_*_stage` helpers plus `_run_compare_only_flow` to accept the single `AnalyzeContext` argument. `_run_ai_baseline_stage` retains its AI-baseline-specific keyword arguments (`skip_generation`, `articles_per_cell`, `baseline_model`).
+- Updated `run_analyze` to build the context once and pass it to every stage. Renamed the local `PipelineContext.resolve()` binding to `pipeline_ctx` so it no longer collides with the new `AnalyzeContext` parameter name.
+
+#### Files Modified
+- `src/forensics/cli/analyze.py` — dataclass introduction + stage runner refactor. No changes required outside this file; Typer surface unchanged.
+
+#### Verification Evidence
+```
+uv run ruff format --check .   # 149 files already formatted
+uv run ruff check .            # All checks passed!
+uv run pytest tests/ -v        # 282 passed, 18 skipped (spacy model), 2 deselected in 75.56s
+                               # Total coverage: 61.13% (threshold 50%)
+uv run pytest tests/ -k "analyze or cli" -v --no-cov
+                               # 27 passed in 107.48s
+uv run forensics --help        # exits 0, command list intact
+uv run forensics analyze --help # exits 0, flags unchanged (--changepoint/--timeseries/--drift/…)
+```
+
+#### Decisions Made
+- Used the existing `AnalysisArtifactPaths` type for the `paths` field — already a frozen dataclass with full artifact-path API, so `AnalyzeContext` transparently exposes every path helper.
+- Exposed `root` as a `@property` instead of storing it separately to avoid the exact data-duplication the refactor targets. `AnalysisArtifactPaths.project_root` is the single source of truth.
+- Renamed the `ctx = PipelineContext.resolve()` local to `pipeline_ctx` rather than renaming the parameter on stage functions; `ctx` reads cleanest at the stage-runner call site, which is where the refactor is load-bearing.
+- `_run_compare_only_flow` wasn't in the explicit list but shares the same clump, so it was refactored alongside for consistency.
+
+#### Unresolved Questions
+- None.
+
+#### Risks & Next Steps
+- Zero public API change — every caller lives inside `analyze.py`. Downstream commits can layer on without worrying about this boundary.
+- If future work needs per-stage settings overrides (e.g. a different config for `_run_drift_stage`), `AnalyzeContext` can gain a `with_settings(...)` helper that returns a mutated copy via `dataclasses.replace` — call sites already thread the same object, so no signature churn is required.
