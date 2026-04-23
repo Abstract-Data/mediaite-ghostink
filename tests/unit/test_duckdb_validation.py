@@ -13,7 +13,6 @@ from forensics.storage.duckdb_queries import (
     _validated_sqlite_path_for_attach,
 )
 
-
 # ---------------------------------------------------------------------------
 # _sql_string_literal
 # ---------------------------------------------------------------------------

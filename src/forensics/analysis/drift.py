@@ -15,9 +15,10 @@ import numpy as np
 from scipy.spatial.distance import cosine
 
 from forensics.analysis.artifact_paths import AnalysisArtifactPaths
-from forensics.analysis.utils import pair_months_with_velocities, resolve_author_rows
+from forensics.analysis.utils import pair_months_with_velocities
 from forensics.config.settings import ForensicsSettings
 from forensics.models.analysis import DriftScores
+from forensics.paths import resolve_author_rows
 from forensics.storage.json_io import write_json_artifact
 from forensics.storage.parquet import (
     EMBEDDING_BATCH_KEY_BYTES,

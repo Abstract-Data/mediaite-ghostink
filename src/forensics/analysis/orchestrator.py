@@ -291,8 +291,9 @@ def run_full_analysis(
     weight. Callers now invoke the function directly instead of via
     ``asyncio.run(...)``.
     """
-    paths.analysis_dir.mkdir(parents=True, exist_ok=True)
-
+    # Parent dirs for analysis outputs are created inside the write helpers
+    # (``write_json_artifact`` / ``write_corpus_custody``); no explicit mkdir
+    # needed here (RF-DRY-004).
     slugs = [author_slug] if author_slug else [a.slug for a in config.authors]
     prob_map = probability_trajectory_by_slug or {}
 

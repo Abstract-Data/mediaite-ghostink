@@ -3,12 +3,18 @@
 Cross-stage helpers (``intervals_overlap``, ``closed_interval_contains``,
 ``load_feature_frame_for_author``, ``resolve_author_rows``) have been hoisted
 to :mod:`forensics.paths` to avoid a cross-stage import from ``features/`` back
-into ``analysis/`` (see RF-ARCH-001). They are re-exported here for backwards
-compatibility.
+into ``analysis/`` (see RF-ARCH-001).
+
+.. deprecated:: Phase 13 (Run 7, RF-ARCH-001 G2)
+   In-tree callers have been migrated to import directly from
+   :mod:`forensics.paths`. These re-exports remain for one release cycle
+   to avoid breaking external consumers; new code must import from
+   ``forensics.paths``. They will be removed in a future release.
 """
 
 from __future__ import annotations
 
+# DEPRECATED re-exports — import from forensics.paths directly (RF-ARCH-001 / G2).
 from forensics.paths import (
     closed_interval_contains,
     intervals_overlap,

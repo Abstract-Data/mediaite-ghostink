@@ -16,9 +16,9 @@ from scipy.special import logsumexp
 
 from forensics.analysis.artifact_paths import AnalysisArtifactPaths
 from forensics.analysis.statistics import cohens_d
-from forensics.analysis.utils import load_feature_frame_for_author, resolve_author_rows
 from forensics.config.settings import ForensicsSettings
 from forensics.models.analysis import ChangePoint
+from forensics.paths import load_feature_frame_for_author, resolve_author_rows
 from forensics.storage.json_io import write_json_artifact
 from forensics.storage.repository import Repository
 from forensics.utils.datetime import timestamps_from_frame
@@ -303,8 +303,7 @@ def run_changepoint_analysis(
 ) -> dict[str, Any]:
     """Load Parquet per author; write changepoint and convergence JSON under data/analysis/."""
     paths = AnalysisArtifactPaths.from_project(project_root, db_path)
-    analysis_dir = paths.analysis_dir
-    analysis_dir.mkdir(parents=True, exist_ok=True)
+    # analysis_dir creation handled inside write_json_artifact (RF-DRY-004).
 
     with Repository(db_path) as repo:
         author_rows = resolve_author_rows(repo, settings, author_slug=author_slug)

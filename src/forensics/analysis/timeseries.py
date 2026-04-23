@@ -13,8 +13,8 @@ import polars as pl
 
 from forensics.analysis.artifact_paths import AnalysisArtifactPaths
 from forensics.analysis.changepoint import PELT_FEATURE_COLUMNS
-from forensics.analysis.utils import load_feature_frame_for_author, resolve_author_rows
 from forensics.config.settings import ForensicsSettings
+from forensics.paths import load_feature_frame_for_author, resolve_author_rows
 from forensics.storage.repository import Repository
 from forensics.utils.datetime import parse_datetime, timestamps_from_frame
 

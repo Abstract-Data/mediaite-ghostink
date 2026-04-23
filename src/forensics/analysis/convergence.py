@@ -11,9 +11,9 @@ import numpy as np
 
 from forensics.analysis.changepoint import PELT_FEATURE_COLUMNS
 from forensics.analysis.monthkeys import iter_months_in_window, month_key_to_range
-from forensics.analysis.utils import closed_interval_contains
 from forensics.config.settings import ForensicsSettings
 from forensics.models.analysis import ChangePoint, ConvergenceWindow
+from forensics.paths import closed_interval_contains
 
 logger = logging.getLogger(__name__)
 
