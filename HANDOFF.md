@@ -1174,3 +1174,46 @@ $ uv run forensics --help
 
 #### Risks & Next Steps
 - If future work moves `compute_convergence_scores`' defaults into `AnalysisConfig` only (removing the positional kwargs), the single-CP and multi-feature tests will need to switch to a `settings=` fixture instead of explicit kwargs.
+
+---
+
+### Phase 13 Unit 10 — Content LDA unit tests
+**Status:** Complete
+**Date:** 2026-04-22
+**Agent/Session:** Phase 13 batch — Unit 10 (worktree agent-a579c236)
+
+#### What Was Done
+- Added dedicated unit-test module for `_topic_entropy_lda` in `src/forensics/features/content.py`, covering focused vs scattered corpora, empty/1-doc/2-doc fallbacks, identical-doc low-entropy behaviour, out-of-range `topic_row` handling, the no-vocabulary fallback path, and determinism across runs.
+- All tests seed synthetic string corpora (no spaCy model required). An autouse `monkeypatch` guard patches `spacy.load` to raise if any transitive import ever tries to load `en_core_web_md`.
+
+#### Files Modified
+- `tests/unit/test_content_lda.py` — new file, 9 tests (~175 lines).
+
+#### Verification Evidence
+```
+uv run --extra dev ruff format --check .
+→ 150 files already formatted
+
+uv run --extra dev ruff check .
+→ All checks passed!
+
+uv run --extra dev pytest tests/unit/test_content_lda.py -v --no-cov
+→ 9 passed in 3.97s
+
+uv run --extra dev pytest tests/ -v --no-cov
+→ 283 passed, 19 skipped, 2 deselected, 1 warning in 44.98s
+
+uv run --extra dev forensics --help
+→ CLI banner renders (extract/analyze/report/… commands listed)
+```
+
+#### Decisions Made
+- `_topic_entropy_lda` does not call spaCy directly (it takes `list[str]` and delegates tokenisation to sklearn's `CountVectorizer`). Rather than inject a fake `nlp` callable, the tests assert via an autouse `spacy.load` guard that no transitive model load is triggered — this matches the task brief's intent (prevent `en_core_web_md` dependency) while avoiding unnecessary mocking of an API the function never touches.
+- Chose `content_lda_n_components=3` / `max_iter=5` / `max_features=256` to keep the full module under 4s while still giving LDA enough iterations to separate three obvious topical clusters.
+- For the "focused vs scattered" comparison, the focused corpus pins row 0 to a single topic and the scattered corpus mixes three topics into row 0. This exercises LDA's per-document mixture entropy correctly (scattered > focused), rather than the inverted corpus-level interpretation.
+
+#### Unresolved Questions
+- None.
+
+#### Risks & Next Steps
+- None. Tests run in the default collection (no `slow` marker) and are independent of external resources.
