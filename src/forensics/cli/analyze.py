@@ -136,7 +136,7 @@ def _run_ai_baseline_stage(
     articles_per_cell: int | None,
     baseline_model: str | None,
 ) -> None:
-    from forensics.analysis.drift import run_ai_baseline_command
+    from forensics.cli.baseline import run_ai_baseline_command
 
     try:
         run_ai_baseline_command(

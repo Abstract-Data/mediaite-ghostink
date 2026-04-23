@@ -21,6 +21,7 @@ from forensics.analysis.orchestrator import run_full_analysis
 from forensics.config.settings import ForensicsSettings
 from forensics.features.pipeline import extract_all_features
 from forensics.models.analysis import AnalysisResult
+from forensics.storage.json_io import write_json_artifact
 from forensics.survey.qualification import (
     QualificationCriteria,
     QualifiedAuthor,
@@ -101,8 +102,7 @@ def _write_checkpoint(report: SurveyReport) -> None:
         "updated_at": datetime.now(UTC).isoformat(),
         "completed_slugs": completed,
     }
-    path = _checkpoint_path(report.run_dir)
-    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    write_json_artifact(_checkpoint_path(report.run_dir), payload)
 
 
 def _write_survey_results(report: SurveyReport) -> None:
@@ -142,10 +142,7 @@ def _write_survey_results(report: SurveyReport) -> None:
         "rankings": rankings,
     }
 
-    (report.run_dir / "survey_results.json").write_text(
-        json.dumps(output, indent=2, default=str),
-        encoding="utf-8",
-    )
+    write_json_artifact(report.run_dir / "survey_results.json", output)
 
 
 def _rank_results(report: SurveyReport) -> None:

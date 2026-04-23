@@ -1,68 +1,82 @@
-"""Shared analysis entry-point helpers."""
+"""Analysis-shared helpers.
+
+Cross-stage helpers (``intervals_overlap``, ``closed_interval_contains``,
+``load_feature_frame_for_author``, ``resolve_author_rows``) have been hoisted
+to :mod:`forensics.paths` to avoid a cross-stage import from ``features/`` back
+into ``analysis/`` (see RF-ARCH-001). They are re-exported here for backwards
+compatibility.
+"""
 
 from __future__ import annotations
 
-import logging
-from pathlib import Path
-
-import polars as pl
-
-from forensics.config.settings import ForensicsSettings
-from forensics.models.author import Author
-from forensics.storage.parquet import load_feature_frame_sorted
-from forensics.storage.repository import Repository
-
-logger = logging.getLogger(__name__)
+from forensics.paths import (
+    closed_interval_contains,
+    intervals_overlap,
+    load_feature_frame_for_author,
+    resolve_author_rows,
+)
 
 
-def intervals_overlap(a0, a1, b0, b1) -> bool:
-    """Return True if closed intervals ``[a0, a1]`` and ``[b0, b1]`` intersect."""
-    return a0 <= b1 and b0 <= a1
+def pair_months_with_velocities(
+    monthly: list[tuple[str, object]],
+    velocities: list[float],
+) -> list[tuple[str, float]]:
+    """Pair each velocity with the month label of the *later* of the two centroids.
+
+    ``monthly`` is a list of ``(YYYY-MM, centroid_vector)`` tuples ordered by
+    time. ``velocities[i]`` measures the cosine distance between month ``i``
+    and month ``i+1``, so we label it with ``monthly[i + 1][0]``.
+    """
+    return [
+        (monthly[i + 1][0], velocities[i])
+        for i in range(min(len(velocities), max(len(monthly) - 1, 0)))
+    ]
 
 
-def closed_interval_contains(value, lo, hi) -> bool:
-    """Return True if ``lo <= value <= hi`` for mutually orderable operands (e.g. dates)."""
-    return lo <= value <= hi
+def _signed_velocity_acceleration(velocities: list[float]) -> float | None:
+    """Return the signed (late - early) / early velocity ratio, or ``None``.
 
-
-def load_feature_frame_for_author(
-    features_dir: Path,
-    slug: str,
-    author_id: str,
-) -> pl.DataFrame | None:
-    """Load sorted features for one author from ``{slug}.parquet`` if present."""
-    path = features_dir / f"{slug}.parquet"
-    if not path.is_file():
+    ``None`` means the split cannot be computed (fewer than six velocities or
+    the early window is non-positive).
+    """
+    if len(velocities) < 6:
         return None
-    dfc = load_feature_frame_sorted(path).filter(pl.col("author_id") == author_id)
-    if dfc.is_empty():
-        logger.warning(
-            "No feature rows for author_id=%s in %s (slug=%s); loading full parquet "
-            "as fallback — downstream code must filter by author_id.",
-            author_id,
-            path.name,
-            slug,
-        )
-        dfc = load_feature_frame_sorted(path)
-    return dfc
+    mid = len(velocities) // 2
+    early = sum(velocities[:mid]) / max(mid, 1)
+    late = sum(velocities[mid:]) / max(len(velocities) - mid, 1)
+    if early <= 0:
+        return None
+    return (late - early) / early
 
 
-def resolve_author_rows(
-    repo: Repository,
-    settings: ForensicsSettings,
-    *,
-    author_slug: str | None,
-) -> list[Author]:
-    """Resolve configured authors to DB rows, optionally filtered by ``author_slug``."""
-    if author_slug:
-        au = repo.get_author_by_slug(author_slug)
-        if au is None:
-            msg = f"Unknown author slug: {author_slug}"
-            raise ValueError(msg)
-        return [au]
-    rows: list[Author] = []
-    for a in settings.authors:
-        au = repo.get_author_by_slug(a.slug)
-        if au is not None:
-            rows.append(au)
-    return rows
+def compute_velocity_acceleration(velocities: list[float]) -> float:
+    """Return the (late - early) / early velocity ratio, clamped to ``[0, 1]``.
+
+    ``0.0`` is returned when fewer than six velocities are available or when
+    the early window has no drift (so the ratio would be undefined).
+    """
+    ratio = _signed_velocity_acceleration(velocities)
+    if ratio is None:
+        return 0.0
+    return min(max(ratio, 0.0), 1.0)
+
+
+def describe_velocity_acceleration_pct(velocities: list[float]) -> str | None:
+    """Return a ``"increased by 42%"`` style phrase, or ``None`` when undefined."""
+    ratio = _signed_velocity_acceleration(velocities)
+    if ratio is None:
+        return None
+    pct = ratio * 100.0
+    direction = "increased" if pct >= 0 else "decreased"
+    return f"{direction} by {abs(pct):.0f}%"
+
+
+__all__ = [
+    "closed_interval_contains",
+    "compute_velocity_acceleration",
+    "describe_velocity_acceleration_pct",
+    "intervals_overlap",
+    "load_feature_frame_for_author",
+    "pair_months_with_velocities",
+    "resolve_author_rows",
+]

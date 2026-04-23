@@ -87,6 +87,7 @@ def _connect(db_path: Path) -> sqlite3.Connection:
     )
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA busy_timeout=5000")
+    conn.execute("PRAGMA foreign_keys=ON")
     return conn
 
 
@@ -164,6 +165,19 @@ class Repository:
 
         with Repository(db_path) as repo:
             repo.upsert_article(...)
+
+    The class is partitioned (RF-SMELL-001) into three logical groups separated
+    by ``# -- ... --`` banner comments below:
+
+    * **Author** — author CRUD, unfetched-URL queries (lines tagged with
+      ``-- Author CRUD / queries --``).
+    * **Article** — article CRUD + streaming iterators + dedup flags + archive
+      path rewrites (``-- Article CRUD / iterators / dedup --``).
+    * **Analysis runs** — audit-trail inserts (``-- Analysis run audit --``).
+
+    The sections are kept in one class to preserve the single-connection
+    context-manager contract and the ``__slots__`` memory footprint; extract
+    to genuine mixin classes only once a consumer needs just one slice.
     """
 
     __slots__ = ("_db_path", "_conn")
@@ -341,17 +355,31 @@ class Repository:
         return _row_to_article(row)
 
     def get_articles_by_author(self, author_id: str) -> list[Article]:
+        """Eager load — prefer :meth:`iter_articles_by_author` for large authors."""
+        return list(self.iter_articles_by_author(author_id))
+
+    def iter_articles_by_author(
+        self, author_id: str, *, batch_size: int = 500
+    ) -> Iterator[Article]:
+        """Yield one author's articles in ``published_date`` order without full load."""
+        if batch_size < 1:
+            msg = f"batch_size must be >= 1, got {batch_size}"
+            raise ValueError(msg)
         conn = self._require_conn()
-        rows = conn.execute(
+        cursor = conn.execute(
             "SELECT * FROM articles WHERE author_id = ? ORDER BY published_date",
             (author_id,),
-        ).fetchall()
-        return [_row_to_article(row) for row in rows]
+        )
+        while True:
+            rows = cursor.fetchmany(batch_size)
+            if not rows:
+                break
+            for row in rows:
+                yield _row_to_article(row)
 
     def get_all_articles(self) -> list[Article]:
-        conn = self._require_conn()
-        rows = conn.execute("SELECT * FROM articles ORDER BY published_date").fetchall()
-        return [_row_to_article(row) for row in rows]
+        """Eager load — prefer :meth:`iter_all_articles` for the full corpus."""
+        return list(self.iter_all_articles())
 
     def iter_all_articles(self, *, batch_size: int = 500) -> Iterator[Article]:
         """Yield every article in ``published_date`` order without loading the full table."""

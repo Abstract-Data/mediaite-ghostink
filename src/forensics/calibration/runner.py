@@ -44,6 +44,7 @@ from forensics.features.pipeline import extract_all_features
 from forensics.models.analysis import AnalysisResult
 from forensics.models.article import Article
 from forensics.models.author import Author
+from forensics.storage.json_io import write_json_artifact
 from forensics.storage.repository import Repository, init_db
 from forensics.survey.scoring import SignalStrength, compute_composite_score
 
@@ -487,5 +488,5 @@ def _write_calibration_report(report: CalibrationReport, output_path: Path) -> N
             for t in report.trials
         ],
     }
-    output_path.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
+    write_json_artifact(output_path, payload)
     logger.info("calibration: report written to %s", output_path)

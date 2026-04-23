@@ -117,6 +117,37 @@ _FAMILIES: tuple[tuple[type[BaseModel], str], ...] = (
 )
 
 
+def _is_scalar_annotation(annotation: Any) -> bool:
+    """True when ``annotation`` is ``float``/``int`` (optionally ``| None``)."""
+    import types
+    from typing import Union, get_args, get_origin
+
+    if annotation is float or annotation is int:
+        return True
+    origin = get_origin(annotation)
+    if origin is Union or origin is types.UnionType:
+        members = [a for a in get_args(annotation) if a is not type(None)]
+        return all(m is float or m is int for m in members)
+    return False
+
+
+def count_scalar_features() -> int:
+    """Total number of scalar feature columns across every feature family.
+
+    ``_TOTAL_SCALAR_FEATURES`` in the survey scoring module is derived from
+    this (P3-MAINT-001): adding or removing a ``float``/``int`` field on any
+    of the ``_FAMILIES`` models bumps the count automatically. Dict- and
+    list-typed fields are intentionally excluded because they do not
+    participate in the per-feature PELT sweep.
+    """
+    total = 0
+    for family_cls, _key in _FAMILIES:
+        for field_info in family_cls.model_fields.values():
+            if _is_scalar_annotation(field_info.annotation):
+                total += 1
+    return total
+
+
 def _maybe_decode_dict_field(value: Any) -> Any:
     """Round-trip compat: Parquet stores dict fields as JSON strings; decode on read."""
     if isinstance(value, str):

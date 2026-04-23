@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -19,6 +19,7 @@ from forensics.analysis.statistics import cohens_d
 from forensics.analysis.utils import load_feature_frame_for_author, resolve_author_rows
 from forensics.config.settings import ForensicsSettings
 from forensics.models.analysis import ChangePoint, ConvergenceWindow
+from forensics.storage.json_io import write_json_artifact
 from forensics.storage.repository import Repository
 from forensics.utils.datetime import parse_datetime
 
@@ -63,6 +64,74 @@ def detect_pelt(signal: np.ndarray, pen: float = 3.0) -> list[int]:
     return [int(b) for b in breakpoints[:-1]]
 
 
+@dataclass(frozen=True, slots=True)
+class _BocpdPrior:
+    """Prior hyperparameters computed once per signal (RF-CPLX-004 split).
+
+    ``sigma2``/``inv_sig2``: known observation variance estimated from the first
+    ``min(80, n)`` samples.
+    ``mu0``/``inv_v0``: Normal prior mean + inverse variance (seeded from the
+    first ``min(10, n)`` samples).
+    ``log_h``/``log_1mh``: log-hazard and log-1-hazard for the constant-rate prior.
+    ``cumsum``: prefix sums of ``x`` for O(1) segment sums.
+    """
+
+    sigma2: float
+    inv_sig2: float
+    mu0: float
+    inv_v0: float
+    log_h: float
+    log_1mh: float
+    cumsum: np.ndarray
+
+
+def _bocpd_init_prior(x: np.ndarray, hazard_rate: float) -> _BocpdPrior:
+    n = len(x)
+    sigma2 = float(np.var(x[: min(80, n)]))
+    if sigma2 < 1e-12:
+        sigma2 = 1e-12
+    mu0 = float(np.mean(x[: min(10, n)]))
+    v0 = sigma2 * 4.0
+    return _BocpdPrior(
+        sigma2=sigma2,
+        inv_sig2=1.0 / sigma2,
+        mu0=mu0,
+        inv_v0=1.0 / v0,
+        log_h=float(np.log(hazard_rate)),
+        log_1mh=float(np.log(max(1e-12, 1.0 - hazard_rate))),
+        cumsum=np.concatenate((np.zeros(1, dtype=float), np.cumsum(x, dtype=float))),
+    )
+
+
+def _bocpd_step(
+    t: int,
+    xt: float,
+    log_pi: np.ndarray,
+    prior: _BocpdPrior,
+) -> tuple[np.ndarray, float]:
+    """One forward update of the run-length posterior. Returns ``(log_pi_new, p_cp)``."""
+    max_s = t
+    log_pi = np.asarray(log_pi, dtype=float)
+    if log_pi.size < max_s:
+        log_pi = np.concatenate([log_pi, np.full(max_s - log_pi.size, -np.inf)])
+
+    s_idx = np.arange(1, max_s + 1, dtype=np.int64)
+    sum_s = prior.cumsum[t] - prior.cumsum[t - s_idx]
+    lengths = s_idx.astype(float)
+    inv_v = prior.inv_v0 + lengths * prior.inv_sig2
+    m = (prior.inv_v0 * prior.mu0 + prior.inv_sig2 * sum_s) / inv_v
+    var_pred = 1.0 / inv_v + prior.sigma2
+    log_pred = -0.5 * (np.log(2 * np.pi * var_pred) + (xt - m) ** 2 / var_pred)
+
+    log_evidence = logsumexp(log_pi[:max_s] + log_pred)
+    log_pi_new = np.full(t + 1, -np.inf)
+    log_pi_new[0] = prior.log_h + log_evidence
+    log_pi_new[1 : t + 1] = prior.log_1mh + log_pi[:t] + log_pred[:t]
+    log_pi_new -= logsumexp(log_pi_new)
+
+    return log_pi_new, float(np.exp(log_pi_new[0]))
+
+
 def detect_bocpd(
     signal: np.ndarray,
     hazard_rate: float = 1 / 250.0,
@@ -82,43 +151,12 @@ def detect_bocpd(
     if n < 6:
         return []
 
-    sigma2 = float(np.var(x[: min(80, n)]))
-    if sigma2 < 1e-12:
-        sigma2 = 1e-12
-    inv_sig2 = 1.0 / sigma2
-    mu0 = float(np.mean(x[: min(10, n)]))
-    v0 = sigma2 * 4.0
-    inv_v0 = 1.0 / v0
-    log_h = float(np.log(hazard_rate))
-    log_1mh = float(np.log(max(1e-12, 1.0 - hazard_rate)))
-
+    prior = _bocpd_init_prior(x, hazard_rate)
     log_pi = np.array([0.0])
     changepoints: list[tuple[int, float]] = []
-    cumsum = np.concatenate((np.zeros(1, dtype=float), np.cumsum(x, dtype=float)))
 
     for t in range(1, n):
-        xt = x[t]
-        max_s = t
-        log_pi = np.asarray(log_pi, dtype=float)
-        if log_pi.size < max_s:
-            log_pi = np.concatenate([log_pi, np.full(max_s - log_pi.size, -np.inf)])
-
-        s_idx = np.arange(1, max_s + 1, dtype=np.int64)
-        sum_s = cumsum[t] - cumsum[t - s_idx]
-        lengths = s_idx.astype(float)
-        inv_v = inv_v0 + lengths * inv_sig2
-        m = (inv_v0 * mu0 + inv_sig2 * sum_s) / inv_v
-        var_pred = 1.0 / inv_v + sigma2
-        log_pred = -0.5 * (np.log(2 * np.pi * var_pred) + (xt - m) ** 2 / var_pred)
-
-        log_evidence = logsumexp(log_pi[:max_s] + log_pred)
-        log_pi_new = np.full(t + 1, -np.inf)
-        log_pi_new[0] = log_h + log_evidence
-        log_pi_new[1 : t + 1] = log_1mh + log_pi[:t] + log_pred[:t]
-        log_pi_new -= logsumexp(log_pi_new)
-        log_pi = log_pi_new
-
-        p_cp = float(np.exp(log_pi_new[0]))
+        log_pi, p_cp = _bocpd_step(t, float(x[t]), log_pi, prior)
         if p_cp >= threshold:
             changepoints.append((t, p_cp))
 
@@ -337,14 +375,8 @@ def run_changepoint_analysis(
 
         cp_path = paths.changepoints_json(author.slug)
         conv_path = paths.convergence_json(author.slug)
-        cp_path.write_text(
-            json.dumps([c.model_dump(mode="json") for c in cps], indent=2, default=str),
-            encoding="utf-8",
-        )
-        conv_path.write_text(
-            json.dumps([c.model_dump(mode="json") for c in conv], indent=2, default=str),
-            encoding="utf-8",
-        )
+        write_json_artifact(cp_path, cps)
+        write_json_artifact(conv_path, conv)
         summary["authors"].append(author.slug)
         summary["changepoint_files"].append(str(cp_path))
         summary["convergence_files"].append(str(conv_path))

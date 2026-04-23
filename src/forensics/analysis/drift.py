@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 from collections import defaultdict
@@ -16,9 +15,10 @@ import numpy as np
 from scipy.spatial.distance import cosine
 
 from forensics.analysis.artifact_paths import AnalysisArtifactPaths
-from forensics.analysis.utils import resolve_author_rows
+from forensics.analysis.utils import pair_months_with_velocities, resolve_author_rows
 from forensics.config.settings import ForensicsSettings
 from forensics.models.analysis import DriftScores
+from forensics.storage.json_io import write_json_artifact
 from forensics.storage.parquet import (
     EMBEDDING_BATCH_KEY_BYTES,
     EMBEDDING_BATCH_KEY_LENGTHS,
@@ -30,6 +30,22 @@ from forensics.storage.repository import Repository
 from forensics.utils.datetime import parse_datetime
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class DriftPipelineResult:
+    """Outputs of :func:`compute_author_drift_pipeline` (RF-SMELL-002).
+
+    Replaces a 6-tuple whose callers had to destructure with throwaway names
+    (``_umap``, ``_bc``, ``_vel``, ``_ai``). Field access is now explicit.
+    """
+
+    monthly_centroids: list[tuple[str, np.ndarray]]
+    drift_scores: DriftScores
+    umap_payload: dict[str, Any]
+    baseline_curve: list[tuple[datetime, float]]
+    velocities: list[float]
+    ai_convergence: list[tuple[str, float]] | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,62 +71,78 @@ class ArticleEmbedding:
     embedding: np.ndarray = field(repr=False)
 
 
-def _load_embedding_row(
-    abs_path: Path,
-    article_id: str,
-    batch_cache: dict[Path, tuple[np.ndarray, dict[str, int]]],
-) -> np.ndarray | None:
-    """Load one embedding row from a legacy ``.npy`` file or a per-author ``batch.npz``."""
-    if not abs_path.is_file():
-        return None
-    if abs_path.suffix.lower() == ".npz":
-        if abs_path not in batch_cache:
-            try:
-                z = np.load(abs_path, allow_pickle=False)
-            except (OSError, ValueError) as exc:
-                logger.warning("Could not read embedding batch %s: %s", abs_path, exc)
-                return None
-            keys = frozenset(z.files)
-            if (
-                EMBEDDING_BATCH_KEY_LENGTHS in keys
-                and EMBEDDING_BATCH_KEY_BYTES in keys
-                and EMBEDDING_BATCH_KEY_VECTORS in keys
-            ):
-                try:
-                    ids_list = unpack_article_ids_from_embedding_batch(
-                        z[EMBEDDING_BATCH_KEY_LENGTHS],
-                        z[EMBEDDING_BATCH_KEY_BYTES],
-                    )
-                except ValueError as exc:
-                    logger.warning("Malformed embedding batch %s: %s", abs_path, exc)
-                    return None
-                mat = np.asarray(z[EMBEDDING_BATCH_KEY_VECTORS], dtype=np.float32)
-                if mat.ndim != 2 or mat.shape[0] != len(ids_list):
-                    logger.warning("Malformed embedding batch (shape mismatch): %s", abs_path)
-                    return None
-                id_map = {ids_list[i]: i for i in range(len(ids_list))}
-            elif "article_ids" in keys and EMBEDDING_BATCH_KEY_VECTORS in keys:
-                logger.warning(
-                    "Legacy embedding batch %s uses pickled article_ids; "
-                    "re-run feature extraction to rewrite the batch.",
-                    abs_path,
-                )
-                return None
-            else:
-                logger.warning("Malformed embedding batch (missing keys): %s", abs_path)
-                return None
-            batch_cache[abs_path] = (mat, id_map)
-        mat, id_map = batch_cache[abs_path]
-        row = id_map.get(article_id)
-        if row is None:
-            logger.warning("Article %s not in embedding batch %s", article_id, abs_path)
-            return None
-        return np.asarray(mat[row], dtype=np.float32)
+def _load_npy_embedding(abs_path: Path) -> np.ndarray | None:
+    """Load a single embedding from a legacy per-article ``.npy`` file."""
     try:
         return np.asarray(np.load(abs_path), dtype=np.float32).ravel()
     except (OSError, ValueError) as exc:
         logger.warning("Could not read embedding file %s: %s", abs_path, exc)
         return None
+
+
+def _load_packed_batch(abs_path: Path) -> tuple[np.ndarray, dict[str, int]] | None:
+    """Load a packed-IDs ``batch.npz`` file and return ``(matrix, id_map)``.
+
+    Returns ``None`` for legacy pickled-IDs batches or malformed files —
+    callers log once and skip the whole author.
+    """
+    try:
+        z = np.load(abs_path, allow_pickle=False)
+    except (OSError, ValueError) as exc:
+        logger.warning("Could not read embedding batch %s: %s", abs_path, exc)
+        return None
+    keys = frozenset(z.files)
+    has_packed = (
+        EMBEDDING_BATCH_KEY_LENGTHS in keys
+        and EMBEDDING_BATCH_KEY_BYTES in keys
+        and EMBEDDING_BATCH_KEY_VECTORS in keys
+    )
+    if not has_packed:
+        if "article_ids" in keys and EMBEDDING_BATCH_KEY_VECTORS in keys:
+            logger.warning(
+                "Legacy embedding batch %s uses pickled article_ids; "
+                "re-run feature extraction to rewrite the batch.",
+                abs_path,
+            )
+        else:
+            logger.warning("Malformed embedding batch (missing keys): %s", abs_path)
+        return None
+    try:
+        ids_list = unpack_article_ids_from_embedding_batch(
+            z[EMBEDDING_BATCH_KEY_LENGTHS],
+            z[EMBEDDING_BATCH_KEY_BYTES],
+        )
+    except ValueError as exc:
+        logger.warning("Malformed embedding batch %s: %s", abs_path, exc)
+        return None
+    mat = np.asarray(z[EMBEDDING_BATCH_KEY_VECTORS], dtype=np.float32)
+    if mat.ndim != 2 or mat.shape[0] != len(ids_list):
+        logger.warning("Malformed embedding batch (shape mismatch): %s", abs_path)
+        return None
+    return mat, {aid: i for i, aid in enumerate(ids_list)}
+
+
+def _load_embedding_row(
+    abs_path: Path,
+    article_id: str,
+    batch_cache: dict[Path, tuple[np.ndarray, dict[str, int]]],
+) -> np.ndarray | None:
+    """Load one embedding row, dispatching on suffix between ``.npy`` and ``batch.npz``."""
+    if not abs_path.is_file():
+        return None
+    if abs_path.suffix.lower() != ".npz":
+        return _load_npy_embedding(abs_path)
+    if abs_path not in batch_cache:
+        loaded = _load_packed_batch(abs_path)
+        if loaded is None:
+            return None
+        batch_cache[abs_path] = loaded
+    mat, id_map = batch_cache[abs_path]
+    row = id_map.get(article_id)
+    if row is None:
+        logger.warning("Article %s not in embedding batch %s", article_id, abs_path)
+        return None
+    return np.asarray(mat[row], dtype=np.float32)
 
 
 def _cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
@@ -419,7 +451,7 @@ def load_drift_summary(
 
     monthly = compute_monthly_centroids(pairs)
     vels = track_centroid_velocity(monthly)
-    velocities = [(monthly[i + 1][0], vels[i]) for i in range(len(vels))]
+    velocities = pair_months_with_velocities(monthly, vels)
     if not baseline_curve:
         baseline_curve = compute_baseline_similarity_curve(
             pairs,
@@ -439,10 +471,7 @@ def write_drift_artifacts(
     umap_payload: dict[str, Any],
 ) -> None:
     paths.analysis_dir.mkdir(parents=True, exist_ok=True)
-    paths.drift_json(author_slug).write_text(
-        drift.model_dump_json(indent=2),
-        encoding="utf-8",
-    )
+    write_json_artifact(paths.drift_json(author_slug), drift)
     months = np.array([m for m, _ in centroids], dtype="U7")
     vecs = np.stack([np.asarray(v, dtype=np.float32) for _, v in centroids], axis=0)
     np.savez_compressed(
@@ -453,14 +482,8 @@ def write_drift_artifacts(
     curve_json = [
         {"published_at": dt.isoformat(), "similarity": float(sim)} for dt, sim in baseline_curve
     ]
-    paths.baseline_curve_json(author_slug).write_text(
-        json.dumps(curve_json, indent=2),
-        encoding="utf-8",
-    )
-    paths.umap_json(author_slug).write_text(
-        json.dumps(umap_payload, indent=2),
-        encoding="utf-8",
-    )
+    write_json_artifact(paths.baseline_curve_json(author_slug), curve_json)
+    write_json_artifact(paths.umap_json(author_slug), umap_payload)
 
 
 def compute_author_drift_pipeline(
@@ -470,21 +493,11 @@ def compute_author_drift_pipeline(
     settings: ForensicsSettings,
     *,
     paths: AnalysisArtifactPaths,
-) -> (
-    tuple[
-        list[tuple[str, np.ndarray]],
-        DriftScores,
-        dict[str, Any],
-        list[tuple[datetime, float]],
-        list[float],
-        list[tuple[str, float]] | None,
-    ]
-    | None
-):
+) -> DriftPipelineResult | None:
     """Shared drift workflow: centroids, curves, scores, UMAP, artifact write.
 
-    Returns ``(monthly, drift, umap_payload, baseline_curve, velocities, ai_conv)`` or
-    ``None`` when embeddings are insufficient.
+    Returns a :class:`DriftPipelineResult` or ``None`` when embeddings are
+    insufficient.
     """
     if len(article_embs) < 2:
         return None
@@ -524,7 +537,14 @@ def compute_author_drift_pipeline(
         baseline_curve=baseline_curve,
         umap_payload=umap_one,
     )
-    return monthly, drift, umap_one, baseline_curve, velocities, ai_conv
+    return DriftPipelineResult(
+        monthly_centroids=monthly,
+        drift_scores=drift,
+        umap_payload=umap_one,
+        baseline_curve=baseline_curve,
+        velocities=velocities,
+        ai_convergence=ai_conv,
+    )
 
 
 def run_drift_analysis(
@@ -554,8 +574,7 @@ def run_drift_analysis(
             if res is None:
                 logger.warning("drift: insufficient embeddings for %s", author.slug)
                 continue
-            monthly, _drift, _umap, _bc, _vel, _ai = res
-            centroids_by_author[author.slug] = monthly
+            centroids_by_author[author.slug] = res.monthly_centroids
             logger.info("drift: wrote analysis artifacts for %s", author.slug)
 
     if len(centroids_by_author) > 1:
@@ -563,52 +582,4 @@ def run_drift_analysis(
             centroids_by_author,
             ai_centroid=None,
         )
-        paths.combined_umap_json().write_text(
-            json.dumps(combined, indent=2),
-            encoding="utf-8",
-        )
-
-
-def run_ai_baseline_command(
-    db_path: Path,
-    settings: ForensicsSettings,
-    *,
-    project_root: Path | None = None,
-    author_slug: str | None = None,
-    skip_generation: bool = False,
-    articles_per_cell: int | None = None,
-    model_filter: str | None = None,
-    dry_run: bool = False,
-) -> None:
-    """CLI entry: generate or re-embed AI baseline corpus via local Ollama.
-
-    Delegates to ``forensics.baseline.orchestrator``. The Phase 10 v0.3.0 spec
-    replaces the old OpenAI path with three locally-run Ollama models
-    (Llama 3.1 8B, Mistral 7B, Gemma 2 9B) so baselines are reproducible by
-    model digest with no external API keys required.
-    """
-    from forensics.baseline.orchestrator import (
-        reembed_existing_baseline,
-        run_generation_matrix,
-    )
-
-    slugs = [author_slug] if author_slug else [a.slug for a in settings.authors]
-
-    if skip_generation:
-        for slug in slugs:
-            reembed_existing_baseline(slug, settings, project_root=project_root)
-        return
-
-    async def _run() -> None:
-        for slug in slugs:
-            await run_generation_matrix(
-                slug,
-                settings,
-                db_path=db_path,
-                project_root=project_root,
-                articles_per_cell=articles_per_cell,
-                model_filter=model_filter,
-                dry_run=dry_run,
-            )
-
-    asyncio.run(_run())
+        write_json_artifact(paths.combined_umap_json(), combined)

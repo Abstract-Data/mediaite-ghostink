@@ -6,11 +6,13 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from forensics.models.analysis import AnalysisResult
+from forensics.models.features import count_scalar_features
 from forensics.survey.qualification import QualifiedAuthor
 
-# Phase 4 scalar feature count: Lexical(6) + Structural(9) + Readability(4) +
-# Content(7) + Productivity(5) + POS(4) = 35. Dict-valued fields are excluded.
-_TOTAL_SCALAR_FEATURES = 35
+# Derived from the feature-model registry (P3-MAINT-001). Adding or removing
+# a scalar field on any family (lexical, structural, ...) updates the
+# denominator automatically at import time.
+_TOTAL_SCALAR_FEATURES = count_scalar_features()
 
 
 class SignalStrength(StrEnum):
@@ -67,16 +69,7 @@ def _pipeline_b_score(analysis: AnalysisResult) -> float:
     """Embedding drift acceleration relative to the first half of the series."""
     if analysis.drift_scores is None:
         return 0.0
-    velocities = analysis.drift_scores.monthly_centroid_velocities
-    if len(velocities) < 6:
-        return 0.0
-    mid = len(velocities) // 2
-    early = sum(velocities[:mid]) / max(mid, 1)
-    late = sum(velocities[mid:]) / max(len(velocities) - mid, 1)
-    if early <= 0:
-        return 0.0
-    acceleration = (late - early) / early
-    return min(max(acceleration, 0.0), 1.0)
+    return analysis.drift_scores.velocity_acceleration_ratio
 
 
 def _pipeline_c_score(analysis: AnalysisResult) -> float | None:

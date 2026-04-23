@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 from enum import Enum, auto
 from pathlib import Path
 from typing import Annotated, assert_never
@@ -201,6 +202,18 @@ async def _full_pipeline(
     return 0
 
 
+async def _archive_only(root: Path, db_path: Path) -> int:
+    n = archive_raw_year_dirs(root, db_path)
+    logger.info("archive: compressed %d year directory(ies) under data/raw/", n)
+    return 0
+
+
+async def _dedup_only(db_path: Path, settings: ForensicsSettings) -> int:
+    dup_ids = deduplicate_articles(db_path, hamming_threshold=settings.scraping.simhash_threshold)
+    logger.info("dedup: marked %d article(s) as near-duplicates", len(dup_ids))
+    return 0
+
+
 async def _run_scrape_mode(
     mode: ScrapeMode,
     *,
@@ -212,44 +225,46 @@ async def _run_scrape_mode(
     force_refresh: bool,
     all_authors: bool,
 ) -> int:
-    match mode:
-        case ScrapeMode.ARCHIVE_ONLY:
-            n = archive_raw_year_dirs(root, db_path)
-            logger.info("archive: compressed %d year directory(ies) under data/raw/", n)
-            return 0
-        case ScrapeMode.DEDUP_ONLY:
-            dup_ids = deduplicate_articles(
-                db_path, hamming_threshold=settings.scraping.simhash_threshold
-            )
-            logger.info("dedup: marked %d article(s) as near-duplicates", len(dup_ids))
-            return 0
-        case ScrapeMode.FETCH_ONLY:
-            return await _fetch_only(db_path, settings, dry_run=dry_run)
-        case ScrapeMode.FETCH_DEDUP_EXPORT:
-            return await _fetch_dedup_export(db_path, root, settings, dry_run=dry_run)
-        case ScrapeMode.DISCOVER_ONLY:
-            return await _discover_only(settings, manifest_path, force_refresh=force_refresh)
-        case ScrapeMode.METADATA_ONLY:
-            return await _metadata_only(db_path, settings, manifest_path, all_authors=all_authors)
-        case ScrapeMode.DISCOVER_AND_METADATA:
-            return await _discover_and_metadata(
-                db_path,
-                settings,
-                manifest_path,
-                force_refresh=force_refresh,
-                all_authors=all_authors,
-            )
-        case ScrapeMode.FULL_PIPELINE:
-            return await _full_pipeline(
-                db_path,
-                root,
-                settings,
-                manifest_path,
-                force_refresh=force_refresh,
-                all_authors=all_authors,
-            )
-        case _ as unreachable:
-            assert_never(unreachable)
+    """Dispatch ``mode`` to its handler (RF-PATTERN-001).
+
+    Using a dict instead of a ``match`` keeps each branch type-checked
+    independently and makes it easier to swap in alternative handlers in tests.
+    ``assert_never`` still guards against new enum members landing without a
+    corresponding dispatch entry.
+    """
+    dispatch: dict[ScrapeMode, Callable[[], Awaitable[int]]] = {
+        ScrapeMode.ARCHIVE_ONLY: lambda: _archive_only(root, db_path),
+        ScrapeMode.DEDUP_ONLY: lambda: _dedup_only(db_path, settings),
+        ScrapeMode.FETCH_ONLY: lambda: _fetch_only(db_path, settings, dry_run=dry_run),
+        ScrapeMode.FETCH_DEDUP_EXPORT: lambda: _fetch_dedup_export(
+            db_path, root, settings, dry_run=dry_run
+        ),
+        ScrapeMode.DISCOVER_ONLY: lambda: _discover_only(
+            settings, manifest_path, force_refresh=force_refresh
+        ),
+        ScrapeMode.METADATA_ONLY: lambda: _metadata_only(
+            db_path, settings, manifest_path, all_authors=all_authors
+        ),
+        ScrapeMode.DISCOVER_AND_METADATA: lambda: _discover_and_metadata(
+            db_path,
+            settings,
+            manifest_path,
+            force_refresh=force_refresh,
+            all_authors=all_authors,
+        ),
+        ScrapeMode.FULL_PIPELINE: lambda: _full_pipeline(
+            db_path,
+            root,
+            settings,
+            manifest_path,
+            force_refresh=force_refresh,
+            all_authors=all_authors,
+        ),
+    }
+    handler = dispatch.get(mode)
+    if handler is None:
+        assert_never(mode)
+    return await handler()
 
 
 async def dispatch_scrape(

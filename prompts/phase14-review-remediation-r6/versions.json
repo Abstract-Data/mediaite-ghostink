@@ -1,0 +1,14 @@
+{
+  "family": "phase14-review-remediation-r6",
+  "current_version": "0.1.0",
+  "versions": [
+    {
+      "version": "0.1.0",
+      "date": "2026-04-22",
+      "status": "active",
+      "model": "claude-opus-4-7",
+      "file": "v0.1.0.md",
+      "changelog_entry": "11-phase (A–K) plan covering the 6th-run review pair: DuckDB Parquet-pattern validation, FK PRAGMA, frozen Article with with_updates, write_json_artifact consolidation (11+ sites), velocity helpers, MonthKey NewType + iter_months_in_window, ConvergenceInput + per-window/permutation split, fetcher handler split, BOCPD factoring, DriftPipelineResult, forensics.paths relocation, scan_features LazyFrame, scrape dispatch dict, and 8 new unit-test modules lifting coverage 65 → 66."
+    }
+  ]
+}
