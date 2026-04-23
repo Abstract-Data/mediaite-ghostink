@@ -61,6 +61,32 @@ app.command(name="analyze")(analyze)
 app.command(name="report")(report)
 
 
+_SETTINGS_LOAD_ERRORS: tuple[type[BaseException], ...] | None = None
+
+
+def _settings_load_errors() -> tuple[type[BaseException], ...]:
+    """Return the narrow exception tuple covering ``get_settings()`` failures.
+
+    Cached after first call so repeated CLI entry points (``preflight``,
+    ``validate``, and any future command) don't re-import ``tomllib`` /
+    ``pydantic`` on every invocation.
+    """
+    global _SETTINGS_LOAD_ERRORS
+    if _SETTINGS_LOAD_ERRORS is None:
+        import tomllib
+
+        from pydantic import ValidationError
+
+        _SETTINGS_LOAD_ERRORS = (
+            ValidationError,
+            FileNotFoundError,
+            tomllib.TOMLDecodeError,
+            ValueError,
+            OSError,
+        )
+    return _SETTINGS_LOAD_ERRORS
+
+
 @app.command(name="preflight")
 def preflight(
     strict: Annotated[
@@ -78,7 +104,7 @@ def preflight(
     logger = logging.getLogger(__name__)
     try:
         settings = get_settings()
-    except Exception as exc:  # noqa: BLE001
+    except _settings_load_errors() as exc:
         logger.error("Could not load settings for preflight: %s", exc)
         settings = None
     report = run_all_preflight_checks(settings, strict=strict)
@@ -143,7 +169,7 @@ def validate_config(
     logger = logging.getLogger(__name__)
     try:
         settings = get_settings()
-    except Exception as exc:  # noqa: BLE001 - surface parse errors verbatim
+    except _settings_load_errors() as exc:
         logger.error("Config error: %s", exc)
         typer.echo(f"Config error: {exc}")
         raise typer.Exit(code=1) from exc

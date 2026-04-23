@@ -36,6 +36,13 @@ class DriftScores(BaseModel):
     monthly_centroid_velocities: list[float]
     intra_period_variance_trend: list[float]
 
+    @property
+    def velocity_acceleration_ratio(self) -> float:
+        """(late-early)/early split of ``monthly_centroid_velocities`` clamped to [0, 1]."""
+        from forensics.analysis.utils import compute_velocity_acceleration
+
+        return compute_velocity_acceleration(self.monthly_centroid_velocities)
+
 
 class HypothesisTest(BaseModel):
     test_name: str

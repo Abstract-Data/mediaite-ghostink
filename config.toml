@@ -19,6 +19,10 @@ archive_url = "https://www.mediaite.com/author/placeholder-control/"
 baseline_start = 2020-01-01
 baseline_end = 2023-12-31
 
+# spaCy pipeline used for feature extraction and preflight validation.
+# Changing this requires: `uv run python -m spacy download <model>`.
+spacy_model = "en_core_web_md"
+
 [scraping]
 rate_limit_seconds = 2.0
 rate_limit_jitter = 0.5

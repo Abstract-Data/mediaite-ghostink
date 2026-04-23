@@ -250,23 +250,29 @@ def _apply_http_failed_mutation(
     article: Article,
     scraped_at: datetime,
     response: httpx.Response,
-) -> None:
-    article.scraped_at = scraped_at
-    article.clean_text = f"[HTTP_ERROR:{response.status_code}]"
-    article.word_count = 0
-    article.content_hash = content_hash(article.clean_text)
+) -> Article:
+    clean = f"[HTTP_ERROR:{response.status_code}]"
+    return article.with_updates(
+        scraped_at=scraped_at,
+        clean_text=clean,
+        word_count=0,
+        content_hash=content_hash(clean),
+    )
 
 
 def _apply_off_domain_mutation(
     article: Article,
     scraped_at: datetime,
     final_host: str,
-) -> None:
-    article.scraped_at = scraped_at
-    article.clean_text = f"[REDIRECT:{final_host}]"
-    article.word_count = 0
-    article.raw_html_path = ""
-    article.content_hash = content_hash(article.clean_text)
+) -> Article:
+    clean = f"[REDIRECT:{final_host}]"
+    return article.with_updates(
+        scraped_at=scraped_at,
+        clean_text=clean,
+        word_count=0,
+        raw_html_path="",
+        content_hash=content_hash(clean),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -312,18 +318,15 @@ async def _persist_article_fetch(
     scraped_at: datetime,
     coauth: Path,
     warns: Path,
-) -> None:
-    """Write raw HTML, mutate ``article``, and append side-JSONL entries.
+) -> Article:
+    """Write raw HTML, return an updated ``Article``, and append side-JSONL entries.
 
     Must run under the DB lock, after the final ``_resume_skip_fetch`` check.
+    ``Article`` is ``frozen=True`` so the updated row is returned to the caller
+    rather than mutated in place.
     """
     raw_path = _write_raw_html_file(root, year, article_id, html)
     merged_meta = {**article.metadata, **parsed.meta_extra}
-    article.raw_html_path = raw_path
-    article.clean_text = parsed.clean
-    article.word_count = parsed.wc
-    article.content_hash = content_hash(parsed.clean)
-    article.scraped_at = scraped_at
 
     if parsed.coauth_flag:
         merged_meta["coauthored"] = True
@@ -337,8 +340,6 @@ async def _persist_article_fetch(
             },
         )
 
-    article.metadata = merged_meta
-
     if parsed.wc < 50:
         await append_jsonl_async(
             warns,
@@ -349,6 +350,15 @@ async def _persist_article_fetch(
                 "reason": "below_minimum_word_count",
             },
         )
+
+    return article.with_updates(
+        raw_html_path=raw_path,
+        clean_text=parsed.clean,
+        word_count=parsed.wc,
+        content_hash=content_hash(parsed.clean),
+        scraped_at=scraped_at,
+        metadata=merged_meta,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -373,7 +383,7 @@ async def _persist_and_log(
     ctx: ArticleHtmlFetchContext,
     row: UnfetchedArticle,
     *,
-    mutate: Callable[[Article], None] | None,
+    mutate: Callable[[Article], Article] | None,
     log_suffix: str,
     article: Article | None = None,
 ) -> bool:
@@ -381,7 +391,7 @@ async def _persist_and_log(
 
     Two modes share this ceremony:
     - When ``mutate`` is provided (HTTP-fail, off-domain): read the row, skip if already
-      filled, apply ``mutate(row)``, upsert.
+      filled, call ``mutate(row)`` which returns a new ``Article``, upsert it.
     - When ``article`` is provided (success): read the latest row, skip upsert if filled,
       else upsert the caller's pre-built ``article``.
 
@@ -393,8 +403,7 @@ async def _persist_and_log(
         if _resume_skip_fetch(latest):
             return False
         if mutate is not None:
-            mutate(latest)
-            to_write = latest
+            to_write = mutate(latest)
         else:
             assert article is not None, "provide either `mutate` or `article`"
             to_write = article
@@ -412,6 +421,87 @@ async def _persist_and_log(
     return True
 
 
+async def _handle_http_failure(
+    ctx: ArticleHtmlFetchContext,
+    row: UnfetchedArticle,
+    *,
+    response: httpx.Response,
+    scraped_at: datetime,
+) -> None:
+    await _persist_and_log(
+        ctx,
+        row,
+        mutate=lambda a: _apply_http_failed_mutation(a, scraped_at, response),
+        log_suffix=f" (http {response.status_code})",
+    )
+
+
+async def _handle_off_domain(
+    ctx: ArticleHtmlFetchContext,
+    row: UnfetchedArticle,
+    *,
+    response: httpx.Response,
+    scraped_at: datetime,
+    final_host: str,
+) -> None:
+    await log_scrape_error(
+        ctx.errors,
+        str(row.url),
+        response.status_code,
+        f"redirect_off_domain:{final_host}",
+        "html_fetch",
+    )
+    await _persist_and_log(
+        ctx,
+        row,
+        mutate=lambda a: _apply_off_domain_mutation(a, scraped_at, final_host),
+        log_suffix=f" (off-domain {final_host})",
+    )
+
+
+async def _handle_success(
+    ctx: ArticleHtmlFetchContext,
+    row: UnfetchedArticle,
+    *,
+    response: httpx.Response,
+    scraped_at: datetime,
+    year: int,
+) -> None:
+    """Parse HTML outside the lock, then persist under a second db_lock critical section."""
+    async with ctx.db_lock:
+        article = await asyncio.to_thread(ctx.repo.get_article_by_id, row.article_id)
+        if _resume_skip_fetch(article):
+            return
+
+    parsed = _parse_article_html(article, response.text)
+
+    async with ctx.db_lock:
+        latest = await asyncio.to_thread(ctx.repo.get_article_by_id, row.article_id)
+        if _resume_skip_fetch(latest):
+            return
+        updated = await _persist_article_fetch(
+            latest,
+            parsed,
+            root=ctx.root,
+            year=year,
+            article_id=row.article_id,
+            html=response.text,
+            scraped_at=scraped_at,
+            coauth=ctx.coauth,
+            warns=ctx.warns,
+        )
+        await asyncio.to_thread(ctx.repo.upsert_article, updated)
+
+    async with ctx.done_lock:
+        ctx.done_count[0] += 1
+        logger.info(
+            "Fetched %s/%s articles for %s",
+            ctx.done_count[0],
+            ctx.total,
+            row.author_name,
+        )
+
+
 async def _fetch_one_article_html(
     client: httpx.AsyncClient,
     row: UnfetchedArticle,
@@ -420,7 +510,6 @@ async def _fetch_one_article_html(
 ) -> None:
     """Fetch one article HTML under concurrency limits; bumps ``ctx.done_count`` on completion."""
     async with ctx.sem:
-        year = row.published_date.year
         response = await request_with_retry(
             client,
             ctx.limiter,
@@ -435,62 +524,26 @@ async def _fetch_one_article_html(
         final_host = urlparse(str(response.url)).netloc
 
         if not response.is_success:
-            await _persist_and_log(
-                ctx,
-                row,
-                mutate=lambda a: _apply_http_failed_mutation(a, scraped_at, response),
-                log_suffix=f" (http {response.status_code})",
-            )
+            await _handle_http_failure(ctx, row, response=response, scraped_at=scraped_at)
             return
 
         if not _is_mediaite_host(final_host):
-            await log_scrape_error(
-                ctx.errors,
-                str(row.url),
-                response.status_code,
-                f"redirect_off_domain:{final_host}",
-                "html_fetch",
-            )
-            await _persist_and_log(
+            await _handle_off_domain(
                 ctx,
                 row,
-                mutate=lambda a: _apply_off_domain_mutation(a, scraped_at, final_host),
-                log_suffix=f" (off-domain {final_host})",
+                response=response,
+                scraped_at=scraped_at,
+                final_host=final_host,
             )
             return
 
-        async with ctx.db_lock:
-            article = await asyncio.to_thread(ctx.repo.get_article_by_id, row.article_id)
-            if _resume_skip_fetch(article):
-                return
-
-        parsed = _parse_article_html(article, response.text)
-
-        async with ctx.db_lock:
-            latest = await asyncio.to_thread(ctx.repo.get_article_by_id, row.article_id)
-            if _resume_skip_fetch(latest):
-                return
-            await _persist_article_fetch(
-                latest,
-                parsed,
-                root=ctx.root,
-                year=year,
-                article_id=row.article_id,
-                html=response.text,
-                scraped_at=scraped_at,
-                coauth=ctx.coauth,
-                warns=ctx.warns,
-            )
-            await asyncio.to_thread(ctx.repo.upsert_article, latest)
-
-        async with ctx.done_lock:
-            ctx.done_count[0] += 1
-            logger.info(
-                "Fetched %s/%s articles for %s",
-                ctx.done_count[0],
-                ctx.total,
-                row.author_name,
-            )
+        await _handle_success(
+            ctx,
+            row,
+            response=response,
+            scraped_at=scraped_at,
+            year=row.published_date.year,
+        )
 
 
 def archive_raw_year_dirs(root: Path, db_path: Path) -> int:

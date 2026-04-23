@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from forensics.analysis.utils import describe_velocity_acceleration_pct
 from forensics.models.analysis import AnalysisResult
 from forensics.survey.scoring import (
     SignalStrength,
@@ -107,21 +108,12 @@ def _effect_size_sentences(analysis: AnalysisResult) -> list[str]:
 def _drift_sentences(analysis: AnalysisResult) -> list[str]:
     if analysis.drift_scores is None:
         return []
-    velocities = analysis.drift_scores.monthly_centroid_velocities
-    if len(velocities) < 6:
+    phrase = describe_velocity_acceleration_pct(analysis.drift_scores.monthly_centroid_velocities)
+    if phrase is None:
         return []
-    mid = len(velocities) // 2
-    early = sum(velocities[:mid]) / max(mid, 1)
-    late = sum(velocities[mid:]) / max(len(velocities) - mid, 1)
-    if early <= 0:
-        return []
-    pct = ((late - early) / early) * 100.0
-    direction = "increased" if pct >= 0 else "decreased"
     return [
-        (
-            f"Embedding drift velocity {direction} by {abs(pct):.0f}% in the "
-            "second half of the timeline relative to the first half."
-        )
+        f"Embedding drift velocity {phrase} in the "
+        "second half of the timeline relative to the first half."
     ]
 
 

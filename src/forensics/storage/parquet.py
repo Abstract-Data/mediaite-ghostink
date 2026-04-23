@@ -39,9 +39,23 @@ def write_features(features: list[FeatureVector], output_path: Path) -> None:
     pl.DataFrame(rows).write_parquet(output_path)
 
 
+def scan_features(path: Path) -> pl.LazyFrame:
+    """Lazy Parquet scan — prefer this over :func:`read_features` for new code.
+
+    ``pl.LazyFrame`` lets downstream callers push filters/projections down
+    before :meth:`.collect` materialises the frame.
+    """
+    return pl.scan_parquet(path)
+
+
 def read_features(path: Path) -> pl.DataFrame:
-    """Load a feature Parquet table via lazy scan (collected eagerly to preserve API)."""
-    return pl.scan_parquet(path).collect()
+    """Eagerly load a feature Parquet table.
+
+    Prefer :func:`scan_features` for new code so predicate pushdown stays
+    available; ``read_features`` remains for notebooks and tests that want a
+    materialised frame.
+    """
+    return scan_features(path).collect()
 
 
 def load_feature_frame_sorted(features_path: Path) -> pl.DataFrame:
@@ -50,7 +64,7 @@ def load_feature_frame_sorted(features_path: Path) -> pl.DataFrame:
     Uses a ``LazyFrame`` scan so the planner can push the sort down and defer the
     materialization — callers that filter/slice downstream get the benefit.
     """
-    lf = pl.scan_parquet(features_path)
+    lf = scan_features(features_path)
     if "timestamp" not in lf.collect_schema().names():
         msg = f"features parquet missing timestamp: {features_path}"
         raise ValueError(msg)

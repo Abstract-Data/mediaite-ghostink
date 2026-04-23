@@ -175,6 +175,13 @@ class ForensicsSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="FORENSICS_", env_nested_delimiter="__")
 
     authors: list[AuthorConfig]
+    spacy_model: str = Field(
+        default="en_core_web_md",
+        description=(
+            "spaCy pipeline name used for feature extraction and preflight validation. "
+            "Keep both in sync by reading this single field."
+        ),
+    )
     scraping: ScrapingConfig = Field(default_factory=ScrapingConfig)
     analysis: AnalysisConfig = Field(default_factory=AnalysisConfig)
     survey: SurveyConfig = Field(default_factory=SurveyConfig)

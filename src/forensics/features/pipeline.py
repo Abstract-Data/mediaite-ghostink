@@ -20,8 +20,6 @@ from rich.progress import (
     TimeElapsedColumn,
 )
 
-from forensics.analysis.artifact_paths import AnalysisArtifactPaths
-from forensics.analysis.utils import resolve_author_rows
 from forensics.config import get_project_root
 from forensics.config.settings import ForensicsSettings
 from forensics.features import (
@@ -36,6 +34,7 @@ from forensics.features import (
 from forensics.features.assembler import build_feature_vector_from_extractors
 from forensics.models.article import Article
 from forensics.models.features import EmbeddingRecord, FeatureVector
+from forensics.paths import AnalysisArtifactPaths, resolve_author_rows
 from forensics.storage.parquet import (
     AUTHOR_EMBEDDING_BATCH_BASENAME,
     write_author_embedding_batch,
@@ -119,14 +118,14 @@ def _resolve_project_root(db_path: Path, project_root: Path | None) -> Path:
     return get_project_root()
 
 
-def _load_spacy_model() -> Any:
-    """Load the ``en_core_web_md`` spaCy model or raise."""
+def _load_spacy_model(model_name: str = "en_core_web_md") -> Any:
+    """Load the requested spaCy pipeline or raise."""
     try:
         import spacy
 
-        return spacy.load("en_core_web_md")
+        return spacy.load(model_name)
     except OSError as exc:
-        logger.error("spaCy model en_core_web_md is required: %s", exc)
+        logger.error("spaCy model %s is required: %s", model_name, exc)
         raise
 
 
@@ -391,7 +390,7 @@ def extract_all_features(
             return 0
 
         by_author = _group_articles_by_author(articles)
-        nlp = _load_spacy_model()
+        nlp = _load_spacy_model(settings.spacy_model)
         processed, failed, manifest_records = _run_author_batches(
             by_author=by_author,
             repo=repo,

@@ -1525,3 +1525,128 @@ uv run pytest tests/ -q
 
 #### Risks & Next Steps
 - If stakeholders want per-feature control tests, implement as a new tracked task (load feature frames + two-sample tests); composite-only `ControlValidation` remains the shipped contract until then.
+
+---
+
+### Phase 14 — Review Remediation (Run 6)
+**Status:** Complete
+**Date:** 2026-04-22
+**Agent/Session:** claude-opus-4-7 / plan `~/.claude/plans/review-https-www-notion-so-34b7d7f562988-dynamic-pancake.md`
+
+#### What Was Done
+Implemented every finding from the 6th-run Apr 22, 2026 review pair
+(Notion pages 34b7d7f56298…28 and 34b7d7f56298…3d) in 11 phases:
+
+- **A** FK `PRAGMA`, spaCy model aligned via `settings.spacy_model`, narrowed
+  `get_settings()` catches, `run_ai_baseline_command` moved to
+  `forensics/cli/baseline.py` so `asyncio` can leave `analysis/drift.py`.
+- **B** `forensics/storage/json_io.py::write_json_artifact` now owns all
+  JSON-artifact serialisation; migrated 11+ sites; new velocity helpers
+  (`pair_months_with_velocities`, `compute_velocity_acceleration`,
+  `describe_velocity_acceleration_pct`) + `DriftScores.velocity_acceleration_ratio`;
+  new `MonthKey` NewType + `iter_months_in_window` in `analysis/monthkeys.py`.
+- **C** `AnalysisArtifactPaths`, `resolve_author_rows`,
+  `load_feature_frame_for_author`, `intervals_overlap`,
+  `closed_interval_contains` relocated to `forensics/paths.py` with
+  re-export shims in `analysis/artifact_paths.py` and `analysis/utils.py`.
+- **D** `_validated_parquet_pattern` added to `duckdb_queries.py`; every
+  `read_parquet(...)` glob is now quote-escaped + URI/control-char
+  rejected.
+- **E** `models/features.py::count_scalar_features()` derives
+  `_TOTAL_SCALAR_FEATURES` from the field registry.
+- **F** `_load_embedding_row` split into format-specific loaders;
+  `compute_convergence_scores` split into `ConvergenceInput` +
+  `_score_single_window` + `_run_permutation_test`;
+  `_fetch_one_article_html` split into three `_handle_*` branches;
+  `detect_bocpd` split into `_bocpd_init_prior` + `_bocpd_step`.
+  C901 ignore lifted for `convergence.py`.
+- **G** `DriftPipelineResult` dataclass replaces the 6-tuple return of
+  `compute_author_drift_pipeline`; `Article` model is `frozen=True` with
+  a `with_updates(**kwargs)` copy method; fetcher mutations now return
+  new Article instances.
+- **H** `Repository.iter_articles_by_author` streaming; `scan_features`
+  LazyFrame API alongside eager `read_features`; Repository doc banner
+  partitions class by author/article/analysis-runs responsibilities.
+- **I** `cli/scrape.py::_run_scrape_mode` uses a dispatch dict with an
+  `assert_never` fallback; remaining C901 ignores annotated with
+  follow-up IDs.
+- **J** 8 new unit test modules:
+  `tests/unit/test_json_io.py`,
+  `tests/unit/test_velocity.py`,
+  `tests/unit/test_monthkeys.py`,
+  `tests/unit/test_duckdb_pattern_validation.py`,
+  `tests/unit/test_article_frozen.py`,
+  `tests/unit/test_repository_pragmas.py`,
+  `tests/unit/test_feature_count_registry.py`,
+  `tests/unit/test_repository_streaming.py`.
+  Coverage lifted from 65 → **66.59%** (fail_under bumped 65 → 66).
+- **K** New prompt family `prompts/phase14-review-remediation-r6/` plus
+  this HANDOFF block.
+
+#### Files Modified
+- `src/forensics/config/settings.py`, `src/forensics/preflight.py`,
+  `src/forensics/features/pipeline.py` — spaCy model aligned + settings-driven
+  (A2, P3-DOC-001).
+- `src/forensics/cli/__init__.py`, `src/forensics/cli/analyze.py`,
+  `src/forensics/cli/baseline.py`, `src/forensics/cli/scrape.py` — narrowed
+  exceptions, baseline CLI entry, dispatch dict.
+- `src/forensics/storage/repository.py`, `src/forensics/storage/parquet.py`,
+  `src/forensics/storage/duckdb_queries.py`,
+  `src/forensics/storage/json_io.py` (new) — FK pragma, streaming iterator,
+  LazyFrame API, Parquet path validation, shared JSON writer.
+- `src/forensics/analysis/convergence.py`, `.../changepoint.py`, `.../drift.py`,
+  `.../orchestrator.py`, `.../comparison.py`, `.../monthkeys.py` (new),
+  `.../utils.py`, `.../artifact_paths.py`, `src/forensics/paths.py` (new) —
+  convergence/BOCPD/embedding/drift decomposition, velocity/month helpers,
+  cross-stage relocation.
+- `src/forensics/scraper/fetcher.py` — `_handle_*` branches +
+  `Article.with_updates(...)` copy-on-write.
+- `src/forensics/models/article.py`, `src/forensics/models/analysis.py`,
+  `src/forensics/models/features.py` — frozen Article,
+  `velocity_acceleration_ratio` property, `count_scalar_features`.
+- `src/forensics/survey/scoring.py`, `src/forensics/survey/orchestrator.py`,
+  `src/forensics/reporting/narrative.py`, `src/forensics/calibration/runner.py`
+  — migrated to shared helpers.
+- `pyproject.toml`, `config.toml` — C901 trim + annotations, coverage
+  threshold 65 → 66, `spacy_model` option documented.
+- `tests/unit/test_{json_io,velocity,monthkeys,duckdb_pattern_validation,article_frozen,repository_pragmas,feature_count_registry,repository_streaming}.py` (new).
+- `tests/unit/test_fetcher_mutations.py` — updated for frozen `Article`.
+- `prompts/phase14-review-remediation-r6/` (new) — `current.md`, `v0.1.0.md`,
+  `versions.json`, `CHANGELOG.md`.
+
+#### Verification Evidence
+```
+$ uv run ruff format --check .
+All checks passed!
+$ uv run ruff check .
+All checks passed!
+$ uv run pytest tests/ -q
+TOTAL                                             6031   1786   1506    224    67%
+Required test coverage of 66.0% reached. Total coverage: 66.59%
+```
+
+#### Decisions Made
+- Kept `analysis/artifact_paths.py` and `analysis/utils.py` as re-export
+  shims rather than deleting them — there's no external caller churn that
+  would justify breaking the existing import paths in one motion.
+- Repository partition stayed inside one class (RF-SMELL-001 annotated in
+  the docstring) rather than extracting three mixin files; no consumer
+  benefits from an ABI split today and keeping the single connection + slots
+  contract is cheaper to reason about.
+- Coverage threshold moved 65 → 66 instead of jumping to the plan's 70
+  target. The extra 3.4 pp comes from the ~30+ lazy TUI/utility modules that
+  would need dedicated tests; sized as a follow-up.
+
+#### Unresolved Questions
+- Should the Repository partition become real mixin classes next iteration,
+  or is the single-class partition sufficient long-term?
+- Should `read_features` be formally deprecated once all callers adopt
+  `scan_features`? Current shim stays eager for notebook ergonomics.
+
+#### Risks & Next Steps
+- Re-run the python-project-review skill after the next audit to confirm the
+  projected score uplift (Security +1, Testing +2, Architecture +1,
+  Maintainability +1).
+- The `notebooks/04_feature_analysis.ipynb` still imports `read_features`
+  directly (verified still functional); update to `scan_features` on next
+  notebook pass.

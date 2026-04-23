@@ -49,6 +49,43 @@ def _validate_feature_name(feature_name: str) -> str:
     return feature_name
 
 
+_FORBIDDEN_PATH_PREFIXES: tuple[str, ...] = (
+    "http://",
+    "https://",
+    "s3://",
+    "gs://",
+    "azure://",
+    "hf://",
+    "duckdb:",
+    "memory:",
+    ":memory:",
+)
+
+
+def _validated_parquet_pattern(pattern: str | Path) -> str:
+    """Return a SQL-safe literal for a Parquet glob pattern (P1-SEC-001).
+
+    DuckDB does not support bind parameters inside ``read_parquet('...')`` so
+    the pattern is inlined as a string literal. This rejects control
+    characters and non-local URI prefixes to prevent crafted paths from
+    pivoting DuckDB into a remote reader, then delegates to
+    :func:`_sql_string_literal` for quote escaping.
+    """
+    raw = str(pattern)
+    if not raw:
+        msg = "Parquet pattern must not be empty"
+        raise ValueError(msg)
+    if "\x00" in raw or "\n" in raw or "\r" in raw:
+        msg = "Parquet pattern contains invalid control characters"
+        raise ValueError(msg)
+    lower = raw.lower()
+    for prefix in _FORBIDDEN_PATH_PREFIXES:
+        if lower.startswith(prefix):
+            msg = f"Unsupported Parquet source (local files only): {raw!r}"
+            raise ValueError(msg)
+    return _sql_string_literal(raw)
+
+
 def get_rolling_feature_comparison(
     db_path: Path,
     features_dir: Path,
@@ -60,9 +97,9 @@ def get_rolling_feature_comparison(
     if window < 1:
         msg = "window must be >= 1"
         raise ValueError(msg)
-    pattern = str((features_dir / "*.parquet").resolve())
+    pattern = (features_dir / "*.parquet").resolve()
     db_lit = _validated_sqlite_path_for_attach(db_path)
-    pat_esc = pattern.replace("'", "''")
+    pat_lit = _validated_parquet_pattern(pattern)
     con = duckdb.connect()
     try:
         con.execute(f"ATTACH {db_lit} AS articles_db (TYPE sqlite, READ_ONLY)")
@@ -76,7 +113,7 @@ def get_rolling_feature_comparison(
                     ORDER BY f.timestamp
                     ROWS BETWEEN {window - 1} PRECEDING AND CURRENT ROW
                 ) AS rolling_avg
-            FROM read_parquet('{pat_esc}') f
+            FROM read_parquet({pat_lit}) f
             JOIN articles_db.authors a ON f.author_id = a.id
             ORDER BY f.timestamp
         """
@@ -88,7 +125,7 @@ def get_rolling_feature_comparison(
 def get_monthly_feature_stats(features_dir: Path, feature_name: str) -> pl.DataFrame:
     """Monthly mean and std for one feature across all Parquet shards."""
     col = _validate_feature_name(feature_name)
-    pattern = str((features_dir / "*.parquet").resolve()).replace("'", "''")
+    pat_lit = _validated_parquet_pattern((features_dir / "*.parquet").resolve())
     con = duckdb.connect()
     try:
         sql = f"""
@@ -97,7 +134,7 @@ def get_monthly_feature_stats(features_dir: Path, feature_name: str) -> pl.DataF
                 AVG(f.{col}) AS mean_{col},
                 STDDEV_SAMP(f.{col}) AS std_{col},
                 COUNT(*) AS n
-            FROM read_parquet('{pattern}') f
+            FROM read_parquet({pat_lit}) f
             GROUP BY 1
             ORDER BY 1
         """
@@ -108,7 +145,7 @@ def get_monthly_feature_stats(features_dir: Path, feature_name: str) -> pl.DataF
 
 def get_ai_marker_spike_detection(features_dir: Path) -> pl.DataFrame:
     """Months where ``ai_marker_frequency`` mean exceeds global mean + 2 * between-month std."""
-    pattern = str((features_dir / "*.parquet").resolve()).replace("'", "''")
+    pat_lit = _validated_parquet_pattern((features_dir / "*.parquet").resolve())
     con = duckdb.connect()
     try:
         sql = f"""
@@ -116,7 +153,7 @@ def get_ai_marker_spike_detection(features_dir: Path) -> pl.DataFrame:
                 SELECT
                     date_trunc('month', CAST(timestamp AS TIMESTAMP)) AS month,
                     AVG(ai_marker_frequency) AS m
-                FROM read_parquet('{pattern}')
+                FROM read_parquet({pat_lit})
                 GROUP BY 1
             ),
             stats AS (
@@ -219,11 +256,11 @@ def export_to_duckdb(
         if include_features and features_dir.is_dir():
             parquets = sorted(features_dir.glob("*.parquet"))
             if parquets:
-                pattern = str((features_dir / "*.parquet").resolve()).replace("'", "''")
+                pat_lit = _validated_parquet_pattern((features_dir / "*.parquet").resolve())
                 con.execute(
                     f"""
                     CREATE TABLE features AS
-                    SELECT * FROM read_parquet('{pattern}', union_by_name=true)
+                    SELECT * FROM read_parquet({pat_lit}, union_by_name=true)
                     """
                 )
                 tables["features"] = con.execute("SELECT COUNT(*) FROM features").fetchone()[0]

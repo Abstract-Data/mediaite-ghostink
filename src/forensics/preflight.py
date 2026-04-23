@@ -83,7 +83,7 @@ def check_python_version(minimum: tuple[int, int] = _MIN_PYTHON) -> PreflightChe
     return PreflightCheck("Python version", "fail", detail)
 
 
-def check_spacy_model(model_name: str = "en_core_web_sm") -> PreflightCheck:
+def check_spacy_model(model_name: str = "en_core_web_md") -> PreflightCheck:
     """Hard-fail when the required spaCy model cannot be loaded."""
     try:
         import spacy
@@ -223,10 +223,11 @@ def run_all_preflight_checks(
 
     data_dir = get_project_root() / "data"
 
+    spacy_model = getattr(resolved, "spacy_model", "en_core_web_md")
     checks: list[PreflightCheck] = [
         config_check,
         check_python_version(),
-        check_spacy_model(),
+        check_spacy_model(spacy_model),
         check_disk_space(data_dir),
     ]
 

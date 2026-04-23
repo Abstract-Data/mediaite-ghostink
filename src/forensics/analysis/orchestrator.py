@@ -25,8 +25,10 @@ from forensics.analysis.statistics import (
     filter_by_effect_size,
     run_hypothesis_tests,
 )
+from forensics.analysis.utils import pair_months_with_velocities
 from forensics.config.settings import AnalysisConfig, ForensicsSettings
 from forensics.models.analysis import AnalysisResult, ChangePoint, DriftScores
+from forensics.storage.json_io import write_json_artifact
 from forensics.storage.parquet import load_feature_frame_sorted
 from forensics.storage.repository import Repository
 from forensics.utils.datetime import parse_datetime
@@ -56,23 +58,10 @@ def _write_per_author_json_artifacts(
     assembled: AnalysisResult,
     all_tests: list,
 ) -> None:
-    paths.changepoints_json(slug).write_text(
-        json.dumps([c.model_dump(mode="json") for c in change_points], indent=2, default=str),
-        encoding="utf-8",
-    )
-    conv_payload = [w.model_dump(mode="json") for w in convergence_windows]
-    paths.convergence_json(slug).write_text(
-        json.dumps(conv_payload, indent=2, default=str),
-        encoding="utf-8",
-    )
-    paths.result_json(slug).write_text(
-        assembled.model_dump_json(indent=2),
-        encoding="utf-8",
-    )
-    paths.hypothesis_tests_json(slug).write_text(
-        json.dumps([t.model_dump(mode="json") for t in all_tests], indent=2, default=str),
-        encoding="utf-8",
-    )
+    write_json_artifact(paths.changepoints_json(slug), change_points)
+    write_json_artifact(paths.convergence_json(slug), convergence_windows)
+    write_json_artifact(paths.result_json(slug), assembled)
+    write_json_artifact(paths.hypothesis_tests_json(slug), all_tests)
 
 
 def _run_hypothesis_tests_for_changepoints(
@@ -163,8 +152,10 @@ def _run_per_author_analysis(
         paths=paths,
     )
     if drift_res is not None:
-        monthly, drift, _umap, baseline_curve, vels, ai_conv = drift_res
-        vel_tuples = [(monthly[i + 1][0], vels[i]) for i in range(len(vels))]
+        drift = drift_res.drift_scores
+        baseline_curve = drift_res.baseline_curve
+        ai_conv = drift_res.ai_convergence
+        vel_tuples = pair_months_with_velocities(drift_res.monthly_centroids, drift_res.velocities)
 
     prob = probability_trajectory_by_slug.get(slug)
     ac = config.analysis
@@ -258,7 +249,7 @@ def _merge_run_metadata(
             "completed_at": datetime.now(UTC).isoformat(),
         }
     )
-    meta_path.write_text(json.dumps(prev, indent=2), encoding="utf-8")
+    write_json_artifact(meta_path, prev)
 
 
 def assemble_analysis_result(
@@ -338,10 +329,7 @@ async def run_full_analysis(
         config=config,
     )
 
-    paths.comparison_report_json().write_text(
-        json.dumps(comparison_payload, indent=2, default=str),
-        encoding="utf-8",
-    )
+    write_json_artifact(paths.comparison_report_json(), comparison_payload)
 
     _merge_run_metadata(paths, results, comparison_payload)
 
@@ -372,6 +360,5 @@ def run_compare_only(
             )
         except (ValueError, OSError) as exc:
             logger.warning("compare-only: failed for %s (%s)", tid, exc)
-    report_path = paths.comparison_report_json()
-    report_path.write_text(json.dumps(out, indent=2, default=str), encoding="utf-8")
+    write_json_artifact(paths.comparison_report_json(), out)
     return out

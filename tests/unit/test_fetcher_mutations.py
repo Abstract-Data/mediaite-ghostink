@@ -23,7 +23,14 @@ from forensics.scraper.fetcher import (
 from forensics.storage.repository import Repository, UnfetchedArticle
 
 
-def _make_article(*, clean_text: str = "", url: str = "https://www.mediaite.com/p/") -> Article:
+def _make_article(
+    *,
+    clean_text: str = "",
+    url: str = "https://www.mediaite.com/p/",
+    raw_html_path: str = "",
+    word_count: int | None = None,
+    content_hash: str = "",
+) -> Article:
     """Build a minimal Article suitable for the persist-and-log branches."""
     return Article(
         id="article-test-1",
@@ -32,8 +39,11 @@ def _make_article(*, clean_text: str = "", url: str = "https://www.mediaite.com/
         title="T",
         published_date=datetime(2024, 1, 2, tzinfo=UTC),
         clean_text=clean_text,
-        word_count=0 if not clean_text else len(clean_text.split()),
-        content_hash="",
+        word_count=word_count
+        if word_count is not None
+        else (0 if not clean_text else len(clean_text.split())),
+        content_hash=content_hash,
+        raw_html_path=raw_html_path,
     )
 
 
@@ -154,10 +164,12 @@ async def test_persist_and_log_success_branch_with_prebuilt_article(
     """Success branch: caller supplies a pre-mutated Article; helper upserts that object."""
     # Latest DB row still unfilled (body empty) — the successful fetch is a race winner.
     latest_empty = _make_article()
-    pre_built = _make_article(clean_text="the parsed body text here")
-    pre_built.raw_html_path = "raw/2024/article-test-1.html"
-    pre_built.word_count = 5
-    pre_built.content_hash = "abc123"
+    pre_built = _make_article(
+        clean_text="the parsed body text here",
+        raw_html_path="raw/2024/article-test-1.html",
+        word_count=5,
+        content_hash="abc123",
+    )
 
     repo = MagicMock(spec=Repository)
     repo.get_article_by_id.return_value = latest_empty
@@ -225,7 +237,7 @@ async def test_persist_and_log_skips_when_row_missing(tmp_path: Path) -> None:
     persisted = await _persist_and_log(
         ctx,
         row,
-        mutate=lambda a: None,
+        mutate=lambda a: a,
         log_suffix=" (http 404)",
     )
 
@@ -249,7 +261,7 @@ async def test_persist_and_log_counter_is_shared_across_branches(tmp_path: Path)
     row = _make_row(fresh)
 
     first = await _persist_and_log(
-        ctx, row, mutate=lambda a: setattr(a, "clean_text", "x"), log_suffix=""
+        ctx, row, mutate=lambda a: a.with_updates(clean_text="x"), log_suffix=""
     )
     second = await _persist_and_log(
         ctx, row, mutate=lambda a: setattr(a, "clean_text", "y"), log_suffix=""
@@ -304,7 +316,7 @@ async def test_persist_and_log_acquires_locks_in_order(tmp_path: Path) -> None:
     await _persist_and_log(
         ctx_patched,
         row,
-        mutate=lambda a: setattr(a, "clean_text", "x"),
+        mutate=lambda a: a.with_updates(clean_text="x"),
         log_suffix="",
     )
 
@@ -337,7 +349,7 @@ async def test_persist_and_log_dispatches_via_asyncio_to_thread(
     persisted = await _persist_and_log(
         ctx,
         row,
-        mutate=lambda a: setattr(a, "clean_text", "x"),
+        mutate=lambda a: a.with_updates(clean_text="x"),
         log_suffix="",
     )
 
