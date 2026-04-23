@@ -135,14 +135,20 @@ def _extract_features_for_article(
     seq: list[Article],
     nlp: Any,
     settings: ForensicsSettings,
+    doc: Any | None = None,
 ) -> FeatureVector:
     """Compute the per-article :class:`FeatureVector`.
 
     Pure feature computation: runs all six extractors and the assembler, with no
     DB access, no logging ceremony, and no author-level bookkeeping. Any extractor
     error propagates to the caller, which owns failure accounting.
+
+    If ``doc`` is provided, it is used directly (enabling bulk spaCy pipelining
+    via :meth:`spacy.Language.pipe` in the caller). Otherwise the document is
+    parsed on demand, preserving the legacy per-article call path.
     """
-    doc = nlp(article.clean_text)
+    if doc is None:
+        doc = nlp(article.clean_text)
     lex = lexical.extract_lexical_features(article.clean_text, doc)
     pos = pos_patterns.extract_pos_pattern_features(doc)
     struct = structural.extract_structural_features(article.clean_text, doc)
@@ -239,7 +245,14 @@ def _process_author_batch(
     if progress is not None:
         task_id = progress.add_task(f"Extracting {author_name}", total=batch)
 
-    for idx, article in enumerate(articles_seq):
+    # Pre-parse every article with nlp.pipe for ~1.5-2× throughput over per-article
+    # nlp(text). n_process stays at 1 so this is safe to run inside a
+    # ProcessPoolExecutor worker (author-level parallelism); spaCy's own fork-based
+    # multiprocessing would deadlock when nested.
+    texts = [a.clean_text for a in articles_seq]
+    docs_iter = nlp.pipe(texts, batch_size=200, n_process=1)
+
+    for idx, (article, doc) in enumerate(zip(articles_seq, docs_iter, strict=True)):
         running_processed = processed_before_batch + result.processed
         if running_processed and running_processed % 50 == 0:
             logger.debug(
@@ -248,7 +261,9 @@ def _process_author_batch(
                 author_name,
             )
         try:
-            fv = _extract_features_for_article(article, idx, articles_seq, nlp, settings)
+            fv = _extract_features_for_article(
+                article, idx, articles_seq, nlp, settings, doc=doc
+            )
             result.features.append(fv)
 
             if not skip_embeddings:
