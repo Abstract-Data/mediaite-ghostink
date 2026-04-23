@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
@@ -19,6 +20,42 @@ from forensics.pipeline_context import PipelineContext
 logger = logging.getLogger(__name__)
 
 
+@dataclass(frozen=True, slots=True)
+class AnalyzeContext:
+    """Shared inputs threaded through ``analyze`` stage runners.
+
+    ``paths`` is pre-computed so stage runners can reach any artifact location
+    without re-deriving the project layout on each call.
+    """
+
+    db_path: Path
+    settings: ForensicsSettings
+    paths: AnalysisArtifactPaths
+    author_slug: str | None
+
+    @classmethod
+    def build(
+        cls,
+        db_path: Path,
+        settings: ForensicsSettings,
+        *,
+        root: Path,
+        author: str | None,
+    ) -> AnalyzeContext:
+        """Construct a context from the ambient project layout."""
+        return cls(
+            db_path=db_path,
+            settings=settings,
+            paths=AnalysisArtifactPaths.from_project(root, db_path),
+            author_slug=author,
+        )
+
+    @property
+    def root(self) -> Path:
+        """Project root backing the artifact layout."""
+        return self.paths.project_root
+
+
 def _write_run_metadata(
     analysis_dir: Path,
     *,
@@ -28,31 +65,24 @@ def _write_run_metadata(
     (analysis_dir / "run_metadata.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
 
 
-def _run_compare_only_flow(
-    db_path: Path,
-    settings: ForensicsSettings,
-    *,
-    root: Path,
-    author: str | None,
-) -> None:
+def _run_compare_only_flow(ctx: AnalyzeContext) -> None:
     from forensics.analysis.orchestrator import run_compare_only
 
-    ctx = PipelineContext.resolve()
-    rid = ctx.record_audit("forensics analyze --compare", optional=False, log=logger)
+    pipeline_ctx = PipelineContext.resolve()
+    rid = pipeline_ctx.record_audit("forensics analyze --compare", optional=False, log=logger)
     assert rid is not None
-    paths = AnalysisArtifactPaths.from_project(root, db_path)
-    analysis_dir = paths.analysis_dir
+    analysis_dir = ctx.paths.analysis_dir
     analysis_dir.mkdir(parents=True, exist_ok=True)
     meta = {
         "run_id": rid,
         "run_timestamp": datetime.now(UTC).isoformat(),
-        "config_hash": ctx.config_hash,
+        "config_hash": pipeline_ctx.config_hash,
         "compare_only": True,
-        "author": author,
+        "author": ctx.author_slug,
     }
     _write_run_metadata(analysis_dir, rid=rid, meta=meta)
-    run_compare_only(settings, paths=paths, author_slug=author)
-    logger.info("analyze: compare-only complete author=%s", author or "all")
+    run_compare_only(ctx.settings, paths=ctx.paths, author_slug=ctx.author_slug)
+    logger.info("analyze: compare-only complete author=%s", ctx.author_slug or "all")
 
 
 def _resolve_mode_flags(
@@ -70,62 +100,37 @@ def _resolve_mode_flags(
     return False, True, False, True
 
 
-def _run_changepoint_stage(
-    db_path: Path,
-    settings: ForensicsSettings,
-    *,
-    root: Path,
-    author: str | None,
-) -> None:
+def _run_changepoint_stage(ctx: AnalyzeContext) -> None:
     from forensics.analysis.changepoint import run_changepoint_analysis
 
-    run_changepoint_analysis(db_path, settings, project_root=root, author_slug=author)
+    run_changepoint_analysis(
+        ctx.db_path, ctx.settings, project_root=ctx.root, author_slug=ctx.author_slug
+    )
 
 
-def _run_timeseries_stage(
-    db_path: Path,
-    settings: ForensicsSettings,
-    *,
-    root: Path,
-    author: str | None,
-) -> None:
+def _run_timeseries_stage(ctx: AnalyzeContext) -> None:
     from forensics.analysis.timeseries import run_timeseries_analysis
 
-    run_timeseries_analysis(db_path, settings, project_root=root, author_slug=author)
+    run_timeseries_analysis(
+        ctx.db_path, ctx.settings, project_root=ctx.root, author_slug=ctx.author_slug
+    )
 
 
-def _run_drift_stage(
-    db_path: Path,
-    settings: ForensicsSettings,
-    *,
-    root: Path,
-    author: str | None,
-) -> None:
+def _run_drift_stage(ctx: AnalyzeContext) -> None:
     from forensics.analysis.drift import run_drift_analysis
 
-    paths = AnalysisArtifactPaths.from_project(root, db_path)
-    run_drift_analysis(settings, paths=paths, author_slug=author)
+    run_drift_analysis(ctx.settings, paths=ctx.paths, author_slug=ctx.author_slug)
 
 
-def _run_full_analysis_stage(
-    db_path: Path,
-    settings: ForensicsSettings,
-    *,
-    root: Path,
-    author: str | None,
-) -> None:
+def _run_full_analysis_stage(ctx: AnalyzeContext) -> None:
     from forensics.analysis.orchestrator import run_full_analysis
 
-    layout_paths = AnalysisArtifactPaths.from_project(root, db_path)
-    asyncio.run(run_full_analysis(layout_paths, settings, author_slug=author))
+    asyncio.run(run_full_analysis(ctx.paths, ctx.settings, author_slug=ctx.author_slug))
 
 
 def _run_ai_baseline_stage(
-    db_path: Path,
-    settings: ForensicsSettings,
+    ctx: AnalyzeContext,
     *,
-    root: Path,
-    author: str | None,
     skip_generation: bool,
     articles_per_cell: int | None,
     baseline_model: str | None,
@@ -134,10 +139,10 @@ def _run_ai_baseline_stage(
 
     try:
         run_ai_baseline_command(
-            db_path,
-            settings,
-            project_root=root,
-            author_slug=author,
+            ctx.db_path,
+            ctx.settings,
+            project_root=ctx.root,
+            author_slug=ctx.author_slug,
             skip_generation=skip_generation,
             articles_per_cell=articles_per_cell,
             model_filter=baseline_model,
@@ -169,8 +174,8 @@ def run_analyze(
     settings = get_settings()
     root = get_project_root()
     db_path = root / "data" / "articles.db"
-    artifact_paths = AnalysisArtifactPaths.from_project(root, db_path)
-    analysis_dir = artifact_paths.analysis_dir
+    ctx = AnalyzeContext.build(db_path, settings, root=root, author=author)
+    analysis_dir = ctx.paths.analysis_dir
     analysis_dir.mkdir(parents=True, exist_ok=True)
 
     if verify_corpus:
@@ -183,7 +188,7 @@ def run_analyze(
         logger.info("corpus hash verified (%s)", message)
 
     if compare and not (changepoint or timeseries or drift or ai_baseline or convergence):
-        _run_compare_only_flow(db_path, settings, root=root, author=author)
+        _run_compare_only_flow(ctx)
         return
 
     do_changepoint, do_timeseries, do_drift, do_full_analysis = _resolve_mode_flags(
@@ -195,13 +200,13 @@ def run_analyze(
         ai_baseline=ai_baseline,
     )
 
-    ctx = PipelineContext.resolve()
-    rid = ctx.record_audit("forensics analyze", optional=False, log=logger)
+    pipeline_ctx = PipelineContext.resolve()
+    rid = pipeline_ctx.record_audit("forensics analyze", optional=False, log=logger)
     assert rid is not None
     meta = {
         "run_id": rid,
         "run_timestamp": datetime.now(UTC).isoformat(),
-        "config_hash": ctx.config_hash,
+        "config_hash": pipeline_ctx.config_hash,
         "changepoint": do_changepoint,
         "timeseries": do_timeseries,
         "drift": do_drift,
@@ -211,19 +216,16 @@ def run_analyze(
     _write_run_metadata(analysis_dir, rid=rid, meta=meta)
 
     if do_changepoint:
-        _run_changepoint_stage(db_path, settings, root=root, author=author)
+        _run_changepoint_stage(ctx)
     if do_timeseries:
-        _run_timeseries_stage(db_path, settings, root=root, author=author)
+        _run_timeseries_stage(ctx)
     if do_drift:
-        _run_drift_stage(db_path, settings, root=root, author=author)
+        _run_drift_stage(ctx)
     if do_full_analysis:
-        _run_full_analysis_stage(db_path, settings, root=root, author=author)
+        _run_full_analysis_stage(ctx)
     if ai_baseline:
         _run_ai_baseline_stage(
-            db_path,
-            settings,
-            root=root,
-            author=author,
+            ctx,
             skip_generation=skip_generation,
             articles_per_cell=articles_per_cell,
             baseline_model=baseline_model,
