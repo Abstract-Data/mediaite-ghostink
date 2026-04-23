@@ -1374,3 +1374,46 @@ $ uv run forensics --help
 #### Risks & Next Steps
 - `load_drift_summary` now opens the manifest directly whenever the drift cache is absent (inherited from `load_article_embeddings`). That is unchanged behavior vs. the previous helper but the caller in `_summarize_control_authors` still passes through an open `Repository` context — no behavioral regression, but future cleanup could hoist all drift-related loading out of `with Repository(...)` if desired.
 - C901 suppression removed for drift.py — future edits that push any function over McCabe 10 will fail lint. That was the intended outcome of D5.
+
+---
+
+### Phase 13 Unit 6 — Scraper / repository / scrape.py consolidation
+**Status:** Complete
+**Date:** 2026-04-22
+**Agent/Session:** Phase 13 batch — Unit 6 (parallel)
+
+#### What Was Done
+- **B1** Added `ensure_repo` context manager in `storage/repository.py` and replaced all five `if repo is not None: ... else: with Repository(db_path) as owned:` ceremonies (3 in `cli/scrape.py`, 1 in `scraper/crawler.py`, 1 in `scraper/fetcher.py`).
+- **A4** Replaced `import uuid` with `from uuid import uuid4` in `storage/repository.py` (single call site updated).
+- **C2** Extracted `_persist_and_log` from `_fetch_one_article_html` (`scraper/fetcher.py`). Helper consolidates the three-branch (HTTP-fail, off-domain, success) ceremony of `db_lock` → read/skip/mutate/upsert → `done_lock` → increment/log. Dual-mode via `mutate=` (lambda applying a branch-specific mutation in place) or `article=` (caller-supplied pre-built Article for the success branch). Preserves existing lock order and log labels.
+- **C3** Refactored `_full_pipeline` in `cli/scrape.py` to delegate discover+metadata to `_discover_and_metadata` (now accepts optional `repo=`), eliminating ~15 lines of duplicate discover-and-load logic.
+- **D4** Added `tests/unit/test_fetcher_mutations.py` — 8 async unit tests covering `_persist_and_log` for all three branches plus skip cases (already-fetched, missing row), shared-counter invariant, lock ordering (db_lock fully entered/exited before done_lock), and `asyncio.to_thread` dispatch.
+
+#### Files Modified
+- `src/forensics/storage/repository.py` — `ensure_repo` context manager, `uuid4` import.
+- `src/forensics/scraper/crawler.py` — import `ensure_repo`, collapsed one ceremony.
+- `src/forensics/scraper/fetcher.py` — import `ensure_repo` and `Callable`; new `_persist_and_log`; refactored three branches in `_fetch_one_article_html`; collapsed `fetch_articles` ceremony.
+- `src/forensics/cli/scrape.py` — import `ensure_repo`; collapsed three ceremonies; `_full_pipeline` delegates to `_discover_and_metadata`.
+- `tests/unit/test_fetcher_mutations.py` — new test module (8 tests).
+
+#### Verification Evidence
+```
+uv run ruff format --check .     -> 150 files already formatted
+uv run ruff check .              -> All checks passed!
+uv run pytest tests/ -v          -> 282 passed, 19 skipped, 2 deselected, coverage 57.75% (>=50% floor)
+uv run pytest tests/ -k "fetch or scrape or repository or repo" -v  -> 74 passed, 1 skipped
+uv run pytest tests/unit/test_fetcher_mutations.py -v               -> 8 passed
+uv run forensics --help          -> all subcommands listed as expected
+uv run forensics scrape --help   -> all scrape flags listed as expected
+```
+
+#### Decisions Made
+- `_persist_and_log` takes a dual signature (`mutate=` or `article=`) rather than two helpers. Single helper kept the call sites uniform; a docstring documents the contract and `assert` guards misuse.
+- `_discover_and_metadata` gained an optional `repo` parameter so `_full_pipeline` can pass a shared repo and keep metadata + fetch inside one context (avoiding a connect/disconnect cycle between phases).
+- Kept `Repository` class imports where classes are still referenced (type annotations in `_metadata_only`, `_fetch_only`, etc.) — `ensure_repo` is an addition, not a replacement of the class.
+
+#### Unresolved Questions
+- None within scope.
+
+#### Risks & Next Steps
+- Other Phase 13 units touch overlapping files (`cli/scrape.py`, `scraper/fetcher.py`). Merge conflicts are expected at boundaries; `_persist_and_log` in particular is a structural change inside `_fetch_one_article_html` that may require rebase fix-up if another unit refactors the same function. No public API surface changed — downstream callers of `fetch_articles`, `collect_article_metadata`, `dispatch_scrape` see identical signatures and behavior.

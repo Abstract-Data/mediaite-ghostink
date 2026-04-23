@@ -10,6 +10,7 @@ import shutil
 import tarfile
 import time
 import weakref
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -23,7 +24,7 @@ from forensics.models.article import Article
 from forensics.scraper.client import create_scraping_client
 from forensics.scraper.parser import extract_article_text, extract_metadata, looks_coauthored
 from forensics.storage.export import append_jsonl_async
-from forensics.storage.repository import Repository, UnfetchedArticle
+from forensics.storage.repository import Repository, UnfetchedArticle, ensure_repo
 from forensics.utils import utc_now_iso
 from forensics.utils.hashing import content_hash
 from forensics.utils.text import word_count
@@ -335,6 +336,49 @@ class ArticleHtmlFetchContext:
     total: int
 
 
+async def _persist_and_log(
+    ctx: ArticleHtmlFetchContext,
+    row: UnfetchedArticle,
+    *,
+    mutate: Callable[[Article], None] | None,
+    log_suffix: str,
+    article: Article | None = None,
+) -> bool:
+    """Persist a fetch result under ``ctx.db_lock`` and log completion under ``ctx.done_lock``.
+
+    Two modes share this ceremony:
+    - When ``mutate`` is provided (HTTP-fail, off-domain): read the row, skip if already
+      filled, apply ``mutate(row)``, upsert.
+    - When ``article`` is provided (success): read the latest row, skip upsert if filled,
+      else upsert the caller's pre-built ``article``.
+
+    Returns True when a row was persisted (counter incremented + log emitted),
+    False when the write was skipped because the row was already fetched.
+    """
+    async with ctx.db_lock:
+        latest = await asyncio.to_thread(ctx.repo.get_article_by_id, row.article_id)
+        if _resume_skip_fetch(latest):
+            return False
+        if mutate is not None:
+            mutate(latest)
+            to_write = latest
+        else:
+            assert article is not None, "provide either `mutate` or `article`"
+            to_write = article
+        await asyncio.to_thread(ctx.repo.upsert_article, to_write)
+
+    async with ctx.done_lock:
+        ctx.done_count[0] += 1
+        logger.info(
+            "Fetched %s/%s articles for %s%s",
+            ctx.done_count[0],
+            ctx.total,
+            row.author_name,
+            log_suffix,
+        )
+    return True
+
+
 async def _fetch_one_article_html(
     client: httpx.AsyncClient,
     row: UnfetchedArticle,
@@ -358,21 +402,12 @@ async def _fetch_one_article_html(
         final_host = urlparse(str(response.url)).netloc
 
         if not response.is_success:
-            async with ctx.db_lock:
-                article = await asyncio.to_thread(ctx.repo.get_article_by_id, row.article_id)
-                if _resume_skip_fetch(article):
-                    return
-                _apply_http_failed_mutation(article, scraped_at, response)
-                await asyncio.to_thread(ctx.repo.upsert_article, article)
-            async with ctx.done_lock:
-                ctx.done_count[0] += 1
-                logger.info(
-                    "Fetched %s/%s articles for %s (http %s)",
-                    ctx.done_count[0],
-                    ctx.total,
-                    row.author_name,
-                    response.status_code,
-                )
+            await _persist_and_log(
+                ctx,
+                row,
+                mutate=lambda a: _apply_http_failed_mutation(a, scraped_at, response),
+                log_suffix=f" (http {response.status_code})",
+            )
             return
 
         if not _is_mediaite_host(final_host):
@@ -383,21 +418,12 @@ async def _fetch_one_article_html(
                 f"redirect_off_domain:{final_host}",
                 "html_fetch",
             )
-            async with ctx.db_lock:
-                article = await asyncio.to_thread(ctx.repo.get_article_by_id, row.article_id)
-                if _resume_skip_fetch(article):
-                    return
-                _apply_off_domain_mutation(article, scraped_at, final_host)
-                await asyncio.to_thread(ctx.repo.upsert_article, article)
-            async with ctx.done_lock:
-                ctx.done_count[0] += 1
-                logger.info(
-                    "Fetched %s/%s articles for %s (off-domain %s)",
-                    ctx.done_count[0],
-                    ctx.total,
-                    row.author_name,
-                    final_host,
-                )
+            await _persist_and_log(
+                ctx,
+                row,
+                mutate=lambda a: _apply_off_domain_mutation(a, scraped_at, final_host),
+                log_suffix=f" (off-domain {final_host})",
+            )
             return
 
         async with ctx.db_lock:
@@ -416,21 +442,7 @@ async def _fetch_one_article_html(
             ctx.warns,
         )
 
-        async with ctx.db_lock:
-            latest = await asyncio.to_thread(ctx.repo.get_article_by_id, row.article_id)
-            if _resume_skip_fetch(latest):
-                pass
-            else:
-                await asyncio.to_thread(ctx.repo.upsert_article, article)
-
-        async with ctx.done_lock:
-            ctx.done_count[0] += 1
-            logger.info(
-                "Fetched %s/%s articles for %s",
-                ctx.done_count[0],
-                ctx.total,
-                row.author_name,
-            )
+        await _persist_and_log(ctx, row, mutate=None, article=article, log_suffix="")
 
 
 def archive_raw_year_dirs(root: Path, db_path: Path) -> int:
@@ -517,7 +529,5 @@ async def fetch_articles(
             )
         return done_count[0]
 
-    if repo is not None:
-        return await _run(repo)
-    with Repository(db_path) as owned:
-        return await _run(owned)
+    with ensure_repo(db_path, repo) as r:
+        return await _run(r)
