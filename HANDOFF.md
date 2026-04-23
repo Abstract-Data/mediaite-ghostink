@@ -1650,3 +1650,37 @@ Required test coverage of 66.0% reached. Total coverage: 66.59%
 - The `notebooks/04_feature_analysis.ipynb` still imports `read_features`
   directly (verified still functional); update to `scan_features` on next
   notebook pass.
+
+---
+
+### Refactoring & Code Smell Report — Run 7
+**Status:** Complete
+**Date:** 2026-04-22
+**Agent/Session:** claude-opus-4-6 / Refactoring & Code Smell Report Run 7
+
+#### What Was Done
+- Performed a full-codebase refactoring and code smell audit across 92 Python source files under `src/forensics/`.
+- Identified 14 distinct issues (47 total occurrences) across DRY violations, complexity hotspots, code smells, architectural smells, and dead/unreachable code.
+- Wrote the full report in Enhanced Markdown (Notion-flavored with HTML `<table>` tags) and saved it to Notion at `collection://2e97d7f5-6298-804c-b8a5-000b18b72684`.
+- Notion page URL: `https://www.notion.so/34b7d7f562988112a9f2d66485c0893f`
+
+#### Files Modified
+- No source files modified. This was a read-only analysis task.
+
+#### Verification Evidence
+- All 92 `.py` files under `src/forensics/` were read and analyzed.
+- Issue counts cross-checked: 0 Critical, 3 High, 7 Medium, 4 Low.
+- Notion page created successfully via `notion-create-pages` MCP tool.
+
+#### Decisions Made
+- Counted each unique pattern as ONE issue regardless of how many locations it appears in; occurrences capture spread per the framework rules.
+- Repository class (~377 lines, ~20 methods) assessed against God Object threshold (500 lines) but downgraded to Medium given ADR-005 rationale and existing section banners from Run 6 remediation.
+- `find_convergence_windows` in `changepoint.py` classified as dead code (redundant with `compute_convergence_scores` in `convergence.py`) rather than a DRY violation, since it produces incomplete results (`pipeline_b_score=0.0`).
+
+#### Unresolved Questions
+- None.
+
+#### Risks & Next Steps
+- Top finding (RF-DRY-001): The incomplete `ConvergenceInput` migration in `convergence.py` leaves a dual API (12-param function + parameter object). Completing the migration is the highest-impact single refactoring.
+- Three High-severity issues should be addressed next: RF-DRY-001 (ConvergenceInput migration), RF-CPLX-001 (`extract_probability_features` at 131 lines), RF-DEAD-001 (redundant `find_convergence_windows`).
+- Quick wins identified: remove unused `Mapping` import in `provenance.py`, replace 5 magic numbers in `convergence.py` with named constants, complete `analysis/utils.py` re-export shim cleanup.
