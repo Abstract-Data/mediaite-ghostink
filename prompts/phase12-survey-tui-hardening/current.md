@@ -1,10 +1,15 @@
 # Phase 12: Survey Mode, Interactive TUI, Runtime Hardening & Calibration
 
 Version: 0.2.0
-Status: pending
+Status: completed
 Last Updated: 2026-04-22
+Completed: 2026-04-22 (stakeholder sign-off — scope shipped per codebase audit / gap-closure plan)
 Model: claude-opus-4-6
 Depends on: Phase 11 (Typer CLI), Phase 10 (AI baseline), Phase 9 (probability features), Phase 7 (convergence/statistics), Phase 6 (drift), Phase 5 (changepoint/timeseries), Phase 4 (feature extraction), Phase 3 (scraper)
+
+## Shipped vs prompt prose (control validation)
+
+- **`validate_against_controls`:** The implementation in `src/forensics/survey/scoring.py` is intentionally lightweight: it returns a `ControlValidation` summary (control count, mean/max composite score across the natural-control slug set). The Phase 12 prompt sketch described per-feature Welch / Mann–Whitney tests against loaded feature frames; that heavier statistical battery is **not** in this release — treat it as a **separate follow-up task** if the newsroom needs distributional comparisons beyond composite summaries.
 
 ## Objective
 
