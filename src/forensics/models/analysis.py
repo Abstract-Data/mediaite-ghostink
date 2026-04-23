@@ -6,7 +6,7 @@ from datetime import date, datetime
 from typing import Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ChangePoint(BaseModel):
@@ -49,6 +49,14 @@ class DriftScores(BaseModel):
 
 
 class HypothesisTest(BaseModel):
+    """Immutable hypothesis-test record.
+
+    ``apply_correction`` and ``filter_by_effect_size`` now return new instances
+    via ``model_copy`` rather than mutating shared objects (P2-MAINT-002).
+    """
+
+    model_config = ConfigDict(frozen=True)
+
     test_name: str
     feature_name: str
     author_id: str

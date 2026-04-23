@@ -76,8 +76,28 @@ CREATE TABLE IF NOT EXISTS analysis_runs (
 def _connect(db_path: Path) -> sqlite3.Connection:
     """Open SQLite with DEFERRED transactions, WAL, and busy timeout (ADR-005).
 
-    ``check_same_thread=False`` allows the connection to be used from asyncio worker
-    threads while callers serialize access (e.g. ``db_lock`` in the scraper fetcher).
+    Threading contract (P1-SEC-001):
+
+    - ``check_same_thread=False`` is set so asyncio worker threads
+      (``asyncio.to_thread``) can share one connection with the coroutine that
+      created it. SQLite itself serializes access at the C level, but Python's
+      cursor objects and transaction state are NOT safe for concurrent use.
+    - **Callers MUST serialize all reads and writes with an external lock.**
+      The scraper's ``db_lock = asyncio.Lock()`` is the canonical example (see
+      ``forensics.scraper.crawler._ingest_author_posts`` and
+      ``forensics.scraper.fetcher._handle_success``). Typical pattern::
+
+          async with db_lock:
+              await asyncio.to_thread(repo.upsert_article, article)
+
+    - Skipping the lock can corrupt the WAL journal (partial writes from one
+      thread seen by another mid-transaction) and will manifest as
+      ``database is locked`` stalls or, worse, silent data loss. If you aren't
+      writing the lock, you probably shouldn't be sharing the ``Repository``
+      across workers.
+    - The canonical single-threaded usage is the ``with Repository(db_path)
+      as repo:`` context manager; only fan-out via ``asyncio.to_thread``
+      needs the explicit lock.
     """
     conn = sqlite3.connect(
         db_path,

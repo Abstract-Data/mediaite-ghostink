@@ -95,12 +95,12 @@ def _run_hypothesis_tests_for_changepoints(
                 n_bootstrap=analysis_cfg.bootstrap_iterations,
             )
         )
-    apply_correction(
+    all_tests = apply_correction(
         all_tests,
         method=analysis_cfg.multiple_comparison_method,
         alpha=analysis_cfg.significance_threshold,
     )
-    filter_by_effect_size(
+    all_tests = filter_by_effect_size(
         all_tests,
         analysis_cfg.effect_size_threshold,
         alpha=analysis_cfg.significance_threshold,
