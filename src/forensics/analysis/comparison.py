@@ -175,11 +175,15 @@ def _summarize_control_authors(
 
         summary = load_drift_summary(slug, paths, settings=settings)
         cps = control_change_points[slug]
+        ac = settings.analysis
         control_windows[slug] = compute_convergence_scores(
             cps,
             summary.velocities,
             summary.baseline_curve,
             settings=settings,
+            use_permutation=ac.convergence_use_permutation,
+            n_permutations=ac.convergence_permutation_iterations,
+            permutation_seed=ac.convergence_permutation_seed,
         )
     return control_change_points, control_drift_scores, control_windows
 
@@ -204,11 +208,16 @@ def _editorial_signal_for_target(
         )
 
     summary = load_drift_summary(target_id, paths, settings=settings)
+
+    ac = settings.analysis
     target_windows = compute_convergence_scores(
         target_cps,
         summary.velocities,
         summary.baseline_curve,
         settings=settings,
+        use_permutation=ac.convergence_use_permutation,
+        n_permutations=ac.convergence_permutation_iterations,
+        permutation_seed=ac.convergence_permutation_seed,
     )
     return compute_signal_attribution(target_windows, control_windows)
 

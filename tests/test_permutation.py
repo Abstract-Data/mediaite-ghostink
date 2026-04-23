@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
+import pytest
 
 from forensics.analysis.permutation import (
     PermutationResult,
     changepoint_permutation,
     permutation_test,
 )
+from forensics.config import get_settings
 
 
 def test_permutation_random_data_high_pvalue() -> None:
@@ -96,3 +100,36 @@ def test_permutation_test_handles_empty_null() -> None:
     assert result.p_value == 1.0
     assert result.null_mean == 0.0
     assert result.null_std == 0.0
+
+
+def test_analysis_config_convergence_permutation_defaults(
+    forensics_config_path: Path,
+) -> None:
+    """``AnalysisConfig`` exposes permutation knobs with safe defaults."""
+    s = get_settings()
+    assert s.analysis.convergence_use_permutation is False
+    assert s.analysis.convergence_permutation_iterations == 1000
+    assert s.analysis.convergence_permutation_seed == 42
+
+
+def test_analysis_config_convergence_permutation_env_override(
+    forensics_config_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Nested ``FORENSICS_ANALYSIS__*`` env vars override TOML defaults."""
+    monkeypatch.setenv("FORENSICS_ANALYSIS__CONVERGENCE_USE_PERMUTATION", "true")
+    monkeypatch.setenv("FORENSICS_ANALYSIS__CONVERGENCE_PERMUTATION_ITERATIONS", "50")
+    monkeypatch.setenv("FORENSICS_ANALYSIS__CONVERGENCE_PERMUTATION_SEED", "7")
+    get_settings.cache_clear()
+    try:
+        s = get_settings()
+        assert s.analysis.convergence_use_permutation is True
+        assert s.analysis.convergence_permutation_iterations == 50
+        assert s.analysis.convergence_permutation_seed == 7
+    finally:
+        for key in (
+            "FORENSICS_ANALYSIS__CONVERGENCE_USE_PERMUTATION",
+            "FORENSICS_ANALYSIS__CONVERGENCE_PERMUTATION_ITERATIONS",
+            "FORENSICS_ANALYSIS__CONVERGENCE_PERMUTATION_SEED",
+        ):
+            monkeypatch.delenv(key, raising=False)
+        get_settings.cache_clear()

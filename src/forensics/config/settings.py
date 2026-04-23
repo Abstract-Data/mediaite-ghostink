@@ -78,6 +78,10 @@ class AnalysisConfig(BaseModel):
     convergence_min_feature_ratio: float = 0.6
     convergence_perplexity_drop_ratio: float = 0.92
     convergence_burstiness_drop_ratio: float = 0.94
+    # Empirical null for convergence windows (logged only; does not change windows).
+    convergence_use_permutation: bool = False
+    convergence_permutation_iterations: int = Field(default=1000, ge=10, le=50_000)
+    convergence_permutation_seed: int = 42
     intra_variance_pairwise_max: int = 20
     ai_baseline_llm_temperature: float = 0.7
     feature_extraction_max_failure_ratio: float = 0.25
