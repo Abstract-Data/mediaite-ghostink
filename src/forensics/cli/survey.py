@@ -71,6 +71,26 @@ def survey(
             help="Override the minimum date-span threshold in days (default from config).",
         ),
     ] = None,
+    post_year_min: Annotated[
+        int | None,
+        typer.Option(
+            "--post-year-min",
+            help=(
+                "Inclusive calendar year for WordPress posts during survey scrape "
+                "(use with --post-year-max); overrides config when set"
+            ),
+        ),
+    ] = None,
+    post_year_max: Annotated[
+        int | None,
+        typer.Option(
+            "--post-year-max",
+            help=(
+                "Inclusive calendar year for WordPress posts during survey scrape "
+                "(use with --post-year-min); overrides config when set"
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Run a blind newsroom survey — analyze all qualified authors."""
     settings = get_settings()
@@ -115,6 +135,8 @@ def survey(
             skip_scrape=skip_scrape,
             author=author,
             criteria=criteria,
+            post_year_min=post_year_min,
+            post_year_max=post_year_max,
         )
     )
 

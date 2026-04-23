@@ -8,7 +8,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field, computed_field, field_validator
+from pydantic import BaseModel, Field, computed_field, field_validator, model_validator
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -58,10 +58,30 @@ class ScrapingConfig(BaseModel):
     user_agent: str = "AI-Writing-Forensics/1.0 (research)"
     max_concurrent: int = 3
     max_retries: int = 3
+    # When True, the metadata phase also pulls `content.rendered` (100 posts per
+    # request) and writes body text inline, so `fetch_articles` no-ops. Trades
+    # per-article OG/ld+json metadata for ~100× fewer requests.
+    bulk_fetch_mode: bool = False
     retry_backoff_seconds: float = 5.0
     # Hamming-distance threshold passed to ``deduplicate_articles``.
     # Lower is stricter; 0 disables near-duplicate collapsing entirely.
     simhash_threshold: int = Field(default=3, ge=0, le=64)
+    # Inclusive calendar-year window for WordPress ``wp/v2/posts`` queries
+    # (``after`` / ``before``). Both unset = no date filter (full history).
+    post_year_min: int | None = Field(default=None, ge=1900, le=2100)
+    post_year_max: int | None = Field(default=None, ge=1900, le=2100)
+
+    @model_validator(mode="after")
+    def _post_year_range_consistent(self) -> ScrapingConfig:
+        has_min = self.post_year_min is not None
+        has_max = self.post_year_max is not None
+        if has_min ^ has_max:
+            msg = "post_year_min and post_year_max must both be set or both omitted"
+            raise ValueError(msg)
+        if has_min and has_max and self.post_year_max < self.post_year_min:
+            msg = "post_year_max must be >= post_year_min"
+            raise ValueError(msg)
+        return self
 
 
 class AnalysisConfig(BaseModel):

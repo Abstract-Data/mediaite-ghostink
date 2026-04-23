@@ -8,6 +8,7 @@ import logging
 from collections.abc import Iterator
 from datetime import UTC, date, datetime
 from pathlib import Path
+from urllib.parse import quote
 from uuid import NAMESPACE_URL, uuid5
 
 import httpx
@@ -22,15 +23,60 @@ from forensics.models.article import Article
 from forensics.models.author import Author, AuthorManifest
 from forensics.scraper.client import create_scraping_client
 from forensics.scraper.fetcher import RateLimiter, log_scrape_error, request_with_retry
+from forensics.scraper.parser import extract_article_text_from_rest
 from forensics.storage.repository import Repository, ensure_repo
 from forensics.utils.datetime import parse_wp_datetime
+from forensics.utils.hashing import content_hash as compute_content_hash
+from forensics.utils.text import word_count
 
 logger = logging.getLogger(__name__)
 
 # Stable entrypoints for CLI and cross-module idempotency; everything else is internal.
-__all__ = ("collect_article_metadata", "discover_authors", "stable_article_id")
+__all__ = (
+    "collect_article_metadata",
+    "discover_authors",
+    "posts_year_query_fragment",
+    "resolve_posts_year_window",
+    "stable_article_id",
+)
 
 MEDIAITE_REST = "https://www.mediaite.com/wp-json/wp/v2"
+
+
+def resolve_posts_year_window(
+    scraping: ScrapingConfig,
+    *,
+    override_min: int | None = None,
+    override_max: int | None = None,
+) -> tuple[int, int] | None:
+    """Return inclusive ``(year_min, year_max)`` for WordPress post queries, or ``None``.
+
+    Config values apply when the corresponding override is omitted. CLI overrides
+    take precedence per side. Both min and max must be defined to enable filtering
+    (either from config or from overrides — mixing is allowed).
+    """
+    m = scraping.post_year_min if override_min is None else override_min
+    x = scraping.post_year_max if override_max is None else override_max
+    if m is None and x is None:
+        return None
+    if m is None or x is None:
+        msg = (
+            "posts year filter requires both min and max calendar years "
+            "(set scraping.post_year_min and post_year_max in config.toml, "
+            "or pass both --post-year-min and --post-year-max)"
+        )
+        raise ValueError(msg)
+    if x < m:
+        msg = "post year max must be >= post year min"
+        raise ValueError(msg)
+    return (m, x)
+
+
+def posts_year_query_fragment(year_min: int, year_max: int) -> str:
+    """URL suffix with WordPress ``after`` / ``before`` (UTC) for inclusive calendar years."""
+    after = f"{year_min:04d}-01-01T00:00:00Z"
+    before = f"{year_max + 1:04d}-01-01T00:00:00Z"
+    return f"&after={quote(after, safe='')}&before={quote(before, safe='')}"
 
 
 def _stable_author_id(slug: str) -> str:
@@ -71,18 +117,31 @@ def _wp_post_to_article(post: dict[str, object], author_id: str) -> Article:
             modified_date = parse_wp_datetime(str(post["modified"]))
         except (TypeError, ValueError):
             modified_date = None
+    clean = ""
+    wc = 0
+    chash = ""
+    scraped_at: datetime | None = None
+    content_block = post.get("content")
+    if isinstance(content_block, dict):
+        rendered = content_block.get("rendered")
+        if isinstance(rendered, str) and rendered:
+            clean = extract_article_text_from_rest(rendered)
+            wc = word_count(clean)
+            chash = compute_content_hash(clean)
+            scraped_at = datetime.now(UTC)
     return Article(
         id=stable_article_id(link),
         author_id=author_id,
         url=link,  # type: ignore[arg-type]
         title=title,
         published_date=published,
-        clean_text="",
-        word_count=0,
+        clean_text=clean,
+        word_count=wc,
         metadata={},
-        content_hash="",
+        content_hash=chash,
         modified_date=modified_date,
         modifier_user_id=_modifier_user_id_from_post(post),
+        scraped_at=scraped_at,
     )
 
 
@@ -156,6 +215,8 @@ async def discover_authors(
     force_refresh: bool = False,
     manifest_path: Path | None = None,
     errors_path: Path | None = None,
+    post_year_min: int | None = None,
+    post_year_max: int | None = None,
 ) -> int:
     """
     Discover all WordPress users and write ``data/authors_manifest.jsonl``.
@@ -175,6 +236,18 @@ async def discover_authors(
         return 0
 
     scraping = settings.scraping
+    year_window = resolve_posts_year_window(
+        scraping, override_min=post_year_min, override_max=post_year_max
+    )
+    posts_suffix = posts_year_query_fragment(*year_window) if year_window else ""
+    if year_window:
+        logger.info(
+            "discover: WordPress posts limited to calendar years %d–%d (inclusive)",
+            year_window[0],
+            year_window[1],
+        )
+    else:
+        logger.info("discover: WordPress posts date filter off (full published history)")
     limiter = RateLimiter(scraping.rate_limit_seconds, scraping.rate_limit_jitter)
     discovered_at = datetime.now(UTC)
     user_rows: list[dict[str, object]] = []
@@ -223,7 +296,9 @@ async def discover_authors(
         async def _count_posts_for_user(user: dict[str, object]) -> AuthorManifest | None:
             async with count_sem:
                 wp_id = int(user["id"])
-                count_url = f"{MEDIAITE_REST}/posts?author={wp_id}&per_page=1&_fields=id"
+                count_url = (
+                    f"{MEDIAITE_REST}/posts?author={wp_id}&per_page=1&_fields=id{posts_suffix}"
+                )
                 cresp = await request_with_retry(
                     client,
                     limiter,
@@ -274,6 +349,8 @@ async def collect_article_metadata(
     errors_path: Path | None = None,
     repo: Repository | None = None,
     all_authors: bool = False,
+    post_year_min: int | None = None,
+    post_year_max: int | None = None,
 ) -> int:
     """
     Upsert authors and their posts (metadata only) into SQLite.
@@ -303,6 +380,18 @@ async def collect_article_metadata(
     else:
         author_cfgs = list(settings.authors)
     scraping = settings.scraping
+    year_window = resolve_posts_year_window(
+        scraping, override_min=post_year_min, override_max=post_year_max
+    )
+    posts_suffix = posts_year_query_fragment(*year_window) if year_window else ""
+    if year_window:
+        logger.info(
+            "metadata: WordPress posts limited to calendar years %d–%d (inclusive)",
+            year_window[0],
+            year_window[1],
+        )
+    else:
+        logger.info("metadata: WordPress posts date filter off (full published history)")
     # One RateLimiter for the whole metadata run: parallel author tasks all call
     # request_with_retry with this instance, so inter-request spacing is global.
     limiter = RateLimiter(scraping.rate_limit_seconds, scraping.rate_limit_jitter)
@@ -323,6 +412,7 @@ async def collect_article_metadata(
                         by_slug,
                         errors,
                         db_lock,
+                        posts_query_suffix=posts_suffix,
                     )
                 except Exception as exc:  # noqa: BLE001 — isolate per-author failures
                     logger.exception("metadata ingestion failed for author slug=%s", cfg.slug)
@@ -352,6 +442,8 @@ async def _ingest_author_posts(
     by_slug: dict[str, AuthorManifest],
     errors_path: Path,
     db_lock: asyncio.Lock,
+    *,
+    posts_query_suffix: str = "",
 ) -> int:
     manifest_row = by_slug.get(cfg.slug)
     if manifest_row is None:
@@ -383,11 +475,15 @@ async def _ingest_author_posts(
     page = 1
     total_pages = 1
     published_dates: list[datetime] = []
+    fields = "id,slug,link,title,date,modified,meta"
+    if scraping.bulk_fetch_mode:
+        fields += ",content"
 
     while page <= total_pages:
         url = (
             f"{MEDIAITE_REST}/posts?author={wp_id}&per_page=100&page={page}"
-            "&_fields=id,slug,link,title,date,modified,meta"
+            f"&_fields={fields}"
+            f"{posts_query_suffix}"
         )
         resp = await request_with_retry(
             client,
@@ -425,6 +521,18 @@ async def _ingest_author_posts(
                 if not exists:
                     await asyncio.to_thread(repo.upsert_article, article)
                     inserted_here += 1
+                elif scraping.bulk_fetch_mode and article.clean_text:
+                    # Resume case: metadata-only row already present, upgrade it with
+                    # the body text we just got from content.rendered.
+                    existing = await asyncio.to_thread(repo.get_article_by_id, article.id)
+                    if existing is not None and not existing.clean_text.strip():
+                        upgraded = existing.with_updates(
+                            clean_text=article.clean_text,
+                            word_count=article.word_count,
+                            content_hash=article.content_hash,
+                            scraped_at=article.scraped_at,
+                        )
+                        await asyncio.to_thread(repo.upsert_article, upgraded)
         page += 1
 
     n_indexed = len(published_dates)
