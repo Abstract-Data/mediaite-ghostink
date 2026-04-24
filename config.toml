@@ -72,8 +72,11 @@ convergence_min_feature_ratio = 0.50
 convergence_cp_source = "section_adjusted"
 # Phase 15 C — apply BH correction per feature family rather than per author.
 fdr_grouping = "family"
-# Phase 15 E — Pipeline B scoring mode. ``legacy`` preserves v0.14 formulas.
-pipeline_b_mode = "legacy"
+# Phase 15 E — Pipeline B scoring mode. ``percentile`` uses per-author velocity
+# baseline (math-floor in ``legacy`` confirmed via DEBUG run on isaac-schorr,
+# 2026-04-24: peak_signal=sim_signal=ai_signal=0 for most windows under the
+# legacy standard-score formula `(max_vel − v_mean) / (2 σ_v)`).
+pipeline_b_mode = "percentile"
 # Phase 15 J5 — residualize feature series against one-hot sections before CPD.
 section_residualize_features = false
 # Phase 15 J — gating thresholds for section-conditioned diagnostics.
