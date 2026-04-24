@@ -1901,3 +1901,49 @@ uv run pytest tests/unit/test_config_hash.py -v
 - **Bench schema (`bench_schema_version: 1`):** bump if per-stage timings become non-flat (e.g. stage-level phases).
 - **Pre/post-Phase-15 boundary:** the new Sign in `docs/GUARDRAILS.md` is now the contract. Any pipeline code that pools `*_result.json` from different `config_hash` values must either force-recompute or explicitly filter to one hash.
 - **Smoke command for the bench (no real DB present):** `uv run python scripts/bench_phase15.py --output /tmp/phase15_pre_bench.json` runs end-to-end against the stub DB in ~8 ms and produces a valid schema-v1 JSON with `error="no AnalysisResult emitted"` per author. Re-run against a real corpus DB to get a meaningful baseline.
+
+---
+
+### Phase 15 F0 — PELT kernel swap RBF → L2
+**Status:** Complete
+**Date:** 2026-04-24
+**Agent/Session:** Wave-2 fast-path perf win
+
+#### What Was Done
+- `src/forensics/analysis/changepoint.py` — `detect_pelt`, `changepoints_from_pelt`, and `analyze_author_feature_changepoints` now thread a `cost_model: PeltCostModel` kwarg (default `"l2"`). The cost model passed to `rpt.Pelt(model=...)` is read from `settings.analysis.pelt_cost_model` rather than hard-coded to `"rbf"`. New module-level `Literal["l2", "l1", "rbf"]` alias keeps the type spelling DRY between the function signatures and the settings field.
+- `config.toml` — extended the `pelt_cost_model` inline comment to capture the default flip (`rbf` → `l2`) and the Apr 24 2026 profile evidence so future readers do not have to dig through the prompt history.
+- `tests/unit/test_pelt_l2_swap.py` (NEW) — 11 tests covering happy path (synthetic mean shift), edge cases (empty/short/constant/NaN signals across `l2`/`l1`/`rbf`), regression-pinned indices for two fixed-seed fixtures, and a settings-wiring spy that confirms `analyze_author_feature_changepoints` forwards the configured cost model down to `detect_pelt`.
+
+#### Files Modified
+- `src/forensics/analysis/changepoint.py`
+- `config.toml`
+- `tests/unit/test_pelt_l2_swap.py` (NEW)
+- `HANDOFF.md`
+
+#### Verification Evidence
+```
+uv run pytest tests/unit/test_pelt_l2_swap.py -v --no-cov
+                                  → 11 passed
+uv run pytest tests/ -k "pelt or changepoint" -v --no-cov
+                                  → 21 passed, 545 deselected
+uv run ruff check . && uv run ruff format --check .
+                                  → All checks passed! / 196 files already formatted
+uv run pytest tests/ --no-cov     → 563 passed, 3 deselected, 1 warning in 154.88s
+```
+
+#### Decisions Made
+- **Defaulting both function args and the settings field to `"l2"`:** belt-and-suspenders so any caller that sidesteps `analyze_author_feature_changepoints` (e.g. ad-hoc notebook code, `tests/test_analysis.py::test_pelt_synthetic_mean_shift`) gets the new default automatically.
+- **Promoted the `Literal` to a module-level alias `PeltCostModel`** instead of repeating the `Literal["l2", "l1", "rbf"]` triple at every call site. Mirrors the settings-side declaration without importing settings into `detect_pelt` (keeps `changepoint.py`'s leaf-function surface simple).
+- **Did not capture a runtime snapshot diff against a reference author in this PR.** The pre-L2 `data/analysis/_pre_l2_snapshot/<slug>/` artifact requires fixture data on disk that this worktree does not carry. Per the F0 spec the snapshot diff is a benchmark-pass deliverable, captured against a real `data/articles.db`. F0 is expected to deliver ≥ 50× on the PELT phase per the Apr 24 2026 profile evidence (99.2% of analysis wall-clock was in `costrbf.error`).
+
+#### Snapshot Diff — Intent
+- Run `uv run forensics analyze --author tommy-christopher` against a populated `data/articles.db` once *before* this PR is merged with `pelt_cost_model = "rbf"` set; archive the per-author `data/analysis/<slug>/changepoints.json` to `data/analysis/_pre_l2_snapshot/<slug>/`.
+- Re-run with `pelt_cost_model = "l2"` (default after this PR). Diff CP counts, mean-timestamp delta, and CP-loss for `|Cohen's d| > 0.5` against the snapshot.
+- Pause and investigate before proceeding with subsequent F-phase units if L2 loses more than 20% of the high-effect-size CPs that RBF emitted (per F0 spec).
+
+#### Unresolved Questions
+- Does pen=3.0 still produce the right CP density under L2 on the full Mediaite corpus, or does L2's tighter location-shift selectivity warrant a re-tune of `pelt_penalty`? Will surface in the snapshot diff above.
+
+#### Risks & Next Steps
+- **Pre/post-F0 artifact mixing:** L2 and RBF emit different CP streams; any cross-author analysis that pools `changepoints.json` produced before/after this PR will mix kernels. The Phase-15 config-hash Sign in `docs/GUARDRAILS.md` already covers this — `pelt_cost_model` is hash-included via `json_schema_extra={"include_in_config_hash": True}`, so per-author results stamped under the old hash will be recomputed on the next analyze run rather than silently mixed.
+- **Subsequent Phase-F units (bootstrap vectorization, per-feature caching, constant-signal early-exit) now operate against an L2 baseline;** their measured wins will be on top of the F0 100–500× win, not added to it.
