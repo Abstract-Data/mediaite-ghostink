@@ -3113,3 +3113,41 @@ uv run python -m pytest tests/ --no-cov
 #### Risks & Next Steps
 - After this PR lands, re-run `forensics features migrate` + `forensics analyze section-profile` to get the real J5 verdict on the corpus. The previous run produced DEGENERATE solely because the migration backfilled `unknown` for every row.
 - The pre-existing `data/features/_pre_phase15_backup/` copy from the prior (URL-less) run will still be present — operators will want to delete or re-locate it before re-running so the next migration's backup doesn't shadow the original v1 fixtures.
+
+---
+
+### Phase 15 J5 Gate Verdict — Real Corpus Run
+**Status:** Decision recorded — J5 deferred per v0.4.0 gate spec
+**Date:** 2026-04-24
+**Agent/Session:** post-PR-#82 verdict computation
+
+#### What Was Done
+- Restored 14 feature parquets from `data/features/_pre_phase15_backup/` (rolling back the prior URL-less migration that filled `section="unknown"` for every row).
+- Re-ran `forensics features migrate --articles-db data/articles.db` against the patched migration script (PR #82). Result: `section` column populated from real URLs across 14 parquets.
+- Verified backfill on `sarah-rumpf.parquet` (2,707 rows): `media` 1,368 / `politics` 702 / `online` 219 / `crime` 171 / `opinion` 105 / `analysis` 67 / `lawcrime` 48 / `election-2022` 20 / `uncategorized` 7. Zero `unknown`.
+- Re-ran `forensics analyze section-profile`. **Verdict: BORDERLINE.**
+- Report written to `data/analysis/section_profile_report.md`.
+
+#### Verdict Detail
+- **9 sections retained** (≥ 50 articles each): analysis, crime, lawcrime, media, online, opinion, politics, uk, uncategorized.
+- **Significant feature families (p < 0.01): 6** ✅ (gate criterion ≥ 3 satisfied)
+  - ai_markers, entropy, lexical_richness, readability, self_similarity, sentence_structure
+- **Max off-diagonal cosine distance: 0.0005** ❌ (gate criterion > 0.3 NOT satisfied)
+- Top features by η²: `bigram_entropy` (0.059), `trigram_entropy` (0.058), `self_similarity_30d` (0.046), `coleman_liau` (0.044), `self_similarity_90d` (0.041), `gunning_fog` (0.033), `flesch_kincaid` (0.033), `mattr` (0.028), `sent_length_mean` (0.023), `ttr` (0.019).
+- All top-10 features have p < 1e-198 (effectively zero), so per-feature variance IS section-driven — but the per-section centroids are extremely close (max cosine 0.0005). Mediaite writes most sections in a similar register; subtle per-feature shifts exist but the multivariate effect is too small to justify residualization.
+
+#### Decision
+Per v0.4.0 prompt lines 1295-1304: "If only one condition holds, document the borderline finding in HANDOFF.md and default-disable J5." → **Wave 4 (J5 section-residualize) NOT shipped.** `section_residualize_features` stays at its `False` default.
+
+#### Side Artifacts Gap
+The J3 spec (lines 1280-1289) calls for four artifacts: `section_centroids.json`, `section_distance_matrix.json`, `section_distance_matrix.csv`, `section_feature_ranking.json`. PR #75's implementation writes only the markdown `section_profile_report.md`. The verdict + matrix + top-10 table are all in the markdown so the gate decision is auditable, but the structured side artifacts are missing. Recorded as a follow-up gap; non-blocking for the J5 decision.
+
+#### Files Touched
+- `data/features/*.parquet` — re-migrated to v2 with real `section` values
+- `data/features/_pre_phase15_backup/*.parquet` — backups updated by the second migration run
+- `data/analysis/section_profile_report.md` — new
+
+#### Follow-Up
+- Optional: small PR to add the missing J3 side artifacts (centroids JSON, distance matrix JSON+CSV, feature ranking JSON) per spec lines 1280-1289.
+- Backup directory currently holds the v1-shape parquets from the second migration; operators wanting the original pre-Phase-15 fixtures should refresh from VCS.
+- Phase 15 is COMPLETE. All 47 in-scope steps landed across 20 PRs (#63-#82). G1 (`max_workers` orchestrator wiring) was flagged by H2 as not-yet-wired; it is the only remaining gap and is independent of Phase 15.
