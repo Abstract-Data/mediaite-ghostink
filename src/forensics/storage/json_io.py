@@ -52,6 +52,7 @@ def write_json_artifact(
     payload: Any,
     *,
     indent: int = 2,
+    sort_keys: bool = True,
 ) -> None:
     """Atomically write ``payload`` as JSON to ``path``.
 
@@ -61,9 +62,13 @@ def write_json_artifact(
       :func:`_to_jsonable`.
     - Writes to a sibling tempfile then atomically renames over ``path`` so a
       crash mid-write cannot corrupt a pre-existing artifact.
+    - ``sort_keys=True`` by default (Phase 15 H2) so two equivalent payloads
+      serialise to byte-identical bytes regardless of dict-insertion order.
+      Set ``sort_keys=False`` only when an artifact's reader depends on a
+      specific top-level key ordering (none currently do).
     """
     ensure_parent(path)
-    rendered = json.dumps(_to_jsonable(payload), indent=indent, default=str)
+    rendered = json.dumps(_to_jsonable(payload), indent=indent, sort_keys=sort_keys, default=str)
 
     with tempfile.NamedTemporaryFile(
         "w",
@@ -117,4 +122,42 @@ def write_text_atomic(path: Path, text: str, *, encoding: str = "utf-8") -> None
         raise
 
 
-__all__ = ["ensure_dir", "ensure_parent", "write_json_artifact", "write_text_atomic"]
+# Sort-key spec from prompts/phase15-optimizations/v0.4.0.md lines 1604-1620.
+# Kept module-level so the routing is data, not control flow — and so a future
+# artifact kind only requires adding a row, not editing logic.
+_ARTIFACT_SORT_KEYS: dict[str, tuple[str, ...]] = {
+    "change_points": ("feature_name", "timestamp", "effect_size_cohens_d"),
+    "hypothesis_tests": ("feature_name", "test_name"),
+    "convergence_windows": ("start_date", "end_date"),
+}
+
+
+def stable_sort_artifact_list(items: list[Any], *, kind: str) -> list[Any]:
+    """Sort a list of artifact records by a stable, semantic key (Phase 15 H2).
+
+    Two parallel runs of the same analysis must produce byte-identical JSON
+    artifacts. Object identity / dict insertion order leak into the wire
+    format unless we explicitly sort list-valued fields. ``kind`` selects the
+    per-list key from :data:`_ARTIFACT_SORT_KEYS`. ``KeyError`` on an unknown
+    ``kind`` is intentional — undefined kinds must not silently pass.
+
+    Items can be Pydantic models or plain dicts; both are read via ``getattr``
+    + ``Mapping.get`` so the same call works either side of a ``model_dump``.
+    """
+    sort_fields = _ARTIFACT_SORT_KEYS[kind]
+
+    def _key(record: Any) -> tuple[str, ...]:
+        if isinstance(record, Mapping):
+            return tuple(str(record.get(f, "")) for f in sort_fields)
+        return tuple(str(getattr(record, f, "")) for f in sort_fields)
+
+    return sorted(items, key=_key)
+
+
+__all__ = [
+    "ensure_dir",
+    "ensure_parent",
+    "stable_sort_artifact_list",
+    "write_json_artifact",
+    "write_text_atomic",
+]

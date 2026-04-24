@@ -83,3 +83,51 @@ def test_pipeline_a_family_score_regression_pin() -> None:
     assert window.convergence_ratio == pytest.approx(expected_ratio)
     assert window.pipeline_a_score == pytest.approx(expected_score)
     assert sorted(window.features_converging) == expected_features
+
+
+def test_pipeline_a_family_score_empty_change_points_yields_no_window() -> None:
+    """Edge case: empty CP list never crosses ``min_feature_ratio`` and emits nothing."""
+    result = compute_convergence_scores(
+        ConvergenceInput.build(
+            change_points=[],
+            centroid_velocities=[],
+            baseline_similarity_curve=[],
+            window_days=30,
+            min_feature_ratio=1 / FAMILY_COUNT,
+            total_feature_count=1,
+        )
+    )
+    assert result == [], "no CPs should yield no convergence windows"
+
+
+def test_pipeline_a_family_score_single_family_one_vote_only() -> None:
+    """Edge case: many CPs from one family count as a single representative vote.
+
+    Two CPs both in ``lexical_richness`` should produce a ratio of ``1 / FAMILY_COUNT``
+    (one family represented), not ``2 / FAMILY_COUNT``. The representative's score
+    is ``confidence * |effect|`` of the strongest CP in that family.
+    """
+    base = datetime(2024, 6, 1, tzinfo=UTC)
+    fixture_cps = [
+        _cp("ttr", base, 0.9, 0.8),  # lexical_richness rep score 0.72
+        _cp("hapax_ratio", base + timedelta(days=1), 0.4, 0.3),  # 0.12, dominated
+    ]
+
+    result = compute_convergence_scores(
+        ConvergenceInput.build(
+            change_points=fixture_cps,
+            centroid_velocities=[],
+            baseline_similarity_curve=[],
+            window_days=30,
+            # Ratio must be strictly below 1/FAMILY_COUNT to admit a single-family window.
+            min_feature_ratio=(1 / FAMILY_COUNT) - 0.01,
+            total_feature_count=len(fixture_cps),
+        )
+    )
+    assert result, "single-family fixture should still emit a window when the ratio passes"
+    window = result[0]
+    assert window.convergence_ratio == pytest.approx(1 / FAMILY_COUNT)
+    # Score = max representative in lexical_richness = 0.9 * 0.8 = 0.72.
+    assert window.pipeline_a_score == pytest.approx(0.72)
+    # Exactly one feature surfaces as the family representative (the stronger one).
+    assert window.features_converging == ["ttr"]

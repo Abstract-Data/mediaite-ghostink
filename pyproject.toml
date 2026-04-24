@@ -105,7 +105,9 @@ omit = [
 # Denominator includes features + storage; optional-heavy paths (probability, live
 # fetches) keep aggregate modest. Phase 15 (Notion remediation) raised fail_under to 72%
 # with pipeline stage-order tests, drift pipeline + provenance hash tests, and
-# orchestrator assemble coverage.
-fail_under = 72
+# orchestrator assemble coverage. Phase 15 H3 lifted to 75% after the H1
+# reference-fixture wave + H2 parallel-parity test added new test surface
+# (observed total coverage ~76.3%).
+fail_under = 75
 show_missing = true
 skip_covered = false
