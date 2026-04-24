@@ -106,9 +106,11 @@ class AnalysisConfig(BaseModel):
         "l2", json_schema_extra={"include_in_config_hash": True}
     )
     bocpd_hazard_rate: float = 1 / 250.0
-    # Phase 15 A — MAP-run-length reset replaces ``P(r=0)`` thresholding.
-    # ``bocpd_threshold`` is removed (it was algebraically pinned to the
-    # hazard rate and could never fire; see docs/GUARDRAILS.md).
+    # Phase 15 A — MAP-run-length reset replaces ``P(r=0)`` thresholding as
+    # the default. ``bocpd_threshold`` was removed (algebraically pinned to
+    # the hazard rate; see docs/GUARDRAILS.md). Set ``bocpd_detection_mode``
+    # to ``"p_r0_legacy"`` to restore the pre-Phase-A behavior byte-for-byte
+    # for replication / ablation runs.
     bocpd_detection_mode: Literal["p_r0_legacy", "map_reset"] = Field(
         "map_reset", json_schema_extra={"include_in_config_hash": True}
     )

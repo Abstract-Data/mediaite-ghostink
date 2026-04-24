@@ -2045,3 +2045,87 @@ uv run pytest tests/ --no-cov     → 563 passed, 3 deselected, 1 warning in 154
 #### Risks & Next Steps
 - **Pre/post-F0 artifact mixing:** L2 and RBF emit different CP streams; any cross-author analysis that pools `changepoints.json` produced before/after this PR will mix kernels. The Phase-15 config-hash Sign in `docs/GUARDRAILS.md` already covers this — `pelt_cost_model` is hash-included via `json_schema_extra={"include_in_config_hash": True}`, so per-author results stamped under the old hash will be recomputed on the next analyze run rather than silently mixed.
 - **Subsequent Phase-F units (bootstrap vectorization, per-feature caching, constant-signal early-exit) now operate against an L2 baseline;** their measured wins will be on top of the F0 100–500× win, not added to it.
+
+---
+
+### Phase 15 Phase A — BOCPD MAP-reset detection rule + Student-t predictive
+**Status:** Complete
+**Date:** 2026-04-24
+**Agent/Session:** Wave-2 signal-correctness unit (A1+A2+A3+A4 shipped together per `prompts/phase15-optimizations/v0.4.0.md` §Phase A)
+
+#### What Was Done
+
+**A1 — Regression test pinning broken legacy behavior**
+- Added `tests/unit/test_bocpd_semantics.py::test_legacy_p_r0_threshold_is_algebraically_pinned` which constructs the canonical synthetic mid-series mean shift (`[0]*50 + [5]*50` plus noise) and asserts that `mode="p_r0_legacy"` returns `<= 1` emit at `threshold=0.5`. This pins the GUARDRAILS Sign "BOCPD `P(r=0)` posterior is pinned to the hazard rate" — the legacy rule cannot fire on this fixture under constant hazard, by construction.
+
+**A2 — MAP-run-length reset detection rule**
+- Rewrote `detect_bocpd` in `src/forensics/analysis/changepoint.py` with `mode: Literal["map_reset", "p_r0_legacy"] = "map_reset"`. The new path emits a CP at timestep `t` when the posterior MAP run-length drops below `map_drop_ratio × prev_map`, gated by `min_run_length` (warmup) and `reset_cooldown` (refractory), then collapsed by `merge_window` (multi-reset clustering). Confidence is `exp(log_pi[current_map])` — bounded in [0, 1] and meaningful, unlike `P(r=0)`.
+- Refactored into three focused helpers (`_detect_bocpd_legacy`, `_detect_bocpd_map_reset`, `_collapse_adjacent_emits`) so `detect_bocpd` itself stays under McCabe 10. `_bocpd_step` math is unchanged — only the read-out changed.
+- Legacy `mode="p_r0_legacy"` path preserved byte-for-byte; pinned by `test_legacy_mode_preserves_byte_for_byte` against the existing O(n²) scalar reference in `tests/test_analysis.py`.
+
+**A3 — Settings plumbing**
+- The six knobs (`bocpd_detection_mode`, `bocpd_map_drop_ratio`, `bocpd_min_run_length`, `bocpd_reset_cooldown`, `bocpd_merge_window`, `bocpd_student_t`) were already declared by Unit 1. Wired all six through `analyze_author_feature_changepoints` → `changepoints_from_bocpd` → `detect_bocpd`. Removed the inlined `bocpd_threshold = 0.5` workaround; only `mode="p_r0_legacy"` consults `threshold` and the historical default is hard-coded there for one-line rollback.
+- Updated `config.toml` comments to document each knob's role + the rollback recipe.
+- Updated the explanatory comment on `AnalysisConfig.bocpd_detection_mode` in `src/forensics/config/settings.py` from "until that ships" to "set to `p_r0_legacy` to restore pre-Phase-A behavior".
+
+**A4 — Student-t posterior predictive (NIG conjugate, Murphy 2007 §7.6)**
+- Extended `_BocpdPrior` with `mu0_t`, `kappa0`, `alpha0`, `beta0`, and a `cumsum_sq` prefix-sum array so per-step segment sum-of-squares is O(1) just like `cumsum`.
+- New `_student_t_log_pred` implements the closed-form NIG → Student-t predictive vectorized over segment lengths via `scipy.stats.t.logpdf`. ν → ∞ correctly reduces to Normal.
+- Existing `_normal_log_pred` extracted from the old inline math; gated by the new `student_t: bool` kwarg on `_bocpd_step`.
+- Default `bocpd_student_t = True`. Normal path preserved for parity tests + A/B; the existing `_detect_bocpd_scalar_reference` test in `tests/test_analysis.py` now pins the Normal path explicitly.
+
+#### Files Modified
+- `src/forensics/analysis/changepoint.py` (rewritten BOCPD readout, new helpers, NIG/Student-t predictive, settings plumbing)
+- `src/forensics/config/settings.py` (comment refresh on `bocpd_detection_mode`)
+- `config.toml` (per-knob comments documenting MAP-reset semantics + Student-t)
+- `tests/test_analysis.py` (existing BOCPD tests pinned to `mode="p_r0_legacy"`, `student_t=False` for parity)
+- `tests/unit/test_bocpd_semantics.py` (new — 11 tests covering A1, A2, A3, A4)
+
+#### Verification Evidence
+
+```
+$ uv run pytest tests/unit/test_bocpd_semantics.py -v --no-cov
+11 passed in 39.78s
+
+$ uv run pytest tests/ -k "bocpd or changepoint or config" -v --no-cov
+68 passed, 516 deselected in 5.56s
+
+$ uv run ruff check . && uv run ruff format --check .
+All checks passed!
+201 files already formatted
+
+$ uv run pytest tests/ -v --no-cov
+581 passed, 3 deselected, 1 warning in 161.66s (0:02:41)
+```
+
+Key validations covered by the new test file:
+- Legacy `P(r=0)` threshold cannot fire on the canonical mean-shift fixture (≤ 1 emit at threshold 0.5).
+- MAP-reset mode emits exactly 1 CP near the true split (after multi-reset collapse).
+- Warmup gate suppresses early-signal resets (no emit at `t < min_run_length`).
+- Cooldown suppresses back-to-back emits (long cooldown ≤ short cooldown ≤ 1 on a 2-shift fixture).
+- Multi-reset collapse: `merge_window > 0` reduces adjacent argmax drops to a single CP.
+- Rollback flag (`bocpd_detection_mode = "p_r0_legacy"`) preserves legacy byte-for-byte regardless of MAP-reset knob values.
+- Student-t parity: on a stationary signal both predictive paths emit ≤ 2 CPs; on the mean-shift fixture Student-t surfaces the shift no later than Normal.
+- `analyze_author_feature_changepoints` integration: with default settings, BOCPD now produces CPs on a synthetic shift in `ttr` (impossible under the legacy `P(r=0)` rule).
+
+#### Decisions Made
+
+- **Single PR for A1+A2+A3+A4:** the prompt called for these to ship together; the test surface required to validate A2 already exercises A4 (Student-t predictive parity + warmup behavior depend on the new prior fields), so splitting commits would have shipped a half-tested module.
+- **Legacy mode kept under `mode` kwarg, not a separate function:** keeps a single import surface for callers and lets the rollback be a one-line config change. The kwarg is keyword-only to discourage positional misuse.
+- **Confidence semantics changed:** legacy returned `P(r=0) == hazard_rate`; MAP-reset returns `exp(log_pi[current_map])` which is the posterior mass at the new run-length. Both are clamped to [0, 1] downstream by `changepoints_from_bocpd`. Documented in the `detect_bocpd` docstring.
+- **NIG seeding (Murphy default):** `(μ_0, κ_0, α_0, β_0) = (mean(x[:10]), 1.0, 1.0, 0.5*var(x[:10]))`. Falls back to the wider 80-sample `sigma2` when the 10-sample seed variance is degenerate (e.g. constant warmup) — preserves numerical sanity without changing the published default.
+- **`min_run_length + 2` minimum signal length:** prevents the warmup gate from being unsatisfiable on too-short series. Returns `[]` rather than raising, matching the legacy `n < 6` guard.
+- **No changes to `_bocpd_step` math:** explicit ask in the prompt. The student_t flag selects between two log-predictive helpers; the log-message-passing update is identical.
+
+#### Unresolved Questions
+
+- **Empirical sensitivity sweep:** Phase A wires the knobs but doesn't ship a tuning study. The prompt's Phase A scope explicitly stops at "wire the new defaults"; Phase B / I (calibration runs) own the sweep.
+- **`changepoints_from_bocpd` parameter sprawl:** the function now takes 9 keyword args. Acceptable for an internal helper called from one site, but if a third caller appears we should bundle the BOCPD knobs into a small dataclass.
+
+#### Risks & Next Steps
+
+- **Downstream changepoint counts will rise sharply on real corpora:** the legacy rule emitted ~zero true CPs (pinned to hazard rate); MAP-reset will surface real shifts. Convergence-window math, BH correction grouping (Phase C `fdr_grouping="family"`), and Pipeline-A scoring (`pipeline_b_mode="legacy"` for now) all need re-verification on the next real-corpus bench. Expected — this is the intended outcome of the fix.
+- **Student-t default-on bumps the analysis config hash:** any cached `*_result.json` artifacts from before this PR will be invalidated. Operators must re-run analyze. Documented in the new comment in `config.toml`.
+- **Rollback recipe:** flip `analysis.bocpd_detection_mode = "p_r0_legacy"` (and optionally `bocpd_student_t = false`) in `config.toml` to restore Phase 15 Unit 1 behavior byte-for-byte. The legacy code path is covered by the parity tests in `tests/test_analysis.py::test_bocpd_vectorized_matches_reference`.
+- **GUARDRAILS Sign:** the "BOCPD `P(r=0)` posterior is pinned to the hazard rate" Sign remains in `docs/GUARDRAILS.md` — keep it. New code should still NOT threshold `P(r=0)`; the legacy mode is a rollback escape hatch only.
+- **Wave-2 follow-ups:** Phase B (feature-family convergence), Phase C (per-family FDR), and Phase D (shared-byline exclusion) are independent of Phase A and can run in parallel. Phase E (Pipeline B scoring) benefits from the increased CP yield enabled by this PR.
