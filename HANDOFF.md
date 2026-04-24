@@ -2216,6 +2216,29 @@ $ uv run python -m pytest tests/unit/test_section_extraction.py -v --no-cov
 $ uv run python -m pytest tests/ -k "url or section or features or parquet" -v --no-cov
 106 passed, 542 deselected in 75.61s
 
+---
+
+### 2026-04-24 — Phase 15 J2: Exclude advertorial / syndicated sections from survey + features
+**Status:** complete
+**Branch:** wave2-parking (worktree `agent-a5666bb5`)
+**Spec:** `prompts/phase15-optimizations/v0.4.0.md` lines 1236-1267
+
+#### What Was Done
+- `src/forensics/config/settings.py` — added `excluded_sections: frozenset[str]` to `FeaturesConfig` mirroring `SurveyConfig`'s default of `{"sponsored", "partner-content", "crosspost"}` so a single CLI flag flips both behaviours together.
+- `src/forensics/survey/qualification.py` — wired `excluded_sections` into `QualificationCriteria` (with `from_settings` propagation), filtered articles via `section_from_url(art.url)` before computing volume / recency / frequency, and emit a new disqualification reason `all_articles_excluded_by_section` when an author's entire corpus is in excluded sections. Added the `data/survey/excluded_articles.csv` audit dump (header pinned: `id,url,author,section,reason,likely_author_own_work`). The `likely_author_own_work` flag is set true for `crosspost` articles where the author is NOT a shared byline (informational only — no auto re-include). The CSV path defaults to `<project_root>/data/survey/excluded_articles.csv` inferred from `db_path`; tests pass an explicit override to keep writes inside `tmp_path`.
+- `src/forensics/features/pipeline.py` — added `_filter_excluded_sections(...)` that drops excluded-section articles before grouping by author, with a per-article DEBUG log + a single INFO summary log. Reads `settings.features.excluded_sections`.
+- `src/forensics/cli/survey.py` — added `--include-advertorial` flag (default OFF) that overrides `criteria.excluded_sections` to `frozenset()` for the run.
+- `src/forensics/cli/analyze.py` — added `--include-advertorial` flag that uses `model_copy` to override BOTH `settings.features.excluded_sections` and `settings.survey.excluded_sections` for the run.
+- `tests/unit/test_section_exclusion.py` — 9 new unit tests covering: happy-path volume reduction, fully-excluded author disqualification, pinned CSV header / column order, crosspost own-work flag, `--include-advertorial` re-inclusion, settings wiring, audit-CSV path constant, and the features-pipeline filter helper (positive + empty-set no-op).
+
+#### Verification Commands
+```bash
+$ uv run python -m pytest tests/unit/test_section_exclusion.py -v --no-cov
+9 passed in <2s
+
+$ uv run python -m pytest tests/ -k "qualification or features or section" -v --no-cov
+54 passed, 581 deselected in 17.14s
+
 $ uv run ruff check . && uv run ruff format --check .
 All checks passed!
 207 files already formatted
@@ -2462,3 +2485,25 @@ section-profile: retained 0 sections
 - If J1 lands a `section` column with `null` values, `_ensure_section_column`
   fills them with `"unknown"` so the omnibus does not crash on null
   groups.
+
+---
+
+$ uv run python -m pytest tests/ --no-cov
+all green (full suite passes; previous run reported 581 passed)
+```
+
+#### Decisions Made
+- **Both `SurveyConfig` and `FeaturesConfig` get the knob** so a single flag at either CLI flips the corresponding stage. Defaults are identical so the cross-stage behaviour stays consistent unless an operator deliberately diverges them in `config.toml`.
+- **Audit CSV is rewritten in full each run, not appended.** Spreadsheet consumers want a snapshot of "what was excluded by the latest run", not a growing log; per-run history lives in git via `data/survey/`.
+- **Default CSV path inference (`data/survey/excluded_articles.csv` under project root) is conditional** on the `data/articles.db` layout convention — unit tests with bare `tmp_path` databases that omit `audit_csv_path` get a no-op write, preventing unintended files outside `tmp_path`.
+- **`crosspost` + non-shared author → `likely_author_own_work=true`** is informational only per the J2 spec; reviewers spot-check the CSV and use `--include-advertorial` per-run for any override. No automatic re-inclusion logic.
+- **DEBUG log per dropped article + INFO summary line** in the features pipeline — DEBUG keeps log volume bounded for runs with many advertorials; the INFO line surfaces the headline number.
+- **CSV header pinned in a module-level constant** (`EXCLUDED_ARTICLES_CSV_HEADER`) and tested verbatim so accidental column reordering is caught at CI.
+
+#### Unresolved Questions
+- **J1 dependency:** the feature-extraction path here uses `section_from_url(str(art.url))` directly (the canonical helper from J1's `forensics.utils.url`). When the J1 PR lands, the feature parquet will gain a `section` column directly; we keep using the URL-derived helper for filtering at the source-of-truth layer (Article model), which is robust to parquet stamping changes. No post-merge cleanup required.
+- **Operational verification:** the spec calls out "verify the ~400 advertorial/syndicated articles are listed in the CSV" after a real run; that's an end-to-end check, not a unit test, and remains for the operator running `uv run forensics survey` against the live `articles.db`.
+
+#### Risks & Next Steps
+- The default `excluded_sections` set is a frozenset on `SurveyConfig` and `FeaturesConfig`. If TOML loading produces a `list`, pydantic will coerce — but if an operator overrides via env vars, the parsing path needs to handle list/set conversion. Pydantic handles this for `frozenset[str]`, but worth a smoke test on the next live run.
+- An author with only excluded-section articles now reports a new disqualification reason `all_articles_excluded_by_section` — downstream consumers parsing the disqualification reason string need to recognise this new value.

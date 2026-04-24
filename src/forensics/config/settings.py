@@ -219,6 +219,14 @@ class FeaturesConfig(BaseModel):
     feature_parquet_schema_version: int = Field(
         2, ge=1, json_schema_extra={"include_in_config_hash": True}
     )
+    # Phase 15 J2 — drop advertorial / syndicated articles from feature
+    # extraction so the per-author parquet stays free of off-style
+    # contamination. Mirrors :class:`SurveyConfig.excluded_sections`; both
+    # default to the same set so a single ``--include-advertorial`` flag at the
+    # CLI layer can flip both behaviours together.
+    excluded_sections: frozenset[str] = Field(
+        default_factory=lambda: frozenset({"sponsored", "partner-content", "crosspost"})
+    )
 
 
 class ProbabilityConfig(BaseModel):

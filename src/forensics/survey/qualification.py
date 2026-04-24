@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import csv
 import logging
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -12,8 +13,22 @@ from forensics.models.article import Article
 from forensics.models.author import Author
 from forensics.storage.repository import Repository
 from forensics.survey.shared_byline import matching_rule as _shared_byline_rule
+from forensics.utils.url import section_from_url
 
 logger = logging.getLogger(__name__)
+
+
+# Phase 15 J2 — header pinned for spreadsheet consumers; column order is part
+# of the public contract for the audit CSV. Tests assert this tuple exactly.
+EXCLUDED_ARTICLES_CSV_HEADER: tuple[str, ...] = (
+    "id",
+    "url",
+    "author",
+    "section",
+    "reason",
+    "likely_author_own_work",
+)
+EXCLUDED_ARTICLES_CSV_RELPATH = Path("data") / "survey" / "excluded_articles.csv"
 
 
 @dataclass(frozen=True)
@@ -32,6 +47,11 @@ class QualificationCriteria:
     recent_activity_days: int = 180
     # Phase 15 D — exclude newsroom-shared accounts (e.g. ``mediaite-staff``).
     exclude_shared_bylines: bool = True
+    # Phase 15 J2 — drop advertorial / syndicated sections from volume,
+    # recency, and frequency stats before checking the qualification gates.
+    excluded_sections: frozenset[str] = field(
+        default_factory=lambda: frozenset({"sponsored", "partner-content", "crosspost"})
+    )
 
     @classmethod
     def from_settings(cls, survey: SurveyConfig) -> QualificationCriteria:
@@ -43,6 +63,7 @@ class QualificationCriteria:
             require_recent_activity=survey.require_recent_activity,
             recent_activity_days=survey.recent_activity_days,
             exclude_shared_bylines=survey.exclude_shared_bylines,
+            excluded_sections=frozenset(survey.excluded_sections),
         )
 
 
@@ -143,11 +164,99 @@ def _check_criteria(
     return None
 
 
+@dataclass(frozen=True, slots=True)
+class _ExcludedRow:
+    """One audit-CSV row for an article dropped by section exclusion."""
+
+    article_id: str
+    url: str
+    author_slug: str
+    section: str
+    reason: str
+    likely_author_own_work: bool
+
+
+def _split_excluded_articles(
+    author: Author,
+    articles: list[Article],
+    excluded: frozenset[str],
+) -> tuple[list[Article], list[_ExcludedRow]]:
+    """Partition ``articles`` into (kept, excluded-rows-with-audit-metadata).
+
+    ``crosspost`` rows by an author who is *not* a shared byline are flagged
+    ``likely_author_own_work=True`` per the J2 spec — informational only; they
+    are still excluded by default.
+    """
+    if not excluded:
+        return articles, []
+    kept: list[Article] = []
+    rows: list[_ExcludedRow] = []
+    for art in articles:
+        section = section_from_url(str(art.url))
+        if section not in excluded:
+            kept.append(art)
+            continue
+        likely_own = section == "crosspost" and not author.is_shared_byline
+        rows.append(
+            _ExcludedRow(
+                article_id=art.id,
+                url=str(art.url),
+                author_slug=author.slug,
+                section=section,
+                reason=f"section_excluded ({section})",
+                likely_author_own_work=likely_own,
+            )
+        )
+    return kept, rows
+
+
+def _write_excluded_articles_csv(
+    rows: list[_ExcludedRow],
+    csv_path: Path,
+) -> None:
+    """Write the audit CSV with the pinned header. Always rewrites in-place."""
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
+    with csv_path.open("w", encoding="utf-8", newline="") as fh:
+        writer = csv.writer(fh)
+        writer.writerow(EXCLUDED_ARTICLES_CSV_HEADER)
+        for r in rows:
+            writer.writerow(
+                [
+                    r.article_id,
+                    r.url,
+                    r.author_slug,
+                    r.section,
+                    r.reason,
+                    "true" if r.likely_author_own_work else "false",
+                ]
+            )
+
+
+def _resolve_audit_csv_path(
+    db_path: Path,
+    explicit: Path | None,
+) -> Path | None:
+    """Pick the audit-CSV destination, or return ``None`` to skip the write.
+
+    Callers may pass ``explicit`` to override; otherwise we infer
+    ``<project_root>/data/survey/excluded_articles.csv`` from the ``db_path``
+    layout (``<project_root>/data/articles.db``). Returns ``None`` if the
+    layout isn't recognisable so unit tests with bare temp DBs don't trigger
+    a write into someone's home directory.
+    """
+    if explicit is not None:
+        return explicit
+    if db_path.name == "articles.db" and db_path.parent.name == "data":
+        return db_path.parent.parent / EXCLUDED_ARTICLES_CSV_RELPATH
+    return None
+
+
 def qualify_authors(
     db_path: Path,
     criteria: QualificationCriteria | None = None,
     *,
     today: date | None = None,
+    audit_csv_path: Path | None = None,
 ) -> tuple[list[QualifiedAuthor], list[QualifiedAuthor]]:
     """Evaluate all authors in the corpus against the qualification criteria.
 
@@ -155,6 +264,11 @@ def qualify_authors(
         db_path: Path to ``articles.db``.
         criteria: Optional custom criteria; defaults to ``QualificationCriteria()``.
         today: Anchor date for "recent activity" (useful for tests).
+        audit_csv_path: If set, dump the section-exclusion audit CSV to this
+            path. Defaults to ``<project>/data/survey/excluded_articles.csv``
+            inferred from ``db_path`` (``data/articles.db``); pass ``None``
+            inside tests to skip the write entirely by also setting
+            ``criteria.excluded_sections`` to ``frozenset()``.
 
     Returns:
         ``(qualified, disqualified)`` — both lists contain stats for transparency.
@@ -164,6 +278,7 @@ def qualify_authors(
 
     qualified: list[QualifiedAuthor] = []
     disqualified: list[QualifiedAuthor] = []
+    excluded_rows: list[_ExcludedRow] = []
 
     with Repository(db_path) as repo:
         authors = repo.all_authors()
@@ -175,9 +290,17 @@ def qualify_authors(
                 disqualified.append(_build_empty_dq(author, shared_reason))
                 continue
 
-            articles = repo.get_articles_by_author(author.id)
+            raw_articles = repo.get_articles_by_author(author.id)
+            articles, dropped = _split_excluded_articles(
+                author, raw_articles, criteria.excluded_sections
+            )
+            excluded_rows.extend(dropped)
+
             if not articles:
-                disqualified.append(_build_empty_dq(author, "no_articles"))
+                # Distinguish "never wrote anything" from "wrote only excluded
+                # sections" so the disqualification log is actionable.
+                reason = "no_articles" if not raw_articles else "all_articles_excluded_by_section"
+                disqualified.append(_build_empty_dq(author, reason))
                 continue
 
             qa = _summarize_author(author, articles)
@@ -190,6 +313,15 @@ def qualify_authors(
                 disqualified.append(replace(qa, disqualification_reason=reason))
             else:
                 qualified.append(qa)
+
+    csv_target = _resolve_audit_csv_path(db_path, audit_csv_path)
+    if csv_target is not None:
+        _write_excluded_articles_csv(excluded_rows, csv_target)
+        logger.info(
+            "qualification: %d article(s) excluded by section -> %s",
+            len(excluded_rows),
+            csv_target,
+        )
 
     logger.info(
         "qualification: %d qualified, %d disqualified out of %d total authors",
