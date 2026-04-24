@@ -58,8 +58,14 @@ except ImportError:  # pragma: no cover - fallback exercised only pre-Unit-4
     FAMILY_COUNT: int = len(set(FEATURE_FAMILIES.values()))
 
 # Named convergence-scoring constants (RF-SMELL-003 / audit for pre-registration lock).
-PIPELINE_SCORE_PASS_THRESHOLD: float = 0.5
-"""Both pipeline A and pipeline B scores must exceed this for the window to pass on A/B alone."""
+PIPELINE_SCORE_PASS_THRESHOLD: float = 0.3
+"""Both pipeline A and pipeline B scores must exceed this for the window to pass on A/B alone.
+
+Lowered from 0.5 → 0.3 in Fix-F (post-Phase-15-Fix-E) so pipeline_b-positive
+windows from percentile mode actually persist into the AB intersection. The
+strict 0.5 threshold filtered all percentile-mode-lifted windows because
+peak_signal alone tops at 0.5 when sim_signal=ai_signal=0.
+"""
 
 EMBEDDING_DROP_EPSILON: float = 0.05
 """Denominator epsilon for the head-vs-tail embedding similarity drop ratio."""
