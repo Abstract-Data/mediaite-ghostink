@@ -143,17 +143,29 @@ def survey(
             ),
         ),
     ] = None,
+    include_shared_bylines: Annotated[
+        bool,
+        typer.Option(
+            "--include-shared-bylines",
+            help=(
+                "Include newsroom-shared accounts (e.g. mediaite-staff) in the "
+                "survey; default OFF — shared bylines are disqualified."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Run a blind newsroom survey — analyze all qualified authors."""
     settings = get_settings()
     root = get_project_root()
     db_path = root / "data" / "articles.db"
 
-    overrides: dict[str, int] = {}
+    overrides: dict[str, object] = {}
     if min_articles is not None:
         overrides["min_articles"] = min_articles
     if min_span_days is not None:
         overrides["min_span_days"] = min_span_days
+    if include_shared_bylines:
+        overrides["exclude_shared_bylines"] = False
     criteria = replace(QualificationCriteria.from_settings(settings.survey), **overrides)
 
     if dry_run:

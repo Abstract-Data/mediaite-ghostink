@@ -1901,3 +1901,62 @@ uv run pytest tests/unit/test_config_hash.py -v
 - **Bench schema (`bench_schema_version: 1`):** bump if per-stage timings become non-flat (e.g. stage-level phases).
 - **Pre/post-Phase-15 boundary:** the new Sign in `docs/GUARDRAILS.md` is now the contract. Any pipeline code that pools `*_result.json` from different `config_hash` values must either force-recompute or explicitly filter to one hash.
 - **Smoke command for the bench (no real DB present):** `uv run python scripts/bench_phase15.py --output /tmp/phase15_pre_bench.json` runs end-to-end against the stub DB in ~8 ms and produces a valid schema-v1 JSON with `error="no AnalysisResult emitted"` per author. Re-run against a real corpus DB to get a meaningful baseline.
+
+---
+
+### Phase 15 Phase D: Shared-byline filter (model field + heuristic + qualification exclusion)
+**Status:** Complete
+**Date:** 2026-04-24
+**Agent/Session:** subagent ae5689c8 (worktree)
+
+#### What Was Done
+- D1: Added frozen `is_shared_byline: bool = False` field on the `Author` Pydantic model and a `with_updates()` helper mirroring `Article`.
+- D2: Implemented `is_shared_byline()` and `matching_rule()` helpers in a new `src/forensics/survey/shared_byline.py` module per Phase D spec. Wired the heuristic into the scraper ingest path so newly-discovered authors are stamped at write time.
+- D3: Added `exclude_shared_bylines: bool = True` to `QualificationCriteria` (kept it in sync with `SurveyConfig`, which already has the field). `qualify_authors` now disqualifies shared bylines first with reason `shared_byline (<rule>)` before counting articles. Added `--include-shared-bylines` CLI flag (default OFF) on `forensics survey`.
+- Repository persistence: `upsert_author` and `_author_row_to_model` now read/write the `is_shared_byline` column added by migration `001_author_shared_byline.py`.
+- New unit tests covering positive/negative heuristic cases (incl. the `Brandon` / `Sandra` false-positive guards), Author-model wiring, qualification disqualification (persisted flag and unflagged-but-heuristic-positive paths), and the `--include-shared-bylines` re-include flow.
+
+#### Files Modified
+- `src/forensics/models/author.py` — frozen `is_shared_byline` field + `with_updates()`.
+- `src/forensics/scraper/crawler.py` — populate `is_shared_byline` at author construction in `_ingest_author_posts`.
+- `src/forensics/storage/repository.py` — persist and load the new column (idempotent: defaults to 0).
+- `src/forensics/survey/shared_byline.py` — NEW heuristic module (`is_shared_byline`, `matching_rule`).
+- `src/forensics/survey/qualification.py` — `exclude_shared_bylines` field on `QualificationCriteria`, `_shared_byline_disqualify` gate in `qualify_authors`.
+- `src/forensics/cli/survey.py` — `--include-shared-bylines` typer option, threaded into criteria override dict.
+- `tests/unit/test_shared_byline.py` — NEW (16 tests across 22 parametrize cases).
+
+#### Verification Evidence
+```
+$ uv run pytest tests/unit/test_shared_byline.py -v --no-cov
+22 passed in 2.41s
+
+$ uv run pytest tests/ -k "qualification or survey or author or models" --no-cov
+63 passed, 1 skipped, 524 deselected in 143.62s
+
+$ uv run ruff check . && uv run ruff format --check .
+All checks passed!
+202 files already formatted
+
+$ uv run pytest tests/ --no-cov
+581 passed, 4 skipped, 3 deselected, 1 warning in 146.39s
+```
+
+#### Decisions Made
+- The qualification gate calls `matching_rule()` instead of both `is_shared_byline()` and `matching_rule()` — the rule label disambiguates which heuristic fired AND signals positivity (non-`None` ⇒ shared), so we avoid recomputing the same checks twice.
+- The gate also honours the persisted `Author.is_shared_byline` flag so older rows that pre-date the heuristic update still surface a `shared_byline (flagged)` reason without re-derivation.
+- Kept the heuristic order: outlet-prefix → token → conjunction → comma. The `" and "` guard with whitespace on both sides is intentional and tested against `brandon`, `sandra`, `alexander`.
+- `Author` is now `frozen=True` (matches `Article` per P1-ARCH-001). All 581 tests pass with this change, including ones that construct `Author` instances directly.
+
+#### Newly Disqualified Authors (Expected)
+With `exclude_shared_bylines=True` (the new default), the following Mediaite shared accounts will move from the qualified pool into `disqualified` with reason `shared_byline (<rule>)` on the next survey run:
+- `mediaite-staff` → reason `shared_byline (outlet_prefix)`.
+- `mediaite` → reason `shared_byline (outlet_slug)`.
+
+Operators who want the old behavior can pass `--include-shared-bylines` to `uv run forensics survey`.
+
+#### Unresolved Questions
+- No backfill: the migration adds the column but leaves all existing rows at `0`. The qualification gate falls back to the heuristic, so behavior is correct. If a future operator wants the database to reflect the heuristic without re-scraping, run a one-shot `UPDATE authors SET is_shared_byline=1 WHERE slug IN (...)` or a small backfill script.
+
+#### Risks & Next Steps
+- Watch the next survey run's `disqualified` list and confirm no real reporters fall into the shared bucket. The token list (`staff`, `editors`, `newsroom`, `team`, `desk`, `contributor(s)`, `bureau`, `wire`) is intentionally narrow but a Mediaite reporter slug containing one of these as a hyphen-separated component would be a false positive.
+- If an outlet other than `mediaite.com` is added later, the `outlet_prefix` rule auto-handles it (uses `outlet.split(".")[0]`).
