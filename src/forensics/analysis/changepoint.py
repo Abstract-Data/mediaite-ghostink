@@ -1,4 +1,15 @@
-"""Change-point detection (PELT, BOCPD) and convergence windows (Phase 5)."""
+"""Change-point detection (PELT, BOCPD) and convergence windows (Phase 5).
+
+Phase 15 Phase A overhaul (this file):
+- ``detect_bocpd`` now defaults to a MAP run-length reset rule. The legacy
+  ``P(r=0)`` threshold path is preserved under ``mode="p_r0_legacy"`` so
+  callers can A/B against the previous (algebraically broken) behavior. See
+  GUARDRAILS Sign "BOCPD ``P(r=0)`` posterior is pinned to the hazard rate".
+- ``_BocpdPrior`` carries a ``cumsum_sq`` array so per-step segment
+  sum-of-squares is O(1), enabling the NIG → Student-t posterior predictive
+  (Murphy 2007 §7.6) gated by ``student_t``. The Normal-known-σ² path is
+  kept for parity tests and rollback.
+"""
 
 from __future__ import annotations
 
@@ -7,12 +18,13 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import polars as pl
 import ruptures as rpt
 from scipy.special import logsumexp
+from scipy.stats import t as student_t_dist
 
 from forensics.analysis.artifact_paths import AnalysisArtifactPaths
 from forensics.analysis.statistics import cohens_d
@@ -22,6 +34,8 @@ from forensics.paths import load_feature_frame_for_author, resolve_author_rows
 from forensics.storage.json_io import write_json_artifact
 from forensics.storage.repository import Repository
 from forensics.utils.datetime import timestamps_from_frame
+
+BocpdMode = Literal["map_reset", "p_r0_legacy"]
 
 logger = logging.getLogger(__name__)
 
@@ -68,39 +82,121 @@ def detect_pelt(signal: np.ndarray, pen: float = 3.0) -> list[int]:
 class _BocpdPrior:
     """Prior hyperparameters computed once per signal (RF-CPLX-004 split).
 
-    ``sigma2``/``inv_sig2``: known observation variance estimated from the first
-    ``min(80, n)`` samples.
-    ``mu0``/``inv_v0``: Normal prior mean + inverse variance (seeded from the
-    first ``min(10, n)`` samples).
-    ``log_h``/``log_1mh``: log-hazard and log-1-hazard for the constant-rate prior.
-    ``cumsum``: prefix sums of ``x`` for O(1) segment sums.
+    Normal-known-σ² fields (legacy / ``student_t=False`` path):
+      - ``sigma2``/``inv_sig2``: known observation variance estimated from the
+        first ``min(80, n)`` samples.
+      - ``mu0``/``inv_v0``: Normal prior mean + inverse variance (seeded from
+        the first ``min(10, n)`` samples).
+
+    NIG → Student-t fields (default / ``student_t=True`` path; Murphy 2007 §7.6):
+      - ``mu0_t``: prior mean for the segment mean.
+      - ``kappa0``: prior pseudo-count for the mean (κ₀).
+      - ``alpha0``: shape for the inverse-gamma over σ².
+      - ``beta0``: scale for the inverse-gamma over σ².
+
+    Hazard:
+      - ``log_h``/``log_1mh``: log-hazard and log-1-hazard for the constant-rate prior.
+
+    Prefix sums (O(1) per-step segment statistics):
+      - ``cumsum``: prefix sums of ``x``.
+      - ``cumsum_sq``: prefix sums of ``x**2`` (Phase 15 A4 — needed for NIG ``ss``).
     """
 
     sigma2: float
     inv_sig2: float
     mu0: float
     inv_v0: float
+    mu0_t: float
+    kappa0: float
+    alpha0: float
+    beta0: float
     log_h: float
     log_1mh: float
     cumsum: np.ndarray
+    cumsum_sq: np.ndarray
 
 
 def _bocpd_init_prior(x: np.ndarray, hazard_rate: float) -> _BocpdPrior:
     n = len(x)
-    sigma2 = float(np.var(x[: min(80, n)]))
-    if sigma2 < 1e-12:
-        sigma2 = 1e-12
-    mu0 = float(np.mean(x[: min(10, n)]))
-    v0 = sigma2 * 4.0
+    seed_slice = x[: min(10, n)]
+    sigma2 = max(float(np.var(x[: min(80, n)])), 1e-12)
+    mu0 = float(np.mean(seed_slice))
+    # NIG seeding (Murphy 2007 §7.6): fall back to the wider prefix variance
+    # when the 10-sample seed is degenerate (e.g. constant warmup).
+    seed_var = float(np.var(seed_slice))
+    var_seed = seed_var if seed_var >= 1e-12 else sigma2
+    zero = np.zeros(1, dtype=float)
     return _BocpdPrior(
         sigma2=sigma2,
         inv_sig2=1.0 / sigma2,
         mu0=mu0,
-        inv_v0=1.0 / v0,
+        inv_v0=1.0 / (sigma2 * 4.0),
+        mu0_t=mu0,
+        kappa0=1.0,
+        alpha0=1.0,
+        beta0=0.5 * var_seed,
         log_h=float(np.log(hazard_rate)),
         log_1mh=float(np.log(max(1e-12, 1.0 - hazard_rate))),
-        cumsum=np.concatenate((np.zeros(1, dtype=float), np.cumsum(x, dtype=float))),
+        cumsum=np.concatenate((zero, np.cumsum(x, dtype=float))),
+        cumsum_sq=np.concatenate((zero, np.cumsum(np.square(x), dtype=float))),
     )
+
+
+def _normal_log_pred(
+    xt: float,
+    prior: _BocpdPrior,
+    s_idx: np.ndarray,
+    sum_s: np.ndarray,
+) -> np.ndarray:
+    """Normal-known-σ² posterior predictive (legacy path)."""
+    lengths = s_idx.astype(float)
+    inv_v = prior.inv_v0 + lengths * prior.inv_sig2
+    m = (prior.inv_v0 * prior.mu0 + prior.inv_sig2 * sum_s) / inv_v
+    var_pred = 1.0 / inv_v + prior.sigma2
+    return -0.5 * (np.log(2 * np.pi * var_pred) + (xt - m) ** 2 / var_pred)
+
+
+def _student_t_log_pred(
+    xt: float,
+    prior: _BocpdPrior,
+    s_idx: np.ndarray,
+    sum_s: np.ndarray,
+    sum_sq_s: np.ndarray,
+) -> np.ndarray:
+    """NIG → Student-t posterior predictive (Murphy 2007 §7.6).
+
+    For a segment of length ``n`` with sum ``s`` and sum-of-squares ``ss``:
+
+        κ_n = κ_0 + n
+        μ_n = (κ_0 μ_0 + s) / κ_n
+        α_n = α_0 + n/2
+        β_n = β_0 + 0.5 (ss − n (s/n)²) + 0.5 κ_0 n (s/n − μ_0)² / κ_n
+
+    Posterior predictive at ``x_t``:
+
+        ν      = 2 α_n
+        loc    = μ_n
+        scale² = β_n (κ_n + 1) / (α_n κ_n)
+
+    Implemented vector-safe over the segment-length axis. ``scipy.stats.t.logpdf``
+    handles ν → ∞ correctly (reduces to Normal).
+    """
+    n_arr = s_idx.astype(float)
+    kappa_n = prior.kappa0 + n_arr
+    mu_n = (prior.kappa0 * prior.mu0_t + sum_s) / kappa_n
+    alpha_n = prior.alpha0 + 0.5 * n_arr
+    sample_mean = sum_s / n_arr
+    centered_ss = sum_sq_s - n_arr * sample_mean * sample_mean
+    # Numerical floor: tiny negative values from float roundoff.
+    centered_ss = np.maximum(centered_ss, 0.0)
+    prior_pull = 0.5 * prior.kappa0 * n_arr * (sample_mean - prior.mu0_t) ** 2 / kappa_n
+    beta_n = prior.beta0 + 0.5 * centered_ss + prior_pull
+    nu = 2.0 * alpha_n
+    scale2 = beta_n * (kappa_n + 1.0) / (alpha_n * kappa_n)
+    # Guard against degenerate scale (e.g. n=1 with var_seed≈0).
+    scale2 = np.maximum(scale2, 1e-300)
+    scale = np.sqrt(scale2)
+    return student_t_dist.logpdf(xt, df=nu, loc=mu_n, scale=scale)
 
 
 def _bocpd_step(
@@ -108,8 +204,15 @@ def _bocpd_step(
     xt: float,
     log_pi: np.ndarray,
     prior: _BocpdPrior,
+    *,
+    student_t: bool = False,
 ) -> tuple[np.ndarray, float]:
-    """One forward update of the run-length posterior. Returns ``(log_pi_new, p_cp)``."""
+    """One forward update of the run-length posterior. Returns ``(log_pi_new, p_cp)``.
+
+    ``student_t=False`` keeps the original Normal-known-σ² predictive used by
+    Phase 15 Unit 1 (preserved for A/B + parity tests). ``student_t=True``
+    swaps in the NIG → Student-t predictive (Phase 15 A4).
+    """
     max_s = t
     log_pi = np.asarray(log_pi, dtype=float)
     if log_pi.size < max_s:
@@ -117,11 +220,11 @@ def _bocpd_step(
 
     s_idx = np.arange(1, max_s + 1, dtype=np.int64)
     sum_s = prior.cumsum[t] - prior.cumsum[t - s_idx]
-    lengths = s_idx.astype(float)
-    inv_v = prior.inv_v0 + lengths * prior.inv_sig2
-    m = (prior.inv_v0 * prior.mu0 + prior.inv_sig2 * sum_s) / inv_v
-    var_pred = 1.0 / inv_v + prior.sigma2
-    log_pred = -0.5 * (np.log(2 * np.pi * var_pred) + (xt - m) ** 2 / var_pred)
+    if student_t:
+        sum_sq_s = prior.cumsum_sq[t] - prior.cumsum_sq[t - s_idx]
+        log_pred = _student_t_log_pred(xt, prior, s_idx, sum_s, sum_sq_s)
+    else:
+        log_pred = _normal_log_pred(xt, prior, s_idx, sum_s)
 
     log_evidence = logsumexp(log_pi[:max_s] + log_pred)
     log_pi_new = np.full(t + 1, -np.inf)
@@ -132,35 +235,138 @@ def _bocpd_step(
     return log_pi_new, float(np.exp(log_pi_new[0]))
 
 
+def _detect_bocpd_legacy(
+    x: np.ndarray,
+    prior: _BocpdPrior,
+    *,
+    threshold: float,
+    student_t: bool,
+) -> list[tuple[int, float]]:
+    """Pre-Phase-A read-out: threshold ``P(r_t = 0 | x_{1:t})`` against ``threshold``.
+
+    Preserved byte-for-byte for rollback and replication. Under constant
+    hazard this quantity is algebraically pinned to the hazard rate (see
+    GUARDRAILS Sign), so the rule cannot fire on real change-points; we keep
+    it only so a one-line config flip restores prior runs exactly.
+    """
+    n = len(x)
+    log_pi = np.array([0.0])
+    out: list[tuple[int, float]] = []
+    for t in range(1, n):
+        log_pi, p_cp = _bocpd_step(t, float(x[t]), log_pi, prior, student_t=student_t)
+        if p_cp >= threshold:
+            out.append((t, p_cp))
+    return out
+
+
+def _detect_bocpd_map_reset(
+    x: np.ndarray,
+    prior: _BocpdPrior,
+    *,
+    map_drop_ratio: float,
+    min_run_length: int,
+    reset_cooldown: int,
+    student_t: bool,
+) -> list[tuple[int, float]]:
+    """Forward sweep emitting (t, confidence) on each MAP run-length reset.
+
+    Confidence is the posterior mass at the new MAP run-length — bounded in
+    [0, 1] and informative, unlike ``P(r=0)``.
+    """
+    n = len(x)
+    log_pi = np.array([0.0])
+    prev_map = 0
+    last_emit_t = -10_000
+    raw_emits: list[tuple[int, float]] = []
+    for t in range(1, n):
+        log_pi, _ = _bocpd_step(t, float(x[t]), log_pi, prior, student_t=student_t)
+        current_map = int(np.argmax(log_pi))
+        warmed_up = prev_map >= min_run_length
+        in_cooldown = (t - last_emit_t) < reset_cooldown
+        reset_detected = current_map < prev_map * map_drop_ratio
+        if warmed_up and reset_detected and not in_cooldown:
+            confidence = float(np.exp(log_pi[current_map]))
+            raw_emits.append((t, confidence))
+            last_emit_t = t
+        prev_map = current_map
+    return raw_emits
+
+
+def _collapse_adjacent_emits(
+    emits: list[tuple[int, float]], merge_window: int
+) -> list[tuple[int, float]]:
+    """Multi-reset collapse: keep the highest-confidence emit per adjacency cluster.
+
+    A single mean shift can drop the MAP across several consecutive timesteps
+    (e.g. 50 → 10 → 2). Merging within ``merge_window`` reduces those to one CP.
+    """
+    if merge_window <= 0 or len(emits) <= 1:
+        return emits
+    merged: list[tuple[int, float]] = []
+    cluster = [emits[0]]
+    for t_i, c_i in emits[1:]:
+        if t_i - cluster[-1][0] <= merge_window:
+            cluster.append((t_i, c_i))
+        else:
+            merged.append(max(cluster, key=lambda p: p[1]))
+            cluster = [(t_i, c_i)]
+    merged.append(max(cluster, key=lambda p: p[1]))
+    return merged
+
+
 def detect_bocpd(
     signal: np.ndarray,
     hazard_rate: float = 1 / 250.0,
+    *,
+    mode: BocpdMode = "map_reset",
     threshold: float = 0.5,
+    map_drop_ratio: float = 0.5,
+    min_run_length: int = 5,
+    reset_cooldown: int = 3,
+    merge_window: int = 2,
+    student_t: bool = True,
 ) -> list[tuple[int, float]]:
-    """BOCPD with Normal prior on mean, known observation variance, constant hazard.
+    """BOCPD over a 1-D signal with constant hazard.
 
-    ``log_pi_new[0]`` is the posterior log-probability that the segment restarts at ``t``
-    (i.e. a changepoint immediately before the current observation). Returns ``(t, p_cp)``
-    when that probability exceeds ``threshold`` (typically sparse).
+    Two detection modes are supported:
 
-    Segment sums use prefix sums so the inner loop over segment lengths is O(1) amortized
-    per timestep (vectorized over ``s``).
+    - ``mode="map_reset"`` (default, Phase 15 Phase A): emit a CP at timestep
+      ``t`` when the posterior MAP run-length drops below ``map_drop_ratio``
+      times its previous value. Subject to a ``min_run_length`` warmup gate,
+      a ``reset_cooldown`` refractory period, and a ``merge_window`` collapse
+      that keeps the highest-confidence emit per cluster of adjacent resets.
+      Confidence returned is the posterior mass at the new MAP run-length —
+      meaningful, bounded in [0, 1].
+    - ``mode="p_r0_legacy"``: pre-Phase-A behavior. Threshold-compares
+      ``P(r_t = 0 | x_{1:t})`` against ``threshold``. Preserved byte-for-byte
+      for rollback and replication studies; structurally pinned to the
+      hazard rate under constant-hazard A&M (see GUARDRAILS Sign).
+
+    The forward update math (``_bocpd_step``) is identical between modes.
+    Only the read-out changes.
+
+    The posterior predictive defaults to NIG → Student-t (Murphy 2007 §7.6,
+    ``student_t=True``); set ``student_t=False`` to fall back to the original
+    Normal-known-σ² conjugate.
     """
     x = np.asarray(signal, dtype=float).ravel()
     n = len(x)
-    if n < 6:
+    min_n = max(6, min_run_length + 2) if mode == "map_reset" else 6
+    if n < min_n:
         return []
 
     prior = _bocpd_init_prior(x, hazard_rate)
-    log_pi = np.array([0.0])
-    changepoints: list[tuple[int, float]] = []
-
-    for t in range(1, n):
-        log_pi, p_cp = _bocpd_step(t, float(x[t]), log_pi, prior)
-        if p_cp >= threshold:
-            changepoints.append((t, p_cp))
-
-    return changepoints
+    if mode == "p_r0_legacy":
+        return _detect_bocpd_legacy(x, prior, threshold=threshold, student_t=student_t)
+    raw_emits = _detect_bocpd_map_reset(
+        x,
+        prior,
+        map_drop_ratio=map_drop_ratio,
+        min_run_length=min_run_length,
+        reset_cooldown=reset_cooldown,
+        student_t=student_t,
+    )
+    return _collapse_adjacent_emits(raw_emits, merge_window)
 
 
 def _pelt_confidence_from_effect(d: float) -> float:
@@ -240,9 +446,26 @@ def changepoints_from_bocpd(
     values: np.ndarray,
     timestamps: list[datetime],
     hazard_rate: float,
-    threshold: float,
+    *,
+    mode: BocpdMode = "map_reset",
+    threshold: float = 0.5,
+    map_drop_ratio: float = 0.5,
+    min_run_length: int = 5,
+    reset_cooldown: int = 3,
+    merge_window: int = 2,
+    student_t: bool = True,
 ) -> list[ChangePoint]:
-    raw = detect_bocpd(values, hazard_rate=hazard_rate, threshold=threshold)
+    raw = detect_bocpd(
+        values,
+        hazard_rate=hazard_rate,
+        mode=mode,
+        threshold=threshold,
+        map_drop_ratio=map_drop_ratio,
+        min_run_length=min_run_length,
+        reset_cooldown=reset_cooldown,
+        merge_window=merge_window,
+        student_t=student_t,
+    )
     probs: dict[int, float] = dict(raw)
     return _changepoints_from_breaks(
         feature_name,
@@ -265,13 +488,12 @@ def analyze_author_feature_changepoints(
     methods = {m.lower() for m in settings.analysis.changepoint_methods}
     pen = settings.analysis.pelt_penalty
     hazard = settings.analysis.bocpd_hazard_rate
-    # Phase 15 Unit 1 — ``bocpd_threshold`` removed from settings because the
-    # quantity it thresholds (``P(r=0)``) is algebraically pinned to the hazard
-    # rate under constant-hazard A&M BOCPD (see docs/GUARDRAILS.md). Phase A
-    # replaces this with a MAP-run-length-reset rule and swaps the setting;
-    # until that ships, the legacy threshold is inlined here at its previous
-    # default so existing callers behave identically.
-    bocpd_threshold = 0.5
+    # Phase 15 Phase A — read all six BOCPD knobs from settings. The legacy
+    # ``bocpd_threshold`` field is gone (see GUARDRAILS Sign + Unit 1 notes);
+    # only ``mode="p_r0_legacy"`` consults ``threshold`` and we hard-code the
+    # historical default there so a one-line config flip restores prior runs.
+    bocpd_mode: BocpdMode = settings.analysis.bocpd_detection_mode
+    bocpd_legacy_threshold = 0.5
     out: list[ChangePoint] = []
 
     timestamps = timestamps_from_frame(df)
@@ -294,7 +516,13 @@ def analyze_author_feature_changepoints(
                     series,
                     timestamps,
                     hazard_rate=hazard,
-                    threshold=bocpd_threshold,
+                    mode=bocpd_mode,
+                    threshold=bocpd_legacy_threshold,
+                    map_drop_ratio=settings.analysis.bocpd_map_drop_ratio,
+                    min_run_length=settings.analysis.bocpd_min_run_length,
+                    reset_cooldown=settings.analysis.bocpd_reset_cooldown,
+                    merge_window=settings.analysis.bocpd_merge_window,
+                    student_t=settings.analysis.bocpd_student_t,
                 )
             )
     return out

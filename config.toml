@@ -55,15 +55,29 @@ changepoint_methods = ["pelt", "bocpd"]
 # Phase 15 F0 — PELT cost model. Default ``l2`` (1-D mean-shift, O(n)); ``rbf``
 # retained for comparison/audit runs. See docs/settings_phase15.md.
 pelt_cost_model = "l2"
-# Phase 15 A — BOCPD detection semantics. ``map_reset`` is the current default
-# (MAP run-length drop detection). ``p_r0_legacy`` kept for replication only;
-# that mode is algebraically pinned to the hazard rate (see GUARDRAILS.md).
+# Phase 15 A — BOCPD detection semantics. ``map_reset`` is the current default:
+# emit a CP when the posterior MAP run-length drops below ``map_drop_ratio``×
+# its previous value, subject to ``min_run_length`` warmup, ``reset_cooldown``
+# refractory period, and ``merge_window`` adjacent-emit collapse. The legacy
+# ``p_r0_legacy`` mode (threshold-compare ``P(r=0)``) is preserved for
+# replication only — under constant-hazard A&M that quantity is algebraically
+# pinned to the hazard rate and cannot fire (see GUARDRAILS.md).
 bocpd_detection_mode = "map_reset"
+# Fractional drop in the MAP run-length that signals a reset. Lower = stricter
+# (only big collapses count); higher = noisier.
 bocpd_map_drop_ratio = 0.5
+# Warmup gate: prev MAP run-length must clear this bar before any emit. Also
+# acts as the minimum series length (n must be >= max(6, min_run_length+2)).
 bocpd_min_run_length = 5
+# Refractory period in timesteps; suppress emits within K of the previous emit.
 bocpd_reset_cooldown = 3
+# Multi-reset collapse window: merge adjacent emits within W timesteps and keep
+# the highest-confidence one. 0 disables merging.
 bocpd_merge_window = 2
-# Phase 15 A4 — Student-t posterior predictive (NIG conjugate).
+# Phase 15 A4 — Posterior predictive choice. ``true`` = NIG → Student-t
+# (Murphy 2007 §7.6); ``false`` = legacy Normal-known-σ² path. Default on:
+# Student-t refreshes scale per-segment so long-established segments don't
+# read new observations through a frozen σ².
 bocpd_student_t = true
 # Phase 15 B3: this ratio now applies over 8 feature families (not 23 raw
 # features). 0.50 asks for 4 of 8 independent axes to shift in the window.
