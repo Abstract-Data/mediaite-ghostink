@@ -65,8 +65,8 @@ bocpd_reset_cooldown = 3
 bocpd_merge_window = 2
 # Phase 15 A4 — Student-t posterior predictive (NIG conjugate).
 bocpd_student_t = true
-# Phase 15 B3 — convergence ratio is now interpreted against feature *families*
-# (≈8 independent axes). Default lowered from 0.60 → 0.50 (4-of-8 axes).
+# Phase 15 B3: this ratio now applies over 8 feature families (not 23 raw
+# features). 0.50 asks for 4 of 8 independent axes to shift in the window.
 convergence_min_feature_ratio = 0.50
 # Phase 15 J5 — which CP stream feeds convergence.
 convergence_cp_source = "section_adjusted"
