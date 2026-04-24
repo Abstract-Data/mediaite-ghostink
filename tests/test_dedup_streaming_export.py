@@ -8,36 +8,18 @@ from datetime import UTC, datetime
 
 from forensics.models import Article
 from forensics.scraper.crawler import stable_article_id
-from forensics.scraper.dedup import _band_candidate_pairs, _find, _union, deduplicate_articles
+from forensics.scraper.dedup import _dedup_union_find, _find, deduplicate_articles
 from forensics.storage.export import export_articles_jsonl
 from forensics.storage.repository import Repository
-from forensics.utils.hashing import simhash, simhash_hamming
+from forensics.utils.hashing import simhash
 
 
-def _reference_duplicate_ids_from_pool(
-    pool: list[Article], *, hamming_threshold: int
+def _reference_dup_ids_from_parent(
+    pool: list[Article], parent: list[int]
 ) -> tuple[list[str], dict[str, bool]]:
-    """Pre-streaming semantics: union-find on simhash(pool), earliest date wins per component."""
     n = len(pool)
-    if n == 0:
-        return [], {}
-    indices = list(range(n))
-    parent = list(indices)
-    fingerprints = [simhash(a.clean_text) for a in pool]
-
-    if hamming_threshold <= 3:
-        candidates = _band_candidate_pairs(fingerprints)
-        for i, j in candidates:
-            if simhash_hamming(fingerprints[i], fingerprints[j]) <= hamming_threshold:
-                _union(parent, i, j)
-    else:
-        for i in indices:
-            for j in range(i + 1, n):
-                if simhash_hamming(fingerprints[i], fingerprints[j]) <= hamming_threshold:
-                    _union(parent, i, j)
-
     groups: dict[int, list[int]] = defaultdict(list)
-    for i in indices:
+    for i in range(n):
         groups[_find(parent, i)].append(i)
 
     dup_ids: list[str] = []
@@ -50,6 +32,17 @@ def _reference_duplicate_ids_from_pool(
             if is_dup:
                 dup_ids.append(pool[i].id)
     return dup_ids, flags
+
+
+def _reference_duplicate_ids_from_pool(
+    pool: list[Article], *, hamming_threshold: int
+) -> tuple[list[str], dict[str, bool]]:
+    """Pre-streaming semantics: union-find on simhash(pool), earliest date wins per component."""
+    if not pool:
+        return [], {}
+    fingerprints = [simhash(a.clean_text) for a in pool]
+    parent = _dedup_union_find(fingerprints, hamming_threshold)
+    return _reference_dup_ids_from_parent(pool, parent)
 
 
 def test_iter_dedup_source_rows_matches_filtered_get_all(tmp_db, sample_author) -> None:

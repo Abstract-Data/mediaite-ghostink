@@ -44,6 +44,8 @@ junit.xml
 # Pipeline & local data (see src/forensics/config — default data_dir is ./data)
 data/raw/*
 data/features/*
+# Embedding batches (per-author *.npz) and manifest — large generated artifacts
+data/embeddings/
 data/analysis/*
 data/reports/*
 data/pipeline/*
@@ -52,6 +54,10 @@ data/preregistration/
 data/calibration/
 data/survey/
 !data/.gitkeep
+# JSONL exports and scrape/discovery logs at repo data root
+data/articles.jsonl
+data/authors_manifest.jsonl
+data/scrape_errors.jsonl
 # DB artifacts often live directly under data/ (e.g. articles.db)
 data/*.db
 data/*.db-journal

@@ -92,11 +92,7 @@ def _ld_json_blobs(soup: BeautifulSoup) -> list[dict[str, Any]]:
     return out
 
 
-def extract_metadata(html: str) -> dict[str, Any]:
-    """Extract supplemental metadata (Open Graph, article tags, schema.org)."""
-    soup = BeautifulSoup(html, "lxml")
-    meta: dict[str, Any] = {}
-
+def _apply_open_graph_meta(soup: BeautifulSoup, meta: dict[str, Any]) -> None:
     section = _meta_content(soup, prop="og:section") or _meta_content(soup, name="section")
     if section:
         meta["og_section"] = section
@@ -115,23 +111,33 @@ def extract_metadata(html: str) -> dict[str, Any]:
     if author_meta:
         meta["page_author"] = author_meta
 
-    for blob in _ld_json_blobs(soup):
-        typ = blob.get("@type")
-        types = typ if isinstance(typ, list) else ([typ] if typ else [])
-        if "NewsArticle" in types or "Article" in types:
-            if blob.get("author"):
-                meta.setdefault("schema_author", blob.get("author"))
-            if blob.get("datePublished"):
-                meta.setdefault("schema_date_published", blob.get("datePublished"))
-            article_section = blob.get("articleSection")
-            if article_section and "og_section" not in meta:
-                meta["og_section"] = str(article_section)
-            keywords = blob.get("keywords")
-            if isinstance(keywords, str) and "article_tags" not in meta:
-                parts = [k.strip() for k in re.split(r"[,;]", keywords) if k.strip()]
-                if parts:
-                    meta["article_tags"] = parts
 
+def _merge_ld_json_news_article(blob: dict[str, Any], meta: dict[str, Any]) -> None:
+    typ = blob.get("@type")
+    types = typ if isinstance(typ, list) else ([typ] if typ else [])
+    if "NewsArticle" not in types and "Article" not in types:
+        return
+    if blob.get("author"):
+        meta.setdefault("schema_author", blob.get("author"))
+    if blob.get("datePublished"):
+        meta.setdefault("schema_date_published", blob.get("datePublished"))
+    article_section = blob.get("articleSection")
+    if article_section and "og_section" not in meta:
+        meta["og_section"] = str(article_section)
+    keywords = blob.get("keywords")
+    if isinstance(keywords, str) and "article_tags" not in meta:
+        parts = [k.strip() for k in re.split(r"[,;]", keywords) if k.strip()]
+        if parts:
+            meta["article_tags"] = parts
+
+
+def extract_metadata(html: str) -> dict[str, Any]:
+    """Extract supplemental metadata (Open Graph, article tags, schema.org)."""
+    soup = BeautifulSoup(html, "lxml")
+    meta: dict[str, Any] = {}
+    _apply_open_graph_meta(soup, meta)
+    for blob in _ld_json_blobs(soup):
+        _merge_ld_json_news_article(blob, meta)
     return meta
 
 

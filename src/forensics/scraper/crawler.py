@@ -211,6 +211,103 @@ def _write_authors_manifest(path: Path, rows: list[AuthorManifest]) -> None:
     write_text_atomic(path, body)
 
 
+async def _fetch_wp_user_rows(
+    client: httpx.AsyncClient,
+    limiter: RateLimiter,
+    scraping: ScrapingConfig,
+    errors: Path,
+) -> list[dict[str, object]]:
+    """Paginate ``/users`` until exhaustion or HTTP / schema failure."""
+    user_rows: list[dict[str, object]] = []
+    page = 1
+    total_pages = 1
+    while page <= total_pages:
+        url = f"{MEDIAITE_REST}/users?per_page=100&page={page}"
+        resp = await request_with_retry(
+            client,
+            limiter,
+            scraping,
+            "GET",
+            url,
+            errors_path=errors,
+            phase="discover_users",
+        )
+        if not resp.is_success:
+            await log_scrape_error(
+                errors,
+                url,
+                resp.status_code,
+                f"{resp.reason_phrase} (users page {page})",
+                "discover_users",
+            )
+            break
+        tp = _int_header(resp, "X-WP-TotalPages", 1)
+        if tp is not None:
+            total_pages = max(1, tp)
+        chunk = resp.json()
+        if not isinstance(chunk, list):
+            logger.warning("Unexpected users JSON on page %s", page)
+            break
+        if not chunk:
+            break
+        user_rows.extend(chunk)  # type: ignore[arg-type]
+        page += 1
+    return user_rows
+
+
+async def _manifests_from_user_rows(
+    client: httpx.AsyncClient,
+    limiter: RateLimiter,
+    scraping: ScrapingConfig,
+    errors: Path,
+    user_rows: list[dict[str, object]],
+    posts_suffix: str,
+    discovered_at: datetime,
+) -> list[AuthorManifest]:
+    """One HEAD-equivalent post count per user, then build ``AuthorManifest`` rows."""
+    count_sem = asyncio.Semaphore(max(1, scraping.max_concurrent))
+
+    async def _count_posts_for_user(user: dict[str, object]) -> AuthorManifest | None:
+        async with count_sem:
+            wp_id = int(user["id"])
+            count_url = f"{MEDIAITE_REST}/posts?author={wp_id}&per_page=1&_fields=id{posts_suffix}"
+            cresp = await request_with_retry(
+                client,
+                limiter,
+                scraping,
+                "GET",
+                count_url,
+                errors_path=errors,
+                phase="discover_count",
+            )
+            total_posts = 0
+            if cresp.is_success:
+                tt = _int_header(cresp, "X-WP-Total", 0)
+                total_posts = tt if tt is not None else 0
+            else:
+                await log_scrape_error(
+                    errors,
+                    count_url,
+                    cresp.status_code,
+                    cresp.reason_phrase,
+                    "discover_count",
+                )
+            try:
+                return _user_dict_to_manifest(
+                    user,
+                    total_posts=total_posts,
+                    discovered_at=discovered_at,
+                )
+            except (KeyError, TypeError, ValueError) as exc:
+                logger.warning("Skipping malformed user row: %s", exc)
+                return None
+
+    count_results = await asyncio.gather(*(_count_posts_for_user(u) for u in user_rows))
+    manifests = [m for m in count_results if m is not None]
+    manifests.sort(key=lambda m: m.total_posts, reverse=True)
+    return manifests
+
+
 async def discover_authors(
     settings: ForensicsSettings,
     *,
@@ -252,90 +349,23 @@ async def discover_authors(
         logger.info("discover: WordPress posts date filter off (full published history)")
     limiter = RateLimiter(scraping.rate_limit_seconds, scraping.rate_limit_jitter)
     discovered_at = datetime.now(UTC)
-    user_rows: list[dict[str, object]] = []
 
     async with create_scraping_client(scraping) as client:
-        page = 1
-        total_pages = 1
-        while page <= total_pages:
-            url = f"{MEDIAITE_REST}/users?per_page=100&page={page}"
-            resp = await request_with_retry(
-                client,
-                limiter,
-                scraping,
-                "GET",
-                url,
-                errors_path=errors,
-                phase="discover_users",
-            )
-            if not resp.is_success:
-                await log_scrape_error(
-                    errors,
-                    url,
-                    resp.status_code,
-                    f"{resp.reason_phrase} (users page {page})",
-                    "discover_users",
-                )
-                break
-            tp = _int_header(resp, "X-WP-TotalPages", 1)
-            if tp is not None:
-                total_pages = max(1, tp)
-            chunk = resp.json()
-            if not isinstance(chunk, list):
-                logger.warning("Unexpected users JSON on page %s", page)
-                break
-            if not chunk:
-                break
-            user_rows.extend(chunk)  # type: ignore[arg-type]
-            page += 1
+        user_rows = await _fetch_wp_user_rows(client, limiter, scraping, errors)
 
         if not user_rows:
             logger.error("Author discovery fetched no users; manifest not written")
             return 0
 
-        count_sem = asyncio.Semaphore(max(1, scraping.max_concurrent))
-
-        async def _count_posts_for_user(user: dict[str, object]) -> AuthorManifest | None:
-            async with count_sem:
-                wp_id = int(user["id"])
-                count_url = (
-                    f"{MEDIAITE_REST}/posts?author={wp_id}&per_page=1&_fields=id{posts_suffix}"
-                )
-                cresp = await request_with_retry(
-                    client,
-                    limiter,
-                    scraping,
-                    "GET",
-                    count_url,
-                    errors_path=errors,
-                    phase="discover_count",
-                )
-                total_posts = 0
-                if cresp.is_success:
-                    tt = _int_header(cresp, "X-WP-Total", 0)
-                    total_posts = tt if tt is not None else 0
-                else:
-                    await log_scrape_error(
-                        errors,
-                        count_url,
-                        cresp.status_code,
-                        cresp.reason_phrase,
-                        "discover_count",
-                    )
-                try:
-                    return _user_dict_to_manifest(
-                        user,
-                        total_posts=total_posts,
-                        discovered_at=discovered_at,
-                    )
-                except (KeyError, TypeError, ValueError) as exc:
-                    logger.warning("Skipping malformed user row: %s", exc)
-                    return None
-
-        count_results = await asyncio.gather(*(_count_posts_for_user(u) for u in user_rows))
-        manifests = [m for m in count_results if m is not None]
-
-        manifests.sort(key=lambda m: m.total_posts, reverse=True)
+        manifests = await _manifests_from_user_rows(
+            client,
+            limiter,
+            scraping,
+            errors,
+            user_rows,
+            posts_suffix,
+            discovered_at,
+        )
         _write_authors_manifest(manifest, manifests)
 
         top = ", ".join(f"{m.name} ({m.total_posts})" for m in manifests[:10])
@@ -500,45 +530,21 @@ async def _persist_page_articles(
     return inserted
 
 
-async def _ingest_author_posts(
+async def _paginate_author_post_pages(
     client: httpx.AsyncClient,
     limiter: RateLimiter,
     scraping: ScrapingConfig,
     repo: Repository,
-    cfg: AuthorConfig,
-    by_slug: dict[str, AuthorManifest],
+    author_id: str,
+    wp_id: int,
+    author_slug: str,
     errors_path: Path,
     db_lock: asyncio.Lock,
     *,
     posts_query_suffix: str = "",
-) -> int:
-    manifest_row = by_slug.get(cfg.slug)
-    if manifest_row is None:
-        await log_scrape_error(
-            errors_path,
-            "",
-            None,
-            f"slug_not_in_manifest:{cfg.slug}",
-            "metadata",
-        )
-        return 0
-
+) -> tuple[int, list[datetime]]:
+    """Fetch all post pages for one WP author; return insert count and dates seen."""
     inserted_here = 0
-    author = Author(
-        id=_stable_author_id(cfg.slug),
-        name=manifest_row.name,
-        slug=cfg.slug,
-        outlet=cfg.outlet,
-        role=cfg.role,
-        baseline_start=cfg.baseline_start,
-        baseline_end=cfg.baseline_end,
-        archive_url=cfg.archive_url,
-    )
-    async with db_lock:
-        await asyncio.to_thread(repo.upsert_author, author)
-    author_id = author.id
-
-    wp_id = manifest_row.wp_id
     page = 1
     total_pages = 1
     published_dates: list[datetime] = []
@@ -566,7 +572,7 @@ async def _ingest_author_posts(
                 errors_path,
                 url,
                 resp.status_code,
-                f"{resp.reason_phrase} (author={cfg.slug} posts page {page})",
+                f"{resp.reason_phrase} (author={author_slug} posts page {page})",
                 "metadata",
             )
             break
@@ -588,6 +594,59 @@ async def _ingest_author_posts(
         if page_articles:
             inserted_here += await _persist_page_articles(page_articles, repo, scraping, db_lock)
         page += 1
+
+    return inserted_here, published_dates
+
+
+async def _ingest_author_posts(
+    client: httpx.AsyncClient,
+    limiter: RateLimiter,
+    scraping: ScrapingConfig,
+    repo: Repository,
+    cfg: AuthorConfig,
+    by_slug: dict[str, AuthorManifest],
+    errors_path: Path,
+    db_lock: asyncio.Lock,
+    *,
+    posts_query_suffix: str = "",
+) -> int:
+    manifest_row = by_slug.get(cfg.slug)
+    if manifest_row is None:
+        await log_scrape_error(
+            errors_path,
+            "",
+            None,
+            f"slug_not_in_manifest:{cfg.slug}",
+            "metadata",
+        )
+        return 0
+
+    author = Author(
+        id=_stable_author_id(cfg.slug),
+        name=manifest_row.name,
+        slug=cfg.slug,
+        outlet=cfg.outlet,
+        role=cfg.role,
+        baseline_start=cfg.baseline_start,
+        baseline_end=cfg.baseline_end,
+        archive_url=cfg.archive_url,
+    )
+    async with db_lock:
+        await asyncio.to_thread(repo.upsert_author, author)
+    author_id = author.id
+
+    inserted_here, published_dates = await _paginate_author_post_pages(
+        client,
+        limiter,
+        scraping,
+        repo,
+        author_id,
+        manifest_row.wp_id,
+        cfg.slug,
+        errors_path,
+        db_lock,
+        posts_query_suffix=posts_query_suffix,
+    )
 
     n_indexed = len(published_dates)
     if published_dates:

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from contextlib import contextmanager
 
 import typer
 
@@ -37,6 +38,17 @@ from forensics.progress import (
 from forensics.reporting import run_report
 
 logger = logging.getLogger(__name__)
+
+
+@contextmanager
+def _pipeline_phase(obs: PipelineObserver | None, phase: PipelineRunPhase):
+    if obs is not None:
+        obs.pipeline_run_phase_start(phase)
+    try:
+        yield
+    finally:
+        if obs is not None:
+            obs.pipeline_run_phase_end(phase)
 
 
 def run_all_pipeline(
@@ -77,9 +89,7 @@ def run_all_pipeline(
     def _run(obs: PipelineObserver | None) -> int:
         rich_extract = show_progress and live_ui_mode(obs) != "textual"
 
-        if obs is not None:
-            obs.pipeline_run_phase_start(PipelineRunPhase.SCRAPE)
-        try:
+        with _pipeline_phase(obs, PipelineRunPhase.SCRAPE):
             code = asyncio.run(
                 dispatch_scrape(
                     discover=False,
@@ -92,15 +102,10 @@ def run_all_pipeline(
                     observer=obs,
                 )
             )
-        finally:
-            if obs is not None:
-                obs.pipeline_run_phase_end(PipelineRunPhase.SCRAPE)
         if code != 0:
             return code
 
-        if obs is not None:
-            obs.pipeline_run_phase_start(PipelineRunPhase.EXTRACT)
-        try:
+        with _pipeline_phase(obs, PipelineRunPhase.EXTRACT):
             extract_all_features(
                 db_path,
                 settings,
@@ -108,34 +113,21 @@ def run_all_pipeline(
                 skip_embeddings=False,
                 show_rich_progress=rich_extract,
             )
-        finally:
-            if obs is not None:
-                obs.pipeline_run_phase_end(PipelineRunPhase.EXTRACT)
 
-        if obs is not None:
-            obs.pipeline_run_phase_start(PipelineRunPhase.ANALYZE)
-        try:
+        with _pipeline_phase(obs, PipelineRunPhase.ANALYZE):
             try:
                 run_analyze(timeseries=True, convergence=True)
             except typer.Exit as exc:
                 if exc.exit_code:
                     return int(exc.exit_code or 1)
-        finally:
-            if obs is not None:
-                obs.pipeline_run_phase_end(PipelineRunPhase.ANALYZE)
 
-        if obs is not None:
-            obs.pipeline_run_phase_start(PipelineRunPhase.REPORT)
-        try:
+        with _pipeline_phase(obs, PipelineRunPhase.REPORT):
             report_args = ReportArgs(
                 notebook=None,
                 report_format=settings.report.output_format,
                 verify=False,
             )
             return run_report(report_args)
-        finally:
-            if obs is not None:
-                obs.pipeline_run_phase_end(PipelineRunPhase.REPORT)
 
     if observer is not None:
         return _run(observer)

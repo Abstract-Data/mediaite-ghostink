@@ -53,6 +53,67 @@ def _band_candidate_pairs(fingerprints: list[int]) -> set[tuple[int, int]]:
     return pairs
 
 
+def _load_dedup_pool(
+    repo: Repository,
+) -> tuple[list[str], list, list[str], list[int]]:
+    pool_ids: list[str] = []
+    pool_dates: list = []
+    pool_titles: list[str] = []
+    fingerprints: list[int] = []
+    for aid, pub_date, title, clean_text in repo.iter_dedup_source_rows():
+        pool_ids.append(aid)
+        pool_dates.append(pub_date)
+        pool_titles.append(title)
+        fingerprints.append(simhash(clean_text))
+    return pool_ids, pool_dates, pool_titles, fingerprints
+
+
+def _dedup_union_find(fingerprints: list[int], hamming_threshold: int) -> list[int]:
+    n = len(fingerprints)
+    parent = list(range(n))
+    if hamming_threshold <= 3:
+        candidates = _band_candidate_pairs(fingerprints)
+        for i, j in candidates:
+            if simhash_hamming(fingerprints[i], fingerprints[j]) <= hamming_threshold:
+                _union(parent, i, j)
+    else:
+        for i in range(n):
+            for j in range(i + 1, n):
+                if simhash_hamming(fingerprints[i], fingerprints[j]) <= hamming_threshold:
+                    _union(parent, i, j)
+    return parent
+
+
+def _duplicate_ids_from_components(
+    parent: list[int],
+    pool_ids: list[str],
+    pool_dates: list,
+    pool_titles: list[str],
+) -> list[str]:
+    n = len(pool_ids)
+    groups: dict[int, list[int]] = defaultdict(list)
+    for i in range(n):
+        groups[_find(parent, i)].append(i)
+    duplicate_ids: list[str] = []
+    for members in groups.values():
+        canonical_i = min(members, key=lambda i: pool_dates[i])
+        can_title = pool_titles[canonical_i]
+        can_date = pool_dates[canonical_i]
+        for i in members:
+            if i == canonical_i:
+                continue
+            art_id = pool_ids[i]
+            duplicate_ids.append(art_id)
+            logger.info(
+                "DUPLICATE: '%s' (%s) ≈ '%s' (%s)",
+                pool_titles[i],
+                pool_dates[i].date().isoformat(),
+                can_title,
+                can_date.date().isoformat(),
+            )
+    return duplicate_ids
+
+
 def _partition_roots(
     fingerprints: list[int], hamming_threshold: int, *, use_banding: bool
 ) -> tuple[int, ...]:
@@ -80,24 +141,11 @@ def deduplicate_articles(db_path: Path, *, hamming_threshold: int = _NEAR_DUP_HA
     per component. Returns IDs that are marked duplicate (excluding canonical rows).
     """
     with Repository(db_path) as repo:
-        pool_ids: list[str] = []
-        pool_dates: list = []
-        pool_titles: list[str] = []
-        fingerprints: list[int] = []
-
-        for aid, pub_date, title, clean_text in repo.iter_dedup_source_rows():
-            pool_ids.append(aid)
-            pool_dates.append(pub_date)
-            pool_titles.append(title)
-            fingerprints.append(simhash(clean_text))
-
+        pool_ids, pool_dates, pool_titles, fingerprints = _load_dedup_pool(repo)
         if not pool_ids:
             return []
 
         n = len(pool_ids)
-        indices = list(range(n))
-        parent = list(indices)
-
         if n > 500:
             logger.info(
                 "dedup: banded simhash over %d articles (Hamming <= %s)",
@@ -105,39 +153,9 @@ def deduplicate_articles(db_path: Path, *, hamming_threshold: int = _NEAR_DUP_HA
                 hamming_threshold,
             )
 
-        if hamming_threshold <= 3:
-            candidates = _band_candidate_pairs(fingerprints)
-            for i, j in candidates:
-                if simhash_hamming(fingerprints[i], fingerprints[j]) <= hamming_threshold:
-                    _union(parent, i, j)
-        else:
-            for i in indices:
-                for j in range(i + 1, n):
-                    if simhash_hamming(fingerprints[i], fingerprints[j]) <= hamming_threshold:
-                        _union(parent, i, j)
-
-        groups: dict[int, list[int]] = defaultdict(list)
-        for i in indices:
-            groups[_find(parent, i)].append(i)
-
-        duplicate_ids: list[str] = []
+        parent = _dedup_union_find(fingerprints, hamming_threshold)
         repo.clear_duplicate_flags(pool_ids)
-        for members in groups.values():
-            canonical_i = min(members, key=lambda i: pool_dates[i])
-            can_title = pool_titles[canonical_i]
-            can_date = pool_dates[canonical_i]
-            for i in members:
-                if i == canonical_i:
-                    continue
-                art_id = pool_ids[i]
-                duplicate_ids.append(art_id)
-                logger.info(
-                    "DUPLICATE: '%s' (%s) ≈ '%s' (%s)",
-                    pool_titles[i],
-                    pool_dates[i].date().isoformat(),
-                    can_title,
-                    can_date.date().isoformat(),
-                )
+        duplicate_ids = _duplicate_ids_from_components(parent, pool_ids, pool_dates, pool_titles)
         if duplicate_ids:
             repo.mark_duplicates(duplicate_ids)
 

@@ -86,16 +86,6 @@ src = ["src", "tests"]
 select = ["E", "F", "I", "B", "UP", "C901"]
 ignore = []
 
-# C901 complexity debt — each entry names the tracking issue that owns the follow-up
-# refactor (RF-DEAD-001). convergence.py was removed after the F2 decomposition split
-# compute_convergence_scores into per-window + permutation helpers.
-[tool.ruff.lint.per-file-ignores]
-"src/forensics/features/probability_pipeline.py" = ["C901"]  # P2-ARCH-003 follow-up
-"src/forensics/scraper/crawler.py" = ["C901"]  # RF-CPLX-005 follow-up
-"src/forensics/scraper/dedup.py" = ["C901"]  # RF-CPLX-006 follow-up
-"src/forensics/scraper/parser.py" = ["C901"]  # RF-CPLX-007 follow-up
-"src/forensics/utils/hashing.py" = ["C901"]  # RF-CPLX-008 follow-up
-
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"

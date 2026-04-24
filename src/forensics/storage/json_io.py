@@ -32,7 +32,7 @@ def _to_jsonable(payload: Any) -> Any:
         return payload.model_dump(mode="json")
     if isinstance(payload, Mapping):
         return {key: _to_jsonable(value) for key, value in payload.items()}
-    if isinstance(payload, (list, tuple)):
+    if isinstance(payload, list | tuple):
         return [_to_jsonable(item) for item in payload]
     return payload
 
