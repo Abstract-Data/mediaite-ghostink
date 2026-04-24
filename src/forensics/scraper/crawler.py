@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import html
+import json
 import logging
+import sqlite3
 from collections.abc import Iterator
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -31,6 +33,17 @@ from forensics.utils.hashing import content_hash as compute_content_hash
 from forensics.utils.text import word_count
 
 logger = logging.getLogger(__name__)
+
+# Recoverable failures during per-author metadata ingest (P2-SEC-001). Others propagate.
+_METADATA_INGEST_RECOVERABLE: tuple[type[BaseException], ...] = (
+    httpx.HTTPError,
+    OSError,
+    ValueError,
+    KeyError,
+    TypeError,
+    json.JSONDecodeError,
+    sqlite3.Error,
+)
 
 # Stable entrypoints for CLI and cross-module idempotency; everything else is internal.
 __all__ = (
@@ -450,7 +463,7 @@ async def collect_article_metadata(
                         db_lock,
                         posts_query_suffix=posts_suffix,
                     )
-                except Exception as exc:  # noqa: BLE001 — isolate per-author failures
+                except _METADATA_INGEST_RECOVERABLE as exc:
                     logger.exception("metadata ingestion failed for author slug=%s", cfg.slug)
                     await log_scrape_error(
                         errors,
@@ -664,7 +677,12 @@ def _iter_manifests_from_users_json(
     total_posts_by_id: dict[int, int],
     discovered_at: datetime | None = None,
 ) -> Iterator[AuthorManifest]:
-    """Build manifests from static user JSON and post-count map (tests / tooling)."""
+    """Build manifests from static user JSON and post-count map.
+
+    **Supported test and tooling surface** (RF-DEAD-003): not used by the live
+    crawl path, but exercised by ``tests/test_scraper.py`` and available for
+    offline fixtures / notebooks. Do not remove without migrating those tests.
+    """
     when = discovered_at or datetime.now(UTC)
     for u in users:
         wp_id = int(u["id"])

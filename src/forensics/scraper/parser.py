@@ -7,7 +7,7 @@ import logging
 import re
 from typing import Any
 
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Tag
 
 from forensics.utils.text import clean_text as normalize_article_text
 
@@ -24,6 +24,17 @@ _REMOVE_CLASS_SUBSTRINGS = (
 )
 
 
+def _sanitize_and_extract(root: BeautifulSoup | Tag) -> str:
+    """Strip boilerplate tags/classes then normalize body text (RF-DRY-001)."""
+    for tag in root.find_all(["script", "style", "nav", "aside", "footer"]):
+        tag.decompose()
+    for el in root.find_all(True):
+        classes = " ".join(el.get("class") or []).lower()
+        if any(s in classes for s in _REMOVE_CLASS_SUBSTRINGS):
+            el.decompose()
+    return normalize_article_text(root.get_text(separator="\n"))
+
+
 def extract_article_text(html: str) -> str:
     """Pull main article body text from Mediaite / WordPress HTML."""
     soup = BeautifulSoup(html, "lxml")
@@ -35,17 +46,7 @@ def extract_article_text(html: str) -> str:
     if container is None:
         logger.warning("extract_article_text: no content container found")
         return ""
-
-    for tag in container.find_all(["script", "style", "nav", "aside", "footer"]):
-        tag.decompose()
-
-    for el in container.find_all(True):
-        classes = " ".join(el.get("class") or []).lower()
-        if any(s in classes for s in _REMOVE_CLASS_SUBSTRINGS):
-            el.decompose()
-
-    raw_text = container.get_text(separator="\n")
-    return normalize_article_text(raw_text)
+    return _sanitize_and_extract(container)
 
 
 def extract_article_text_from_rest(content_rendered: str) -> str:
@@ -53,13 +54,7 @@ def extract_article_text_from_rest(content_rendered: str) -> str:
     if not content_rendered:
         return ""
     soup = BeautifulSoup(content_rendered, "lxml")
-    for tag in soup.find_all(["script", "style", "nav", "aside", "footer"]):
-        tag.decompose()
-    for el in soup.find_all(True):
-        classes = " ".join(el.get("class") or []).lower()
-        if any(s in classes for s in _REMOVE_CLASS_SUBSTRINGS):
-            el.decompose()
-    return normalize_article_text(soup.get_text(separator="\n"))
+    return _sanitize_and_extract(soup)
 
 
 def _meta_content(soup: BeautifulSoup, *, prop: str | None = None, name: str | None = None) -> str:

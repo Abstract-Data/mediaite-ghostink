@@ -74,6 +74,29 @@ def _safe_pvalue(p: float) -> float:
     return float(min(1.0, max(0.0, float(p))))
 
 
+def _hypothesis_test(
+    *,
+    prefix: str,
+    feature_name: str,
+    author_id: str,
+    raw_p: float,
+    d: float,
+    ci: tuple[float, float],
+) -> HypothesisTest:
+    """Single Welch / Mann–Whitney / KS row with shared effect size and CI (RF-SMELL-005)."""
+    sp = _safe_pvalue(float(raw_p))
+    return HypothesisTest(
+        test_name=f"{prefix}_{feature_name}",
+        feature_name=feature_name,
+        author_id=author_id,
+        raw_p_value=sp,
+        corrected_p_value=sp,
+        effect_size_cohens_d=d,
+        confidence_interval_95=ci,
+        significant=False,
+    )
+
+
 def run_hypothesis_tests(
     feature_values: list[float],
     breakpoint_idx: int,
@@ -98,15 +121,13 @@ def run_hypothesis_tests(
     d = cohens_d(pre, post)
     ci = bootstrap_ci(pre, post, n_bootstrap=n_bootstrap)
     tests.append(
-        HypothesisTest(
-            test_name=f"welch_t_{feature_name}",
+        _hypothesis_test(
+            prefix="welch_t",
             feature_name=feature_name,
             author_id=author_id,
-            raw_p_value=_safe_pvalue(float(p_welch)),
-            corrected_p_value=_safe_pvalue(float(p_welch)),
-            effect_size_cohens_d=d,
-            confidence_interval_95=ci,
-            significant=False,
+            raw_p=float(p_welch),
+            d=d,
+            ci=ci,
         )
     )
 
@@ -115,29 +136,25 @@ def run_hypothesis_tests(
     except ValueError:
         p_mw = 1.0
     tests.append(
-        HypothesisTest(
-            test_name=f"mann_whitney_{feature_name}",
+        _hypothesis_test(
+            prefix="mann_whitney",
             feature_name=feature_name,
             author_id=author_id,
-            raw_p_value=_safe_pvalue(float(p_mw)),
-            corrected_p_value=_safe_pvalue(float(p_mw)),
-            effect_size_cohens_d=d,
-            confidence_interval_95=ci,
-            significant=False,
+            raw_p=float(p_mw),
+            d=d,
+            ci=ci,
         )
     )
 
     _ks_stat, p_ks = stats.ks_2samp(pre, post)
     tests.append(
-        HypothesisTest(
-            test_name=f"ks_test_{feature_name}",
+        _hypothesis_test(
+            prefix="ks_test",
             feature_name=feature_name,
             author_id=author_id,
-            raw_p_value=_safe_pvalue(float(p_ks)),
-            corrected_p_value=_safe_pvalue(float(p_ks)),
-            effect_size_cohens_d=d,
-            confidence_interval_95=ci,
-            significant=False,
+            raw_p=float(p_ks),
+            d=d,
+            ci=ci,
         )
     )
     return tests

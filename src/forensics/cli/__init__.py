@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import importlib.metadata
 import logging
+import sys
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 
+import httpx
 import typer
 
 from forensics.cli.state import ForensicsCliState, get_cli_state
@@ -26,6 +28,25 @@ def _version_callback(value: bool) -> None:
             version = "0.0.0+unknown"
         typer.echo(f"forensics {version}")
         raise typer.Exit()
+
+
+def _configure_logging(
+    level: int,
+    log_format: Literal["text", "json"],
+) -> None:
+    """Configure root logging once per process (P2-OPS-001)."""
+    if log_format == "json":
+        from pythonjsonlogger.jsonlogger import JsonFormatter
+
+        handler = logging.StreamHandler(sys.stderr)
+        handler.setFormatter(JsonFormatter(fmt="%(levelname)s %(name)s %(message)s"))
+        logging.basicConfig(level=level, handlers=[handler], force=True)
+    else:
+        logging.basicConfig(
+            level=level,
+            format="%(levelname)s %(name)s: %(message)s",
+            force=True,
+        )
 
 
 @app.callback()
@@ -49,11 +70,18 @@ def _root(
             help="Disable Rich progress bars and pipeline observers (CI, logs, minimal TTY).",
         ),
     ] = False,
+    log_format: Annotated[
+        Literal["text", "json"],
+        typer.Option(
+            "--log-format",
+            help="Log output format: plain text (default) or JSON for aggregation.",
+        ),
+    ] = "text",
 ) -> None:
     """AI Writing Forensics Pipeline."""
     ctx.obj = ForensicsCliState(show_progress=not no_progress)
     level = logging.DEBUG if verbose else logging.INFO
-    logging.basicConfig(level=level, format="%(levelname)s %(name)s: %(message)s")
+    _configure_logging(level, log_format)
 
 
 # --- Register subcommands ---
@@ -151,12 +179,10 @@ _OLLAMA_TAGS_URL = "http://localhost:11434/api/tags"
 
 
 def _probe_endpoint(url: str, *, timeout: float = 3.0) -> tuple[bool, str]:
-    """Synchronous GET that tolerates every network error (returns ``(ok, detail)``)."""
-    import httpx
-
+    """Synchronous GET that tolerates network / transport errors (returns ``(ok, detail)``)."""
     try:
         resp = httpx.get(url, timeout=timeout)
-    except Exception as exc:  # noqa: BLE001 - report any failure as a warn
+    except (httpx.HTTPError, OSError, ValueError, TypeError) as exc:
         return False, f"{type(exc).__name__}: {exc}"
     if 200 <= resp.status_code < 400:
         return True, f"HTTP {resp.status_code}"

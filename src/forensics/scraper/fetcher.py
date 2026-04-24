@@ -25,6 +25,7 @@ from forensics.progress import FetchProgressThrottle, PipelineObserver
 from forensics.scraper.client import create_scraping_client
 from forensics.scraper.parser import extract_article_text, extract_metadata, looks_coauthored
 from forensics.storage.export import append_jsonl_async
+from forensics.storage.json_io import ensure_parent
 from forensics.storage.repository import Repository, UnfetchedArticle, ensure_repo
 from forensics.utils import utc_now_iso
 from forensics.utils.hashing import content_hash
@@ -69,7 +70,7 @@ class RateLimiter:
 
 async def append_scrape_error(path: Path, record: dict[str, Any]) -> None:
     """Append one JSON object to ``path`` (line-delimited), serialized across concurrent callers."""
-    path.parent.mkdir(parents=True, exist_ok=True)
+    ensure_parent(path)
     line = json.dumps(record, default=str) + "\n"
 
     def _write() -> None:
@@ -364,23 +365,146 @@ async def _persist_article_fetch(
 
 
 @dataclass(frozen=True, slots=True)
-class ArticleHtmlFetchContext:
-    """Paths, locks, and shared counters for one ``fetch_articles`` concurrent HTML run."""
+class FetchConfig:
+    """Immutable paths and limits for one HTML fetch run (RF-SMELL-004)."""
 
-    repo: Repository
     root: Path
     scraping: ScrapingConfig
-    limiter: RateLimiter
     errors: Path
     coauth: Path
     warns: Path
+    total: int
+
+
+@dataclass(slots=True)
+class FetchSession:
+    """Per-run mutable coordination state (RF-SMELL-004)."""
+
+    repo: Repository
+    limiter: RateLimiter
     sem: asyncio.Semaphore
     db_lock: asyncio.Lock
     done_lock: asyncio.Lock
     done_count: list[int]
-    total: int
     observer: PipelineObserver | None = None
     fetch_throttle: FetchProgressThrottle | None = None
+
+
+class ArticleHtmlFetchContext:
+    """Paths, locks, and shared counters for one ``fetch_articles`` concurrent HTML run.
+
+    Internally split into :class:`FetchConfig` + :class:`FetchSession` (RF-SMELL-004).
+    Callers may construct either ``ArticleHtmlFetchContext(config=..., session=...)``
+    (both required together; do not mix with legacy keys) or pass the legacy flat
+    keyword set (``repo=``, ``root=``, …) preserved for tests.
+    """
+
+    __slots__ = ("config", "session")
+
+    def __init__(
+        self,
+        *,
+        config: FetchConfig | None = None,
+        session: FetchSession | None = None,
+        repo: Repository | None = None,
+        root: Path | None = None,
+        scraping: ScrapingConfig | None = None,
+        limiter: RateLimiter | None = None,
+        errors: Path | None = None,
+        coauth: Path | None = None,
+        warns: Path | None = None,
+        sem: asyncio.Semaphore | None = None,
+        db_lock: asyncio.Lock | None = None,
+        done_lock: asyncio.Lock | None = None,
+        done_count: list[int] | None = None,
+        total: int | None = None,
+        observer: PipelineObserver | None = None,
+        fetch_throttle: FetchProgressThrottle | None = None,
+    ) -> None:
+        has_config = config is not None
+        has_session = session is not None
+        if has_config ^ has_session:
+            raise TypeError(
+                "ArticleHtmlFetchContext requires both `config` and `session` together, "
+                "or omit both and pass the full legacy flat kwargs (repo=, root=, scraping=, …)."
+            )
+        if has_config and has_session:
+            legacy_conflicts = [
+                name
+                for name, value in (
+                    ("repo", repo),
+                    ("root", root),
+                    ("scraping", scraping),
+                    ("limiter", limiter),
+                    ("errors", errors),
+                    ("coauth", coauth),
+                    ("warns", warns),
+                    ("sem", sem),
+                    ("db_lock", db_lock),
+                    ("done_lock", done_lock),
+                    ("done_count", done_count),
+                    ("total", total),
+                    ("observer", observer),
+                    ("fetch_throttle", fetch_throttle),
+                )
+                if value is not None
+            ]
+            if legacy_conflicts:
+                joined = ", ".join(sorted(legacy_conflicts))
+                raise TypeError(
+                    "ArticleHtmlFetchContext: with `config` and `session`, do not pass "
+                    f"legacy keyword arguments (received non-None: {joined})"
+                )
+            self.config = config
+            self.session = session
+            return
+
+        legacy_required: tuple[tuple[str, object], ...] = (
+            ("repo", repo),
+            ("root", root),
+            ("scraping", scraping),
+            ("limiter", limiter),
+            ("errors", errors),
+            ("coauth", coauth),
+            ("warns", warns),
+            ("sem", sem),
+            ("db_lock", db_lock),
+            ("done_lock", done_lock),
+            ("done_count", done_count),
+            ("total", total),
+        )
+        missing = [name for name, value in legacy_required if value is None]
+        if missing:
+            raise TypeError(
+                "ArticleHtmlFetchContext legacy constructor missing required: "
+                + ", ".join(missing)
+            )
+        self.config = FetchConfig(
+            root=root,
+            scraping=scraping,
+            errors=errors,
+            coauth=coauth,
+            warns=warns,
+            total=total,
+        )
+        self.session = FetchSession(
+            repo=repo,
+            limiter=limiter,
+            sem=sem,
+            db_lock=db_lock,
+            done_lock=done_lock,
+            done_count=done_count,
+            observer=observer,
+            fetch_throttle=fetch_throttle,
+        )
+
+    def __getattr__(self, name: str) -> Any:
+        if hasattr(self.config, name):
+            return getattr(self.config, name)
+        if hasattr(self.session, name):
+            return getattr(self.session, name)
+        msg = f"{type(self).__name__!s} has no attribute {name!r}"
+        raise AttributeError(msg)
 
 
 async def _persist_and_log(
@@ -466,6 +590,39 @@ async def _handle_off_domain(
     )
 
 
+async def _commit_parsed_article(
+    ctx: ArticleHtmlFetchContext,
+    row: UnfetchedArticle,
+    *,
+    parsed: ParsedArticleFetch,
+    response: httpx.Response,
+    scraped_at: datetime,
+    year: int,
+) -> bool:
+    """Second lock leg: re-check row, persist parsed HTML, upsert (RF-CPLX-007).
+
+    Returns ``True`` when an upsert was written; ``False`` when a concurrent worker
+    won the race (caller must not bump ``done_count``).
+    """
+    async with ctx.db_lock:
+        latest = await asyncio.to_thread(ctx.repo.get_article_by_id, row.article_id)
+        if _resume_skip_fetch(latest):
+            return False
+        updated = await _persist_article_fetch(
+            latest,
+            parsed,
+            root=ctx.root,
+            year=year,
+            article_id=row.article_id,
+            html=response.text,
+            scraped_at=scraped_at,
+            coauth=ctx.coauth,
+            warns=ctx.warns,
+        )
+        await asyncio.to_thread(ctx.repo.upsert_article, updated)
+    return True
+
+
 async def _handle_success(
     ctx: ArticleHtmlFetchContext,
     row: UnfetchedArticle,
@@ -486,10 +643,10 @@ async def _handle_success(
        Running it under the DB lock would serialize fetchers; doing it *between*
        the locks allows N workers to parse concurrently against a single SQLite
        connection.
-    3. **Second lock (write)** — re-read the DB row under a fresh lock to detect
-       the race where a peer wrote the same article while we were parsing. If the
-       peer already committed, abort our write to keep upserts idempotent. Otherwise
-       persist the parsed result and bump the done counter.
+    3. **Second lock (write)** — :func:`_commit_parsed_article` re-reads the DB row
+       under a fresh lock to detect the race where a peer wrote the same article while
+       we were parsing. If the peer already committed, abort our write to keep upserts
+       idempotent. Otherwise persist the parsed result and bump the done counter.
 
     The ``db_lock`` is the single serialization point for the SQLite connection,
     which ``_connect`` opened with ``check_same_thread=False``. Skipping it on
@@ -502,22 +659,15 @@ async def _handle_success(
 
     parsed = _parse_article_html(article, response.text)
 
-    async with ctx.db_lock:
-        latest = await asyncio.to_thread(ctx.repo.get_article_by_id, row.article_id)
-        if _resume_skip_fetch(latest):
-            return
-        updated = await _persist_article_fetch(
-            latest,
-            parsed,
-            root=ctx.root,
-            year=year,
-            article_id=row.article_id,
-            html=response.text,
-            scraped_at=scraped_at,
-            coauth=ctx.coauth,
-            warns=ctx.warns,
-        )
-        await asyncio.to_thread(ctx.repo.upsert_article, updated)
+    if not await _commit_parsed_article(
+        ctx,
+        row,
+        parsed=parsed,
+        response=response,
+        scraped_at=scraped_at,
+        year=year,
+    ):
+        return
 
     async with ctx.done_lock:
         ctx.done_count[0] += 1
@@ -642,20 +792,24 @@ async def fetch_articles(
         done_count = [0]
         throttle = FetchProgressThrottle() if observer is not None else None
         html_ctx = ArticleHtmlFetchContext(
-            repo=r,
-            root=root,
-            scraping=scraping,
-            limiter=limiter,
-            errors=errors,
-            coauth=coauth,
-            warns=warns,
-            sem=sem,
-            db_lock=db_lock,
-            done_lock=done_lock,
-            done_count=done_count,
-            total=total,
-            observer=observer,
-            fetch_throttle=throttle,
+            config=FetchConfig(
+                root=root,
+                scraping=scraping,
+                errors=errors,
+                coauth=coauth,
+                warns=warns,
+                total=total,
+            ),
+            session=FetchSession(
+                repo=r,
+                limiter=limiter,
+                sem=sem,
+                db_lock=db_lock,
+                done_lock=done_lock,
+                done_count=done_count,
+                observer=observer,
+                fetch_throttle=throttle,
+            ),
         )
 
         async with create_scraping_client(scraping) as client:

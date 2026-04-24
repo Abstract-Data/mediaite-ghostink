@@ -8,7 +8,6 @@ interruption.
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 import logging
 import os
@@ -39,6 +38,7 @@ from forensics.survey.scoring import (
     identify_natural_controls,
     validate_against_controls,
 )
+from forensics.utils.provenance import compute_model_config_hash
 
 logger = logging.getLogger(__name__)
 
@@ -73,8 +73,7 @@ class SurveyReport:
 
 
 def _compute_config_hash(settings: ForensicsSettings) -> str:
-    payload = json.dumps(settings.analysis.model_dump(mode="json"), sort_keys=True, default=str)
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+    return compute_model_config_hash(settings.analysis, length=16)
 
 
 def _run_dir_for(project_root: Path, run_id: str) -> Path:
@@ -296,7 +295,7 @@ async def _maybe_run_survey_scrape(
     return False
 
 
-async def _survey_run_parallel_workers(
+async def _run_authors_parallel(
     *,
     pending: list[QualifiedAuthor],
     qualified: list[QualifiedAuthor],
@@ -345,7 +344,7 @@ async def _survey_run_parallel_workers(
             _write_checkpoint(report)
 
 
-async def _survey_run_sequential_authors(
+async def _run_authors_sequential(
     *,
     qualified: list[QualifiedAuthor],
     completed_slugs: set[str],
@@ -388,7 +387,7 @@ async def _survey_run_sequential_authors(
         _write_checkpoint(report)
 
 
-def _survey_rank_and_persist(report: SurveyReport, observer: PipelineObserver | None) -> None:
+def _finalize_survey(report: SurveyReport, observer: PipelineObserver | None) -> None:
     with _observer_phase(observer, PipelineRunPhase.SURVEY_FINALIZE):
         _rank_results(report)
 
@@ -555,7 +554,7 @@ async def run_survey(
             len(pending),
             workers,
         )
-        await _survey_run_parallel_workers(
+        await _run_authors_parallel(
             pending=pending,
             qualified=qualified,
             total=total,
@@ -567,7 +566,7 @@ async def run_survey(
             workers=workers,
         )
     else:
-        await _survey_run_sequential_authors(
+        await _run_authors_sequential(
             qualified=qualified,
             completed_slugs=completed_slugs,
             total=total,
@@ -579,5 +578,5 @@ async def run_survey(
             rich_extract=rich_extract,
         )
 
-    _survey_rank_and_persist(report, observer)
+    _finalize_survey(report, observer)
     return report

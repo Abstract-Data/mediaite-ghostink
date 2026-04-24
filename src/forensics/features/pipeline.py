@@ -35,6 +35,7 @@ from forensics.features.assembler import build_feature_vector_from_extractors
 from forensics.models.article import Article
 from forensics.models.features import EmbeddingRecord, FeatureVector
 from forensics.paths import AnalysisArtifactPaths, resolve_author_rows
+from forensics.storage.json_io import ensure_dir
 from forensics.storage.parquet import (
     AUTHOR_EMBEDDING_BATCH_BASENAME,
     write_author_embedding_batch,
@@ -45,6 +46,11 @@ from forensics.storage.repository import Repository
 from forensics.utils.model_cache import KeyedModelCache
 
 logger = logging.getLogger(__name__)
+
+__all__ = [
+    "clear_spacy_model_cache",
+    "extract_all_features",
+]
 
 # Recoverable failures from extractors, numpy I/O, and sentence-transformers encode.
 # MemoryError and RecursionError are intentionally excluded — they indicate
@@ -109,7 +115,7 @@ def _archive_embeddings_if_mismatch(embed_root: Path, model_name: str, model_ver
     )
     if embed_root.exists():
         shutil.move(str(embed_root), str(dest))
-    embed_root.mkdir(parents=True, exist_ok=True)
+    ensure_dir(embed_root)
 
 
 def _resolve_project_root(db_path: Path, project_root: Path | None) -> Path:

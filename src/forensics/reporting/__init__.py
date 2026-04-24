@@ -10,6 +10,7 @@ from pathlib import Path
 
 from forensics.config import ForensicsSettings, get_project_root, get_settings
 from forensics.models.report_args import ReportArgs
+from forensics.storage.json_io import ensure_dir
 from forensics.utils.provenance import verify_corpus_hash
 
 logger = logging.getLogger(__name__)
@@ -124,7 +125,7 @@ def run_report(args: ReportArgs) -> int:
     settings = get_settings()
     root = get_project_root()
     reports_dir = root / "data" / "reports"
-    reports_dir.mkdir(parents=True, exist_ok=True)
+    ensure_dir(reports_dir)
 
     ok, code, quarto = _validate_report_prerequisites(settings, root, args)
     if not ok or quarto is None:

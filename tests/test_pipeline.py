@@ -103,6 +103,40 @@ def test_run_all_pipeline_maps_typer_exit_from_analyze() -> None:
     rr.assert_not_called()
 
 
+def test_run_all_pipeline_runs_stages_in_order() -> None:
+    """P3-TEST-002: scrape → extract → analyze → report order on the happy path."""
+    report = PreflightReport(checks=())
+    root = Path("/tmp/forensics-pipeline-test-root")
+    order: list[str] = []
+
+    async def _track_dispatch(**_kwargs: object) -> int:
+        order.append("scrape")
+        return 0
+
+    def _track_extract(*_a: object, **_k: object) -> None:
+        order.append("extract")
+
+    def _track_analyze(*_a: object, **_k: object) -> None:
+        order.append("analyze")
+
+    def _track_report(*_a: object, **_k: object) -> int:
+        order.append("report")
+        return 0
+
+    with (
+        mock.patch("forensics.preflight.run_all_preflight_checks", return_value=report),
+        mock.patch("forensics.pipeline.get_settings", return_value=_settings()),
+        mock.patch("forensics.pipeline.get_project_root", return_value=root),
+        mock.patch("forensics.pipeline.PipelineContext.resolve", return_value=mock.MagicMock()),
+        mock.patch("forensics.pipeline.dispatch_scrape", side_effect=_track_dispatch),
+        mock.patch("forensics.pipeline.extract_all_features", side_effect=_track_extract),
+        mock.patch("forensics.pipeline.run_analyze", side_effect=_track_analyze),
+        mock.patch("forensics.pipeline.run_report", side_effect=_track_report),
+    ):
+        assert run_all_pipeline(show_progress=False) == 0
+    assert order == ["scrape", "extract", "analyze", "report"]
+
+
 def test_run_all_pipeline_typer_exit_zero_from_analyze_still_reports() -> None:
     report = PreflightReport(checks=())
     root = Path("/tmp/forensics-pipeline-test-root")

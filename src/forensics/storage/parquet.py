@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import warnings
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,7 @@ import numpy as np
 import polars as pl
 
 from forensics.models.features import EmbeddingRecord, FeatureVector
+from forensics.storage.json_io import ensure_parent
 
 _DICT_FIELDS = frozenset(
     {
@@ -42,20 +44,20 @@ def write_parquet_atomic(
     ``path.parent.mkdir(parents=True, exist_ok=True)`` ceremony from callers
     (RF-DRY-004 / G1). Accepts an existing frame or a list of row dicts.
     """
-    path.parent.mkdir(parents=True, exist_ok=True)
+    ensure_parent(path)
     df = frame if isinstance(frame, pl.DataFrame) else pl.DataFrame(frame)
     df.write_parquet(path)
 
 
 def save_numpy_atomic(path: Path, array: np.ndarray) -> None:
     """``np.save`` with mkdir on the parent directory (RF-DRY-004 / G1)."""
-    path.parent.mkdir(parents=True, exist_ok=True)
+    ensure_parent(path)
     np.save(path, array)
 
 
 def save_numpy_compressed_atomic(path: Path, **arrays: np.ndarray) -> None:
     """``np.savez_compressed`` with mkdir on the parent directory (RF-DRY-004 / G1)."""
-    path.parent.mkdir(parents=True, exist_ok=True)
+    ensure_parent(path)
     np.savez_compressed(path, **arrays)
 
 
@@ -80,7 +82,16 @@ def read_features(path: Path) -> pl.DataFrame:
     Prefer :func:`scan_features` for new code so predicate pushdown stays
     available; ``read_features`` remains for notebooks and tests that want a
     materialised frame.
+
+    .. deprecated:: 0.2
+        Use :func:`scan_features` and call :meth:`~polars.LazyFrame.collect` at
+        the boundary where a ``DataFrame`` is required (RF-DEAD-004).
     """
+    warnings.warn(
+        "read_features() is deprecated; use scan_features(path).collect()",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     return scan_features(path).collect()
 
 
@@ -107,7 +118,7 @@ def load_feature_frame_sorted_eager(features_path: Path) -> pl.DataFrame:
 
 def write_embeddings_manifest(records: list[EmbeddingRecord], path: Path) -> None:
     """Atomically rewrite the embedding manifest JSONL."""
-    path.parent.mkdir(parents=True, exist_ok=True)
+    ensure_parent(path)
     lines = [json.dumps(r.model_dump(mode="json"), sort_keys=True) for r in records]
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
@@ -175,7 +186,7 @@ def write_author_embedding_batch(
     ``vectors`` (float32, 2-D). This avoids NumPy object arrays so archives load
     with ``np.load(..., allow_pickle=False)``.
     """
-    path.parent.mkdir(parents=True, exist_ok=True)
+    ensure_parent(path)
     mat = np.asarray(vectors, dtype=np.float32)
     if mat.ndim != 2:
         msg = f"vectors must be 2-D, got shape {mat.shape}"

@@ -28,6 +28,7 @@ dependencies = [
   "ipykernel>=6.29.0",
   "pyarrow>=17.0",
   "xxhash>=3.4",
+  "python-json-logger>=3.2.1",
   "en-core-web-md @ https://github.com/explosion/spacy-models/releases/download/en_core_web_md-3.8.0/en_core_web_md-3.8.0-py3-none-any.whl",
 ]
 
@@ -101,13 +102,10 @@ omit = [
 ]
 
 [tool.coverage.report]
-# Denominator includes features + storage (P1-TEST-001); optional-heavy paths (probability,
-# live fetches) keep aggregate modest — raise gradually as tests land. Phase 14 pushed
-# this from 65 → 66. Phase 13 Run 7 F4 fixed the 3 broken spacy.load monkeypatch tests,
-# corrected the 5 lexical/content feature-extractor bugs (MATTR NaN, hapax_ratio
-# definition, bigram_entropy NaN, self_similarity peer-count) that were previously
-# xfailed, and added ~22 statistics-module tests. Measured coverage is ~67% (baseline
-# main was 63.4%). Next target: 70% once probability/baseline stages get test coverage.
-fail_under = 66
+# Denominator includes features + storage; optional-heavy paths (probability, live
+# fetches) keep aggregate modest. Phase 15 (Notion remediation) raised fail_under to 72%
+# with pipeline stage-order tests, drift pipeline + provenance hash tests, and
+# orchestrator assemble coverage.
+fail_under = 72
 show_missing = true
 skip_covered = false

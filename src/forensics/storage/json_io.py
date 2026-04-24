@@ -20,6 +20,16 @@ from pydantic import BaseModel
 _JsonLike = BaseModel | Mapping[str, Any] | Sequence[Any] | str | int | float | bool | None
 
 
+def ensure_parent(path: Path) -> None:
+    """Create parent directories for a file path (RF-DRY-004)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+
+def ensure_dir(path: Path) -> None:
+    """Create a directory path if missing (RF-DRY-004)."""
+    path.mkdir(parents=True, exist_ok=True)
+
+
 def _to_jsonable(payload: Any) -> Any:
     """Return a JSON-ready representation of ``payload``.
 
@@ -52,7 +62,7 @@ def write_json_artifact(
     - Writes to a sibling tempfile then atomically renames over ``path`` so a
       crash mid-write cannot corrupt a pre-existing artifact.
     """
-    path.parent.mkdir(parents=True, exist_ok=True)
+    ensure_parent(path)
     rendered = json.dumps(_to_jsonable(payload), indent=indent, default=str)
 
     with tempfile.NamedTemporaryFile(
@@ -87,7 +97,7 @@ def write_text_atomic(path: Path, text: str, *, encoding: str = "utf-8") -> None
     ``path.parent.mkdir(...)`` + ``path.write_text(...)`` pair from every
     caller (RF-DRY-004 / G1).
     """
-    path.parent.mkdir(parents=True, exist_ok=True)
+    ensure_parent(path)
     with tempfile.NamedTemporaryFile(
         "w",
         encoding=encoding,
@@ -107,4 +117,4 @@ def write_text_atomic(path: Path, text: str, *, encoding: str = "utf-8") -> None
         raise
 
 
-__all__ = ["write_json_artifact", "write_text_atomic"]
+__all__ = ["ensure_dir", "ensure_parent", "write_json_artifact", "write_text_atomic"]

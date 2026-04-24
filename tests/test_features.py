@@ -422,11 +422,11 @@ def test_productivity_rolling(tmp_path: Path) -> None:
 
 
 def test_write_features_empty_list_writes_zero_rows(tmp_path: Path) -> None:
-    from forensics.storage.parquet import read_features, write_features
+    from forensics.storage.parquet import scan_features, write_features
 
     path = tmp_path / "empty.parquet"
     write_features([], path)
-    df = read_features(path)
+    df = scan_features(path).collect()
     assert df.height == 0
 
 
@@ -483,7 +483,7 @@ def test_extract_all_features_writes_embedding_batch_not_per_article_npy(
 
 def test_write_features_roundtrip(tmp_path: Path, sample_author: Author) -> None:
     from forensics.models.features import FeatureVector
-    from forensics.storage.parquet import read_features, write_features
+    from forensics.storage.parquet import scan_features, write_features
 
     fv = FeatureVector(
         article_id="x",
@@ -496,7 +496,7 @@ def test_write_features_roundtrip(tmp_path: Path, sample_author: Author) -> None
     )
     path = tmp_path / "f.parquet"
     write_features([fv], path)
-    df = read_features(path)
+    df = scan_features(path).collect()
     assert df.height == 1
     assert "article_id" in df.columns
 
@@ -507,7 +507,7 @@ def test_feature_vector_parquet_dict_field_roundtrip(
 ) -> None:
     """Dict-typed fields must survive to_flat_dict → Parquet → row → FeatureVector."""
     from forensics.models.features import FeatureVector
-    from forensics.storage.parquet import read_features, write_features
+    from forensics.storage.parquet import scan_features, write_features
 
     fw = {"the": 0.25, "of": 0.12, "and": 0.08}
     punct = {".": 0.3, ",": 0.5, ";": 0.05}
@@ -526,7 +526,7 @@ def test_feature_vector_parquet_dict_field_roundtrip(
     path = tmp_path / "fv_rt.parquet"
     write_features([fv], path)
 
-    df = read_features(path)
+    df = scan_features(path).collect()
     row = df.row(0, named=True)
 
     restored = FeatureVector.model_validate(row)

@@ -177,7 +177,7 @@ Local **Ollama** HTTP API (`baseline.ollama_base_url`); model tags from `baselin
    uv run python -m spacy download en_core_web_md
    ```
 
-4. **Edit [`config.toml`](config.toml)** — Replace template authors (`placeholder-target` / `placeholder-control`) with real author rows before any live scrape; the CLI rejects placeholders on discover/metadata/fetch paths.
+4. **Edit [`config.toml`](config.toml)** (see also **[`config.toml.example`](config.toml.example)** for the same template with setup notes) — Replace template authors (`placeholder-target` / `placeholder-control`) with real author rows before any live scrape; the CLI rejects placeholders on discover/metadata/fetch paths.
 
 5. **Optional: Quarto** — Required for `forensics report` and the report step of `forensics all`. [Install Quarto](https://quarto.org/docs/get-started/) so `quarto` is on your `PATH`.
 
