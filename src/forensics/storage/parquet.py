@@ -146,6 +146,11 @@ def save_numpy_compressed_atomic(path: Path, **arrays: np.ndarray) -> None:
 def write_features(features: list[FeatureVector], output_path: Path) -> None:
     """Write feature vectors to Parquet (dict fields as JSON strings).
 
+    Schema includes the ``section: pl.Utf8`` column derived from the article
+    URL via :func:`forensics.utils.url.section_from_url` (Phase 15 Step J1);
+    legacy parquets without this column are upgraded by
+    ``forensics features migrate``.
+
     ``write_parquet_atomic`` stamps the current
     ``feature_parquet_schema_version`` into parquet key/value metadata
     automatically (Phase 15 Step 0.3).

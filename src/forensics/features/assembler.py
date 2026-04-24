@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 
 from forensics.models.article import Article
@@ -14,6 +15,26 @@ from forensics.models.features import (
     ReadabilityFeatures,
     StructuralFeatures,
 )
+from forensics.utils.url import section_from_url
+
+logger = logging.getLogger(__name__)
+
+
+def _derive_section(article: Article) -> str:
+    """Derive ``section`` from ``article.url`` (Phase 15 Step J1).
+
+    Logs a WARNING when the regex falls through to ``"unknown"`` so future
+    URL-shape changes surface in routine pipeline runs (per the J1 spec).
+    """
+    url_str = str(article.url)
+    section = section_from_url(url_str)
+    if section == "unknown":
+        logger.warning(
+            "section_from_url returned 'unknown' for article %s (url=%r)",
+            article.id,
+            url_str,
+        )
+    return section
 
 
 def build_feature_vector_from_extractors(
@@ -33,6 +54,7 @@ def build_feature_vector_from_extractors(
         article_id=article.id,
         author_id=article.author_id,
         timestamp=ts,
+        section=_derive_section(article),
         lexical=LexicalFeatures.model_validate(lex),
         structural=StructuralFeatures.model_validate(struct),
         content=ContentFeatures.model_validate(cont),

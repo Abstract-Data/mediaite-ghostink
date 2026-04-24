@@ -1,4 +1,11 @@
-"""Analyze subcommand — change-point, time-series, drift, convergence, comparison."""
+"""Analyze subcommand — change-point, time-series, drift, convergence, comparison.
+
+The default invocation (``forensics analyze [flags]``) preserves the legacy
+behaviour from before Phase 15 J3. New diagnostics ride on nested
+sub-commands (``forensics analyze section-profile``); the surrounding
+``analyze_app`` is registered with ``invoke_without_command=True`` so
+existing flag-only invocations continue to work unchanged.
+"""
 
 from __future__ import annotations
 
@@ -18,6 +25,13 @@ from forensics.preregistration import verify_preregistration
 from forensics.storage.json_io import write_json_artifact
 
 logger = logging.getLogger(__name__)
+
+analyze_app = typer.Typer(
+    name="analyze",
+    help="Run analysis pipeline (change-point, drift, convergence, comparison).",
+    no_args_is_help=False,
+    invoke_without_command=True,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -256,7 +270,9 @@ def run_analyze(
     )
 
 
+@analyze_app.callback(invoke_without_command=True)
 def analyze(
+    ctx: typer.Context,
     changepoint: Annotated[
         bool,
         typer.Option("--changepoint", help="Run change-point detection (PELT/BOCPD)"),
@@ -331,6 +347,10 @@ def analyze(
     ] = False,
 ) -> None:
     """Run analysis pipeline (change-point, drift, convergence, comparison)."""
+    # When a sub-command is invoked (e.g. ``analyze section-profile``),
+    # Typer still runs the callback first; let the sub-command own the flow.
+    if ctx.invoked_subcommand is not None:
+        return
     run_analyze(
         changepoint=changepoint,
         timeseries=timeseries,
@@ -345,3 +365,54 @@ def analyze(
         author=author,
         include_advertorial=include_advertorial,
     )
+
+
+@analyze_app.command(name="section-profile")
+def section_profile_cmd(
+    output: Annotated[
+        Path | None,
+        typer.Option(
+            "--output",
+            metavar="PATH",
+            help=(
+                "Override the human-readable report path. JSON/CSV side artifacts "
+                "still land in data/analysis/."
+            ),
+        ),
+    ] = None,
+    features_dir: Annotated[
+        Path | None,
+        typer.Option(
+            "--features-dir",
+            metavar="PATH",
+            help="Override the features parquet directory (default: data/features).",
+        ),
+    ] = None,
+) -> None:
+    """Phase 15 J3: newsroom-wide section descriptive report and J5 gate verdict."""
+    from forensics.analysis.section_profile import GATE_OMNIBUS_ALPHA, run_section_profile
+
+    settings = get_settings()
+    root = get_project_root()
+    db_path = root / "data" / "articles.db"
+    paths = AnalysisArtifactPaths.from_project(root, db_path)
+    feat_dir = features_dir if features_dir is not None else paths.features_dir
+    analysis_dir = paths.analysis_dir
+    analysis_dir.mkdir(parents=True, exist_ok=True)
+
+    result = run_section_profile(
+        settings,
+        features_dir=feat_dir,
+        analysis_dir=analysis_dir,
+        report_path=output,
+    )
+    typer.echo(f"section-profile: retained {len(result.sections)} sections")
+    typer.echo(
+        f"  significant families (p<{GATE_OMNIBUS_ALPHA}): "
+        f"{len(result.significant_families)} "
+        f"({', '.join(result.significant_families) or 'none'})"
+    )
+    typer.echo(f"  max off-diagonal cosine distance: {result.max_off_diagonal_distance:.4f}")
+    typer.echo(f"  J5 gate verdict: {result.gate_verdict}")
+    if result.artifacts is not None:
+        typer.echo(f"  report: {result.artifacts.report_md}")

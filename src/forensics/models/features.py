@@ -160,12 +160,20 @@ def _maybe_decode_dict_field(value: Any) -> Any:
 
 
 class FeatureVector(BaseModel):
-    """Per-article computed linguistic and productivity features (nested by family)."""
+    """Per-article computed linguistic and productivity features (nested by family).
+
+    The ``section`` column (Phase 15 Step J1) is the URL-derived first path
+    segment for the article (e.g. ``"politics"``, ``"opinion"``, ``"sponsored"``).
+    Default is ``"unknown"`` so legacy callers and tests that build
+    ``FeatureVector`` without supplying the URL still validate; populated
+    callers go through :func:`forensics.utils.url.section_from_url`.
+    """
 
     id: str = Field(default_factory=lambda: str(uuid4()))
     article_id: str
     author_id: str
     timestamp: datetime
+    section: str = "unknown"
     lexical: LexicalFeatures = Field(default_factory=LexicalFeatures)
     structural: StructuralFeatures = Field(default_factory=StructuralFeatures)
     readability: ReadabilityFeatures = Field(default_factory=ReadabilityFeatures)
@@ -203,6 +211,7 @@ class FeatureVector(BaseModel):
             "article_id": self.article_id,
             "author_id": self.author_id,
             "timestamp": self.timestamp.isoformat(),
+            "section": self.section,
             **self.lexical.model_dump(mode="json"),
             **self.structural.model_dump(mode="json"),
             **self.readability.model_dump(mode="json"),
