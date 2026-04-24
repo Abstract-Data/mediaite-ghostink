@@ -1,38 +1,60 @@
-"""HTML fragments for the per-author report sections (Phase 15 K2 + K3).
+"""HTML report assembly for the per-author and aggregate report (Phase 15 K-series).
 
-Wave 3 wires three new analysis artifacts into the per-author HTML report:
+This module is intentionally tiny: each helper renders one named HTML
+fragment and is owned by a single K-series step:
 
-- ``<author_slug>_section_mix.json`` (J4) — a stacked-area plot of monthly
-  section composition, placed *above* the stylometric drift plot. K2.
-- ``<author_slug>_section_contrast.json`` (J6) — a per-author table of
-  pairwise section contrasts, summarised at the feature-family level. K3.
+- K2 — section-mix stacked-area chart (``render_section_mix_chart``)
+- K3 — section-contrast table (``render_section_contrast_table``)
+- K4 — adjusted-vs-unadjusted CP twin panel (``_render_cp_twin_panel_section``)
+- K5 — outlet-level section profile embed (``render_section_profile_embed``)
 
-Both helpers in this module return self-contained HTML strings. They never
-write to disk and never raise on missing inputs: a missing artifact yields a
-short placeholder fragment so the surrounding report renders cleanly even
-when its sibling wave hasn't shipped yet (J6 is parallel work in Wave 3.3).
+The aggregator :func:`render_author_section` stitches them together in a
+fixed order so sibling agents can land helpers without coordinating prose
+changes. Every helper here is a free function with no shared state.
 
-Wave 3.2 (K4–K6) will add adjusted-vs-unadjusted change-point twin panels,
-the section-profile embed, and the Pipeline B diagnostics block in this
-same file. To keep the conflict surface small, every helper here is a
-free function with no shared state.
+Soft-failure semantics: a missing artifact yields a short placeholder
+fragment so the surrounding report renders cleanly even when its sibling
+wave hasn't shipped yet (e.g. J5 residualization). The chart helpers use
+:mod:`plotly.graph_objects` directly (rather than ``plotly.express``) so
+the report stage stays pandas-free — this project is Polars-native.
 """
 
 from __future__ import annotations
 
 import html
 import json
+from collections.abc import Iterable, Sequence
+from datetime import datetime
+from html import escape
 from pathlib import Path
 
 import plotly.graph_objects as go
 
+from forensics.reporting.plots import render_cp_twin_panel
+
 __all__ = [
+    "K5_FALLBACK_HTML",
     "SECTION_MIX_CAPTION",
+    "SECTION_PROFILE_REPORT_RELPATH",
+    "render_author_section",
     "render_section_contrast_table",
     "render_section_mix_chart",
+    "render_section_profile_embed",
 ]
 
-# Verbatim caption from the prompt spec (Phase 15 K2). Tests pin this string.
+# K5 — outlet-level section profile artifact path (relative to project_root)
+SECTION_PROFILE_REPORT_RELPATH: str = "data/analysis/section_profile_report.md"
+
+K5_FALLBACK_HTML = (
+    '<section class="outlet-section-profile">'
+    "<h2>Outlet-Level Section Profile</h2>"
+    "<p><em>Section profile not yet computed; run "
+    "<code>forensics analyze section-profile</code> to generate "
+    "<code>data/analysis/section_profile_report.md</code>.</em></p>"
+    "</section>"
+)
+
+# K2 — verbatim caption from the prompt spec (Phase 15). Tests pin this string.
 SECTION_MIX_CAPTION = (
     "Section mix. Use this to distinguish stylistic drift from editorial mix shifts."
 )
@@ -56,11 +78,7 @@ _INSUFFICIENT_VOLUME_FRAGMENT = (
 
 
 def _load_json(path: Path) -> dict | None:
-    """Return the parsed JSON dict, or ``None`` when missing/invalid.
-
-    Soft-failure semantics keep K2/K3 from crashing the report stage when the
-    sibling analysis artifact (especially K3's J6) has not yet been produced.
-    """
+    """Return the parsed JSON dict, or ``None`` when missing/invalid."""
     try:
         with path.open("r", encoding="utf-8") as handle:
             data = json.load(handle)
@@ -101,18 +119,7 @@ def render_section_mix_chart(
     author_slug: str,
     div_id: str | None = None,
 ) -> str:
-    """Render the section-mix stacked-area chart as a self-contained HTML fragment.
-
-    Returns a short placeholder fragment when ``section_mix_path`` is missing
-    or empty; the surrounding report still renders. The caption is fixed
-    verbatim from the spec so reviewers see the same framing across authors.
-
-    The chart uses :mod:`plotly.graph_objects` directly (rather than
-    ``plotly.express.area``) so the report stage stays pandas-free — this
-    project's data path is Polars-native and we do not want to drag pandas
-    in as a transitive reporting dependency. The visual result (one stacked
-    area per section, normalized to 1.0) is identical.
-    """
+    """Render the section-mix stacked-area chart as a self-contained HTML fragment."""
     payload = _load_json(section_mix_path)
     if payload is None:
         return _MISSING_SECTION_MIX_FRAGMENT
@@ -177,10 +184,7 @@ def _pair_label(pair: dict) -> str | None:
 
 
 def _significant_feature_map(pair: dict) -> dict[str, list[str]]:
-    """Coerce ``significant_features_by_family`` into ``{family: [features]}``.
-
-    Drops empty/missing entries so callers can iterate without re-checking.
-    """
+    """Coerce ``significant_features_by_family`` into ``{family: [features]}``."""
     raw = pair.get("significant_features_by_family", {}) or {}
     if not isinstance(raw, dict):
         return {}
@@ -190,12 +194,7 @@ def _significant_feature_map(pair: dict) -> dict[str, list[str]]:
 def _collect_contrast_axes(
     pairs: list[dict],
 ) -> tuple[list[str], list[str], dict[tuple[str, str], set[str]]]:
-    """Walk ``pairs`` once to collect rows (sections), columns (families), cells.
-
-    The cell set holds the features with significant contrast for each
-    (pair, family) cell. Pair labels are sorted alphabetically so the table
-    is byte-stable across runs.
-    """
+    """Walk ``pairs`` once to collect rows (sections), columns (families), cells."""
     pair_labels: set[str] = set()
     families: set[str] = set()
     cells: dict[tuple[str, str], set[str]] = {}
@@ -244,15 +243,7 @@ def render_section_contrast_table(
     *,
     author_slug: str,
 ) -> str:
-    """Render the per-author section-contrast table as an HTML fragment.
-
-    Soft-fails (returns a "no data" fragment) when:
-    - the artifact file is missing (J6 may not have shipped yet),
-    - the JSON is malformed,
-    - ``disposition == "insufficient_section_volume"`` (we render a short
-      note instead, as the spec requires),
-    - or no qualifying pairs are present.
-    """
+    """Render the per-author section-contrast table as an HTML fragment."""
     payload = _load_json(section_contrast_path)
     if payload is None:
         return _MISSING_SECTION_CONTRAST_FRAGMENT
@@ -275,3 +266,99 @@ def render_section_contrast_table(
         f"{table_html}"
         "</div>"
     )
+
+
+# ---------------------------------------------------------------------------
+# K4 — adjusted-vs-unadjusted CP twin panel
+# ---------------------------------------------------------------------------
+
+
+def _render_cp_twin_panel_section(
+    *,
+    author_slug: str,
+    timestamps: Sequence[datetime],
+    feature_series: Sequence[float],
+    change_points: Iterable[object],
+    feature_name: str = "stylometric feature",
+) -> str:
+    """K4 wrapper: wrap the bare plotly fragment in a labelled ``<section>``."""
+    fragment = render_cp_twin_panel(
+        author_slug=author_slug,
+        timestamps=timestamps,
+        feature_series=feature_series,
+        change_points=change_points,
+        feature_name=feature_name,
+    )
+    return (
+        '<section class="cp-twin-panel">'
+        "<h3>Adjusted vs unadjusted change-points</h3>"
+        f"{fragment}"
+        "</section>"
+    )
+
+
+# ---------------------------------------------------------------------------
+# K5 — outlet-level section profile embed
+# ---------------------------------------------------------------------------
+
+
+def render_section_profile_embed(project_root: Path) -> str:
+    """K5: embed the outlet-level section profile report when present."""
+    report_path = project_root / SECTION_PROFILE_REPORT_RELPATH
+    if not report_path.is_file():
+        return K5_FALLBACK_HTML
+    body = report_path.read_text(encoding="utf-8")
+    return (
+        '<section class="outlet-section-profile">'
+        "<h2>Outlet-Level Section Profile</h2>"
+        '<pre class="section-profile-md">'
+        f"{escape(body)}"
+        "</pre>"
+        "</section>"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Aggregator
+# ---------------------------------------------------------------------------
+
+
+def render_author_section(
+    *,
+    author_slug: str,
+    timestamps: Sequence[datetime],
+    feature_series: Sequence[float],
+    change_points: Iterable[object],
+    feature_name: str = "stylometric feature",
+    pipeline_b_diagnostic_html: str = "",
+    section_mix_path: Path | None = None,
+    section_contrast_path: Path | None = None,
+) -> str:
+    """Assemble the per-author HTML section.
+
+    Stitches K2 (section mix), K3 (section contrast), K4 (CP twin panel),
+    and K6's optional Pipeline B diagnostic block in a fixed order.
+    Per spec, the section-mix chart is placed *above* the CP visual so the
+    reader sees editorial-mix context before stylometric drift.
+    """
+    parts: list[str] = [f'<section class="author" data-author="{escape(author_slug)}">']
+    parts.append(f"<h2>Author: {escape(author_slug)}</h2>")
+    if pipeline_b_diagnostic_html:
+        parts.append(pipeline_b_diagnostic_html)
+    if section_mix_path is not None:
+        parts.append(render_section_mix_chart(section_mix_path, author_slug=author_slug))
+    parts.append(
+        _render_cp_twin_panel_section(
+            author_slug=author_slug,
+            timestamps=timestamps,
+            feature_series=feature_series,
+            change_points=change_points,
+            feature_name=feature_name,
+        )
+    )
+    if section_contrast_path is not None:
+        parts.append(
+            render_section_contrast_table(section_contrast_path, author_slug=author_slug)
+        )
+    parts.append("</section>")
+    return "".join(parts)

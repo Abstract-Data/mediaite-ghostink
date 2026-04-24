@@ -34,7 +34,15 @@ from forensics.survey.scoring import (
 )
 
 if TYPE_CHECKING:
+    from forensics.analysis.artifact_paths import AnalysisArtifactPaths
     from forensics.preregistration import VerificationResult
+
+
+# Phase 15 K6 — stable diagnostic prose. Tests pin the exact wording so the
+# reader-facing message survives prose churn elsewhere in this file.
+PIPELINE_B_DIAGNOSTIC_NOTE: str = (
+    "Drift artifacts missing for this author; Pipeline B score reflects partial data."
+)
 
 
 # ---------------------------------------------------------------------------
@@ -284,4 +292,58 @@ def generate_evidence_narrative(
     return header + " ".join(sentences)
 
 
-__all__ = ["generate_evidence_narrative"]
+# ---------------------------------------------------------------------------
+# Phase 15 K6 — Pipeline B diagnostic block
+# ---------------------------------------------------------------------------
+
+
+def _author_has_embeddings(slug: str, paths: AnalysisArtifactPaths) -> bool:
+    """Mirror ``drift._author_has_embeddings_on_disk`` without importing it.
+
+    Re-importing the analysis-layer helper would create a reporting → analysis
+    dependency just for one filesystem check. Repeating the four lines is the
+    smaller price.
+    """
+    slug_dir = paths.embeddings_dir / slug
+    if not slug_dir.is_dir():
+        return False
+    return any(slug_dir.iterdir())
+
+
+def _has_missing_drift_artifact(slug: str, paths: AnalysisArtifactPaths) -> bool:
+    artifacts = (
+        paths.drift_json(slug),
+        paths.baseline_curve_json(slug),
+        paths.centroids_npz(slug),
+    )
+    return any(not p.is_file() for p in artifacts)
+
+
+def pipeline_b_diagnostics_block(
+    author_slug: str,
+    paths: AnalysisArtifactPaths,
+) -> str:
+    """Phase 15 K6: emit a one-line diagnostic when drift artifacts are incomplete.
+
+    Mirrors the disk-presence logic that ``load_drift_summary`` uses to emit
+    its WARNING (Phase 15 E2). When embeddings exist on disk but at least
+    one of ``drift.json`` / ``baseline_curve.json`` / ``centroids.npz`` is
+    missing, the reader sees the diagnostic alongside the per-author
+    narrative; otherwise the function returns an empty string and adds
+    nothing to the narrative.
+
+    Returns plain prose (no HTML) so callers can splice it into either the
+    HTML report or a plain-text aggregate without re-stripping markup.
+    """
+    if not _author_has_embeddings(author_slug, paths):
+        return ""
+    if not _has_missing_drift_artifact(author_slug, paths):
+        return ""
+    return PIPELINE_B_DIAGNOSTIC_NOTE
+
+
+__all__ = [
+    "PIPELINE_B_DIAGNOSTIC_NOTE",
+    "generate_evidence_narrative",
+    "pipeline_b_diagnostics_block",
+]

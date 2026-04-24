@@ -2782,3 +2782,54 @@ in 168.65s
   report the caller can post-process the fragment, or the helper can
   be retargeted to `include_plotlyjs=True` (~3 MB inline per author
   page) — left for a follow-up if it becomes a constraint.
+
+---
+
+### Phase 15 K4+K5+K6 — Reporting integration (CP twin-panel + section profile + Pipeline B diagnostics)
+
+**Status:** Complete
+
+#### Goal
+Surface three reporting deliverables from the Phase 15 v0.4.0 prompt:
+- **K4** — adjusted-vs-unadjusted change-point twin-panel visualisation, the spec's "single most important forensic-defensibility visual."
+- **K5** — embed `section_profile_report.md` (J3 artifact) in the aggregate report so reviewers see the outlet-level section-distinctness verdict.
+- **K6** — surface a "Pipeline B diagnostic" prose block in the per-author narrative when drift artifacts are missing on disk despite embeddings being present (closes the silent-failure loop opened by E2's WARNING template).
+
+#### What Was Done
+- **`src/forensics/reporting/plots.py` (new)** — `render_cp_twin_panel(...)` using `plotly.subplots.make_subplots(rows=2, cols=1, shared_xaxes=True)`. Renders the J5 placeholder fragment when no `pelt_section_adjusted` / `bocpd_section_adjusted` change-points are present, so the report stays renderable before J5 ships. Public constants: `RAW_CP_COLOR`, `ADJUSTED_CP_COLOR`, `J5_PLACEHOLDER_HTML`, `J5_PLACEHOLDER_PREFIX`.
+- **`src/forensics/reporting/html_report.py` (new)** — `render_section_profile_embed(project_root)` (K5) reads `data/analysis/section_profile_report.md` if present, escapes the body, and wraps it in a labelled `<section>`. Falls back to a one-paragraph notice naming the CLI command to generate it. `render_author_section(...)` agglomerator stitches the K6 diagnostic + K4 chart in a fixed order (diagnostic first so reviewers see data-completeness caveats before the chart).
+- **`src/forensics/reporting/narrative.py` (modified)** — added `pipeline_b_diagnostics_block(slug, paths)` (K6) and `PIPELINE_B_DIAGNOSTIC_NOTE` constant. Mirrors the disk-presence logic of `drift._author_has_embeddings_on_disk` + per-artifact existence checks; returns an empty string in two silent-default cases (no embeddings; all artifacts present) so callers can splice the result unconditionally.
+- **`tests/unit/test_reporting_diagnostics.py` (new)** — 9 tests across K4 (3), K5 (2), K6 (3), aggregator integration (1). Exceeds H1's `≥3 per file` requirement and includes a SHA-256 byte-stable regression-pin on the J5 placeholder fragment.
+
+#### Verification
+```
+$ uv run pytest tests/unit/test_reporting_diagnostics.py -v --no-cov
+9 passed in 0.82s
+
+$ uv run pytest tests/ -k "narrative or reporting or html_report or plots" -v --no-cov
+16 passed, 1 skipped, 672 deselected in 2.65s
+
+$ uv run ruff check . && uv run ruff format --check .
+All checks passed!
+217 files already formatted
+
+$ uv run pytest tests/ --no-cov
+682 passed, 4 skipped, 3 deselected, 1 warning in 171.00s
+```
+
+#### Decisions Made
+- **`html_report.py` aggregator is intentionally minimal.** Sibling Wave 3.1 (K1+K2+K3) may add helpers in the same file; this PR only owns K4 + K5 helpers and a small `render_author_section` aggregator. Each helper is a standalone function so sibling agents can land K1-K3 helpers without a merge conflict on prose.
+- **Method-label constants are duplicated, not imported.** `RAW_METHODS` / `SECTION_ADJUSTED_METHODS` in `plots.py` repeat the `_`-prefixed convergence constants; importing them would create a `reporting → analysis` dependency just for two frozensets. Same rationale for K6's `_author_has_embeddings` mirroring `drift._author_has_embeddings_on_disk`.
+- **K4 placeholder rather than omission when J5 hasn't shipped.** The spec calls this out as the most important visual; replacing the chart with a notice means reviewers always see *something* about CP-source even before J5 enables section-adjusted CPs. The placeholder text is byte-locked under SHA-256 in the test for log-grep dashboard stability.
+- **K6 emits prose, not HTML.** `pipeline_b_diagnostics_block` returns plain prose so the diagnostic can be spliced into either the HTML report (wrapped in `<p>` by the caller) or a plain-text aggregate without re-stripping markup.
+- **K6 is silent when no embeddings exist.** Mirrors E2's logging default — an author with no embeddings was never analysed by Pipeline B, so a "data incomplete" note would mislead the reader.
+
+#### Unresolved Questions
+- **J5 ships separately.** This PR is forward-compatible: when the J5 writer adds `pelt_section_adjusted` / `bocpd_section_adjusted` to `ChangePoint.method`'s Literal and writes them to `*_result.json`, K4's twin-panel renders the chart automatically. No changes here required.
+- **End-to-end visual inspection.** Spec validation step says "open the generated HTML for one author and visually confirm the chart renders." Smoke-rendering against live `data/analysis/*_result.json` is an operator step, not a unit test, and remains for the next pipeline run.
+
+#### Risks & Next Steps
+- **`html_report.py` will conflict with sibling Wave 3.1** if both PRs add the same helper name to the same file. K4's helper is named `_render_cp_twin_panel_section`, K5's is `render_section_profile_embed`, the aggregator is `render_author_section` — none of which overlap with K1's `families_converging` narrative edit or K2/K3's `section_mix` / `section_contrast` table helpers. Three-way merge should land cleanly; if not, the resolution is to keep both sets of helpers and union the aggregator's `parts.append(...)` calls.
+- **Plotly `to_html(include_plotlyjs="cdn")`** requires network on render-time. If the report is built offline, switch to `"inline"` or `"directory"` — left for whichever sibling owns the final stitching path.
+
+---
