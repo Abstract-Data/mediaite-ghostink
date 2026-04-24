@@ -2310,7 +2310,24 @@ $ uv run ruff check . && uv run ruff format --check .
 All checks passed!
 208 files already formatted
 
-<<<<<<< HEAD
+$ uv run pytest tests/ --no-cov
+619 passed, 4 skipped, 3 deselected, 1 warning in 198.21s
+```
+
+#### Decisions Made
+- **F1 reference values are post-F1, not pre-F1.** The spec text in `prompts/phase15-optimizations/v0.4.0.md:1067-1072` calls for "bit-for-bit parity with the loop reference" at the same seed, but this is mathematically impossible — the loop calls `rng.choice(a, ...)` then `rng.choice(b, ...)` interleaved per iteration, while the vectorized form draws all rows for `a` first then all rows for `b`. They consume the RNG stream in different orders and cannot agree at any seed. I captured `_REF_LO=0.2601315351229742` and `_REF_HI=1.1295517416236465` from the post-F1 vectorized implementation on the spec's `(default_rng(0).normal(0, 1, 30), default_rng(0).normal(0.3, 1, 40), seed=42, n_bootstrap=200)` triple. This still satisfies the spec's stated *purpose* (lines 1075-1078): "Any future change ... must update these constants deliberately." The output-shape change from loop → vector is itself the deliberate change being pinned.
+- **F3 threshold is `1e-9` (per spec).** This catches both literal-zero series and near-constant ones (e.g. `np.full(60, 0.4) + tiny noise` with `std ~ 1e-13`). PELT alone would already return `[]` on these, but BOCPD's `_bocpd_init_prior` uses `max(np.var(...), 1e-12)` as a floor — the predictive then divides by ~zero and produces unstable / meaningless emits. Skipping at the analyze layer keeps the audit log clean.
+- **Wrapped the F3 guard at the top of the per-feature loop, after the existing `len(series) < 10` guard.** Phase F0 (cost_model threading) and Phase A (BOCPD knobs) already touched this function — the F3 patch is 11 lines, fully inside the existing loop, no signature changes, minimal blast radius for Wave 3 merges.
+
+#### Unresolved Questions
+- None. The work matches the F1 + F3 specs from `prompts/phase15-optimizations/v0.4.0.md`. F2 (per-feature series cache in orchestrator) is a separate unit and remains untouched here.
+
+#### Risks & Next Steps
+- The output drift in `bootstrap_ci` (from loop to vector at the same seed) is a one-time, deliberate change. Any downstream test/artifact that pinned outputs against the pre-F1 implementation will need updating; none were found in the test suite (only ordering / determinism / empty-input tests existed prior). Production CI artifacts are not seed-pinned, so no impact.
+- The F3 DEBUG log is silent at the default INFO log level. Audits that need to see the skipped features should run with `LOGLEVEL=DEBUG forensics changepoint ...`.
+
+---
+
 $ uv run python -m pytest tests/ --no-cov
 635 passed, 3 deselected, 1 warning in 146.77s
 ```
@@ -2331,20 +2348,3 @@ $ uv run python -m pytest tests/ --no-cov
 - **Byte-stability is regression-pinned** by `test_write_section_mix_artifact_byte_stable_for_fixed_fixture`. Any change to indent, key order, separators, trailing newline, or sort discipline will fail this test by SHA256. When H2 centralises `sort_keys=True` in `write_json_artifact`, swap the manual `json.dumps` for `write_json_artifact(..., sort_keys=True)` and re-run the byte-pin to confirm parity.
 - **Wave 3 K2 wiring** can read the artifact directly (`json.loads(path.read_text())`) — no Pydantic model is required to consume it. Use `SectionMixSeries` only inside the analyze stage.
 - **No GUARDRAILS Sign needed** — no novel failure pattern was hit; the J1 column-derivation fallback is a documented design contingency, not a footgun.
-=======
-$ uv run pytest tests/ --no-cov
-619 passed, 4 skipped, 3 deselected, 1 warning in 198.21s
-```
-
-#### Decisions Made
-- **F1 reference values are post-F1, not pre-F1.** The spec text in `prompts/phase15-optimizations/v0.4.0.md:1067-1072` calls for "bit-for-bit parity with the loop reference" at the same seed, but this is mathematically impossible — the loop calls `rng.choice(a, ...)` then `rng.choice(b, ...)` interleaved per iteration, while the vectorized form draws all rows for `a` first then all rows for `b`. They consume the RNG stream in different orders and cannot agree at any seed. I captured `_REF_LO=0.2601315351229742` and `_REF_HI=1.1295517416236465` from the post-F1 vectorized implementation on the spec's `(default_rng(0).normal(0, 1, 30), default_rng(0).normal(0.3, 1, 40), seed=42, n_bootstrap=200)` triple. This still satisfies the spec's stated *purpose* (lines 1075-1078): "Any future change ... must update these constants deliberately." The output-shape change from loop → vector is itself the deliberate change being pinned.
-- **F3 threshold is `1e-9` (per spec).** This catches both literal-zero series and near-constant ones (e.g. `np.full(60, 0.4) + tiny noise` with `std ~ 1e-13`). PELT alone would already return `[]` on these, but BOCPD's `_bocpd_init_prior` uses `max(np.var(...), 1e-12)` as a floor — the predictive then divides by ~zero and produces unstable / meaningless emits. Skipping at the analyze layer keeps the audit log clean.
-- **Wrapped the F3 guard at the top of the per-feature loop, after the existing `len(series) < 10` guard.** Phase F0 (cost_model threading) and Phase A (BOCPD knobs) already touched this function — the F3 patch is 11 lines, fully inside the existing loop, no signature changes, minimal blast radius for Wave 3 merges.
-
-#### Unresolved Questions
-- None. The work matches the F1 + F3 specs from `prompts/phase15-optimizations/v0.4.0.md`. F2 (per-feature series cache in orchestrator) is a separate unit and remains untouched here.
-
-#### Risks & Next Steps
-- The output drift in `bootstrap_ci` (from loop to vector at the same seed) is a one-time, deliberate change. Any downstream test/artifact that pinned outputs against the pre-F1 implementation will need updating; none were found in the test suite (only ordering / determinism / empty-input tests existed prior). Production CI artifacts are not seed-pinned, so no impact.
-- The F3 DEBUG log is silent at the default INFO log level. Audits that need to see the skipped features should run with `LOGLEVEL=DEBUG forensics changepoint ...`.
->>>>>>> 2d51e1d639a3b2a7def03229e4dbfbb2483ab7c8
