@@ -144,6 +144,17 @@ class AnalysisConfig(BaseModel):
         "section_adjusted",
         json_schema_extra={"include_in_config_hash": True},
     )
+    # Phase 15 Fix-G — windows pass via drift-only when pipeline_b >= this threshold.
+    # Lets high embedding-drift signals surface independently of the stylometric
+    # ratio gate or the AB intersection gate (both of which require non-trivial
+    # pipeline_a). Setting this to ``1.0`` (or any value above the maximum
+    # achievable pipeline_b) disables the drift-only channel.
+    convergence_drift_only_pb_threshold: float = Field(
+        0.3,
+        ge=0.0,
+        le=1.0,
+        json_schema_extra={"include_in_config_hash": True},
+    )
     convergence_perplexity_drop_ratio: float = 0.92
     convergence_burstiness_drop_ratio: float = 0.94
     # Empirical null for convergence windows (logged only; does not change windows).
