@@ -2348,3 +2348,117 @@ $ uv run python -m pytest tests/ --no-cov
 - **Byte-stability is regression-pinned** by `test_write_section_mix_artifact_byte_stable_for_fixed_fixture`. Any change to indent, key order, separators, trailing newline, or sort discipline will fail this test by SHA256. When H2 centralises `sort_keys=True` in `write_json_artifact`, swap the manual `json.dumps` for `write_json_artifact(..., sort_keys=True)` and re-run the byte-pin to confirm parity.
 - **Wave 3 K2 wiring** can read the artifact directly (`json.loads(path.read_text())`) — no Pydantic model is required to consume it. Use `SectionMixSeries` only inside the analyze stage.
 - **No GUARDRAILS Sign needed** — no novel failure pattern was hit; the J1 column-derivation fallback is a documented design contingency, not a footgun.
+
+---
+
+### Phase 15 J3 — Section-level descriptive report (newsroom-wide diagnostic)
+**Status:** Complete
+**Date:** 2026-04-24
+**Agent/Session:** wave2-parking / agent-af0b78f6 (J3 unit)
+
+#### What Was Done
+- New analysis module `forensics.analysis.section_profile` that computes
+  per-section centroids, an inter-section cosine distance matrix, and a
+  per-feature Kruskal–Wallis omnibus ranking. Persists the four required
+  artifacts plus a CSV mirror of the distance matrix:
+  - `data/analysis/section_centroids.json`
+  - `data/analysis/section_distance_matrix.json`
+  - `data/analysis/section_distance_matrix.csv`
+  - `data/analysis/section_feature_ranking.json`
+  - `data/analysis/section_profile_report.md` (J5 gate verdict embedded)
+- New CLI subcommand `forensics analyze section-profile` with `--output`
+  and `--features-dir` overrides. The legacy `forensics analyze [flags]`
+  invocation is preserved by promoting `analyze` to a Typer sub-app with
+  `invoke_without_command=True` (Phase 15 L6 pattern documented in
+  `docs/RUNBOOK.md`).
+- Quantified J5 gate verdict computed from the two locked criteria:
+  ≥ 3 feature families with omnibus p < 0.01 AND max off-diagonal cosine
+  distance > 0.3. Verdict labels: `PASS` / `BORDERLINE` / `FAIL` /
+  `DEGENERATE` (≤ 1 retained section).
+- Unit tests cover happy path (PASS verdict on two clearly-distinct
+  synthetic sections), the single-retained-section degenerate path, the
+  below-threshold skip, the regression-pin (fixed-seed verdict locks to
+  PASS), the artifact write-out, the empty-frame phantom-row guard, and
+  a 5-row truth-table parametrize for `compute_gate_verdict`.
+
+#### Files Modified
+- `src/forensics/analysis/section_profile.py` — new module (compute,
+  persistence, gate verdict).
+- `src/forensics/cli/analyze.py` — converted to sub-app, added
+  `section-profile` subcommand. Legacy flag invocation preserved via the
+  `invoke_without_command` callback.
+- `src/forensics/cli/__init__.py` — register the new sub-app.
+- `tests/unit/test_section_profile.py` — 11 tests covering happy path,
+  edge cases, regression-pin, artifact write-out, gate truth table.
+
+#### Verification Evidence
+```
+$ uv run python -m pytest tests/unit/test_section_profile.py -v --no-cov
+11 passed in 0.82s
+
+$ uv run python -m pytest tests/ -k "section_profile or section" -v --no-cov
+14 passed, 1 skipped, 615 deselected in 2.99s
+
+$ uv run ruff check . && uv run ruff format --check .
+All checks passed; 208 files already formatted
+
+$ uv run python -m pytest tests/ -v --no-cov
+623 passed, 4 skipped, 3 deselected, 1 warning in 144.41s
+
+$ uv run forensics analyze section-profile --output /tmp/section_profile_test.md
+section-profile: retained 0 sections
+  significant families (p<0.01): 0 (none)
+  max off-diagonal cosine distance: 0.0000
+  J5 gate verdict: DEGENERATE
+  report: /tmp/section_profile_test.md
+```
+
+#### Decisions Made
+- **statsmodels MANOVA fallback to scipy Kruskal–Wallis.** `statsmodels`
+  is not in `pyproject.toml`; per-feature non-parametric Kruskal–Wallis
+  matches the spec's documented fallback and avoids adding a heavy
+  dependency for one diagnostic. Rationale is in the module docstring.
+- **CLI back-compat preserved.** Spec says "subcommand `section-profile`
+  on `forensics analyze`", but the existing `analyze` is a flag-driven
+  command and the integration test (`tests/integration/test_cli.py`)
+  asserts those flags appear in `--help`. Converting `analyze` to a
+  Typer sub-app with `invoke_without_command=True` (the Phase 15 L6
+  pattern) lets `forensics analyze --changepoint` still work AND adds
+  `forensics analyze section-profile` as a nested subcommand.
+- **Gate verdict locked as a `Literal`** — `Literal["PASS", "BORDERLINE",
+  "FAIL", "DEGENERATE"]`. Constants `GATE_MIN_SIGNIFICANT_FAMILIES=3`,
+  `GATE_OMNIBUS_ALPHA=0.01`, `GATE_MIN_MAX_OFF_DIAGONAL_DISTANCE=0.3`
+  are module-level so callers + tests share one source.
+- **J1 dependency handled with derive-on-read.** The module reads
+  `section` from the parquet if present, else derives from `url` via
+  `forensics.utils.url.section_from_url` (the same helper J1's migration
+  uses). Robust against either pre- or post-migration corpus state.
+- **Empty-frame footgun fixed.** `pl.DataFrame().with_columns(pl.lit(...))`
+  silently broadcasts to a 1-row frame; `_ensure_section_column` short-
+  circuits on empty input. Regression-pinned in
+  `test_empty_frame_does_not_invent_phantom_row`.
+
+#### Real-data Smoke Test Verdict
+- Smoke test on this worktree's `data/` returned **DEGENERATE** because
+  no feature parquets exist in the worktree (the worktree has `articles.db`
+  only, no `data/features/*.parquet`). To get a real PASS/FAIL/BORDERLINE
+  answer the coordinator must run `uv run forensics analyze section-profile`
+  against a worktree that has been through the extract stage. The CLI
+  exit path is exercised; the verdict itself can only be computed against
+  populated parquets.
+
+#### Unresolved Questions
+- None blocking. Once a worktree with populated `data/features/` runs
+  this command, the verdict drives the J5 toggle decision per the v0.4.0
+  gate spec. The Wave 4 J5 unit consumes the verdict from
+  `data/analysis/section_feature_ranking.json` (`gate_verdict` field) so
+  the toggle is automatable.
+
+#### Risks & Next Steps
+- The Kruskal η² approximation (`(H - k + 1) / (n - k)`) is conservative
+  for very small effective sample sizes; on tiny sections this could
+  understate effect. Retention threshold (≥ 50 articles, ≥ 30 from ≥ 2
+  authors) keeps the smallest section comfortably above the danger zone.
+- If J1 lands a `section` column with `null` values, `_ensure_section_column`
+  fills them with `"unknown"` so the omnibus does not crash on null
+  groups.
