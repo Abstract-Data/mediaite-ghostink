@@ -236,11 +236,11 @@ def _run_target_control_comparisons(
     config: ForensicsSettings,
 ) -> dict[str, Any]:
     comparison_payload: dict[str, Any] = {"targets": {}}
-    _validate_compare_artifact_hashes(targets, controls, paths, config)
+    active_targets = [target for target in targets if target in results]
+    if active_targets:
+        _validate_compare_artifact_hashes(active_targets, controls, paths, config)
     changepoints_memory = {slug: list(res.change_points) for slug, res in results.items()}
-    for tid in targets:
-        if tid not in results:
-            continue
+    for tid in active_targets:
         try:
             report = compare_target_to_controls(
                 tid,

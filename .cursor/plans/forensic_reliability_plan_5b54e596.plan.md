@@ -7,7 +7,7 @@ todos:
     status: completed
   - id: tier0-repairs
     content: Repair AI baseline loading, NaN feature comparisons, legacy DB cleanup, and config-hash report gates.
-    status: in_progress
+    status: completed
   - id: methodology-gates
     content: Calibrate AI markers, preregister minimal tests, and gate change-points by effect size.
     status: pending

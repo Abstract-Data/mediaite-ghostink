@@ -1950,3 +1950,71 @@ uv run python - <<'PY' ... PY
 - TASK-2 should use this snapshot to verify AI-baseline repair fills `ai_baseline_similarity` only when valid baseline vectors exist.
 - TASK-3 should use the recorded comparison NaNs as the before-state for finite-value filtering and extractor regressions.
 - TASK-4 should treat `data/forensics.db` as a candidate zero-byte legacy artifact, not as canonical storage.
+
+---
+
+### Forensic Reliability Plan — Tier 0 Repairs
+**Status:** Complete
+**Date:** 2026-04-24
+**Agent/Session:** Cursor Agent tier0-repairs
+
+#### What Was Done
+- Repaired AI baseline loading so drift analysis reads legacy and nested Phase 10 generated `embeddings/*.npy` files under each author baseline root, validates 384-dimensional vectors, and skips malformed vectors loudly.
+- Added an analyze-stage diagnostic that fails when `--ai-baseline` was requested and an author with existing drift artifacts still has no usable AI baseline vectors.
+- Fixed target/control feature comparisons to filter `NaN` / infinite values before Welch t-tests and mean calculations.
+- Added feature coverage diagnostics for all-zero, all-null, all-NaN, and mixed non-finite comparison columns.
+- Removed the confirmed zero-byte legacy `data/forensics.db` artifact and added a report preflight that rejects any future zero-byte legacy DB before rendering.
+- Added analysis result config-hash validation for report prerequisites and compare-only artifact reuse, while preserving `run_metadata.json` as the broader raw pipeline settings hash.
+- Documented the two-hash contract in `docs/ARCHITECTURE.md`.
+
+#### Files Modified
+- `src/forensics/paths.py`
+- `src/forensics/analysis/drift.py`
+- `src/forensics/analysis/comparison.py`
+- `src/forensics/analysis/orchestrator.py`
+- `src/forensics/cli/analyze.py`
+- `src/forensics/reporting/__init__.py`
+- `src/forensics/utils/provenance.py`
+- `tests/test_analysis_drift_pipeline.py`
+- `tests/test_analysis_infrastructure.py`
+- `tests/test_baseline.py`
+- `tests/test_features.py`
+- `tests/test_report.py`
+- `tests/unit/test_comparison_target_controls.py`
+- `docs/ARCHITECTURE.md`
+- `HANDOFF.md`
+- Deleted: `data/forensics.db`
+
+#### Verification Evidence
+```
+npx gitnexus analyze
+  -> Repository indexed successfully (5,281 nodes | 11,086 edges | 182 clusters | 300 flows)
+npx gitnexus impact --repo mediaite-ghostink --direction upstream ...
+  -> GitNexus graph query failed with "Corrupted wal file"; manual direct-caller trace used instead.
+uv run ruff check .
+  -> All checks passed!
+uv run ruff format --check .
+  -> 195 files already formatted
+uv run pytest tests/test_analysis_drift_pipeline.py tests/test_baseline.py tests/test_features.py tests/test_report.py tests/unit/test_comparison_target_controls.py tests/test_analysis_infrastructure.py -v --no-cov
+  -> 82 passed
+uv run pytest tests/test_survey.py::test_survey_orchestrator_checkpoints_after_each_author tests/test_survey.py::test_survey_observer_hooks_fire_per_author -v --no-cov
+  -> 2 passed
+uv run pytest tests/ -v
+  -> 557 passed, 3 deselected, 1 warning in 173.31s
+  -> Total coverage: 73.72% (gate 72% — PASS)
+```
+
+#### Decisions Made
+- Kept the AI baseline loader recursive only under an author's baseline root and only through `embeddings` directories, avoiding broader data scans.
+- Treated vector dimension mismatch as a skip-with-warning, not a fallback conversion, because the embedding model is pinned to 384 dimensions.
+- Added the comparison feature coverage diagnostic to the comparison payload rather than silently dropping non-finite columns.
+- Made compare-only strict about result config hashes, but limited full-analysis comparison gating to active targets so survey per-author runs that do not build comparisons are not blocked by configured target artifacts.
+- Deleted `data/forensics.db` because it was zero bytes and no source code referenced it as canonical storage.
+
+#### Unresolved Questions
+- GitNexus impact/context queries failed after indexing with a WAL corruption error; source edits proceeded with manual direct-caller tracing. A future GitNexus maintenance pass may need to clean or rebuild the index outside this task.
+- Existing analysis artifacts should be regenerated before report rendering if their per-author result hashes do not match the current `settings.analysis` compatibility hash.
+
+#### Risks & Next Steps
+- Re-run `uv run forensics analyze` before `uv run forensics report` on the real corpus so all per-author `*_result.json` files carry the current analysis config hash.
+- If AI baseline generation is requested after drift artifacts already exist, verify generated nested baseline embeddings are present before trusting `ai_baseline_similarity`.
