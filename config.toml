@@ -183,6 +183,13 @@ bocpd_student_t = true
 convergence_min_feature_ratio = 0.50
 # Phase 15 J5 — which CP stream feeds convergence.
 convergence_cp_source = "section_adjusted"
+# Phase 15 Fix-G — drift-only persistence channel. Windows survive whenever
+# pipeline_b_score >= this threshold even if the family-ratio gate and the
+# AB-intersection gate both fail. Surfaces high embedding-drift windows in
+# the report for authors whose pipeline_a stays below 0.3 (13 of 14 in the
+# Apr-2026 baseline). Set ratio gate or AB threshold higher to make this
+# channel the dominant one.
+convergence_drift_only_pb_threshold = 0.3
 # Phase 15 C — apply BH correction per feature family rather than per author.
 fdr_grouping = "family"
 # Phase 15 E — Pipeline B scoring mode. ``percentile`` uses per-author velocity

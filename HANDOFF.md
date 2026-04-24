@@ -3434,3 +3434,109 @@ uv run python scripts/bench_phase15.py --author placeholder-target --output /tmp
 - The bench placeholder slug emits zero per-stage timings because the worker bails before any stage runs. Operators benching real authors will see populated buckets — this is the documented behavior, not a bug.
 - `mp_context="fork"` is exposed as a public parameter on `run_full_analysis`. If a future operator passes it on macOS with native libraries already loaded, the worker pool will deadlock. The docstring flags this explicitly and the parity test learned the lesson — no production caller currently passes the parameter.
 - The `--compare-pair` flag is purely advisory: it does not validate that both slugs exist as authors in the database. The downstream `compare_target_to_controls` call already raises `ValueError` on unknown slugs and is logged at WARNING by `_run_target_control_comparisons`. Consider adding a CLI-level pre-flight check if user reports surface here.
+
+---
+
+### Phase 15 Fix-G: Drift-only persistence channel
+**Status:** Complete (code) / Partial (digest blocked by data state)
+**Date:** 2026-04-24
+**Agent/Session:** worktree agent-aad9021d (fix-g-drift-only)
+
+#### What Was Done
+- Added a third persistence gate to ``_score_single_window`` so windows with
+  ``pipeline_b_score >= drift_only_pb_threshold`` (default 0.3) survive even
+  when the family-ratio gate and the AB-intersection gate both fail. Pre-Fix-G,
+  high embedding-drift windows were filtered out for any author whose
+  ``pipeline_a`` was below the AB threshold of 0.3.
+- New ``ConvergenceWindow.passes_via: list[str]`` records which gate(s)
+  admitted each window. Insertion order in ``_score_single_window`` is
+  ``ratio``, then ``ab``, then ``drift_only``.
+- New hash-enumerated config knob
+  ``analysis.convergence_drift_only_pb_threshold`` (default 0.3) wired through
+  ``ConvergenceInput`` (auto-resolved by ``from_settings``) and snapshotted in
+  the pre-registration lock.
+- Three new tests in ``tests/unit/test_convergence.py`` covering happy-path
+  drift-only admission, mixed AB+drift_only admission, and the pure-ratio
+  regression (``drift_only_pb_threshold=1.5`` disables the channel).
+- ``tests/unit/test_config_hash.py`` registers the new field in the
+  enumeration guard.
+
+#### Files Modified
+- ``src/forensics/analysis/convergence.py`` — new ``DRIFT_ONLY_PB_THRESHOLD``
+  constant, ``ConvergenceInput.drift_only_pb_threshold`` propagation,
+  third gate in ``_score_single_window`` populating ``passes_via``.
+- ``src/forensics/models/analysis.py`` — added ``passes_via`` field
+  (default ``[]`` for backward compatibility).
+- ``src/forensics/config/settings.py`` — added
+  ``convergence_drift_only_pb_threshold`` (Field 0.3, ``ge=0.0``, ``le=1.0``,
+  hash-enumerated).
+- ``src/forensics/preregistration.py`` — snapshot the new field in the lock.
+- ``config.toml`` — set ``convergence_drift_only_pb_threshold = 0.3`` with
+  rationale comment.
+- ``tests/unit/test_convergence.py`` — three new Fix-G tests.
+- ``tests/unit/test_config_hash.py`` — register new hash-enumerated field.
+
+#### Verification Evidence
+```
+uv run python -m pytest tests/unit/test_convergence.py tests/unit/test_config_hash.py tests/test_preregistration.py tests/unit/test_convergence_input.py --no-cov
+  → 49 passed, 1 skipped (preregistration template lock not present)
+
+uv run python -m pytest tests/ --no-cov
+  → all green (one pre-existing xfail; the four skips are textual / template fixtures)
+
+uv run ruff check src/... tests/...  → all checks passed
+uv run ruff format --check ...        → applied & verified
+
+Manual reproduction with real change-points + reconstructed velocities for
+ahmad-austin (centroids NPZ exists; embeddings manifest is stale relative
+to the symlinked corpus DB):
+  → 677 windows persisted under Fix-G
+  → pb_max ≈ 0.56
+  → 540 windows pass via drift_only (1 pure drift-only)
+
+Per-author re-run of all 14 authors via
+``uv run forensics analyze --include-shared-bylines --author <slug>``
+returned the same persisted counts as before for the 13 authors whose
+``data/embeddings/manifest.jsonl`` no longer references their author UUIDs;
+only ``tommy-christopher`` shows non-zero ``pipeline_b`` because his is the
+only ``author_id`` present in the manifest. See "Risks & Next Steps".
+```
+
+#### Decisions Made
+- ``passes_via`` is a ``list[str]`` (not ``list[Literal[...]]``) for symmetry
+  with the existing ``features_converging`` / ``families_converging`` fields
+  in ``ConvergenceWindow``. Allowed values are documented in the field
+  comment and in ``_score_single_window``'s insertion order.
+- ``DRIFT_ONLY_PB_THRESHOLD`` lives as a module-level constant (parallel to
+  ``PIPELINE_SCORE_PASS_THRESHOLD``) to keep the gate logic self-documenting
+  even when called without a ``ForensicsSettings``.
+- ``convergence_drift_only_pb_threshold`` is hash-enumerated because the
+  threshold materially changes which windows persist into the report; the
+  pre-registration lock now captures it for tamper detection.
+- ``ConvergenceInput.drift_only_pb_threshold`` is a real dataclass field with
+  a default (not threaded through from the ``settings`` getattr at scoring
+  time) so callers building inputs without a settings object still get a
+  consistent default.
+
+#### Unresolved Questions
+- ``data/embeddings/manifest.jsonl`` only references
+  ``tommy-christopher``'s ``author_id``. The other 13 authors load zero
+  embeddings via ``load_article_embeddings``, so
+  ``compute_author_drift_pipeline`` returns ``None`` and the orchestrator
+  passes empty ``vel_tuples`` to convergence — pipeline_b cannot exceed 0
+  for those authors regardless of Fix-G. The post-Fix-G digest below shows
+  this clearly. Re-extracting per-author embeddings (or restoring a
+  newer ``manifest.jsonl``) is required to validate the channel against
+  the full roster.
+
+#### Risks & Next Steps
+- The post-Fix-G digest shows only 1/14 authors with ``pb_max > 0`` because
+  of the data state described above, NOT because of any bug in Fix-G. The
+  unit tests pin the gate semantics; the live ``tommy-christopher`` path
+  shows 1070/1330 windows admitted via ``drift_only`` (1 pure, the rest
+  alongside ``ratio`` since pipeline_a is consistently above the family
+  threshold for him).
+- Consumers that previously read ``ConvergenceWindow`` artifacts WITHOUT the
+  ``passes_via`` field will continue to load via the model's default
+  factory; downstream code that wants to surface drift-only windows must
+  branch on ``"drift_only" in window.passes_via``.

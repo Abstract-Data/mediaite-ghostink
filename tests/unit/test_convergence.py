@@ -405,3 +405,121 @@ def test_ab_threshold_persists_pb_positive_windows() -> None:
         "pa should be < 0.5 so this window would have been filtered pre-Fix-F"
     )
     assert window.pipeline_b_score > PIPELINE_SCORE_PASS_THRESHOLD
+
+
+# --------------------------------------------------------------------------- #
+# Phase 15 Fix-G — drift-only persistence channel.
+# --------------------------------------------------------------------------- #
+
+
+def _drift_only_inputs() -> tuple[list[ChangePoint], list[tuple[str, float]]]:
+    """Build a fixture where pa is tiny but pb_score clears the drift threshold.
+
+    A single weak CP (confidence * effect_size = 0.1 * 0.1 = 0.01) keeps
+    pipeline_a_score ≈ 0.01 — well below the 0.3 AB threshold — and the
+    1-of-FAMILY_COUNT family ratio cannot clear ``min_feature_ratio = 0.5``.
+    The velocity ramp gives ``peak_signal == 1.0`` in percentile mode so
+    ``pipeline_b_score`` lands at ~0.5 (mean of [1.0, 0.0]) — above the
+    0.3 drift-only threshold.
+    """
+    cp_time = datetime(2024, 3, 15, tzinfo=UTC)
+    cps = [_cp("ttr", cp_time, confidence=0.1, effect_size=0.1)]
+    velocities = [(f"2024-{m:02d}", 0.1 * m) for m in range(1, 7)]
+    return cps, velocities
+
+
+def test_drift_only_window_persists_when_pa_is_low() -> None:
+    """Fix-G happy path: pa ≈ 0, pb ≈ 0.5 → window persists via the drift-only channel."""
+    cps, velocities = _drift_only_inputs()
+    settings = _settings_with(pipeline_b_mode="percentile")
+
+    windows = compute_convergence_scores(
+        ConvergenceInput.build(
+            change_points=cps,
+            centroid_velocities=velocities,
+            baseline_similarity_curve=[],
+            window_days=90,
+            min_feature_ratio=0.99,  # ratio gate cannot save this single-family window
+            total_feature_count=1,
+            settings=settings,
+        )
+    )
+
+    assert windows, "Fix-G: drift-only path should persist the high-pb window"
+    window = windows[0]
+    # pa is tiny — pre-Fix-G both ratio and AB gates would have rejected this.
+    assert window.pipeline_a_score < 0.3
+    assert window.pipeline_b_score >= 0.3
+    assert window.passes_via == ["drift_only"], (
+        f"expected pure drift-only admission, got {window.passes_via}"
+    )
+
+
+def test_drift_only_and_ab_both_admit_window() -> None:
+    """Fix-G edge: pa just over 0.3 plus pb >= 0.3 → passes_via lists both gates in order."""
+    cp_time = datetime(2024, 3, 15, tzinfo=UTC)
+    # confidence * effect_size = 0.7 * 0.6 = 0.42 → pa ≈ 0.42 (above 0.3, below 0.5).
+    cps = [_cp("ttr", cp_time, confidence=0.7, effect_size=0.6)]
+    velocities = [(f"2024-{m:02d}", 0.1 * m) for m in range(1, 7)]
+    settings = _settings_with(pipeline_b_mode="percentile")
+
+    windows = compute_convergence_scores(
+        ConvergenceInput.build(
+            change_points=cps,
+            centroid_velocities=velocities,
+            baseline_similarity_curve=[],
+            window_days=90,
+            min_feature_ratio=0.99,  # ratio gate cannot save this single-family window
+            total_feature_count=1,
+            settings=settings,
+        )
+    )
+
+    assert windows, "expected an admitted window"
+    window = windows[0]
+    assert window.pipeline_a_score > PIPELINE_SCORE_PASS_THRESHOLD
+    assert window.pipeline_b_score >= 0.3
+    # Insertion order in ``_score_single_window`` is ratio → ab → drift_only.
+    assert window.passes_via == ["ab", "drift_only"], (
+        f"expected ab + drift_only admission, got {window.passes_via}"
+    )
+
+
+def test_ratio_only_admission_marks_passes_via_ratio() -> None:
+    """Fix-G regression: a window passing ONLY via the family-ratio gate keeps its label."""
+    base = datetime(2024, 6, 1, tzinfo=UTC)
+    feature_names = [
+        "ttr",  # lexical_richness
+        "flesch_kincaid",  # readability
+        "sent_length_mean",  # sentence_structure
+        "bigram_entropy",  # entropy
+        "self_similarity_30d",  # self_similarity
+        "ai_marker_frequency",  # ai_markers
+    ]
+    # Tiny per-CP score keeps pipeline_a below 0.3 while still hitting all
+    # FAMILY_COUNT families so the ratio gate fires alone.
+    cps = [
+        _cp(name, base + timedelta(days=i * 3), confidence=0.1, effect_size=0.1)
+        for i, name in enumerate(feature_names)
+    ]
+
+    windows = compute_convergence_scores(
+        ConvergenceInput.build(
+            change_points=cps,
+            centroid_velocities=[],
+            baseline_similarity_curve=[],
+            window_days=30,
+            min_feature_ratio=0.6,
+            total_feature_count=len(feature_names),
+            # Disable the drift-only channel by setting threshold above max pb.
+            drift_only_pb_threshold=1.5,
+        )
+    )
+
+    assert windows, "expected the family-ratio gate to admit at least one window"
+    window = windows[0]
+    assert window.pipeline_a_score < PIPELINE_SCORE_PASS_THRESHOLD, (
+        "pipeline_a should be too low to clear the AB gate"
+    )
+    assert window.pipeline_b_score < 0.3, "no velocity/sim signal → pb stays at 0"
+    assert window.passes_via == ["ratio"], f"expected pure ratio admission, got {window.passes_via}"

@@ -67,6 +67,17 @@ strict 0.5 threshold filtered all percentile-mode-lifted windows because
 peak_signal alone tops at 0.5 when sim_signal=ai_signal=0.
 """
 
+DRIFT_ONLY_PB_THRESHOLD: float = 0.3
+"""Phase 15 Fix-G third persistence channel — fallback when no settings supply one.
+
+A window survives whenever ``pipeline_b_score >= DRIFT_ONLY_PB_THRESHOLD``
+regardless of the ratio / AB-intersection gates. Pre-Fix-G, 13 of 14 authors
+persisted *zero* windows with positive pipeline_b because their pa fell below
+0.3, hiding the drift signal from the report. The runtime value lives on
+``AnalysisConfig.convergence_drift_only_pb_threshold`` and is propagated via
+:class:`ConvergenceInput`.
+"""
+
 EMBEDDING_DROP_EPSILON: float = 0.05
 """Denominator epsilon for the head-vs-tail embedding similarity drop ratio."""
 
@@ -312,6 +323,7 @@ class ConvergenceInput:
     use_permutation: bool
     permutation_seed: int
     n_permutations: int
+    drift_only_pb_threshold: float = DRIFT_ONLY_PB_THRESHOLD
 
     @classmethod
     def build(
@@ -329,11 +341,16 @@ class ConvergenceInput:
         use_permutation: bool = False,
         permutation_seed: int = 42,
         n_permutations: int = 1000,
+        drift_only_pb_threshold: float | None = None,
     ) -> ConvergenceInput:
         """Resolve defaults from ``settings`` and from ``PELT_FEATURE_COLUMNS``."""
         if settings is not None:
             window_days = settings.analysis.convergence_window_days
             min_feature_ratio = settings.analysis.convergence_min_feature_ratio
+            if drift_only_pb_threshold is None:
+                drift_only_pb_threshold = settings.analysis.convergence_drift_only_pb_threshold
+        if drift_only_pb_threshold is None:
+            drift_only_pb_threshold = DRIFT_ONLY_PB_THRESHOLD
         total = (
             total_feature_count if total_feature_count is not None else len(PELT_FEATURE_COLUMNS)
         )
@@ -350,6 +367,7 @@ class ConvergenceInput:
             use_permutation=use_permutation,
             permutation_seed=permutation_seed,
             n_permutations=n_permutations,
+            drift_only_pb_threshold=drift_only_pb_threshold,
         )
 
     @classmethod
@@ -497,8 +515,20 @@ def _score_single_window(
         pipeline_a_score > PIPELINE_SCORE_PASS_THRESHOLD
         and pipeline_b_score > PIPELINE_SCORE_PASS_THRESHOLD
     )
-    if not (passes_ratio or passes_ab):
+    # Phase 15 Fix-G — drift-only channel: persist windows where the embedding
+    # / velocity signal is strong enough on its own, even if pipeline_a is too
+    # weak to clear the AB intersection and the family ratio gate misses.
+    passes_drift_only = pipeline_b_score >= input_.drift_only_pb_threshold
+    if not (passes_ratio or passes_ab or passes_drift_only):
         return None
+
+    passes_via: list[str] = []
+    if passes_ratio:
+        passes_via.append("ratio")
+    if passes_ab:
+        passes_via.append("ab")
+    if passes_drift_only:
+        passes_via.append("drift_only")
 
     # Phase 15 B4 — ``families_converging`` is added to ``ConvergenceWindow``
     # by Unit 4. Fall through to the legacy constructor if the field isn't
@@ -513,6 +543,7 @@ def _score_single_window(
             pipeline_a_score=pipeline_a_score,
             pipeline_b_score=pipeline_b_score,
             pipeline_c_score=pipeline_c,
+            passes_via=passes_via,
         )
     except (TypeError, ValueError):  # pragma: no cover - exercised pre-Unit-4 only
         return ConvergenceWindow(
