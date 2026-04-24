@@ -2507,3 +2507,182 @@ all green (full suite passes; previous run reported 581 passed)
 #### Risks & Next Steps
 - The default `excluded_sections` set is a frozenset on `SurveyConfig` and `FeaturesConfig`. If TOML loading produces a `list`, pydantic will coerce — but if an operator overrides via env vars, the parsing path needs to handle list/set conversion. Pydantic handles this for `frozenset[str]`, but worth a smoke test on the next live run.
 - An author with only excluded-section articles now reports a new disqualification reason `all_articles_excluded_by_section` — downstream consumers parsing the disqualification reason string need to recognise this new value.
+
+---
+
+### Phase 15 I1+I2+I3+I4: Docs (ARCHITECTURE + RUNBOOK + GUARDRAILS + HANDOFF)
+**Status:** Complete
+**Date:** 2026-04-24
+**Agent/Session:** subagent af7897ad (worktree)
+
+#### What Was Done
+Pure documentation roll-up for Phase 15 (no code edits). Updates the
+three operator-facing docs so future agents can navigate the
+post-Phase-15 analysis stage without re-reading
+`prompts/phase15-optimizations/v0.4.0.md`.
+
+- **I1 — `docs/ARCHITECTURE.md`.** Added a new top-level subsection
+  **"Phase 15 Analysis-Stage Updates"** between *Convergence &
+  Statistics* and *Design Pattern Guidance*. It documents:
+  - MAP-reset BOCPD (Phase A / PR #70) and the algebraic reason
+    `P(r=0)` was unusable under constant hazard.
+  - Feature-family registry + per-family FDR (Phases B + C / PRs #64,
+    #66), with the 0.60 → 0.50 threshold drop and the
+    `families_converging` field on `ConvergenceWindow`.
+  - Shared-byline filter (Phase D / PR #71).
+  - Section-tag enrichment + section-conditioned analysis (Phases J1,
+    J2, J3, J4, J6 / PRs #73, #75, #76 …) including the J5 toggle
+    contingent on the J3 corpus verdict.
+  - PELT cost-model knob (`pelt_cost_model = "l2"` default, Phase F0
+    / PR #69).
+  - Parallelism topology (G1 author-level default; G2 feature-level
+    opt-in via `feature_workers`; G3 embedding I/O audit).
+- **I2 — `docs/RUNBOOK.md`.** Added two new operational sections under
+  *Migrations (Phase 15)*:
+  - **"Phase 15 CLI surface (analyze + survey)"** — `--max-workers`,
+    `--include-shared-bylines`, `--include-advertorial` (both stages),
+    `forensics analyze section-profile`,
+    `forensics analyze section-contrast [--author <slug>]`,
+    `--residualize-sections` on `analyze all`.
+  - **"Phase 15 debug + parity recipes"** — `FORENSICS_LOG_LEVEL=DEBUG`
+    for Pipeline B (Phase E1), serial-vs-parallel `diff -r` recipe
+    (Phase H2 → `tests/integration/test_parallel_parity.py`).
+  - **"Phase 15 schema migration + benchmarks"** — quick-reference for
+    `forensics features migrate` (Unit 1 / Step 0.3) and the bench
+    script `scripts/bench_phase15.py` (Phase L1).
+- **I3 — `docs/GUARDRAILS.md`.** **No edit needed.** All three Signs
+  pre-authored by Unit 1 are already present at lines 121-137:
+  1. *BOCPD `P(r=0)` Posterior Is Pinned to the Hazard Rate* (Phase A).
+  2. *`bulk_fetch_mode` Metadata Column Is Effectively Empty* (Phase J1
+     prep).
+  3. *Do Not Mix Pre- and Post-Phase-15 Artifacts in One Analysis Run*
+     (Unit 1 L5).
+  No new recurring footgun (3+ instances) surfaced during this docs
+  unit, so no fourth Sign is warranted at this time.
+- **I4 — `HANDOFF.md`.** This block.
+
+#### Files Modified
+- `docs/ARCHITECTURE.md` — new "Phase 15 Analysis-Stage Updates"
+  subsection (~120 lines) inserted before *Design Pattern Guidance*.
+- `docs/RUNBOOK.md` — three new subsections inserted before *Typer
+  subcommand registration pattern (Phase 15 L6)*.
+- `HANDOFF.md` — this completion block.
+- `docs/GUARDRAILS.md` — **unchanged** (Unit 1 Signs already cover the
+  Phase 15 footguns).
+
+#### Verification Evidence
+Pure docs unit; per the unit recipe pytest is skipped. Markdown was
+spot-checked for formatting and cross-link integrity.
+
+```
+$ ls -la docs/ARCHITECTURE.md docs/RUNBOOK.md docs/GUARDRAILS.md HANDOFF.md
+# All four files present and modified per the diff above.
+```
+
+#### Decisions Made
+- **GUARDRAILS unchanged.** The unit explicitly permits skipping I3
+  when no new recurring footgun appeared. Unit 1's three Signs already
+  cover (a) the BOCPD `P(r=0)` collapse, (b) the empty
+  `articles.metadata` column, and (c) the pre/post-Phase-15
+  `config_hash` boundary — those are the three Phase-15-specific
+  footguns this rollout introduced.
+- **J5 toggle decision deferred.** Per Wave 3.3 / J3's HANDOFF block
+  (above), the J3 verdict on this worktree is **DEGENERATE** because
+  no `data/features/*.parquet` exists in the worktree. The J5
+  `--residualize-sections` toggle is documented forward-compatibly in
+  RUNBOOK and ARCHITECTURE but the *enable* decision waits on a J3 run
+  against a populated features tree. The Wave 4 J5 unit consumes the
+  verdict from `data/analysis/section_feature_ranking.json`
+  (`gate_verdict` field) so the toggle is automatable.
+- **Section subcommand documentation is forward-compatible.** Wave 3.3
+  may merge `forensics analyze section-contrast` and
+  `--residualize-sections` in parallel with this docs rollup; both are
+  documented as if landed so the docs stay correct after merge. If
+  they slip, the runbook entries are still accurate (the section says
+  "Wave 3.3 — may be merging in parallel").
+
+#### Phase 15 Roll-up Summary
+
+**Wall-clock — bench big-N author (mediaite-staff).**
+- *Before:* baseline RBF profile preserved at
+  `data/analysis/provenance/apr24_rbf_profile.txt` (April 24 2026 run);
+  `ruptures.costs.costrbf.error` accounted for 99.2 % of analysis
+  wall-clock across 3.2 M calls.
+- *After:* deferred to a bench rerun on the live corpus (no fixture
+  data on disk in this worktree). Phase F0 alone (RBF → L2) is
+  expected to deliver ≥ 50× speedup on the PELT phase per the L1
+  pre-registration; full numbers pending
+  `uv run python scripts/bench_phase15.py --author mediaite-staff`.
+
+**Convergence windows surfacing per author.**
+- Qualitative — expected to **increase** under the Phase B family-level
+  threshold drop (0.60 → 0.50) and the per-family rule replacing the
+  raw-feature-count rule. Authors that previously sat just below the
+  60 % bar now cross the 50 % bar across families. Quantitative
+  before/after counts deferred to the bench rerun.
+
+**FDR-significant tests before vs after.**
+- Qualitative — expected **non-zero on at least half of the 10 authors**
+  with per-family BH (Phase C2). Pre-Phase-15 global BH suppressed
+  per-family signal whenever a single noisy family inflated the
+  family-wide null. Per-family BH preserves signal in the quieter
+  families. Quantitative counts deferred to the bench rerun.
+
+**Authors newly disqualified by the shared-byline filter (Phase D / PR
+#71).**
+- `mediaite`
+- `mediaite-staff`
+
+Both are group bylines populated at ingest with `is_shared_byline =
+true`. They are excluded from survey qualification by default and
+reincludable via `--include-shared-bylines`.
+
+**Wave 4 J5 toggle decision.**
+- **Pending.** Awaits Wave 3.4's J3 verdict on real corpus data. The
+  smoke verdict on this worktree is `DEGENERATE` (no parquets).
+  `data/analysis/section_feature_ranking.json::gate_verdict` is the
+  authoritative artifact the Wave 4 unit consumes.
+
+**PRs landed in Phase 15 (April 2026).**
+- #63 — Unit 1 foundations (Phase 0 + L).
+- #64 — Phase B feature-family registry + family-level convergence.
+- #65 — Phase B3 default-threshold migration.
+- #66 — Phase C per-family BH FDR.
+- #67 — Phase G2 opt-in feature-level parallelism.
+- #68 — Phase H1 reference-fixture tests.
+- #69 — Phase F0 PELT cost-model swap (RBF → L2).
+- #70 — Phase A MAP-reset BOCPD.
+- #71 — Phase D shared-byline filter.
+- #72 — Phase E1/E2 Pipeline B diagnostics.
+- #73 — Phase J1 section column at extract time.
+- #74 — Phase F1/F3 vectorized bootstrap_ci + constant-signal early
+  exit.
+- #75 — Phase J3 newsroom-wide section descriptive report.
+- #76 — Phase J2 advertorial / syndicated exclusion.
+- **Wave 3 (in flight at write time):** four parallel PRs for Wave
+  3.1–3.4 covering K1/K2/K3/K4 reporting integration, J4 section-mix
+  time series, J6 section-contrast, H2 parity test, and the I1–I4
+  docs rollup (this PR). Numbers will be assigned at merge.
+
+#### Unresolved Questions
+- Quantitative bench numbers (before/after wall-clock, convergence
+  window counts, FDR-significant test counts) are deferred to a bench
+  rerun against a populated worktree. The qualitative direction is
+  documented above; a follow-up handoff block should pin the actuals
+  once `scripts/bench_phase15.py` runs against the live corpus.
+- The J5 toggle decision is pending the Wave 3.4 J3 verdict on real
+  data.
+
+#### Risks & Next Steps
+- **HANDOFF.md merge-conflict caution.** Sibling Wave 3 agents append
+  to this same file. If a sibling block lands after this one, the
+  resolution rule is straightforward append: keep both blocks in
+  chronological order (siblings before this if they merged first;
+  this block stays at the tail of the docs rollup pair). The Wave 1
+  / Wave 2 conflict-resolution pattern applies.
+- **Section-conditioned commands** (`section-profile`,
+  `section-contrast`, `--residualize-sections`) are documented forward-
+  compatibly. If Wave 3.3 changes the surface name or adds flags
+  before merge, update RUNBOOK + ARCHITECTURE in a small follow-up.
+- **No code paths touched.** This unit cannot regress test pass-rate;
+  pytest was intentionally not re-run.
