@@ -354,13 +354,30 @@ def compute_drift_scores(
     )
 
 
+def _classify_embedding_path(abs_path: Path) -> str:
+    """Return ``"npz"`` for a packed batch file, ``"npy"`` for legacy per-article.
+
+    Used by :func:`load_article_embeddings` to emit a single per-author DEBUG
+    audit line covering the mix of writer formats encountered (Phase 15 G3).
+    """
+    return "npz" if abs_path.suffix.lower() == ".npz" else "npy"
+
+
 def load_article_embeddings(
     author_slug: str,
     paths: AnalysisArtifactPaths,
 ) -> list[ArticleEmbedding]:
-    """Load article embeddings from manifest + ``.npy`` or ``batch.npz``."""
+    """Load article embeddings from manifest + ``.npy`` or ``batch.npz``.
+
+    Phase 15 G3: emits one DEBUG line summarising the mix of writer formats
+    referenced in the manifest for this author. The default writer is
+    ``batch.npz`` (see :func:`forensics.storage.parquet.write_author_embedding_batch`);
+    a non-zero ``.npy`` count indicates legacy artifacts that predate the
+    packed-batch migration and is informational only — readers handle both.
+    """
     root = paths.project_root
     batch_cache: dict[Path, tuple[np.ndarray, dict[str, int]]] = {}
+    format_counts: dict[str, int] = {"npz": 0, "npy": 0}
     with Repository(paths.db_path) as repo:
         author = repo.get_author_by_slug(author_slug)
         if author is None:
@@ -374,6 +391,7 @@ def load_article_embeddings(
                 continue
             p = Path(rec.embedding_path)
             abs_path = p if p.is_absolute() else (root / p)
+            format_counts[_classify_embedding_path(abs_path)] += 1
             vec = _load_embedding_row(abs_path, rec.article_id, batch_cache)
             if vec is None:
                 logger.warning(
@@ -381,6 +399,13 @@ def load_article_embeddings(
                 )
                 continue
             pairs.append(ArticleEmbedding(published_at=rec.timestamp, embedding=vec))
+        if format_counts["npz"] or format_counts["npy"]:
+            logger.debug(
+                "embedding I/O audit: slug=%s npz=%d npy=%d (default writer is batch.npz)",
+                author_slug,
+                format_counts["npz"],
+                format_counts["npy"],
+            )
         pairs.sort(key=lambda r: r.published_at)
         return pairs
 
