@@ -1901,3 +1901,50 @@ uv run pytest tests/unit/test_config_hash.py -v
 - **Bench schema (`bench_schema_version: 1`):** bump if per-stage timings become non-flat (e.g. stage-level phases).
 - **Pre/post-Phase-15 boundary:** the new Sign in `docs/GUARDRAILS.md` is now the contract. Any pipeline code that pools `*_result.json` from different `config_hash` values must either force-recompute or explicitly filter to one hash.
 - **Smoke command for the bench (no real DB present):** `uv run python scripts/bench_phase15.py --output /tmp/phase15_pre_bench.json` runs end-to-end against the stub DB in ~8 ms and produces a valid schema-v1 JSON with `error="no AnalysisResult emitted"` per author. Re-run against a real corpus DB to get a meaningful baseline.
+
+---
+
+### Phase 15 E1+E2 — Pipeline B Diagnostics (DEBUG component logging + missing-artifact WARNING)
+**Status:** Complete
+**Date:** 2026-04-24
+**Agent/Session:** Phase 15 E1+E2 unit (logging-only, no formula changes)
+
+#### What Was Done
+- **E1** was already on `main` via PR #65 (Phase 15 Unit 3); confirmed `_score_single_window` in `src/forensics/analysis/convergence.py` emits a DEBUG record with `(author, window, peak_signal, sim_signal, ai_signal, pipeline_b)` for every scored window. Also confirmed E3 (`pipeline_b_mode = "percentile"`) shipped gated and defaulted to `"legacy"` per spec.
+- **E2** added: `load_drift_summary` in `src/forensics/analysis/drift.py` now calls `_warn_missing_drift_artifacts` before any cached read. When the author has at least one file in `data/embeddings/<slug>/` but a cached artifact is missing, it logs one WARNING per missing artifact (`drift.json`, `baseline_curve.json`, `centroids.npz`) using the stable template `_DRIFT_ARTIFACT_MISSING_WARNING`. Default behaviour (return empty fields) is preserved — this is logging-only.
+- New test file `tests/unit/test_pipeline_b_diagnostics.py` with four tests:
+  - `test_e1_score_single_window_emits_debug_components` — DEBUG record names all four components plus the author.
+  - `test_e2_warns_when_artifacts_missing_but_embeddings_exist` — exactly one WARNING per missing artifact when the author has embeddings.
+  - `test_e2_silent_when_no_embeddings_exist` — no WARNING when the author has no embeddings (avoids log noise for unanalysed authors).
+  - `test_e2_warning_message_format_is_stable` — regression-pin on the WARNING template prefix, slug token, and template literal so log-grep dashboards keyed on it break loudly if the wording changes.
+
+#### Files Modified
+- `src/forensics/analysis/drift.py` — added `_author_has_embeddings_on_disk`, `_DRIFT_ARTIFACT_MISSING_WARNING`, `_warn_missing_drift_artifacts`; wired the warner into `load_drift_summary`.
+- `tests/unit/test_pipeline_b_diagnostics.py` — NEW.
+- `HANDOFF.md` — this block.
+
+#### Verification Evidence
+```
+uv run pytest tests/unit/test_pipeline_b_diagnostics.py -v --no-cov
+                                  → 4 passed in 24.77s
+uv run pytest tests/ -k "convergence or drift" -v --no-cov
+                                  → 31 passed, 1 skipped, 538 deselected in 40.51s
+uv run ruff check .               → All checks passed!
+uv run ruff format --check .      → 201 files already formatted
+uv run pytest tests/ --no-cov     → 563 passed, 4 skipped, 3 deselected in 188.63s
+```
+
+#### Decisions Made
+- **No formula changes** anywhere. Spec explicitly forbids touching `_velocity_peak_and_months` or `_embedding_similarity_signal` in this unit; E3 already landed via PR #65 with `pipeline_b_mode = "percentile"` defaulted off.
+- **Helper extraction over inline checks.** `_author_has_embeddings_on_disk` and `_warn_missing_drift_artifacts` keep `load_drift_summary` readable and isolate the I/O probe so future changes (e.g., switching the embedding-presence test to manifest-based detection) live in one place.
+- **Stable WARNING template as a module constant.** Exporting `_DRIFT_ARTIFACT_MISSING_WARNING` (single underscore, module-private but importable) lets the regression-pin test assert on the literal directly rather than re-deriving the format. The "do not change without updating the regression-pin test" comment preserves that coupling for the next reader.
+- **Kept E1's existing test** (`test_convergence_debug_logging_emits` in `tests/unit/test_convergence.py`) and added an independent E1 happy-path test in the new diagnostics file. The duplication is intentional: the new file is the "Pipeline B diagnostics" surface area; the old file already pinned E1 alongside the convergence test cluster.
+
+#### Unresolved Questions
+- **What do the DEBUG logs reveal on a real run?** The whole point of E1+E2 is to diagnose whether the seven authors with `pipeline_b == 0.0` are math-floor or I/O-failure cases. That requires a `FORENSICS_LOG_LEVEL=DEBUG` pipeline run against the real corpus, which is out of scope for this unit. Capture the DEBUG output for `isaac-schorr` (or any flagged author) and decide whether to flip `pipeline_b_mode` to `"percentile"` based on the components.
+- **Manifest-based embedding detection?** Currently `_author_has_embeddings_on_disk` checks `data/embeddings/<slug>/` for any file. The legacy-`.npy` and packed-`batch.npz` paths both live there, so this is correct today. If the manifest layout changes (e.g., centralised `manifest.jsonl` only), update the helper to read the manifest instead.
+
+#### Risks & Next Steps
+- **Diagnostic-only PR.** No behaviour change for normal operation; only log lines added. Coverage for the new helpers is high (the four tests exercise both branches of `_author_has_embeddings_on_disk` and the per-artifact loop).
+- **Next:** run the pipeline with DEBUG on for one flagged author, capture component values + any WARNINGs, then decide whether E3's percentile mode flip is warranted (or whether the issue is silent write failures that need a separate fix).
+- **No follow-up code change in this unit.** E3's flip lives behind `settings.analysis.pipeline_b_mode` and can be set from `config.toml` without a code change.
