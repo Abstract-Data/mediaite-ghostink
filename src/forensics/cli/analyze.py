@@ -165,6 +165,7 @@ def run_analyze(
     baseline_model: str | None = None,
     articles_per_cell: int | None = None,
     author: str | None = None,
+    include_advertorial: bool = False,
 ) -> None:
     """Execute the analyze stage as a plain Python function.
 
@@ -172,6 +173,16 @@ def run_analyze(
     orchestrator can call this without fighting Typer's option defaults.
     """
     settings = get_settings()
+    if include_advertorial:
+        # Phase 15 J2 escape hatch — re-enable advertorial / syndicated
+        # sections in feature extraction for this run only. Must be applied
+        # before AnalyzeContext is built so downstream stages see the override.
+        settings = settings.model_copy(
+            update={
+                "features": settings.features.model_copy(update={"excluded_sections": frozenset()}),
+                "survey": settings.survey.model_copy(update={"excluded_sections": frozenset()}),
+            }
+        )
     root = get_project_root()
     db_path = root / "data" / "articles.db"
     ctx = AnalyzeContext.build(db_path, settings, root=root, author=author)
@@ -307,6 +318,17 @@ def analyze(
         str | None,
         typer.Option("--author", metavar="SLUG", help="Limit to one author slug"),
     ] = None,
+    include_advertorial: Annotated[
+        bool,
+        typer.Option(
+            "--include-advertorial",
+            help=(
+                "Re-include advertorial / syndicated sections (sponsored, "
+                "partner-content, crosspost) in feature extraction and survey "
+                "qualification for this run; default OFF (Phase 15 J2)."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Run analysis pipeline (change-point, drift, convergence, comparison)."""
     run_analyze(
@@ -321,4 +343,5 @@ def analyze(
         baseline_model=baseline_model,
         articles_per_cell=articles_per_cell,
         author=author,
+        include_advertorial=include_advertorial,
     )

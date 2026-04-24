@@ -153,6 +153,17 @@ def survey(
             ),
         ),
     ] = False,
+    include_advertorial: Annotated[
+        bool,
+        typer.Option(
+            "--include-advertorial",
+            help=(
+                "Re-include sponsored / partner-content / crosspost articles in "
+                "qualification volume / recency / frequency stats; default OFF "
+                "— advertorial sections are excluded per Phase 15 J2."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Run a blind newsroom survey — analyze all qualified authors."""
     settings = get_settings()
@@ -166,6 +177,8 @@ def survey(
         overrides["min_span_days"] = min_span_days
     if include_shared_bylines:
         overrides["exclude_shared_bylines"] = False
+    if include_advertorial:
+        overrides["excluded_sections"] = frozenset()
     criteria = replace(QualificationCriteria.from_settings(settings.survey), **overrides)
 
     if dry_run:
