@@ -68,11 +68,18 @@ GateVerdict = Literal["PASS", "BORDERLINE", "FAIL", "DEGENERATE"]
 
 @dataclass(frozen=True, slots=True)
 class SectionProfileArtifacts:
-    """Filesystem locations written by :func:`run_section_profile`."""
+    """Filesystem locations written by :func:`run_section_profile`.
+
+    ``distance_matrix_json`` and ``distance_matrix_csv`` are ``None`` in the
+    degenerate case (< 2 retained sections) — there is no inter-section
+    contrast to materialise, so writing a 0×0 or 1×1 matrix would be
+    misleading on disk. The markdown report still lands so an operator can
+    inspect why no matrix was written.
+    """
 
     centroids_json: Path
-    distance_matrix_json: Path
-    distance_matrix_csv: Path
+    distance_matrix_json: Path | None
+    distance_matrix_csv: Path | None
     feature_ranking_json: Path
     report_md: Path
 
@@ -428,7 +435,11 @@ def _retention_section(sections: list[str], skipped: dict[str, str]) -> list[str
 def _distance_matrix_section(sections: list[str], distance_matrix: np.ndarray) -> list[str]:
     lines = ["## Inter-section Cosine Distance Matrix", ""]
     if len(sections) < 2:
-        lines.append("_Need ≥ 2 retained sections for a contrast matrix._")
+        lines.append(
+            "_Need ≥ 2 retained sections for a contrast matrix — "
+            "`section_distance_matrix.json` and `section_distance_matrix.csv` "
+            "were not written for this run._"
+        )
         lines.append("")
         return lines
     lines.append("| section | " + " | ".join(sections) + " |")
@@ -558,23 +569,20 @@ def write_section_profile(
     *,
     report_path: Path | None = None,
 ) -> SectionProfileArtifacts:
-    """Write all artifacts described in the module docstring."""
-    artifacts = _section_artifact_paths(analysis_dir)
+    """Write all artifacts described in the module docstring.
+
+    The distance-matrix JSON + CSV files are skipped in the degenerate case
+    (< 2 retained sections) — see :class:`SectionProfileArtifacts` for why.
+    The skip is recorded in the markdown report so a downstream reader is
+    not left guessing at a missing artifact.
+    """
+    paths = _section_artifact_paths(analysis_dir)
     if report_path is not None:
-        artifacts = replace(artifacts, report_md=report_path)
+        paths = replace(paths, report_md=report_path)
     distance_matrix = np.asarray(result.distance_matrix, dtype=float)
-    write_json_artifact(artifacts.centroids_json, result.centroids)
+    write_json_artifact(paths.centroids_json, result.centroids)
     write_json_artifact(
-        artifacts.distance_matrix_json,
-        {
-            "sections": result.sections,
-            "matrix": result.distance_matrix,
-            "max_off_diagonal_distance": result.max_off_diagonal_distance,
-        },
-    )
-    _write_distance_matrix_csv(artifacts.distance_matrix_csv, result.sections, distance_matrix)
-    write_json_artifact(
-        artifacts.feature_ranking_json,
+        paths.feature_ranking_json,
         {
             "ranking": result.feature_ranking,
             "significant_families": result.significant_families,
@@ -582,6 +590,24 @@ def write_section_profile(
             "skipped_sections": result.skipped_sections,
         },
     )
+    if len(result.sections) >= 2:
+        write_json_artifact(
+            paths.distance_matrix_json,
+            {
+                "sections": result.sections,
+                "matrix": result.distance_matrix,
+                "max_off_diagonal_distance": result.max_off_diagonal_distance,
+            },
+        )
+        _write_distance_matrix_csv(paths.distance_matrix_csv, result.sections, distance_matrix)
+        artifacts = paths
+    else:
+        logger.info(
+            "section-profile: skipping distance matrix files (n_sections=%d < 2 — "
+            "no inter-section contrast to write)",
+            len(result.sections),
+        )
+        artifacts = replace(paths, distance_matrix_json=None, distance_matrix_csv=None)
     report_text = _format_report_markdown(
         sections=result.sections,
         skipped=result.skipped_sections,
@@ -591,7 +617,7 @@ def write_section_profile(
         max_off_diagonal=result.max_off_diagonal_distance,
         verdict=result.gate_verdict,
     )
-    write_text_atomic(artifacts.report_md, report_text)
+    write_text_atomic(paths.report_md, report_text)
     return artifacts
 
 

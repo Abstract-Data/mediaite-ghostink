@@ -62,6 +62,10 @@ data/ai_baseline/
 data/preregistration/*
 # Phase 15 — keep pre-registration amendments committed
 !data/preregistration/amendment_*.md
+# Phase 15 J3/J6 follow-up — keep the operator-fillable lock template committed
+# so the analyze CLI sees a non-mismatching exploratory state by default.
+!data/preregistration/preregistration_lock.json
+!data/preregistration/.gitignore
 data/calibration/
 data/survey/
 # Phase 15 — bench baselines are committed provenance artifacts

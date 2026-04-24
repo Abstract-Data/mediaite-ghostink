@@ -12,10 +12,23 @@ Coverage targets (per H1 spec):
   verdict so the J5 toggle decision is reproducible run-to-run.
 * artifact write-out — JSON / CSV / Markdown all land on disk and
   contain the verdict.
+* side-artifact happy path — the four J3 side artifacts (centroids,
+  distance matrix JSON, distance matrix CSV, feature ranking JSON)
+  all land beside the markdown report.
+* side-artifact regression-pin — JSON shape (sort_keys, stable section
+  order) is locked so two equivalent runs serialise to byte-identical
+  bytes.
+* side-artifact degenerate input — a single retained section writes
+  the markdown report but skips the matrix files (with a documented
+  note in the report).
+* CSV/JSON header parity — CSV header section order matches the JSON
+  ``sections`` key order so spreadsheet inspection lines up with
+  programmatic readers.
 """
 
 from __future__ import annotations
 
+import csv
 import json
 from pathlib import Path
 
@@ -278,3 +291,196 @@ def test_empty_frame_does_not_invent_phantom_row() -> None:
     assert result.sections == []
     assert result.skipped_sections == {}
     assert result.gate_verdict == "DEGENERATE"
+
+
+def _two_section_result(tmp_path: Path):
+    """Shared happy-path fixture for the side-artifact tests."""
+    df = _make_frame(
+        sections={
+            "opinion": {
+                "n": 60,
+                "authors": ["a1", "a2", "a3"],
+                "shifts": {
+                    "first_person_ratio": 1.5,
+                    "hedging_frequency": 1.5,
+                    "ttr": 1.5,
+                    "flesch_kincaid": 1.5,
+                },
+            },
+            "politics": {
+                "n": 60,
+                "authors": ["b1", "b2", "b3"],
+                "shifts": {
+                    "first_person_ratio": -1.5,
+                    "hedging_frequency": -1.5,
+                    "ttr": -1.5,
+                    "flesch_kincaid": -1.5,
+                },
+            },
+        },
+        seed=20260424,
+    )
+    result = compute_section_profile(df, section_min_articles=50)
+    artifacts = write_section_profile(result, tmp_path)
+    return result, artifacts
+
+
+def test_side_artifacts_happy_path_writes_all_four_alongside_markdown(tmp_path: Path) -> None:
+    """All four J3 side artifacts + the markdown report land on disk together.
+
+    This locks the PR #75 contract: ``compute_section_profile`` persists
+    centroids, distance-matrix JSON, distance-matrix CSV, feature ranking
+    JSON, and the markdown report in a single call. Regression-pin for the
+    spec block (prompts/phase15-optimizations/v0.4.0.md lines 1280-1289).
+    """
+    result, artifacts = _two_section_result(tmp_path)
+
+    assert artifacts.centroids_json is not None
+    assert artifacts.distance_matrix_json is not None
+    assert artifacts.distance_matrix_csv is not None
+    assert artifacts.feature_ranking_json is not None
+    assert artifacts.report_md is not None
+
+    for path in (
+        artifacts.centroids_json,
+        artifacts.distance_matrix_json,
+        artifacts.distance_matrix_csv,
+        artifacts.feature_ranking_json,
+        artifacts.report_md,
+    ):
+        assert path.is_file(), f"expected artifact at {path}"
+        assert path.stat().st_size > 0, f"artifact at {path} is empty"
+
+    # Centroids JSON must carry one key per retained section.
+    centroids_payload = json.loads(artifacts.centroids_json.read_text())
+    assert set(centroids_payload) == set(result.sections)
+
+    # Feature ranking must include the per-section means/medians used by the
+    # operator when reading the report — not just the aggregate ranking.
+    ranking_payload = json.loads(artifacts.feature_ranking_json.read_text())
+    assert "ranking" in ranking_payload
+    first_row = ranking_payload["ranking"][0]
+    assert "section_means" in first_row
+    assert "section_medians" in first_row
+    assert set(first_row["section_means"]) == set(result.sections)
+
+
+def test_side_artifact_json_shape_is_regression_pinned(tmp_path: Path) -> None:
+    """JSON shape is sort-key-stable so parallel runs produce byte-identical bytes.
+
+    ``write_json_artifact`` defaults to ``sort_keys=True`` (Phase 15 H2).
+    If a future refactor flips that flag the side artifacts lose their
+    byte-identity guarantee — this test pins the invariant so the
+    regression is caught before a parallel-parity run diverges.
+    """
+    _, artifacts = _two_section_result(tmp_path)
+
+    # Top-level keys must be alphabetically sorted in the on-disk JSON. We
+    # round-trip the bytes through ``json.loads`` + ``json.dumps(sort_keys=True)``
+    # and compare — any drift from the sort_keys contract surfaces as a diff.
+    for payload_path in (
+        artifacts.distance_matrix_json,
+        artifacts.feature_ranking_json,
+        artifacts.centroids_json,
+    ):
+        raw_text = payload_path.read_text()
+        canonical = json.dumps(json.loads(raw_text), indent=2, sort_keys=True)
+        assert raw_text.rstrip("\n") == canonical.rstrip("\n"), (
+            f"{payload_path} bytes diverge from sort_keys=True canonical form"
+        )
+
+    # Centroid keys inside each section are themselves sorted (important
+    # because the centroid vectors feed the distance-matrix computation and
+    # a drift in key order would quietly change the projection).
+    centroids_raw = artifacts.centroids_json.read_text()
+    centroids_payload = json.loads(centroids_raw)
+    for section, vector in centroids_payload.items():
+        assert list(vector) == sorted(vector), (
+            f"centroid keys for {section!r} not sorted — sort_keys contract broken"
+        )
+
+    # Distance-matrix JSON section ordering mirrors ``result.sections`` (not
+    # alphabetical — the sections key is list-valued and preserves compute
+    # order so the matrix rows/cols remain aligned with centroids).
+    distance_payload = json.loads(artifacts.distance_matrix_json.read_text())
+    assert distance_payload["sections"] == sorted(distance_payload["sections"]), (
+        "sections list must be sorted so CSV + JSON header orders align"
+    )
+
+
+def test_side_artifacts_degenerate_input_skips_matrix_files(tmp_path: Path) -> None:
+    """Single retained section → markdown lands, matrix files are skipped.
+
+    The 1×1 matrix would be misleading on disk (a single zero distance has
+    no contrast signal), so ``write_section_profile`` intentionally skips
+    both the JSON and CSV matrix outputs in that case. The markdown report
+    documents the skip so an operator reading the analysis dir is not left
+    guessing at missing files.
+    """
+    df = _make_frame(
+        sections={
+            "opinion": {
+                "n": 60,
+                "authors": ["a1", "a2", "a3"],
+                "shifts": {"first_person_ratio": 1.0},
+            },
+            "tinysection": {
+                "n": 5,
+                "authors": ["b1"],
+                "shifts": {"first_person_ratio": -1.0},
+            },
+        },
+        seed=11,
+    )
+    result = compute_section_profile(df, section_min_articles=50)
+    assert result.sections == ["opinion"]
+    assert result.gate_verdict == "DEGENERATE"
+
+    artifacts = write_section_profile(result, tmp_path)
+
+    # Markdown + centroids + feature ranking still land on disk.
+    assert artifacts.report_md.is_file()
+    assert artifacts.centroids_json.is_file()
+    assert artifacts.feature_ranking_json.is_file()
+
+    # Matrix files were intentionally skipped — the artifact record reflects
+    # the skip by holding ``None`` so downstream consumers don't chase a
+    # phantom path.
+    assert artifacts.distance_matrix_json is None
+    assert artifacts.distance_matrix_csv is None
+    assert not (tmp_path / "section_distance_matrix.json").exists()
+    assert not (tmp_path / "section_distance_matrix.csv").exists()
+
+    # The report documents the skip so a future operator reading the file
+    # knows why two expected artifacts are missing.
+    report_text = artifacts.report_md.read_text()
+    assert "section_distance_matrix.json" in report_text
+    assert "section_distance_matrix.csv" in report_text
+
+
+def test_csv_header_order_matches_json_sections(tmp_path: Path) -> None:
+    """CSV header columns match JSON ``sections`` so spreadsheet + JSON align.
+
+    Without this pin the CSV and JSON could drift apart under a future
+    refactor (e.g. one writes alphabetical and the other writes insertion
+    order), which would produce misaligned rows when an analyst cross-
+    references the two files.
+    """
+    _, artifacts = _two_section_result(tmp_path)
+    assert artifacts.distance_matrix_json is not None
+    assert artifacts.distance_matrix_csv is not None
+
+    json_sections: list[str] = json.loads(artifacts.distance_matrix_json.read_text())["sections"]
+
+    with artifacts.distance_matrix_csv.open("r", encoding="utf-8", newline="") as f:
+        reader = csv.reader(f)
+        header = next(reader)
+        # Header is ["section", *sections]; verify the trailing columns are in
+        # the same order as the JSON sections key.
+        assert header[0] == "section"
+        assert header[1:] == json_sections
+
+        # First column of each data row is the same section list, in the same
+        # order — this keeps the matrix square from both axes.
+        row_sections = [row[0] for row in reader]
+        assert row_sections == json_sections

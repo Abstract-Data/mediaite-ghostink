@@ -3288,3 +3288,76 @@ uv run ruff check . && uv run ruff format --check .
 - The pre-Unit-4 fallback dict in `convergence.py` is still drift bait — it
   duplicates the canonical registry. Consolidating it (or asserting equality
   at import time) is out of scope here but worth a follow-up.
+
+---
+
+## Phase 15 J3 side artifacts + pre-registration lock template (2026-04-24)
+
+### Status
+COMPLETE — J3 side artifacts (#9) and pre-registration lock template (#6) shipped together.
+
+### What Was Done
+
+#### Item 1 — J3 side artifacts (#9)
+- `src/forensics/analysis/section_profile.py`:
+  - `SectionProfileArtifacts.distance_matrix_json` and `distance_matrix_csv` are now `Path | None` so the degenerate case (< 2 retained sections) can record the skip in-band rather than writing a misleading 0×0 / 1×1 matrix.
+  - `write_section_profile` now branches on `len(result.sections) >= 2`: writes the JSON + CSV matrix files when contrast exists; logs an INFO and returns `None` paths via `dataclasses.replace` when not.
+  - `_distance_matrix_section` (markdown formatter) names the two skipped artifact filenames so a future operator reading the `.md` knows why two expected files are absent.
+- The four side artifacts (`section_centroids.json`, `section_distance_matrix.json`, `section_distance_matrix.csv`, `section_feature_ranking.json`) and the markdown report continue to land alongside each other in non-degenerate runs (PR #75 contract preserved).
+- `tests/unit/test_section_profile.py`: extended from 11 → 15 tests with 4 new ones (≥ 3 per H1):
+  - `test_side_artifacts_happy_path_writes_all_four_alongside_markdown` — pins all 5 artifacts on disk + payload shape.
+  - `test_side_artifact_json_shape_is_regression_pinned` — round-trips each JSON through `json.dumps(sort_keys=True, indent=2)` and asserts the bytes are stable (locks the H2 sort-key contract).
+  - `test_side_artifacts_degenerate_input_skips_matrix_files` — single-section case writes md + centroids + ranking, skips both matrix files, names them in the report.
+  - `test_csv_header_order_matches_json_sections` — pins the CSV header columns to the JSON `sections` key order so spreadsheet inspection lines up with programmatic readers.
+
+#### Item 2 — Pre-registration lock template (#6)
+- `data/preregistration/preregistration_lock.json` — operator-fillable template (locked_at/locked_by/config_hash null; preregistration_id, hypotheses, expected_directions seeded with example values).
+- `data/preregistration/.gitignore` — documents what's committed (the lock template + amendment narratives) and ignores `*.private.*` / `*.draft.*` / `notes_*.md` operator notes.
+- `.gitignore` — added `!data/preregistration/preregistration_lock.json` and `!data/preregistration/.gitignore` so the committed template is not swallowed by the directory-wide `data/preregistration/*` ignore rule.
+- `src/forensics/preregistration.py`: `verify_preregistration` short-circuits the unfilled template state (`locked_at is null AND analysis is absent`) to `status="missing"` so the committed template never trips a false `mismatch` warning. Operators run `forensics lock-preregistration` to overwrite the template with the canonical analysis snapshot + content_hash before a confirmatory run.
+- `tests/test_preregistration.py`: 2 new tests (`test_unfilled_template_returns_missing`, `test_committed_template_lock_does_not_violate`) pin the template-handling behaviour and the on-disk repo template's compatibility with current settings.
+- `docs/RUNBOOK.md`: new "Pre-registration lock workflow (confirmatory vs exploratory)" section documenting the three statuses, the file layout, the short-circuit behaviour, and the 3-step locking workflow (edit template → `lock-preregistration` → analyze).
+
+### Files Touched
+- `src/forensics/analysis/section_profile.py`
+- `src/forensics/preregistration.py`
+- `tests/unit/test_section_profile.py`
+- `tests/test_preregistration.py`
+- `data/preregistration/preregistration_lock.json` (NEW)
+- `data/preregistration/.gitignore` (NEW)
+- `.gitignore`
+- `docs/RUNBOOK.md`
+
+### Decisions Made
+- **Skip matrix files in degenerate state** (vs writing empty 1×1 matrix): a 1×1 matrix on disk would mislead any consumer parsing for off-diagonal contrast. The skip is recorded in two places (artifact-record `None` paths + markdown report's distance-matrix section), so a downstream reader sees a consistent story.
+- **Template short-circuit in `verify_preregistration`** (vs forcing `mismatch`): committing the template with all `analysis` fields drifted from current settings would otherwise log WARNING + record `mismatch` on every run, masking real violations. The short-circuit treats the template as exploratory (`missing`) until the operator lifts `locked_at` to a non-null value AND populates the `analysis` block (which `lock-preregistration` does atomically).
+- **Sort-key regression test rounds-trips through `json.dumps(sort_keys=True)` rather than asserting a specific key order**: any change to artifact payload schema would otherwise force a brittle test edit. The round-trip catches accidental `sort_keys=False` flips without coupling the test to specific key names.
+
+### Verification
+```
+uv run pytest tests/unit/test_section_profile.py -v --no-cov
+  → 15 passed (4 new tests)
+
+uv run pytest tests/ -k "section_profile or preregistration" -v --no-cov
+  → 28 passed, 1 skipped, 701 deselected
+
+uv run pytest tests/ --no-cov
+  → 722 passed, 4 skipped, 1 xfailed
+
+uv run ruff check . && uv run ruff format --check src/forensics/analysis/section_profile.py src/forensics/preregistration.py tests/unit/test_section_profile.py tests/test_preregistration.py
+  → all clean (one pre-existing format issue in src/forensics/reporting/html_report.py is unrelated to this change)
+
+# Smoke
+uv run forensics analyze section-profile --features-dir data/features --output /tmp/sp_smoke.md
+  → empty corpus → DEGENERATE verdict, only centroids + feature_ranking + report.md land
+  → INFO log: "skipping distance matrix files (n_sections=0 < 2 — no inter-section contrast to write)"
+  → /tmp/sp_smoke.md documents the skip in the matrix section
+```
+
+### Unresolved Questions
+- The pre-existing format issue in `src/forensics/reporting/html_report.py` (one `parts.append(...)` block) is on `main` already; left untouched since it falls outside this change's scope.
+- The repo's template `data/preregistration/preregistration_lock.json` ships with a `preregistration_id` of `phase15-rollout-2026-04-24` — operators forking a new analysis run should bump that to a per-run identifier before locking. The template's `notes` field calls this out.
+
+### Risks & Next Steps
+- If a future change adds a new analysis-threshold field to `_snapshot_thresholds` without bumping the template's narrative pointer (`amended_from`), an existing filled lock will read as `mismatch` against the new field. That's the correct behaviour but worth noting in a future amendment file when it happens.
+- `verify_preregistration`'s template short-circuit checks for `locked_at is None` AND `analysis` absent. If an operator partially fills the template (e.g. sets `locked_at` but leaves `analysis` empty), the function falls into the existing diff path and logs a `mismatch` against every threshold. That's intentional — partial locks should not pretend to be confirmatory — but the operator-facing message could be clearer; defer to a follow-up if it comes up in practice.

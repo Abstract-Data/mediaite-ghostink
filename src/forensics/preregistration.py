@@ -141,6 +141,22 @@ def verify_preregistration(
         return VerificationResult(status="missing", message=msg, lock_path=resolved)
 
     raw = json.loads(resolved.read_text(encoding="utf-8"))
+
+    # Operator-facing template state: the lock file exists but ``locked_at``
+    # is null and ``analysis`` is absent. Treat it as "missing" (exploratory)
+    # rather than "mismatch" so committing the template alone does not
+    # trip a false-violation warning. Operators must lift ``locked_at`` (and
+    # the ``analysis`` snapshot) before the file becomes a confirmatory lock.
+    if raw.get("locked_at") is None and not raw.get("analysis"):
+        msg = (
+            "Pre-registration lock at "
+            f"{resolved} is an unfilled template (locked_at=null, analysis "
+            "absent); analysis is exploratory, not confirmatory. Run "
+            "`uv run forensics lock-preregistration` to convert it."
+        )
+        logger.info("preregistration: %s", msg)
+        return VerificationResult(status="missing", message=msg, lock_path=resolved)
+
     locked_analysis: dict[str, Any] = raw.get("analysis", {})
     locked_hash: str | None = raw.get("content_hash")
 

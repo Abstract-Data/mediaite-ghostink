@@ -1,0 +1,24 @@
+{
+  "preregistration_id": "phase15-rollout-2026-04-24",
+  "locked_at": null,
+  "locked_by": null,
+  "config_hash": null,
+  "amended_from": "data/preregistration/amendment_phase15.md",
+  "amendments": [
+    "data/preregistration/amendment_phase15.md"
+  ],
+  "hypotheses": [
+    "<author-of-interest> shows family-level convergence in window <YYYY-MM> across families <list>",
+    "Per-family BH FDR yields >= 1 significant test for at least 5 of the 10 corpus authors",
+    "Section-conditioned drift removes the change-point under the section-adjusted pipeline"
+  ],
+  "expected_directions": {
+    "ai_marker_frequency": "increase",
+    "first_person_ratio": "decrease",
+    "hedging_frequency": "decrease",
+    "ttr": "decrease",
+    "self_similarity_30d": "increase",
+    "formula_opening_score": "increase"
+  },
+  "notes": "Operator MUST fill in this file and commit BEFORE running a confirmatory analysis. Set locked_at + locked_by + config_hash + hypotheses to non-null before run. The analyze CLI inspects data/preregistration/preregistration_lock.json via verify_preregistration() — a missing or null-fielded lock causes the run to be logged as exploratory, not confirmatory. After editing, run `uv run forensics lock-preregistration` to populate the canonical analysis-threshold snapshot + content_hash and overwrite this template; the resulting file becomes the immutable confirmatory contract for the run that follows."
+}

@@ -251,6 +251,72 @@ Operational notes:
   `config.toml` under `[analysis] section_residualize_features = true` so
   the change is captured by the config hash + preregistration lock.
 
+## Pre-registration lock workflow (confirmatory vs exploratory)
+
+Every `analyze` run records `preregistration_status` in
+`data/analysis/run_metadata.json`. The status comes from
+`verify_preregistration(settings)` against
+`data/preregistration/preregistration_lock.json` and is one of:
+
+- `ok` — a filled lock file matches the current analysis thresholds. The
+  run is **confirmatory**.
+- `missing` — no lock file (or the committed template, see below). The
+  run is **exploratory** and any p-values are descriptive only.
+- `mismatch` — a filled lock file exists but one or more analysis
+  thresholds drifted since the lock. Logged at WARNING with a
+  per-key diff; the run continues so an operator can inspect.
+
+### Files in this directory
+
+- `data/preregistration/preregistration_lock.json` — the operator-fillable
+  lock template lives in the repo so a fresh checkout has a non-mismatching
+  exploratory state out of the box. The template carries:
+  - `preregistration_id` — opaque identifier for the run plan
+  - `locked_at` / `locked_by` — null until the operator fills them
+  - `config_hash` — null until the operator fills it
+  - `amended_from` / `amendments` — pointers to the narrative docs
+    (`amendment_phase15.md` etc.) that justify the locked hypotheses
+  - `hypotheses` — H1..Hn list operator must populate before claiming
+    a confirmatory result
+  - `expected_directions` — per-feature pre-declared direction of effect
+- `data/preregistration/amendment_phase15.md` — phase-amendment narrative
+  (committed). Reference any new hypothesis here before locking.
+
+### How the analyze CLI reads the file
+
+`verify_preregistration` short-circuits the unfilled template (where
+`locked_at is null` AND `analysis` block is absent) to `missing` so the
+committed template never trips a false `mismatch`. The first fully-filled
+lock — written by `uv run forensics lock-preregistration` — populates the
+canonical `analysis` snapshot + SHA256 `content_hash` and converts the
+next run from exploratory to confirmatory.
+
+### Locking workflow
+
+```bash
+# 1. Edit the template and commit it (preregistration_id + hypotheses +
+#    expected_directions are the operator-authored fields). Do NOT fill
+#    locked_at / locked_by / config_hash by hand — those are written by
+#    the lock-preregistration command in step 2.
+$EDITOR data/preregistration/preregistration_lock.json
+git add data/preregistration/preregistration_lock.json
+git commit -m "Pre-register analysis plan for <author> / <window>"
+
+# 2. Snapshot the current thresholds + content hash. This OVERWRITES the
+#    file with the canonical confirmatory lock — keep your template-edit
+#    commit so the hypothesis history stays in git.
+uv run forensics lock-preregistration
+
+# 3. Run the analysis. ``run_metadata.json::preregistration_status`` lands
+#    as ``ok`` and the narrative report renders as confirmatory.
+uv run forensics analyze
+cat data/analysis/run_metadata.json | jq .preregistration_status   # → "ok"
+```
+
+Re-running step 2 after every config change keeps the lock current. If you
+change a threshold without re-locking, the next analyze run logs WARNING
++ records `preregistration_status: "mismatch"` — fix it before publishing.
+
 ## Migrations (Phase 15)
 
 Storage-layer migrations now land through the Typer CLI rather than the old
