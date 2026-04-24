@@ -106,9 +106,11 @@ class AnalysisConfig(BaseModel):
         "l2", json_schema_extra={"include_in_config_hash": True}
     )
     bocpd_hazard_rate: float = 1 / 250.0
-    # Phase 15 A — MAP-run-length reset replaces ``P(r=0)`` thresholding.
-    # ``bocpd_threshold`` is removed (it was algebraically pinned to the
-    # hazard rate and could never fire; see docs/GUARDRAILS.md).
+    # Phase 15 A — MAP-run-length reset replaces ``P(r=0)`` thresholding as
+    # the default. ``bocpd_threshold`` was removed (algebraically pinned to
+    # the hazard rate; see docs/GUARDRAILS.md). Set ``bocpd_detection_mode``
+    # to ``"p_r0_legacy"`` to restore the pre-Phase-A behavior byte-for-byte
+    # for replication / ablation runs.
     bocpd_detection_mode: Literal["p_r0_legacy", "map_reset"] = Field(
         "map_reset", json_schema_extra={"include_in_config_hash": True}
     )
@@ -164,6 +166,12 @@ class AnalysisConfig(BaseModel):
     fdr_grouping: Literal["author", "family"] = Field(
         "family", json_schema_extra={"include_in_config_hash": True}
     )
+    # Phase 15 C1 — Kolmogorov–Smirnov is highly correlated with Mann–Whitney
+    # for the location shifts this analysis cares about. Default OFF drops the
+    # per-CP test count from 3 → 2 and removes a redundant inflator from the
+    # BH denominator. Re-enable for replication runs that want shape-change
+    # detection on top of location shift.
+    enable_ks_test: bool = Field(False, json_schema_extra={"include_in_config_hash": True})
     # Phase 15 E — Pipeline B scoring mode; legacy preserves the v0.14 formulas.
     pipeline_b_mode: Literal["legacy", "percentile"] = Field(
         "legacy", json_schema_extra={"include_in_config_hash": True}

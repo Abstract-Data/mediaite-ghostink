@@ -134,8 +134,17 @@ def run_hypothesis_tests(
     author_id: str,
     *,
     n_bootstrap: int = 1000,
+    enable_ks_test: bool = False,
 ) -> list[HypothesisTest]:
-    """Welch t, Mann–Whitney U, and two-sample KS at a candidate split index."""
+    """Welch t and Mann–Whitney U at a candidate split index (KS opt-in).
+
+    Phase 15 C1: KS is dropped from the default battery. Welch and Mann–Whitney
+    already cover the location shifts the forensic analysis cares about, and
+    KS overlaps Mann–Whitney enough that keeping it just inflates the BH FDR
+    denominator with a correlated test (per-CP test count drops 3 → 2). Pass
+    ``enable_ks_test=True`` to re-introduce the two-sample KS branch for
+    replication runs that want distribution-shape detection.
+    """
     y = list(feature_values)
     n = len(y)
     if n < 4 or breakpoint_idx < 1 or breakpoint_idx >= n:
@@ -176,17 +185,18 @@ def run_hypothesis_tests(
         )
     )
 
-    _ks_stat, p_ks = stats.ks_2samp(pre, post)
-    tests.append(
-        _hypothesis_test(
-            prefix="ks_test",
-            feature_name=feature_name,
-            author_id=author_id,
-            raw_p=float(p_ks),
-            d=d,
-            ci=ci,
+    if enable_ks_test:
+        _ks_stat, p_ks = stats.ks_2samp(pre, post)
+        tests.append(
+            _hypothesis_test(
+                prefix="ks_2samp",
+                feature_name=feature_name,
+                author_id=author_id,
+                raw_p=float(p_ks),
+                d=d,
+                ci=ci,
+            )
         )
-    )
     return tests
 
 

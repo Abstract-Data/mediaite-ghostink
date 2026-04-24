@@ -1904,6 +1904,234 @@ uv run pytest tests/unit/test_config_hash.py -v
 
 ---
 
+### Phase 15 E1+E2 — Pipeline B Diagnostics (DEBUG component logging + missing-artifact WARNING)
+**Status:** Complete
+**Date:** 2026-04-24
+**Agent/Session:** Phase 15 E1+E2 unit (logging-only, no formula changes)
+
+#### What Was Done
+- **E1** was already on `main` via PR #65 (Phase 15 Unit 3); confirmed `_score_single_window` in `src/forensics/analysis/convergence.py` emits a DEBUG record with `(author, window, peak_signal, sim_signal, ai_signal, pipeline_b)` for every scored window. Also confirmed E3 (`pipeline_b_mode = "percentile"`) shipped gated and defaulted to `"legacy"` per spec.
+- **E2** added: `load_drift_summary` in `src/forensics/analysis/drift.py` now calls `_warn_missing_drift_artifacts` before any cached read. When the author has at least one file in `data/embeddings/<slug>/` but a cached artifact is missing, it logs one WARNING per missing artifact (`drift.json`, `baseline_curve.json`, `centroids.npz`) using the stable template `_DRIFT_ARTIFACT_MISSING_WARNING`. Default behaviour (return empty fields) is preserved — this is logging-only.
+- New test file `tests/unit/test_pipeline_b_diagnostics.py` with four tests:
+  - `test_e1_score_single_window_emits_debug_components` — DEBUG record names all four components plus the author.
+  - `test_e2_warns_when_artifacts_missing_but_embeddings_exist` — exactly one WARNING per missing artifact when the author has embeddings.
+  - `test_e2_silent_when_no_embeddings_exist` — no WARNING when the author has no embeddings (avoids log noise for unanalysed authors).
+  - `test_e2_warning_message_format_is_stable` — regression-pin on the WARNING template prefix, slug token, and template literal so log-grep dashboards keyed on it break loudly if the wording changes.
+
+#### Files Modified
+- `src/forensics/analysis/drift.py` — added `_author_has_embeddings_on_disk`, `_DRIFT_ARTIFACT_MISSING_WARNING`, `_warn_missing_drift_artifacts`; wired the warner into `load_drift_summary`.
+- `tests/unit/test_pipeline_b_diagnostics.py` — NEW.
+- `HANDOFF.md` — this block.
+
+#### Verification Evidence
+```
+uv run pytest tests/unit/test_pipeline_b_diagnostics.py -v --no-cov
+                                  → 4 passed in 24.77s
+uv run pytest tests/ -k "convergence or drift" -v --no-cov
+                                  → 31 passed, 1 skipped, 538 deselected in 40.51s
+uv run ruff check .               → All checks passed!
+uv run ruff format --check .      → 201 files already formatted
+uv run pytest tests/ --no-cov     → 563 passed, 4 skipped, 3 deselected in 188.63s
+```
+
+#### Decisions Made
+- **No formula changes** anywhere. Spec explicitly forbids touching `_velocity_peak_and_months` or `_embedding_similarity_signal` in this unit; E3 already landed via PR #65 with `pipeline_b_mode = "percentile"` defaulted off.
+- **Helper extraction over inline checks.** `_author_has_embeddings_on_disk` and `_warn_missing_drift_artifacts` keep `load_drift_summary` readable and isolate the I/O probe so future changes (e.g., switching the embedding-presence test to manifest-based detection) live in one place.
+- **Stable WARNING template as a module constant.** Exporting `_DRIFT_ARTIFACT_MISSING_WARNING` (single underscore, module-private but importable) lets the regression-pin test assert on the literal directly rather than re-deriving the format. The "do not change without updating the regression-pin test" comment preserves that coupling for the next reader.
+- **Kept E1's existing test** (`test_convergence_debug_logging_emits` in `tests/unit/test_convergence.py`) and added an independent E1 happy-path test in the new diagnostics file. The duplication is intentional: the new file is the "Pipeline B diagnostics" surface area; the old file already pinned E1 alongside the convergence test cluster.
+
+#### Unresolved Questions
+- **What do the DEBUG logs reveal on a real run?** The whole point of E1+E2 is to diagnose whether the seven authors with `pipeline_b == 0.0` are math-floor or I/O-failure cases. That requires a `FORENSICS_LOG_LEVEL=DEBUG` pipeline run against the real corpus, which is out of scope for this unit. Capture the DEBUG output for `isaac-schorr` (or any flagged author) and decide whether to flip `pipeline_b_mode` to `"percentile"` based on the components.
+- **Manifest-based embedding detection?** Currently `_author_has_embeddings_on_disk` checks `data/embeddings/<slug>/` for any file. The legacy-`.npy` and packed-`batch.npz` paths both live there, so this is correct today. If the manifest layout changes (e.g., centralised `manifest.jsonl` only), update the helper to read the manifest instead.
+
+#### Risks & Next Steps
+- **Diagnostic-only PR.** No behaviour change for normal operation; only log lines added. Coverage for the new helpers is high (the four tests exercise both branches of `_author_has_embeddings_on_disk` and the per-artifact loop).
+- **Next:** run the pipeline with DEBUG on for one flagged author, capture component values + any WARNINGs, then decide whether E3's percentile mode flip is warranted (or whether the issue is silent write failures that need a separate fix).
+- **No follow-up code change in this unit.** E3's flip lives behind `settings.analysis.pipeline_b_mode` and can be set from `config.toml` without a code change.
+
+---
+
+### Phase 15 C1 — Drop KS test from default hypothesis battery
+**Status:** Complete
+**Date:** 2026-04-24
+**Agent/Session:** wave2-parking subagent (worktree-agent-a9524a16)
+
+#### What Was Done
+- Removed the unconditional `stats.ks_2samp` branch from `run_hypothesis_tests`; gated it behind a new keyword argument `enable_ks_test: bool = False`.
+- Added `AnalysisConfig.enable_ks_test: bool = False` (hash-enumerated) so replication runs can re-enable shape-change detection without code changes.
+- Threaded `analysis_cfg.enable_ks_test` from the orchestrator's `_run_hypothesis_tests_for_changepoints` into `run_hypothesis_tests`.
+- KS prefix changed from `ks_test` → `ks_2samp` to match the scipy-canonical name (only observable when the opt-in flag is on).
+- Added `tests/unit/test_drop_ks.py` with 4 tests covering: default-off behaviour, opt-in flag re-introduces KS, default count + ordering pin (Welch then Mann–Whitney), and `AnalysisConfig` default.
+- Updated existing `test_run_hypothesis_tests_emits_welch_mw_ks` to assert KS is *absent* by default (renamed to `_emits_welch_and_mw_by_default`).
+- Updated `tests/unit/test_config_hash.py` enumeration set + flip values to include `enable_ks_test`.
+
+Net effect: per-CP test count drops 3 → 2 (Welch + Mann–Whitney). Removes a correlated test from the BH FDR denominator and reduces hypothesis-test wall-clock by ~33% per change-point.
+
+#### Files Modified
+- `src/forensics/analysis/statistics.py` — gate KS branch on `enable_ks_test`; expanded docstring with C1 rationale.
+- `src/forensics/analysis/orchestrator.py` — pass `analysis_cfg.enable_ks_test` through to `run_hypothesis_tests`.
+- `src/forensics/config/settings.py` — add `enable_ks_test: bool = False` (hash-enumerated).
+- `tests/unit/test_statistics.py` — flip the existing battery test to assert KS is absent by default.
+- `tests/unit/test_config_hash.py` — register `enable_ks_test` in expected hash-fields set + flip values.
+- `tests/unit/test_drop_ks.py` (new) — 4 tests: happy path, edge case (flag flip), regression-pin (count + order), settings default.
+
+#### Verification Evidence
+```
+uv run pytest tests/unit/test_drop_ks.py -v
+                                  → 4 passed in 22.13s
+uv run pytest tests/ -k "hypothesis or statistics" -v
+                                  → 39 passed, 538 deselected in 41.09s
+uv run ruff check . && uv run ruff format --check .
+                                  → All checks passed; 201 files already formatted
+uv run pytest tests/
+                                  → 575 passed, 3 deselected, 1 warning in 174.12s
+```
+
+#### Decisions Made
+- **Default OFF, settings-flag ON for replication:** matches the spec ("If a settings flag is wanted for replication runs… add `enable_ks_test: bool = False` to `AnalysisConfig` and gate the branch — but keep the default OFF").
+- **Hash-enumerate the flag:** `enable_ks_test` participates in the analysis config hash because flipping it changes the test count and therefore the BH-corrected p-values. Cached `*_result.json` produced under one value would be incorrect when re-read under the other.
+- **Prefix rename `ks_test` → `ks_2samp`:** brings the test name in line with the scipy function and makes the spec's `test_name == "ks_2samp"` assertion direct. Only observable under opt-in (which has no production users yet).
+- **Expanded function-level docstring instead of a separate config knob doc:** the rationale (correlation with Mann–Whitney, BH denominator inflation) lives where future readers will find it.
+
+#### Unresolved Questions
+- Should the changelog or a published release note flag the `ks_test_*` → `ks_2samp_*` prefix rename for any replication consumers? Out of scope here; coordinator can decide when bundling C1 + C2 into a v0.4.0 release.
+
+#### Risks & Next Steps
+- **Downstream JSON readers:** any consumer that grepped historical `hypothesis_tests_json(slug)` for `test_name.startswith("ks_test")` will now find nothing. New artifacts use `ks_2samp_<feature>` only when the opt-in is on. No production reader matched this pattern (verified via `Grep` across `src/` and `tests/`).
+- **Per-author test count drops by ~230** (23 features × ~10 CPs × 1 dropped test). BH denominator shrinks accordingly; expect more rejections at the same alpha. Spec considers this the desired effect — Phase 15 C2 (per-family BH) is the complementary fix and already merged.
+
+---
+
+### Phase 15 F0 — PELT kernel swap RBF → L2
+**Status:** Complete
+**Date:** 2026-04-24
+**Agent/Session:** Wave-2 fast-path perf win
+
+#### What Was Done
+- `src/forensics/analysis/changepoint.py` — `detect_pelt`, `changepoints_from_pelt`, and `analyze_author_feature_changepoints` now thread a `cost_model: PeltCostModel` kwarg (default `"l2"`). The cost model passed to `rpt.Pelt(model=...)` is read from `settings.analysis.pelt_cost_model` rather than hard-coded to `"rbf"`. New module-level `Literal["l2", "l1", "rbf"]` alias keeps the type spelling DRY between the function signatures and the settings field.
+- `config.toml` — extended the `pelt_cost_model` inline comment to capture the default flip (`rbf` → `l2`) and the Apr 24 2026 profile evidence so future readers do not have to dig through the prompt history.
+- `tests/unit/test_pelt_l2_swap.py` (NEW) — 11 tests covering happy path (synthetic mean shift), edge cases (empty/short/constant/NaN signals across `l2`/`l1`/`rbf`), regression-pinned indices for two fixed-seed fixtures, and a settings-wiring spy that confirms `analyze_author_feature_changepoints` forwards the configured cost model down to `detect_pelt`.
+
+#### Files Modified
+- `src/forensics/analysis/changepoint.py`
+- `config.toml`
+- `tests/unit/test_pelt_l2_swap.py` (NEW)
+- `HANDOFF.md`
+
+#### Verification Evidence
+```
+uv run pytest tests/unit/test_pelt_l2_swap.py -v --no-cov
+                                  → 11 passed
+uv run pytest tests/ -k "pelt or changepoint" -v --no-cov
+                                  → 21 passed, 545 deselected
+uv run ruff check . && uv run ruff format --check .
+                                  → All checks passed! / 196 files already formatted
+uv run pytest tests/ --no-cov     → 563 passed, 3 deselected, 1 warning in 154.88s
+```
+
+#### Decisions Made
+- **Defaulting both function args and the settings field to `"l2"`:** belt-and-suspenders so any caller that sidesteps `analyze_author_feature_changepoints` (e.g. ad-hoc notebook code, `tests/test_analysis.py::test_pelt_synthetic_mean_shift`) gets the new default automatically.
+- **Promoted the `Literal` to a module-level alias `PeltCostModel`** instead of repeating the `Literal["l2", "l1", "rbf"]` triple at every call site. Mirrors the settings-side declaration without importing settings into `detect_pelt` (keeps `changepoint.py`'s leaf-function surface simple).
+- **Did not capture a runtime snapshot diff against a reference author in this PR.** The pre-L2 `data/analysis/_pre_l2_snapshot/<slug>/` artifact requires fixture data on disk that this worktree does not carry. Per the F0 spec the snapshot diff is a benchmark-pass deliverable, captured against a real `data/articles.db`. F0 is expected to deliver ≥ 50× on the PELT phase per the Apr 24 2026 profile evidence (99.2% of analysis wall-clock was in `costrbf.error`).
+
+#### Snapshot Diff — Intent
+- Run `uv run forensics analyze --author tommy-christopher` against a populated `data/articles.db` once *before* this PR is merged with `pelt_cost_model = "rbf"` set; archive the per-author `data/analysis/<slug>/changepoints.json` to `data/analysis/_pre_l2_snapshot/<slug>/`.
+- Re-run with `pelt_cost_model = "l2"` (default after this PR). Diff CP counts, mean-timestamp delta, and CP-loss for `|Cohen's d| > 0.5` against the snapshot.
+- Pause and investigate before proceeding with subsequent F-phase units if L2 loses more than 20% of the high-effect-size CPs that RBF emitted (per F0 spec).
+
+#### Unresolved Questions
+- Does pen=3.0 still produce the right CP density under L2 on the full Mediaite corpus, or does L2's tighter location-shift selectivity warrant a re-tune of `pelt_penalty`? Will surface in the snapshot diff above.
+
+#### Risks & Next Steps
+- **Pre/post-F0 artifact mixing:** L2 and RBF emit different CP streams; any cross-author analysis that pools `changepoints.json` produced before/after this PR will mix kernels. The Phase-15 config-hash Sign in `docs/GUARDRAILS.md` already covers this — `pelt_cost_model` is hash-included via `json_schema_extra={"include_in_config_hash": True}`, so per-author results stamped under the old hash will be recomputed on the next analyze run rather than silently mixed.
+- **Subsequent Phase-F units (bootstrap vectorization, per-feature caching, constant-signal early-exit) now operate against an L2 baseline;** their measured wins will be on top of the F0 100–500× win, not added to it.
+
+---
+
+### Phase 15 Phase A — BOCPD MAP-reset detection rule + Student-t predictive
+**Status:** Complete
+**Date:** 2026-04-24
+**Agent/Session:** Wave-2 signal-correctness unit (A1+A2+A3+A4 shipped together per `prompts/phase15-optimizations/v0.4.0.md` §Phase A)
+
+#### What Was Done
+
+**A1 — Regression test pinning broken legacy behavior**
+- Added `tests/unit/test_bocpd_semantics.py::test_legacy_p_r0_threshold_is_algebraically_pinned` which constructs the canonical synthetic mid-series mean shift (`[0]*50 + [5]*50` plus noise) and asserts that `mode="p_r0_legacy"` returns `<= 1` emit at `threshold=0.5`. This pins the GUARDRAILS Sign "BOCPD `P(r=0)` posterior is pinned to the hazard rate" — the legacy rule cannot fire on this fixture under constant hazard, by construction.
+
+**A2 — MAP-run-length reset detection rule**
+- Rewrote `detect_bocpd` in `src/forensics/analysis/changepoint.py` with `mode: Literal["map_reset", "p_r0_legacy"] = "map_reset"`. The new path emits a CP at timestep `t` when the posterior MAP run-length drops below `map_drop_ratio × prev_map`, gated by `min_run_length` (warmup) and `reset_cooldown` (refractory), then collapsed by `merge_window` (multi-reset clustering). Confidence is `exp(log_pi[current_map])` — bounded in [0, 1] and meaningful, unlike `P(r=0)`.
+- Refactored into three focused helpers (`_detect_bocpd_legacy`, `_detect_bocpd_map_reset`, `_collapse_adjacent_emits`) so `detect_bocpd` itself stays under McCabe 10. `_bocpd_step` math is unchanged — only the read-out changed.
+- Legacy `mode="p_r0_legacy"` path preserved byte-for-byte; pinned by `test_legacy_mode_preserves_byte_for_byte` against the existing O(n²) scalar reference in `tests/test_analysis.py`.
+
+**A3 — Settings plumbing**
+- The six knobs (`bocpd_detection_mode`, `bocpd_map_drop_ratio`, `bocpd_min_run_length`, `bocpd_reset_cooldown`, `bocpd_merge_window`, `bocpd_student_t`) were already declared by Unit 1. Wired all six through `analyze_author_feature_changepoints` → `changepoints_from_bocpd` → `detect_bocpd`. Removed the inlined `bocpd_threshold = 0.5` workaround; only `mode="p_r0_legacy"` consults `threshold` and the historical default is hard-coded there for one-line rollback.
+- Updated `config.toml` comments to document each knob's role + the rollback recipe.
+- Updated the explanatory comment on `AnalysisConfig.bocpd_detection_mode` in `src/forensics/config/settings.py` from "until that ships" to "set to `p_r0_legacy` to restore pre-Phase-A behavior".
+
+**A4 — Student-t posterior predictive (NIG conjugate, Murphy 2007 §7.6)**
+- Extended `_BocpdPrior` with `mu0_t`, `kappa0`, `alpha0`, `beta0`, and a `cumsum_sq` prefix-sum array so per-step segment sum-of-squares is O(1) just like `cumsum`.
+- New `_student_t_log_pred` implements the closed-form NIG → Student-t predictive vectorized over segment lengths via `scipy.stats.t.logpdf`. ν → ∞ correctly reduces to Normal.
+- Existing `_normal_log_pred` extracted from the old inline math; gated by the new `student_t: bool` kwarg on `_bocpd_step`.
+- Default `bocpd_student_t = True`. Normal path preserved for parity tests + A/B; the existing `_detect_bocpd_scalar_reference` test in `tests/test_analysis.py` now pins the Normal path explicitly.
+
+#### Files Modified
+- `src/forensics/analysis/changepoint.py` (rewritten BOCPD readout, new helpers, NIG/Student-t predictive, settings plumbing)
+- `src/forensics/config/settings.py` (comment refresh on `bocpd_detection_mode`)
+- `config.toml` (per-knob comments documenting MAP-reset semantics + Student-t)
+- `tests/test_analysis.py` (existing BOCPD tests pinned to `mode="p_r0_legacy"`, `student_t=False` for parity)
+- `tests/unit/test_bocpd_semantics.py` (new — 11 tests covering A1, A2, A3, A4)
+
+#### Verification Evidence
+
+```
+$ uv run pytest tests/unit/test_bocpd_semantics.py -v --no-cov
+11 passed in 39.78s
+
+$ uv run pytest tests/ -k "bocpd or changepoint or config" -v --no-cov
+68 passed, 516 deselected in 5.56s
+
+$ uv run ruff check . && uv run ruff format --check .
+All checks passed!
+201 files already formatted
+
+$ uv run pytest tests/ -v --no-cov
+581 passed, 3 deselected, 1 warning in 161.66s (0:02:41)
+```
+
+Key validations covered by the new test file:
+- Legacy `P(r=0)` threshold cannot fire on the canonical mean-shift fixture (≤ 1 emit at threshold 0.5).
+- MAP-reset mode emits exactly 1 CP near the true split (after multi-reset collapse).
+- Warmup gate suppresses early-signal resets (no emit at `t < min_run_length`).
+- Cooldown suppresses back-to-back emits (long cooldown ≤ short cooldown ≤ 1 on a 2-shift fixture).
+- Multi-reset collapse: `merge_window > 0` reduces adjacent argmax drops to a single CP.
+- Rollback flag (`bocpd_detection_mode = "p_r0_legacy"`) preserves legacy byte-for-byte regardless of MAP-reset knob values.
+- Student-t parity: on a stationary signal both predictive paths emit ≤ 2 CPs; on the mean-shift fixture Student-t surfaces the shift no later than Normal.
+- `analyze_author_feature_changepoints` integration: with default settings, BOCPD now produces CPs on a synthetic shift in `ttr` (impossible under the legacy `P(r=0)` rule).
+
+#### Decisions Made
+
+- **Single PR for A1+A2+A3+A4:** the prompt called for these to ship together; the test surface required to validate A2 already exercises A4 (Student-t predictive parity + warmup behavior depend on the new prior fields), so splitting commits would have shipped a half-tested module.
+- **Legacy mode kept under `mode` kwarg, not a separate function:** keeps a single import surface for callers and lets the rollback be a one-line config change. The kwarg is keyword-only to discourage positional misuse.
+- **Confidence semantics changed:** legacy returned `P(r=0) == hazard_rate`; MAP-reset returns `exp(log_pi[current_map])` which is the posterior mass at the new run-length. Both are clamped to [0, 1] downstream by `changepoints_from_bocpd`. Documented in the `detect_bocpd` docstring.
+- **NIG seeding (Murphy default):** `(μ_0, κ_0, α_0, β_0) = (mean(x[:10]), 1.0, 1.0, 0.5*var(x[:10]))`. Falls back to the wider 80-sample `sigma2` when the 10-sample seed variance is degenerate (e.g. constant warmup) — preserves numerical sanity without changing the published default.
+- **`min_run_length + 2` minimum signal length:** prevents the warmup gate from being unsatisfiable on too-short series. Returns `[]` rather than raising, matching the legacy `n < 6` guard.
+- **No changes to `_bocpd_step` math:** explicit ask in the prompt. The student_t flag selects between two log-predictive helpers; the log-message-passing update is identical.
+
+#### Unresolved Questions
+
+- **Empirical sensitivity sweep:** Phase A wires the knobs but doesn't ship a tuning study. The prompt's Phase A scope explicitly stops at "wire the new defaults"; Phase B / I (calibration runs) own the sweep.
+- **`changepoints_from_bocpd` parameter sprawl:** the function now takes 9 keyword args. Acceptable for an internal helper called from one site, but if a third caller appears we should bundle the BOCPD knobs into a small dataclass.
+
+#### Risks & Next Steps
+
+- **Downstream changepoint counts will rise sharply on real corpora:** the legacy rule emitted ~zero true CPs (pinned to hazard rate); MAP-reset will surface real shifts. Convergence-window math, BH correction grouping (Phase C `fdr_grouping="family"`), and Pipeline-A scoring (`pipeline_b_mode="legacy"` for now) all need re-verification on the next real-corpus bench. Expected — this is the intended outcome of the fix.
+- **Student-t default-on bumps the analysis config hash:** any cached `*_result.json` artifacts from before this PR will be invalidated. Operators must re-run analyze. Documented in the new comment in `config.toml`.
+- **Rollback recipe:** flip `analysis.bocpd_detection_mode = "p_r0_legacy"` (and optionally `bocpd_student_t = false`) in `config.toml` to restore Phase 15 Unit 1 behavior byte-for-byte. The legacy code path is covered by the parity tests in `tests/test_analysis.py::test_bocpd_vectorized_matches_reference`.
+- **GUARDRAILS Sign:** the "BOCPD `P(r=0)` posterior is pinned to the hazard rate" Sign remains in `docs/GUARDRAILS.md` — keep it. New code should still NOT threshold `P(r=0)`; the legacy mode is a rollback escape hatch only.
+- **Wave-2 follow-ups:** Phase B (feature-family convergence), Phase C (per-family FDR), and Phase D (shared-byline exclusion) are independent of Phase A and can run in parallel. Phase E (Pipeline B scoring) benefits from the increased CP yield enabled by this PR.
+
+---
+
 ### Phase 15 Phase D: Shared-byline filter (model field + heuristic + qualification exclusion)
 **Status:** Complete
 **Date:** 2026-04-24
