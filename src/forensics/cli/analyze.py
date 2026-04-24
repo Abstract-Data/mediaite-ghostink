@@ -23,6 +23,8 @@ from forensics.config.settings import ForensicsSettings
 from forensics.pipeline_context import PipelineContext
 from forensics.preregistration import verify_preregistration
 from forensics.storage.json_io import write_json_artifact
+from forensics.storage.repository import Repository
+from forensics.survey.shared_byline import is_shared_byline as _is_shared_byline_heuristic
 
 logger = logging.getLogger(__name__)
 
@@ -166,6 +168,56 @@ def _run_ai_baseline_stage(
         raise typer.Exit(code=1) from exc
 
 
+def _enforce_shared_byline_gate(
+    db_path: Path,
+    settings: ForensicsSettings,
+    *,
+    author_slug: str,
+    include_shared_bylines: bool,
+) -> None:
+    """Refuse to analyze a shared-byline author unless the operator opts in.
+
+    Mirrors the Phase 15 D survey-stage gate (``forensics survey``): the
+    accounts ``mediaite`` and ``mediaite-staff`` aggregate output from many
+    contributors, so single-author stylometry on them is meaningless. We
+    consult both the persisted ``Author.is_shared_byline`` flag (set at
+    ingest) AND the slug heuristic so older databases that pre-date the
+    flag still trip the gate.
+    """
+    if include_shared_bylines:
+        return
+    flagged = False
+    matched_name: str | None = None
+    matched_outlet: str | None = None
+    with Repository(db_path) as repo:
+        author = repo.get_author_by_slug(author_slug)
+    if author is not None:
+        flagged = bool(author.is_shared_byline)
+        matched_name = author.name
+        matched_outlet = author.outlet
+    # Fall back to the configured outlet/name when the slug isn't in the DB
+    # yet — analyze CLI may run before scrape on a fresh checkout.
+    if not flagged:
+        configured = next((a for a in settings.authors if a.slug == author_slug), None)
+        if configured is not None:
+            matched_name = matched_name or configured.name
+            matched_outlet = matched_outlet or configured.outlet
+        flagged = _is_shared_byline_heuristic(
+            author_slug,
+            matched_name or author_slug,
+            matched_outlet or "",
+        )
+    if not flagged:
+        return
+    msg = (
+        f"author '{author_slug}' is a shared byline (group account) and is "
+        "disqualified by the Phase 15 D survey gate. Pass "
+        "--include-shared-bylines to override."
+    )
+    logger.error(msg)
+    raise typer.BadParameter(msg, param_hint="--author")
+
+
 def _apply_per_run_overrides(
     settings: ForensicsSettings,
     *,
@@ -215,6 +267,7 @@ def run_analyze(
     author: str | None = None,
     include_advertorial: bool = False,
     residualize_sections: bool = False,
+    include_shared_bylines: bool = False,
 ) -> None:
     """Execute the analyze stage as a plain Python function.
 
@@ -228,6 +281,13 @@ def run_analyze(
     )
     root = get_project_root()
     db_path = root / "data" / "articles.db"
+    if author is not None:
+        _enforce_shared_byline_gate(
+            db_path,
+            settings,
+            author_slug=author,
+            include_shared_bylines=include_shared_bylines,
+        )
     ctx = AnalyzeContext.build(db_path, settings, root=root, author=author)
     # analysis_dir is created by the first write helper that lands an artifact.
     analysis_dir = ctx.paths.analysis_dir
@@ -385,6 +445,20 @@ def analyze(
             ),
         ),
     ] = False,
+    include_shared_bylines: Annotated[
+        bool,
+        typer.Option(
+            "--include-shared-bylines",
+            help=(
+                "Re-enable analysis of shared-byline accounts (e.g. "
+                "mediaite-staff, mediaite). Default OFF — matches the Phase "
+                "15 D survey gate, which disqualifies group bylines because "
+                "single-author stylometry on aggregate accounts is "
+                "meaningless. Mirrors ``forensics survey "
+                "--include-shared-bylines``."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Run analysis pipeline (change-point, drift, convergence, comparison)."""
     # When a sub-command is invoked (e.g. ``analyze section-profile``),
@@ -405,6 +479,7 @@ def analyze(
         author=author,
         include_advertorial=include_advertorial,
         residualize_sections=residualize_sections,
+        include_shared_bylines=include_shared_bylines,
     )
 
 

@@ -3151,3 +3151,51 @@ The J3 spec (lines 1280-1289) calls for four artifacts: `section_centroids.json`
 - Optional: small PR to add the missing J3 side artifacts (centroids JSON, distance matrix JSON+CSV, feature ranking JSON) per spec lines 1280-1289.
 - Backup directory currently holds the v1-shape parquets from the second migration; operators wanting the original pre-Phase-15 fixtures should refresh from VCS.
 - Phase 15 is COMPLETE. All 47 in-scope steps landed across 20 PRs (#63-#82). G1 (`max_workers` orchestrator wiring) was flagged by H2 as not-yet-wired; it is the only remaining gap and is independent of Phase 15.
+
+---
+
+## 2026-04-24 — Real authors in config.toml + survey gate in `forensics analyze` CLI
+
+### Status
+COMPLETE — committed to main (no PR).
+
+### Context
+The Phase-15 full-analysis run had two bypass gaps:
+1. `config.toml` shipped with two `placeholder-target` / `placeholder-control` `[[authors]]` blocks, so `forensics analyze` (no `--author`) iterated phantoms and bailed out instantly.
+2. `forensics analyze --author <slug>` accepted shared-byline slugs (`mediaite`, `mediaite-staff`) even though the Phase 15 D survey gate disqualifies them, producing meaningless PA=1.00 readings on aggregate-author corpora.
+
+### What Was Done
+- `config.toml`: replaced both placeholders with the 12 survey-qualified Mediaite reporters (ahmad-austin, alex-griffing, charlie-nash, colby-hall, david-gilmour, isaac-schorr, jennifer-bowers-bahney, joe-depaolo, michael-luciano, sarah-rumpf, tommy-christopher, zachary-leeman). All carry `role="target"`. The two shared-byline accounts (`mediaite`, `mediaite-staff`) are intentionally omitted — analysis re-includes them via the new flag.
+- `src/forensics/cli/analyze.py`: added `_enforce_shared_byline_gate()` plus a `--include-shared-bylines` Typer flag mirroring the survey CLI. The gate consults the persisted `Author.is_shared_byline` flag first and falls back to the slug heuristic so older databases still trip it. `run_analyze(...)` now refuses shared bylines via `typer.BadParameter` unless `include_shared_bylines=True`.
+- `tests/unit/test_analyze_survey_gate.py` (NEW, 6 tests): happy path (real author), refuse-without-flag, allow-with-flag, heuristic fallback when DB flag is False, `author=None` bypasses gate, signature contract.
+
+### Files Touched
+- `config.toml`
+- `src/forensics/cli/analyze.py`
+- `tests/unit/test_analyze_survey_gate.py` (NEW)
+- `HANDOFF.md` (this block)
+
+### Decisions
+- **Gate fires only when `--author <slug>` is passed.** Newsroom-wide invocations iterate every configured author; the configured roster is now the gate (placeholders dropped).
+- **DB-then-config-then-heuristic precedence.** A shared byline can be detected three ways: (1) persisted `is_shared_byline=1` row, (2) configured-but-unflagged outlet/name on a DB row that doesn't exist yet, (3) pure slug heuristic. Each successive fallback handles a different real-world drift (fresh checkout, missing scrape, etc.).
+- **No CLI subcommand.** Reuses the existing `analyze_app` callback (PR #75 J3 made it `invoke_without_command=True`); the new flag rides alongside `--author` and `--include-advertorial`.
+
+### Verification
+```
+.venv/bin/pytest tests/unit/test_analyze_survey_gate.py -v --no-cov
+  → 6 passed
+
+.venv/bin/pytest tests/ --no-cov
+  → 733 passed, 3 deselected, 1 xfailed (pre-existing J5 placeholder)
+
+.venv/bin/ruff check src/forensics/cli/analyze.py tests/unit/test_analyze_survey_gate.py
+  → All checks passed!
+
+.venv/bin/ruff format --check src/forensics/cli/analyze.py tests/unit/test_analyze_survey_gate.py
+  → already formatted
+```
+
+### Unresolved
+- `scripts/bench_phase15.py` still iterates `settings.authors`; with the new roster it will benchmark all 12 real authors instead of two phantoms, which is the desired behaviour. No code change needed there.
+- `mediaite` and `mediaite-staff` parquets remain on disk under `data/features/`. Operators who need them should pass `forensics analyze --author mediaite-staff --include-shared-bylines` for the audit / replication path.
+
