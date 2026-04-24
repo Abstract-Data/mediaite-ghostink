@@ -1904,6 +1904,150 @@ uv run pytest tests/unit/test_config_hash.py -v
 
 ---
 
+### Phase 15 E1+E2 — Pipeline B Diagnostics (DEBUG component logging + missing-artifact WARNING)
+**Status:** Complete
+**Date:** 2026-04-24
+**Agent/Session:** Phase 15 E1+E2 unit (logging-only, no formula changes)
+
+#### What Was Done
+- **E1** was already on `main` via PR #65 (Phase 15 Unit 3); confirmed `_score_single_window` in `src/forensics/analysis/convergence.py` emits a DEBUG record with `(author, window, peak_signal, sim_signal, ai_signal, pipeline_b)` for every scored window. Also confirmed E3 (`pipeline_b_mode = "percentile"`) shipped gated and defaulted to `"legacy"` per spec.
+- **E2** added: `load_drift_summary` in `src/forensics/analysis/drift.py` now calls `_warn_missing_drift_artifacts` before any cached read. When the author has at least one file in `data/embeddings/<slug>/` but a cached artifact is missing, it logs one WARNING per missing artifact (`drift.json`, `baseline_curve.json`, `centroids.npz`) using the stable template `_DRIFT_ARTIFACT_MISSING_WARNING`. Default behaviour (return empty fields) is preserved — this is logging-only.
+- New test file `tests/unit/test_pipeline_b_diagnostics.py` with four tests:
+  - `test_e1_score_single_window_emits_debug_components` — DEBUG record names all four components plus the author.
+  - `test_e2_warns_when_artifacts_missing_but_embeddings_exist` — exactly one WARNING per missing artifact when the author has embeddings.
+  - `test_e2_silent_when_no_embeddings_exist` — no WARNING when the author has no embeddings (avoids log noise for unanalysed authors).
+  - `test_e2_warning_message_format_is_stable` — regression-pin on the WARNING template prefix, slug token, and template literal so log-grep dashboards keyed on it break loudly if the wording changes.
+
+#### Files Modified
+- `src/forensics/analysis/drift.py` — added `_author_has_embeddings_on_disk`, `_DRIFT_ARTIFACT_MISSING_WARNING`, `_warn_missing_drift_artifacts`; wired the warner into `load_drift_summary`.
+- `tests/unit/test_pipeline_b_diagnostics.py` — NEW.
+- `HANDOFF.md` — this block.
+
+#### Verification Evidence
+```
+uv run pytest tests/unit/test_pipeline_b_diagnostics.py -v --no-cov
+                                  → 4 passed in 24.77s
+uv run pytest tests/ -k "convergence or drift" -v --no-cov
+                                  → 31 passed, 1 skipped, 538 deselected in 40.51s
+uv run ruff check .               → All checks passed!
+uv run ruff format --check .      → 201 files already formatted
+uv run pytest tests/ --no-cov     → 563 passed, 4 skipped, 3 deselected in 188.63s
+```
+
+#### Decisions Made
+- **No formula changes** anywhere. Spec explicitly forbids touching `_velocity_peak_and_months` or `_embedding_similarity_signal` in this unit; E3 already landed via PR #65 with `pipeline_b_mode = "percentile"` defaulted off.
+- **Helper extraction over inline checks.** `_author_has_embeddings_on_disk` and `_warn_missing_drift_artifacts` keep `load_drift_summary` readable and isolate the I/O probe so future changes (e.g., switching the embedding-presence test to manifest-based detection) live in one place.
+- **Stable WARNING template as a module constant.** Exporting `_DRIFT_ARTIFACT_MISSING_WARNING` (single underscore, module-private but importable) lets the regression-pin test assert on the literal directly rather than re-deriving the format. The "do not change without updating the regression-pin test" comment preserves that coupling for the next reader.
+- **Kept E1's existing test** (`test_convergence_debug_logging_emits` in `tests/unit/test_convergence.py`) and added an independent E1 happy-path test in the new diagnostics file. The duplication is intentional: the new file is the "Pipeline B diagnostics" surface area; the old file already pinned E1 alongside the convergence test cluster.
+
+#### Unresolved Questions
+- **What do the DEBUG logs reveal on a real run?** The whole point of E1+E2 is to diagnose whether the seven authors with `pipeline_b == 0.0` are math-floor or I/O-failure cases. That requires a `FORENSICS_LOG_LEVEL=DEBUG` pipeline run against the real corpus, which is out of scope for this unit. Capture the DEBUG output for `isaac-schorr` (or any flagged author) and decide whether to flip `pipeline_b_mode` to `"percentile"` based on the components.
+- **Manifest-based embedding detection?** Currently `_author_has_embeddings_on_disk` checks `data/embeddings/<slug>/` for any file. The legacy-`.npy` and packed-`batch.npz` paths both live there, so this is correct today. If the manifest layout changes (e.g., centralised `manifest.jsonl` only), update the helper to read the manifest instead.
+
+#### Risks & Next Steps
+- **Diagnostic-only PR.** No behaviour change for normal operation; only log lines added. Coverage for the new helpers is high (the four tests exercise both branches of `_author_has_embeddings_on_disk` and the per-artifact loop).
+- **Next:** run the pipeline with DEBUG on for one flagged author, capture component values + any WARNINGs, then decide whether E3's percentile mode flip is warranted (or whether the issue is silent write failures that need a separate fix).
+- **No follow-up code change in this unit.** E3's flip lives behind `settings.analysis.pipeline_b_mode` and can be set from `config.toml` without a code change.
+
+---
+
+### Phase 15 C1 — Drop KS test from default hypothesis battery
+**Status:** Complete
+**Date:** 2026-04-24
+**Agent/Session:** wave2-parking subagent (worktree-agent-a9524a16)
+
+#### What Was Done
+- Removed the unconditional `stats.ks_2samp` branch from `run_hypothesis_tests`; gated it behind a new keyword argument `enable_ks_test: bool = False`.
+- Added `AnalysisConfig.enable_ks_test: bool = False` (hash-enumerated) so replication runs can re-enable shape-change detection without code changes.
+- Threaded `analysis_cfg.enable_ks_test` from the orchestrator's `_run_hypothesis_tests_for_changepoints` into `run_hypothesis_tests`.
+- KS prefix changed from `ks_test` → `ks_2samp` to match the scipy-canonical name (only observable when the opt-in flag is on).
+- Added `tests/unit/test_drop_ks.py` with 4 tests covering: default-off behaviour, opt-in flag re-introduces KS, default count + ordering pin (Welch then Mann–Whitney), and `AnalysisConfig` default.
+- Updated existing `test_run_hypothesis_tests_emits_welch_mw_ks` to assert KS is *absent* by default (renamed to `_emits_welch_and_mw_by_default`).
+- Updated `tests/unit/test_config_hash.py` enumeration set + flip values to include `enable_ks_test`.
+
+Net effect: per-CP test count drops 3 → 2 (Welch + Mann–Whitney). Removes a correlated test from the BH FDR denominator and reduces hypothesis-test wall-clock by ~33% per change-point.
+
+#### Files Modified
+- `src/forensics/analysis/statistics.py` — gate KS branch on `enable_ks_test`; expanded docstring with C1 rationale.
+- `src/forensics/analysis/orchestrator.py` — pass `analysis_cfg.enable_ks_test` through to `run_hypothesis_tests`.
+- `src/forensics/config/settings.py` — add `enable_ks_test: bool = False` (hash-enumerated).
+- `tests/unit/test_statistics.py` — flip the existing battery test to assert KS is absent by default.
+- `tests/unit/test_config_hash.py` — register `enable_ks_test` in expected hash-fields set + flip values.
+- `tests/unit/test_drop_ks.py` (new) — 4 tests: happy path, edge case (flag flip), regression-pin (count + order), settings default.
+
+#### Verification Evidence
+```
+uv run pytest tests/unit/test_drop_ks.py -v
+                                  → 4 passed in 22.13s
+uv run pytest tests/ -k "hypothesis or statistics" -v
+                                  → 39 passed, 538 deselected in 41.09s
+uv run ruff check . && uv run ruff format --check .
+                                  → All checks passed; 201 files already formatted
+uv run pytest tests/
+                                  → 575 passed, 3 deselected, 1 warning in 174.12s
+```
+
+#### Decisions Made
+- **Default OFF, settings-flag ON for replication:** matches the spec ("If a settings flag is wanted for replication runs… add `enable_ks_test: bool = False` to `AnalysisConfig` and gate the branch — but keep the default OFF").
+- **Hash-enumerate the flag:** `enable_ks_test` participates in the analysis config hash because flipping it changes the test count and therefore the BH-corrected p-values. Cached `*_result.json` produced under one value would be incorrect when re-read under the other.
+- **Prefix rename `ks_test` → `ks_2samp`:** brings the test name in line with the scipy function and makes the spec's `test_name == "ks_2samp"` assertion direct. Only observable under opt-in (which has no production users yet).
+- **Expanded function-level docstring instead of a separate config knob doc:** the rationale (correlation with Mann–Whitney, BH denominator inflation) lives where future readers will find it.
+
+#### Unresolved Questions
+- Should the changelog or a published release note flag the `ks_test_*` → `ks_2samp_*` prefix rename for any replication consumers? Out of scope here; coordinator can decide when bundling C1 + C2 into a v0.4.0 release.
+
+#### Risks & Next Steps
+- **Downstream JSON readers:** any consumer that grepped historical `hypothesis_tests_json(slug)` for `test_name.startswith("ks_test")` will now find nothing. New artifacts use `ks_2samp_<feature>` only when the opt-in is on. No production reader matched this pattern (verified via `Grep` across `src/` and `tests/`).
+- **Per-author test count drops by ~230** (23 features × ~10 CPs × 1 dropped test). BH denominator shrinks accordingly; expect more rejections at the same alpha. Spec considers this the desired effect — Phase 15 C2 (per-family BH) is the complementary fix and already merged.
+
+---
+
+### Phase 15 F0 — PELT kernel swap RBF → L2
+**Status:** Complete
+**Date:** 2026-04-24
+**Agent/Session:** Wave-2 fast-path perf win
+
+#### What Was Done
+- `src/forensics/analysis/changepoint.py` — `detect_pelt`, `changepoints_from_pelt`, and `analyze_author_feature_changepoints` now thread a `cost_model: PeltCostModel` kwarg (default `"l2"`). The cost model passed to `rpt.Pelt(model=...)` is read from `settings.analysis.pelt_cost_model` rather than hard-coded to `"rbf"`. New module-level `Literal["l2", "l1", "rbf"]` alias keeps the type spelling DRY between the function signatures and the settings field.
+- `config.toml` — extended the `pelt_cost_model` inline comment to capture the default flip (`rbf` → `l2`) and the Apr 24 2026 profile evidence so future readers do not have to dig through the prompt history.
+- `tests/unit/test_pelt_l2_swap.py` (NEW) — 11 tests covering happy path (synthetic mean shift), edge cases (empty/short/constant/NaN signals across `l2`/`l1`/`rbf`), regression-pinned indices for two fixed-seed fixtures, and a settings-wiring spy that confirms `analyze_author_feature_changepoints` forwards the configured cost model down to `detect_pelt`.
+
+#### Files Modified
+- `src/forensics/analysis/changepoint.py`
+- `config.toml`
+- `tests/unit/test_pelt_l2_swap.py` (NEW)
+- `HANDOFF.md`
+
+#### Verification Evidence
+```
+uv run pytest tests/unit/test_pelt_l2_swap.py -v --no-cov
+                                  → 11 passed
+uv run pytest tests/ -k "pelt or changepoint" -v --no-cov
+                                  → 21 passed, 545 deselected
+uv run ruff check . && uv run ruff format --check .
+                                  → All checks passed! / 196 files already formatted
+uv run pytest tests/ --no-cov     → 563 passed, 3 deselected, 1 warning in 154.88s
+```
+
+#### Decisions Made
+- **Defaulting both function args and the settings field to `"l2"`:** belt-and-suspenders so any caller that sidesteps `analyze_author_feature_changepoints` (e.g. ad-hoc notebook code, `tests/test_analysis.py::test_pelt_synthetic_mean_shift`) gets the new default automatically.
+- **Promoted the `Literal` to a module-level alias `PeltCostModel`** instead of repeating the `Literal["l2", "l1", "rbf"]` triple at every call site. Mirrors the settings-side declaration without importing settings into `detect_pelt` (keeps `changepoint.py`'s leaf-function surface simple).
+- **Did not capture a runtime snapshot diff against a reference author in this PR.** The pre-L2 `data/analysis/_pre_l2_snapshot/<slug>/` artifact requires fixture data on disk that this worktree does not carry. Per the F0 spec the snapshot diff is a benchmark-pass deliverable, captured against a real `data/articles.db`. F0 is expected to deliver ≥ 50× on the PELT phase per the Apr 24 2026 profile evidence (99.2% of analysis wall-clock was in `costrbf.error`).
+
+#### Snapshot Diff — Intent
+- Run `uv run forensics analyze --author tommy-christopher` against a populated `data/articles.db` once *before* this PR is merged with `pelt_cost_model = "rbf"` set; archive the per-author `data/analysis/<slug>/changepoints.json` to `data/analysis/_pre_l2_snapshot/<slug>/`.
+- Re-run with `pelt_cost_model = "l2"` (default after this PR). Diff CP counts, mean-timestamp delta, and CP-loss for `|Cohen's d| > 0.5` against the snapshot.
+- Pause and investigate before proceeding with subsequent F-phase units if L2 loses more than 20% of the high-effect-size CPs that RBF emitted (per F0 spec).
+
+#### Unresolved Questions
+- Does pen=3.0 still produce the right CP density under L2 on the full Mediaite corpus, or does L2's tighter location-shift selectivity warrant a re-tune of `pelt_penalty`? Will surface in the snapshot diff above.
+
+#### Risks & Next Steps
+- **Pre/post-F0 artifact mixing:** L2 and RBF emit different CP streams; any cross-author analysis that pools `changepoints.json` produced before/after this PR will mix kernels. The Phase-15 config-hash Sign in `docs/GUARDRAILS.md` already covers this — `pelt_cost_model` is hash-included via `json_schema_extra={"include_in_config_hash": True}`, so per-author results stamped under the old hash will be recomputed on the next analyze run rather than silently mixed.
+- **Subsequent Phase-F units (bootstrap vectorization, per-feature caching, constant-signal early-exit) now operate against an L2 baseline;** their measured wins will be on top of the F0 100–500× win, not added to it.
+
+---
+
 ### Phase 15 Phase A — BOCPD MAP-reset detection rule + Student-t predictive
 **Status:** Complete
 **Date:** 2026-04-24

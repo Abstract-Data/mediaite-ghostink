@@ -156,6 +156,7 @@ def _run_hypothesis_tests_for_changepoints(
                 cp.feature_name,
                 author_id,
                 n_bootstrap=analysis_cfg.bootstrap_iterations,
+                enable_ks_test=analysis_cfg.enable_ks_test,
             )
         )
     all_tests = _family_bh_correct(all_tests, analysis_cfg)

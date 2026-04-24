@@ -166,6 +166,12 @@ class AnalysisConfig(BaseModel):
     fdr_grouping: Literal["author", "family"] = Field(
         "family", json_schema_extra={"include_in_config_hash": True}
     )
+    # Phase 15 C1 — Kolmogorov–Smirnov is highly correlated with Mann–Whitney
+    # for the location shifts this analysis cares about. Default OFF drops the
+    # per-CP test count from 3 → 2 and removes a redundant inflator from the
+    # BH denominator. Re-enable for replication runs that want shape-change
+    # detection on top of location shift.
+    enable_ks_test: bool = Field(False, json_schema_extra={"include_in_config_hash": True})
     # Phase 15 E — Pipeline B scoring mode; legacy preserves the v0.14 formulas.
     pipeline_b_mode: Literal["legacy", "percentile"] = Field(
         "legacy", json_schema_extra={"include_in_config_hash": True}
