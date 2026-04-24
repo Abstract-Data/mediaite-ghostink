@@ -166,6 +166,40 @@ def _run_ai_baseline_stage(
         raise typer.Exit(code=1) from exc
 
 
+def _apply_per_run_overrides(
+    settings: ForensicsSettings,
+    *,
+    include_advertorial: bool,
+    residualize_sections: bool,
+) -> ForensicsSettings:
+    """Return ``settings`` with per-run CLI escape hatches applied.
+
+    - ``include_advertorial`` (Phase 15 J2): re-enable advertorial / syndicated
+      sections in features + survey config for this run only.
+    - ``residualize_sections`` (Phase 15 J7): flip the J5 toggle without
+      touching the persisted ``config.toml``.
+
+    Both escapes copy nested config models so the global ``get_settings()``
+    cache is never mutated.
+    """
+    if include_advertorial:
+        settings = settings.model_copy(
+            update={
+                "features": settings.features.model_copy(update={"excluded_sections": frozenset()}),
+                "survey": settings.survey.model_copy(update={"excluded_sections": frozenset()}),
+            }
+        )
+    if residualize_sections:
+        settings = settings.model_copy(
+            update={
+                "analysis": settings.analysis.model_copy(
+                    update={"section_residualize_features": True}
+                ),
+            }
+        )
+    return settings
+
+
 def run_analyze(
     *,
     changepoint: bool = False,
@@ -180,23 +214,18 @@ def run_analyze(
     articles_per_cell: int | None = None,
     author: str | None = None,
     include_advertorial: bool = False,
+    residualize_sections: bool = False,
 ) -> None:
     """Execute the analyze stage as a plain Python function.
 
     Kept separate from the Typer ``analyze`` callback so the `forensics all`
     orchestrator can call this without fighting Typer's option defaults.
     """
-    settings = get_settings()
-    if include_advertorial:
-        # Phase 15 J2 escape hatch — re-enable advertorial / syndicated
-        # sections in feature extraction for this run only. Must be applied
-        # before AnalyzeContext is built so downstream stages see the override.
-        settings = settings.model_copy(
-            update={
-                "features": settings.features.model_copy(update={"excluded_sections": frozenset()}),
-                "survey": settings.survey.model_copy(update={"excluded_sections": frozenset()}),
-            }
-        )
+    settings = _apply_per_run_overrides(
+        get_settings(),
+        include_advertorial=include_advertorial,
+        residualize_sections=residualize_sections,
+    )
     root = get_project_root()
     db_path = root / "data" / "articles.db"
     ctx = AnalyzeContext.build(db_path, settings, root=root, author=author)
@@ -345,6 +374,17 @@ def analyze(
             ),
         ),
     ] = False,
+    residualize_sections: Annotated[
+        bool,
+        typer.Option(
+            "--residualize-sections",
+            help=(
+                "Toggle J5 section-residualized changepoints for this run "
+                "(flips analysis.section_residualize_features). Default OFF "
+                "matches the persisted config (Phase 15 J7)."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Run analysis pipeline (change-point, drift, convergence, comparison)."""
     # When a sub-command is invoked (e.g. ``analyze section-profile``),
@@ -364,6 +404,7 @@ def analyze(
         articles_per_cell=articles_per_cell,
         author=author,
         include_advertorial=include_advertorial,
+        residualize_sections=residualize_sections,
     )
 
 
@@ -416,3 +457,71 @@ def section_profile_cmd(
     typer.echo(f"  J5 gate verdict: {result.gate_verdict}")
     if result.artifacts is not None:
         typer.echo(f"  report: {result.artifacts.report_md}")
+
+
+@analyze_app.command(name="section-contrast")
+def section_contrast_cmd(
+    author: Annotated[
+        str | None,
+        typer.Option(
+            "--author",
+            metavar="SLUG",
+            help=(
+                "Limit to one author slug. Default: every configured author "
+                "with a feature parquet under data/features/."
+            ),
+        ),
+    ] = None,
+    features_dir: Annotated[
+        Path | None,
+        typer.Option(
+            "--features-dir",
+            metavar="PATH",
+            help="Override the features parquet directory (default: data/features).",
+        ),
+    ] = None,
+) -> None:
+    """Phase 15 J6: per-author section-contrast tests (Welch + MW + per-family BH)."""
+    from forensics.analysis.section_contrast import compute_and_write_section_contrast
+    from forensics.paths import load_feature_frame_for_author, resolve_author_rows
+    from forensics.storage.repository import Repository
+
+    settings = get_settings()
+    root = get_project_root()
+    db_path = root / "data" / "articles.db"
+    paths = AnalysisArtifactPaths.from_project(root, db_path)
+    feat_dir = features_dir if features_dir is not None else paths.features_dir
+    analysis_dir = paths.analysis_dir
+    analysis_dir.mkdir(parents=True, exist_ok=True)
+
+    with Repository(db_path) as repo:
+        author_rows = resolve_author_rows(repo, settings, author_slug=author)
+
+    if not author_rows:
+        typer.echo("section-contrast: no authors resolved (check --author / config.toml)")
+        raise typer.Exit(code=1)
+
+    written = 0
+    for author_row in author_rows:
+        df = load_feature_frame_for_author(feat_dir, author_row.slug, author_row.id)
+        if df is None or df.is_empty():
+            typer.echo(f"section-contrast: skipped {author_row.slug} (no feature rows)")
+            continue
+        result, path = compute_and_write_section_contrast(
+            df,
+            author_id=author_row.id,
+            author_slug=author_row.slug,
+            analysis_dir=analysis_dir,
+            alpha=settings.analysis.significance_threshold,
+            bh_method=settings.analysis.multiple_comparison_method,
+        )
+        written += 1
+        if result.disposition == "insufficient_section_volume":
+            typer.echo(
+                f"section-contrast: {author_row.slug} → insufficient_section_volume → {path}"
+            )
+        else:
+            typer.echo(
+                f"section-contrast: {author_row.slug} → {len(result.pairs)} pair(s) → {path}"
+            )
+    typer.echo(f"section-contrast: wrote {written} artifact(s)")

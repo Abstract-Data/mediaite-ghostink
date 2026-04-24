@@ -492,13 +492,98 @@ def changepoints_from_bocpd(
     )
 
 
+def _changepoints_for_feature(
+    col: str,
+    df: pl.DataFrame,
+    timestamps: list[datetime],
+    *,
+    author_id: str,
+    methods: set[str],
+    pen: float,
+    pelt_cost_model: PeltCostModel,
+    hazard: float,
+    bocpd_mode: BocpdMode,
+    bocpd_legacy_threshold: float,
+    settings: ForensicsSettings,
+) -> list[ChangePoint]:
+    """Run all configured detectors on one feature column.
+
+    Extracted from :func:`analyze_author_feature_changepoints` so the per-
+    feature work can be dispatched to a ``ThreadPoolExecutor`` when
+    ``feature_workers > 1`` (Phase 15 G2). Returns ``[]`` for missing /
+    short / flat / undetectable series.
+    """
+    if col not in df.columns:
+        return []
+    series = df[col].cast(pl.Float64, strict=False).to_numpy()
+    if not np.isfinite(series).all():
+        series = np.nan_to_num(series, nan=np.nanmedian(series))
+    if len(series) < 10:
+        return []
+    # Phase 15 F3: skip flat series. PELT cannot produce meaningful CPs on
+    # a constant signal, and BOCPD's variance normalization divides by
+    # ~zero (sigma2 floored to 1e-12 — unstable predictive). Early-exit
+    # before either detector to keep audits clean.
+    if float(np.std(series)) < 1e-9:
+        logger.debug(
+            "changepoint: author=%s feature=%s skipped — constant signal",
+            author_id,
+            col,
+        )
+        return []
+    found: list[ChangePoint] = []
+    if "pelt" in methods:
+        found.extend(
+            changepoints_from_pelt(
+                col,
+                author_id,
+                series,
+                timestamps,
+                pen,
+                cost_model=pelt_cost_model,
+            )
+        )
+    if "bocpd" in methods:
+        found.extend(
+            changepoints_from_bocpd(
+                col,
+                author_id,
+                series,
+                timestamps,
+                hazard_rate=hazard,
+                mode=bocpd_mode,
+                threshold=bocpd_legacy_threshold,
+                map_drop_ratio=settings.analysis.bocpd_map_drop_ratio,
+                min_run_length=settings.analysis.bocpd_min_run_length,
+                reset_cooldown=settings.analysis.bocpd_reset_cooldown,
+                merge_window=settings.analysis.bocpd_merge_window,
+                student_t=settings.analysis.bocpd_student_t,
+            )
+        )
+    return found
+
+
 def analyze_author_feature_changepoints(
     df: pl.DataFrame,
     *,
     author_id: str,
     settings: ForensicsSettings,
 ) -> list[ChangePoint]:
-    """Run configured changepoint methods on each numeric feature column."""
+    """Run configured changepoint methods on each numeric feature column.
+
+    Phase 15 G2 — opportunistic per-feature parallelism. When
+    ``settings.analysis.feature_workers > 1`` the 23-feature loop is
+    dispatched to a ``ThreadPoolExecutor`` (NOT a ``ProcessPoolExecutor``;
+    G1 already wraps the per-author loop in processes, so nesting another
+    process pool deadlocks on macOS spawn semantics, and PELT/BOCPD do
+    enough numpy work to release the GIL). Default ``feature_workers == 1``
+    keeps the legacy serial path.
+
+    Output ordering matches the serial path byte-for-byte: results are
+    collected into a ``{feature: [ChangePoint]}`` dict and walked in
+    ``PELT_FEATURE_COLUMNS`` order, which is identical to the serial
+    iteration order.
+    """
     methods = {m.lower() for m in settings.analysis.changepoint_methods}
     pen = settings.analysis.pelt_penalty
     pelt_cost_model = settings.analysis.pelt_cost_model
@@ -509,58 +594,51 @@ def analyze_author_feature_changepoints(
     # historical default there so a one-line config flip restores prior runs.
     bocpd_mode: BocpdMode = settings.analysis.bocpd_detection_mode
     bocpd_legacy_threshold = 0.5
-    out: list[ChangePoint] = []
 
     timestamps = timestamps_from_frame(df)
+    feature_workers = max(1, int(settings.analysis.feature_workers))
 
+    def _run_one(col: str) -> list[ChangePoint]:
+        return _changepoints_for_feature(
+            col,
+            df,
+            timestamps,
+            author_id=author_id,
+            methods=methods,
+            pen=pen,
+            pelt_cost_model=pelt_cost_model,
+            hazard=hazard,
+            bocpd_mode=bocpd_mode,
+            bocpd_legacy_threshold=bocpd_legacy_threshold,
+            settings=settings,
+        )
+
+    if feature_workers <= 1:
+        # Legacy serial path — preserved byte-for-byte. The result-collector
+        # branch below is order-equivalent but we keep this so the cold path
+        # has zero ThreadPoolExecutor overhead.
+        out: list[ChangePoint] = []
+        for col in PELT_FEATURE_COLUMNS:
+            out.extend(_run_one(col))
+        return out
+
+    # Parallel path — dispatch one task per feature, walk in PELT order to
+    # rebuild byte-identical output. ``ThreadPoolExecutor`` caps workers at
+    # the configured value but never spawns more than one per submitted task,
+    # so over-provisioning (e.g. ``feature_workers=64`` with 23 features) is
+    # harmless — Python's pool just leaves the extras idle.
+    from concurrent.futures import ThreadPoolExecutor
+
+    max_workers = min(feature_workers, len(PELT_FEATURE_COLUMNS))
+    results: dict[str, list[ChangePoint]] = {}
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        future_to_col = {pool.submit(_run_one, col): col for col in PELT_FEATURE_COLUMNS}
+        for future, col in future_to_col.items():
+            results[col] = future.result()
+    out_parallel: list[ChangePoint] = []
     for col in PELT_FEATURE_COLUMNS:
-        if col not in df.columns:
-            continue
-        series = df[col].cast(pl.Float64, strict=False).to_numpy()
-        if not np.isfinite(series).all():
-            series = np.nan_to_num(series, nan=np.nanmedian(series))
-        if len(series) < 10:
-            continue
-        # Phase 15 F3: skip flat series. PELT cannot produce meaningful CPs on
-        # a constant signal, and BOCPD's variance normalization divides by
-        # ~zero (sigma2 floored to 1e-12 — unstable predictive). Early-exit
-        # before either detector to keep audits clean.
-        if float(np.std(series)) < 1e-9:
-            logger.debug(
-                "changepoint: author=%s feature=%s skipped — constant signal",
-                author_id,
-                col,
-            )
-            continue
-        if "pelt" in methods:
-            out.extend(
-                changepoints_from_pelt(
-                    col,
-                    author_id,
-                    series,
-                    timestamps,
-                    pen,
-                    cost_model=pelt_cost_model,
-                )
-            )
-        if "bocpd" in methods:
-            out.extend(
-                changepoints_from_bocpd(
-                    col,
-                    author_id,
-                    series,
-                    timestamps,
-                    hazard_rate=hazard,
-                    mode=bocpd_mode,
-                    threshold=bocpd_legacy_threshold,
-                    map_drop_ratio=settings.analysis.bocpd_map_drop_ratio,
-                    min_run_length=settings.analysis.bocpd_min_run_length,
-                    reset_cooldown=settings.analysis.bocpd_reset_cooldown,
-                    merge_window=settings.analysis.bocpd_merge_window,
-                    student_t=settings.analysis.bocpd_student_t,
-                )
-            )
-    return out
+        out_parallel.extend(results.get(col, []))
+    return out_parallel
 
 
 def run_changepoint_analysis(

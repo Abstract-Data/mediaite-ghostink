@@ -210,6 +210,47 @@ uv run pytest tests/ -v --cov=src --cov-report=term-missing
 uv run pytest tests/ -v --hypothesis-show-statistics
 ```
 
+## Section diagnostics (Phase 15 J3 / J6 / J7)
+
+URL-derived `section` tags (Phase 15 J1) unlock three diagnostic surfaces on
+the `analyze` sub-app. All commands write deterministic JSON / CSV / Markdown
+under `data/analysis/`; legacy `forensics analyze --changepoint` etc. still
+work unchanged.
+
+```bash
+# J3 — newsroom-wide section descriptive report + J5 gate verdict.
+# Persists section_centroids.json, section_distance_matrix.{json,csv},
+# section_feature_ranking.json, and section_profile_report.md.
+uv run forensics analyze section-profile
+uv run forensics analyze section-profile --output /tmp/profile.md
+uv run forensics analyze section-profile --features-dir path/to/features
+
+# J6 — per-author section-contrast tests (Welch + Mann-Whitney + per-family
+# BH; Phase 15 C2 helper). Output: data/analysis/<slug>_section_contrast.json.
+uv run forensics analyze section-contrast                    # every author
+uv run forensics analyze section-contrast --author jane-doe  # one author
+
+# J7 — residualize-sections per-run override. Flips
+# analysis.section_residualize_features for the current process only;
+# config.toml is NOT modified. Use this for A/B comparisons against the
+# unadjusted CP run without touching the persisted config.
+uv run forensics analyze --residualize-sections --changepoint
+uv run forensics analyze all --residualize-sections          # via run_analyze()
+```
+
+Operational notes:
+
+- `section-contrast` requires authors to have ≥ 2 sections each with ≥ 30
+  articles (`MIN_SECTION_ARTICLES`). Authors below the bar emit
+  `{"pairs": [], "disposition": "insufficient_section_volume"}` rather than
+  raising — downstream consumers must render "N/A".
+- A WARNING is emitted when **every** PELT feature passes BH for a single
+  pair — wholly different registers across the entire feature set is
+  suspicious and warrants a spot-check.
+- `--residualize-sections` is a hot-fix knob. Persistent toggling lives in
+  `config.toml` under `[analysis] section_residualize_features = true` so
+  the change is captured by the config hash + preregistration lock.
+
 ## Migrations (Phase 15)
 
 Storage-layer migrations now land through the Typer CLI rather than the old
@@ -234,6 +275,72 @@ uv run forensics features migrate --dry-run    # preview only, no writes
   a straight ``mv`` of the backup copy.
 - Both commands tolerate missing target dirs (``data/``, ``data/features/``)
   with a friendly stderr message and exit code ``0``.
+
+### Phase 15 CLI surface (analyze + survey)
+
+New flags and subcommands shipped during Phase 15. All are additive;
+prior invocations remain valid. See `docs/ARCHITECTURE.md` for the
+behavioural rationale.
+
+```bash
+# G1 — author-level parallelism (PR #60). Default 1 = serial.
+uv run forensics analyze --max-workers 8
+
+# D — survey shared-byline filter (PR #71). Default excludes group bylines
+# (mediaite, mediaite-staff, ...). Pass to include them for transparency.
+uv run forensics survey --include-shared-bylines
+
+# J2 — advertorial / syndicated section exclusion (PR #76). Default
+# excludes sponsored, partner-content, crosspost, etc. Both stages take
+# the same flag so a single override flips the corresponding stage.
+uv run forensics survey --include-advertorial
+uv run forensics analyze --include-advertorial
+
+# J3 — newsroom-wide section descriptive diagnostic (PR #75). Writes
+# data/analysis/section_centroids.json, section_distance_matrix.json
+# (+ .csv mirror), section_feature_ranking.json, and
+# section_profile_report.md (J5 gate verdict embedded).
+uv run forensics analyze section-profile
+uv run forensics analyze section-profile --output /tmp/section_profile_test.md
+
+# J6 — per-author section-contrast tests (Wave 3.3). Document forward-
+# compatibly; flag may merge in parallel with this runbook entry.
+uv run forensics analyze section-contrast
+uv run forensics analyze section-contrast --author <slug>
+
+# J5 — optional section residualization before BOCPD (Wave 3.3, gated
+# on J3 verdict against real corpus data). Off by default.
+uv run forensics analyze all --residualize-sections
+```
+
+### Phase 15 debug + parity recipes
+
+```bash
+# E1 — Pipeline B per-window component DEBUG logs. Useful when
+# investigating drift / centroid-velocity regressions.
+FORENSICS_LOG_LEVEL=DEBUG uv run forensics analyze --drift --author <slug>
+
+# H2 — serial vs parallel JSON artifact parity check. Confirms
+# author-level parallelism is byte-identical to a serial run. The
+# integration test lives at tests/integration/test_parallel_parity.py
+# (added by Wave 3.4).
+uv run forensics analyze                    # serial baseline
+mv data/analysis data/analysis_serial
+uv run forensics analyze --max-workers 4    # parallel run
+diff -r data/analysis_serial data/analysis  # expected: no output
+```
+
+### Phase 15 schema migration + benchmarks
+
+```bash
+# Storage migrations (covered above):
+uv run forensics migrate                    # SQLite (Phase D1, etc.)
+uv run forensics features migrate           # parquet section column
+uv run forensics features migrate --dry-run # preview only
+
+# L1 — pre-Phase-15 wall-clock baseline + phase-by-phase benchmark.
+uv run python scripts/bench_phase15.py --author mediaite-staff
+```
 
 ### Typer subcommand registration pattern (Phase 15 L6)
 

@@ -2510,6 +2510,498 @@ all green (full suite passes; previous run reported 581 passed)
 
 ---
 
+### Phase 15 I1+I2+I3+I4: Docs (ARCHITECTURE + RUNBOOK + GUARDRAILS + HANDOFF)
+**Status:** Complete
+**Date:** 2026-04-24
+**Agent/Session:** subagent af7897ad (worktree)
+
+#### What Was Done
+Pure documentation roll-up for Phase 15 (no code edits). Updates the
+three operator-facing docs so future agents can navigate the
+post-Phase-15 analysis stage without re-reading
+`prompts/phase15-optimizations/v0.4.0.md`.
+
+- **I1 — `docs/ARCHITECTURE.md`.** Added a new top-level subsection
+  **"Phase 15 Analysis-Stage Updates"** between *Convergence &
+  Statistics* and *Design Pattern Guidance*. It documents:
+  - MAP-reset BOCPD (Phase A / PR #70) and the algebraic reason
+    `P(r=0)` was unusable under constant hazard.
+  - Feature-family registry + per-family FDR (Phases B + C / PRs #64,
+    #66), with the 0.60 → 0.50 threshold drop and the
+    `families_converging` field on `ConvergenceWindow`.
+  - Shared-byline filter (Phase D / PR #71).
+  - Section-tag enrichment + section-conditioned analysis (Phases J1,
+    J2, J3, J4, J6 / PRs #73, #75, #76 …) including the J5 toggle
+    contingent on the J3 corpus verdict.
+  - PELT cost-model knob (`pelt_cost_model = "l2"` default, Phase F0
+    / PR #69).
+  - Parallelism topology (G1 author-level default; G2 feature-level
+    opt-in via `feature_workers`; G3 embedding I/O audit).
+- **I2 — `docs/RUNBOOK.md`.** Added two new operational sections under
+  *Migrations (Phase 15)*:
+  - **"Phase 15 CLI surface (analyze + survey)"** — `--max-workers`,
+    `--include-shared-bylines`, `--include-advertorial` (both stages),
+    `forensics analyze section-profile`,
+    `forensics analyze section-contrast [--author <slug>]`,
+    `--residualize-sections` on `analyze all`.
+  - **"Phase 15 debug + parity recipes"** — `FORENSICS_LOG_LEVEL=DEBUG`
+    for Pipeline B (Phase E1), serial-vs-parallel `diff -r` recipe
+    (Phase H2 → `tests/integration/test_parallel_parity.py`).
+  - **"Phase 15 schema migration + benchmarks"** — quick-reference for
+    `forensics features migrate` (Unit 1 / Step 0.3) and the bench
+    script `scripts/bench_phase15.py` (Phase L1).
+- **I3 — `docs/GUARDRAILS.md`.** **No edit needed.** All three Signs
+  pre-authored by Unit 1 are already present at lines 121-137:
+  1. *BOCPD `P(r=0)` Posterior Is Pinned to the Hazard Rate* (Phase A).
+  2. *`bulk_fetch_mode` Metadata Column Is Effectively Empty* (Phase J1
+     prep).
+  3. *Do Not Mix Pre- and Post-Phase-15 Artifacts in One Analysis Run*
+     (Unit 1 L5).
+  No new recurring footgun (3+ instances) surfaced during this docs
+  unit, so no fourth Sign is warranted at this time.
+- **I4 — `HANDOFF.md`.** This block.
+
+#### Files Modified
+- `docs/ARCHITECTURE.md` — new "Phase 15 Analysis-Stage Updates"
+  subsection (~120 lines) inserted before *Design Pattern Guidance*.
+- `docs/RUNBOOK.md` — three new subsections inserted before *Typer
+  subcommand registration pattern (Phase 15 L6)*.
+- `HANDOFF.md` — this completion block.
+- `docs/GUARDRAILS.md` — **unchanged** (Unit 1 Signs already cover the
+  Phase 15 footguns).
+
+#### Verification Evidence
+Pure docs unit; per the unit recipe pytest is skipped. Markdown was
+spot-checked for formatting and cross-link integrity.
+
+```
+$ ls -la docs/ARCHITECTURE.md docs/RUNBOOK.md docs/GUARDRAILS.md HANDOFF.md
+# All four files present and modified per the diff above.
+```
+
+#### Decisions Made
+- **GUARDRAILS unchanged.** The unit explicitly permits skipping I3
+  when no new recurring footgun appeared. Unit 1's three Signs already
+  cover (a) the BOCPD `P(r=0)` collapse, (b) the empty
+  `articles.metadata` column, and (c) the pre/post-Phase-15
+  `config_hash` boundary — those are the three Phase-15-specific
+  footguns this rollout introduced.
+- **J5 toggle decision deferred.** Per Wave 3.3 / J3's HANDOFF block
+  (above), the J3 verdict on this worktree is **DEGENERATE** because
+  no `data/features/*.parquet` exists in the worktree. The J5
+  `--residualize-sections` toggle is documented forward-compatibly in
+  RUNBOOK and ARCHITECTURE but the *enable* decision waits on a J3 run
+  against a populated features tree. The Wave 4 J5 unit consumes the
+  verdict from `data/analysis/section_feature_ranking.json`
+  (`gate_verdict` field) so the toggle is automatable.
+- **Section subcommand documentation is forward-compatible.** Wave 3.3
+  may merge `forensics analyze section-contrast` and
+  `--residualize-sections` in parallel with this docs rollup; both are
+  documented as if landed so the docs stay correct after merge. If
+  they slip, the runbook entries are still accurate (the section says
+  "Wave 3.3 — may be merging in parallel").
+
+#### Phase 15 Roll-up Summary
+
+**Wall-clock — bench big-N author (mediaite-staff).**
+- *Before:* baseline RBF profile preserved at
+  `data/analysis/provenance/apr24_rbf_profile.txt` (April 24 2026 run);
+  `ruptures.costs.costrbf.error` accounted for 99.2 % of analysis
+  wall-clock across 3.2 M calls.
+- *After:* deferred to a bench rerun on the live corpus (no fixture
+  data on disk in this worktree). Phase F0 alone (RBF → L2) is
+  expected to deliver ≥ 50× speedup on the PELT phase per the L1
+  pre-registration; full numbers pending
+  `uv run python scripts/bench_phase15.py --author mediaite-staff`.
+
+**Convergence windows surfacing per author.**
+- Qualitative — expected to **increase** under the Phase B family-level
+  threshold drop (0.60 → 0.50) and the per-family rule replacing the
+  raw-feature-count rule. Authors that previously sat just below the
+  60 % bar now cross the 50 % bar across families. Quantitative
+  before/after counts deferred to the bench rerun.
+
+**FDR-significant tests before vs after.**
+- Qualitative — expected **non-zero on at least half of the 10 authors**
+  with per-family BH (Phase C2). Pre-Phase-15 global BH suppressed
+  per-family signal whenever a single noisy family inflated the
+  family-wide null. Per-family BH preserves signal in the quieter
+  families. Quantitative counts deferred to the bench rerun.
+
+**Authors newly disqualified by the shared-byline filter (Phase D / PR
+#71).**
+- `mediaite`
+- `mediaite-staff`
+
+Both are group bylines populated at ingest with `is_shared_byline =
+true`. They are excluded from survey qualification by default and
+reincludable via `--include-shared-bylines`.
+
+**Wave 4 J5 toggle decision.**
+- **Pending.** Awaits Wave 3.4's J3 verdict on real corpus data. The
+  smoke verdict on this worktree is `DEGENERATE` (no parquets).
+  `data/analysis/section_feature_ranking.json::gate_verdict` is the
+  authoritative artifact the Wave 4 unit consumes.
+
+**PRs landed in Phase 15 (April 2026).**
+- #63 — Unit 1 foundations (Phase 0 + L).
+- #64 — Phase B feature-family registry + family-level convergence.
+- #65 — Phase B3 default-threshold migration.
+- #66 — Phase C per-family BH FDR.
+- #67 — Phase G2 opt-in feature-level parallelism.
+- #68 — Phase H1 reference-fixture tests.
+- #69 — Phase F0 PELT cost-model swap (RBF → L2).
+- #70 — Phase A MAP-reset BOCPD.
+- #71 — Phase D shared-byline filter.
+- #72 — Phase E1/E2 Pipeline B diagnostics.
+- #73 — Phase J1 section column at extract time.
+- #74 — Phase F1/F3 vectorized bootstrap_ci + constant-signal early
+  exit.
+- #75 — Phase J3 newsroom-wide section descriptive report.
+- #76 — Phase J2 advertorial / syndicated exclusion.
+- **Wave 3 (in flight at write time):** four parallel PRs for Wave
+  3.1–3.4 covering K1/K2/K3/K4 reporting integration, J4 section-mix
+  time series, J6 section-contrast, H2 parity test, and the I1–I4
+  docs rollup (this PR). Numbers will be assigned at merge.
+
+#### Unresolved Questions
+- Quantitative bench numbers (before/after wall-clock, convergence
+  window counts, FDR-significant test counts) are deferred to a bench
+  rerun against a populated worktree. The qualitative direction is
+  documented above; a follow-up handoff block should pin the actuals
+  once `scripts/bench_phase15.py` runs against the live corpus.
+- The J5 toggle decision is pending the Wave 3.4 J3 verdict on real
+  data.
+
+#### Risks & Next Steps
+- **HANDOFF.md merge-conflict caution.** Sibling Wave 3 agents append
+  to this same file. If a sibling block lands after this one, the
+  resolution rule is straightforward append: keep both blocks in
+  chronological order (siblings before this if they merged first;
+  this block stays at the tail of the docs rollup pair). The Wave 1
+  / Wave 2 conflict-resolution pattern applies.
+- **Section-conditioned commands** (`section-profile`,
+  `section-contrast`, `--residualize-sections`) are documented forward-
+  compatibly. If Wave 3.3 changes the surface name or adds flags
+  before merge, update RUNBOOK + ARCHITECTURE in a small follow-up.
+- **No code paths touched.** This unit cannot regress test pass-rate;
+  pytest was intentionally not re-run.
+
+---
+
+### 2026-04-24 — Phase 15 K1+K2+K3: Reporting integration (families + section mix + section contrast)
+
+#### Status
+COMPLETE — narrative names family-representative features; HTML report
+helpers render the section-mix stacked area + section-contrast table.
+
+#### Files Changed
+- `src/forensics/reporting/narrative.py` — K1: `_convergence_sentences`
+  prefers `ConvergenceWindow.families_converging`, naming each family
+  with its representative feature ("readability (flesch_kincaid)" form).
+  Falls back to the legacy feature-level wording for older artifacts
+  whose `families_converging` list is empty.
+- `src/forensics/reporting/html_report.py` — NEW. Two free functions:
+  - `render_section_mix_chart(path, *, author_slug, div_id=None)` — reads
+    `<slug>_section_mix.json`, builds a `plotly.graph_objects` stacked
+    area trace per section (no pandas needed), emits an HTML fragment
+    with the verbatim K2 caption.
+  - `render_section_contrast_table(path, *, author_slug)` — reads
+    `<slug>_section_contrast.json`, renders a `pair × family` table whose
+    cells list the family-level BH-significant features. Soft-fails on
+    missing JSON ("No section-contrast data") and on
+    `disposition == "insufficient_section_volume"` ("Insufficient section
+    volume…"). Wave 3.3's J6 is a soft dependency.
+- `tests/unit/test_reporting_section.py` — NEW. 12 tests covering K1
+  family-aware narrative + K1 legacy fallback + K2 chart render with
+  caption + K2 missing-artifact soft fail + K3 table rows/columns + K3
+  missing artifact + K3 insufficient-volume + K3 byte-determinism + K3
+  SHA-256 pin (H2 contract) + parametrized div-id stability.
+
+#### Decisions Made
+- **`plotly.graph_objects` over `plotly.express.area`** for K2: `px.area`
+  requires pandas to be installed (it round-trips to `pd.DataFrame`).
+  This project is Polars-native — adding pandas as a transitive reporting
+  dep would have been a larger architectural change than the unit
+  warrants. `go.Scatter(stackgroup=…)` produces visually identical
+  output and stays pandas-free.
+- **Soft-fail on missing JSON** for both K2 and K3, returning a small
+  placeholder fragment rather than raising. Coordination with Wave 3.3
+  (J6) is asynchronous, and the report stage must still render when the
+  sibling artifact is absent.
+- **Re-derive family from `FEATURE_FAMILIES`** for the K1 sentence rather
+  than trusting positional alignment with `features_converging`. The
+  pipeline-A scorer already writes representative features sorted
+  alphabetically per family, but downstream filters could theoretically
+  reorder either list — re-deriving from the registry keeps the pairing
+  robust.
+- **SHA-256 pin** for the K3 contrast-table fragment (per H2 spec). The
+  K2 chart fragment intentionally is not byte-pinned because Plotly's
+  HTML output embeds a UUID/timestamp in the script payload; only the
+  `div id` and caption are pinned.
+
+#### Verification
+```bash
+$ uv run python -m pytest tests/unit/test_reporting_section.py -v --no-cov
+12 passed in 0.86s
+
+$ uv run python -m pytest tests/ -k "narrative or reporting or html_report" -v --no-cov
+19 passed, 1 skipped (textual missing — pre-existing) in 51.89s
+
+$ uv run ruff check . && uv run ruff format --check .
+All checks passed!  216 files already formatted
+
+$ uv run python -m pytest tests/ -v --no-cov
+685 passed, 4 skipped (textual TUI tests, pre-existing), 3 deselected
+in 168.65s
+```
+
+#### Unresolved Questions
+- **K2 hover counts**: spec asks for absolute article counts in the
+  hover; J4's `section_mix.json` only emits shares (fractions) and
+  cannot be reverse-engineered to integer counts from shares alone. The
+  current K2 implementation surfaces shares as percentages (`Share:
+  42.0%`). If the K2 ↔ J4 contract is revised to also emit a per-month
+  total or per-cell count, switch the `customdata` payload accordingly
+  in `render_section_mix_chart`.
+- **K3 cell wording**: the spec says "cell shows which families reach
+  family-level BH-significant contrast"; the table currently shows the
+  significant feature names within each family cell (e.g.
+  `flesch_kincaid, gunning_fog`) so reviewers can see *which* feature
+  drove the family-level signal. If the desired display is just the
+  family name or a checkmark, the format is one f-string in
+  `_render_contrast_table_html`.
+
+#### Risks & Next Steps
+- Wave 3.2 (K4–K6) will add helpers to the same `html_report.py`. The
+  module is structured as free functions with no shared state to
+  minimise the merge surface — adjust headers/comments only if the new
+  helpers want a different organisation.
+- The K2 chart uses `include_plotlyjs="cdn"` so the resulting HTML
+  pulls plotly.min.js from a CDN at view time. For a fully offline
+  report the caller can post-process the fragment, or the helper can
+  be retargeted to `include_plotlyjs=True` (~3 MB inline per author
+  page) — left for a follow-up if it becomes a constraint.
+
+---
+
+### Phase 15 K4+K5+K6 — Reporting integration (CP twin-panel + section profile + Pipeline B diagnostics)
+
+**Status:** Complete
+
+#### Goal
+Surface three reporting deliverables from the Phase 15 v0.4.0 prompt:
+- **K4** — adjusted-vs-unadjusted change-point twin-panel visualisation, the spec's "single most important forensic-defensibility visual."
+- **K5** — embed `section_profile_report.md` (J3 artifact) in the aggregate report so reviewers see the outlet-level section-distinctness verdict.
+- **K6** — surface a "Pipeline B diagnostic" prose block in the per-author narrative when drift artifacts are missing on disk despite embeddings being present (closes the silent-failure loop opened by E2's WARNING template).
+
+#### What Was Done
+- **`src/forensics/reporting/plots.py` (new)** — `render_cp_twin_panel(...)` using `plotly.subplots.make_subplots(rows=2, cols=1, shared_xaxes=True)`. Renders the J5 placeholder fragment when no `pelt_section_adjusted` / `bocpd_section_adjusted` change-points are present, so the report stays renderable before J5 ships. Public constants: `RAW_CP_COLOR`, `ADJUSTED_CP_COLOR`, `J5_PLACEHOLDER_HTML`, `J5_PLACEHOLDER_PREFIX`.
+- **`src/forensics/reporting/html_report.py` (new)** — `render_section_profile_embed(project_root)` (K5) reads `data/analysis/section_profile_report.md` if present, escapes the body, and wraps it in a labelled `<section>`. Falls back to a one-paragraph notice naming the CLI command to generate it. `render_author_section(...)` agglomerator stitches the K6 diagnostic + K4 chart in a fixed order (diagnostic first so reviewers see data-completeness caveats before the chart).
+- **`src/forensics/reporting/narrative.py` (modified)** — added `pipeline_b_diagnostics_block(slug, paths)` (K6) and `PIPELINE_B_DIAGNOSTIC_NOTE` constant. Mirrors the disk-presence logic of `drift._author_has_embeddings_on_disk` + per-artifact existence checks; returns an empty string in two silent-default cases (no embeddings; all artifacts present) so callers can splice the result unconditionally.
+- **`tests/unit/test_reporting_diagnostics.py` (new)** — 9 tests across K4 (3), K5 (2), K6 (3), aggregator integration (1). Exceeds H1's `≥3 per file` requirement and includes a SHA-256 byte-stable regression-pin on the J5 placeholder fragment.
+
+#### Verification
+```
+$ uv run pytest tests/unit/test_reporting_diagnostics.py -v --no-cov
+9 passed in 0.82s
+
+$ uv run pytest tests/ -k "narrative or reporting or html_report or plots" -v --no-cov
+16 passed, 1 skipped, 672 deselected in 2.65s
+
+$ uv run ruff check . && uv run ruff format --check .
+All checks passed!
+217 files already formatted
+
+$ uv run pytest tests/ --no-cov
+682 passed, 4 skipped, 3 deselected, 1 warning in 171.00s
+```
+
+#### Decisions Made
+- **`html_report.py` aggregator is intentionally minimal.** Sibling Wave 3.1 (K1+K2+K3) may add helpers in the same file; this PR only owns K4 + K5 helpers and a small `render_author_section` aggregator. Each helper is a standalone function so sibling agents can land K1-K3 helpers without a merge conflict on prose.
+- **Method-label constants are duplicated, not imported.** `RAW_METHODS` / `SECTION_ADJUSTED_METHODS` in `plots.py` repeat the `_`-prefixed convergence constants; importing them would create a `reporting → analysis` dependency just for two frozensets. Same rationale for K6's `_author_has_embeddings` mirroring `drift._author_has_embeddings_on_disk`.
+- **K4 placeholder rather than omission when J5 hasn't shipped.** The spec calls this out as the most important visual; replacing the chart with a notice means reviewers always see *something* about CP-source even before J5 enables section-adjusted CPs. The placeholder text is byte-locked under SHA-256 in the test for log-grep dashboard stability.
+- **K6 emits prose, not HTML.** `pipeline_b_diagnostics_block` returns plain prose so the diagnostic can be spliced into either the HTML report (wrapped in `<p>` by the caller) or a plain-text aggregate without re-stripping markup.
+- **K6 is silent when no embeddings exist.** Mirrors E2's logging default — an author with no embeddings was never analysed by Pipeline B, so a "data incomplete" note would mislead the reader.
+
+#### Unresolved Questions
+- **J5 ships separately.** This PR is forward-compatible: when the J5 writer adds `pelt_section_adjusted` / `bocpd_section_adjusted` to `ChangePoint.method`'s Literal and writes them to `*_result.json`, K4's twin-panel renders the chart automatically. No changes here required.
+- **End-to-end visual inspection.** Spec validation step says "open the generated HTML for one author and visually confirm the chart renders." Smoke-rendering against live `data/analysis/*_result.json` is an operator step, not a unit test, and remains for the next pipeline run.
+
+#### Risks & Next Steps
+- **`html_report.py` will conflict with sibling Wave 3.1** if both PRs add the same helper name to the same file. K4's helper is named `_render_cp_twin_panel_section`, K5's is `render_section_profile_embed`, the aggregator is `render_author_section` — none of which overlap with K1's `families_converging` narrative edit or K2/K3's `section_mix` / `section_contrast` table helpers. Three-way merge should land cleanly; if not, the resolution is to keep both sets of helpers and union the aggregator's `parts.append(...)` calls.
+- **Plotly `to_html(include_plotlyjs="cdn")`** requires network on render-time. If the report is built offline, switch to `"inline"` or `"directory"` — left for whichever sibling owns the final stitching path.
+
+---
+
+---
+
+### Phase 15 J6 + J7 + G2 + G3 — Section contrast + CLI surface + per-feature parallel + embedding I/O audit
+**Status:** Complete
+**Date:** 2026-04-24
+**Agent/Session:** worktree-agent-a11c3526
+
+#### What Was Done
+- **J6 (per-author section contrast)** — new module
+  `src/forensics/analysis/section_contrast.py` runs pairwise Welch +
+  Mann-Whitney tests per PELT feature on every (section_a, section_b)
+  pair an author has, where each section meets `MIN_SECTION_ARTICLES = 30`.
+  Per-family BH correction reuses Phase 15 C2's `apply_correction_grouped`
+  helper. Output: `data/analysis/<slug>_section_contrast.json` with the
+  schema in the spec (lines 1429-1444). Edge cases: insufficient section
+  volume → `disposition: "insufficient_section_volume"` + empty `pairs`;
+  all features pass → WARNING (`ALL_FEATURES_PASS_WARNING` template).
+- **J7 (CLI surface)** — registered `forensics analyze section-contrast`
+  subcommand on the existing `analyze_app` Typer sub-app (PR #75 J3
+  pattern). Added `--residualize-sections` flag on `analyze` (and
+  threaded through `run_analyze` so `forensics all` can flip it). The
+  flag is a per-run override that copies settings via `model_copy` —
+  `config.toml` is never mutated, the global `get_settings()` cache is
+  preserved. Documented all three section subcommands in
+  `docs/RUNBOOK.md` under a new `## Section diagnostics (Phase 15 J3 / J6 / J7)`
+  section.
+- **G2 (per-feature parallelism)** — refactored
+  `analyze_author_feature_changepoints` to dispatch the 23-feature loop
+  to a `ThreadPoolExecutor` when `settings.analysis.feature_workers > 1`.
+  Used the result-collector pattern (`{feature_name: [ChangePoint]}`
+  dict, walked in PELT_FEATURE_COLUMNS order) so output is byte-identical
+  to the serial path. Default `feature_workers=1` keeps the legacy serial
+  branch with zero executor overhead. ThreadPool (not Process) chosen
+  because: (a) G1 already wraps per-author in processes — nesting would
+  deadlock on macOS spawn semantics; (b) PELT/BOCPD do enough numpy work
+  to release the GIL.
+- **G3 (embedding I/O audit)** — added `_classify_embedding_path` helper
+  and a per-author DEBUG log line in `load_article_embeddings`
+  summarising the mix of `npz` vs `npy` reads. The audit confirms the
+  default writer for the main embedding path
+  (`forensics.features.pipeline._write_author_embedding_artifacts`) is
+  already `write_author_embedding_batch` → packed `batch.npz`. The
+  legacy per-article `.npy` writer (`save_numpy_atomic`) is only used by
+  the AI-baseline orchestrator at `src/forensics/baseline/orchestrator.py`,
+  which is a separate corpus from the main embeddings stream. **No
+  behavior change required.**
+
+#### Files Modified
+- `src/forensics/analysis/section_contrast.py` — NEW J6 module.
+- `src/forensics/analysis/changepoint.py` — extracted
+  `_changepoints_for_feature` helper + opportunistic ThreadPoolExecutor
+  branch in `analyze_author_feature_changepoints`.
+- `src/forensics/analysis/drift.py` — added DEBUG audit log on embedding
+  read with format-mix counts; new `_classify_embedding_path` helper.
+- `src/forensics/cli/analyze.py` — `--residualize-sections` flag on
+  `analyze`, `_apply_per_run_overrides` extraction (resolves C901 too-
+  complex), `section-contrast` subcommand wiring.
+- `tests/unit/test_section_contrast.py` — NEW (6 tests: happy path,
+  insufficient volume, no qualifying sections, all-features-pass
+  warning, JSON round-trip, three-pair combinatorics).
+- `tests/unit/test_g2_per_feature_parallel.py` — NEW (5 tests:
+  workers=2 byte parity, workers=4 byte parity, single-feature
+  over-provision, BOCPD parity, PELT-order preservation).
+- `docs/RUNBOOK.md` — new section documenting `section-profile`,
+  `section-contrast`, and `--residualize-sections`.
+
+#### Verification Evidence
+```
+$ uv run python -m pytest tests/unit/test_section_contrast.py tests/unit/test_g2_per_feature_parallel.py -v --no-cov
+11 passed in 1.08s
+
+$ uv run python -m pytest tests/ -k "section_contrast or contrast or feature_parallel or changepoint or analyze" -v --no-cov
+26 passed, 672 deselected in 4.09s
+
+$ uv run ruff check . && uv run ruff format --check .
+All checks passed!
+215 files already formatted
+
+$ uv run python -m pytest tests/ -v --no-cov
+695 passed, 3 deselected, 1 warning in 165.45s
+
+$ uv run forensics analyze --help     # shows --residualize-sections + section-contrast
+$ uv run forensics analyze section-contrast --help  # shows --author / --features-dir
+```
+
+#### Decisions Made
+- **ThreadPoolExecutor over ProcessPoolExecutor for G2** — per the spec:
+  G1 already wraps per-author in processes; nested ProcessPools deadlock
+  on macOS spawn semantics. PELT/BOCPD release the GIL on numpy ops,
+  so threads give real parallelism here.
+- **Result-collector dict keyed by feature name** in G2 instead of a
+  list of `as_completed` futures. Walking `PELT_FEATURE_COLUMNS` after
+  the executor finishes preserves byte-identical output ordering vs the
+  serial path. Tested directly by `test_output_walks_pelt_feature_columns_order`.
+- **Hand-rolled HypothesisTest construction in J6** rather than reusing
+  `statistics._hypothesis_test`. The latter is module-private and emits
+  a different `test_name` format; J6 needs `(section_a, section_b)` in
+  the name for traceability when the artifact lands on disk. Effect-size
+  + CI fields are zeroed because the J6 artifact only consumes
+  feature-level significance flags rolled up by family — saves a per-
+  feature bootstrap call per pair.
+- **`_apply_per_run_overrides` extracted from `run_analyze`** to keep
+  the function under C901 complexity. Both `--include-advertorial` (J2)
+  and `--residualize-sections` (J7) flow through it; future per-run
+  escape hatches add a single branch instead of expanding the runner.
+- **`--residualize-sections` is a per-run override only** — no edits to
+  `config.toml`, no config-hash impact (the persisted setting still
+  governs preregistration). Operators wanting durable residualization
+  flip `[analysis] section_residualize_features = true` in the file.
+- **G3: no code change beyond DEBUG log.** The audit confirmed the
+  packed-batch writer is the default for the main embedding stream;
+  `.npy` only appears in the AI baseline subtree
+  (`src/forensics/baseline/orchestrator.py`) which is intentionally
+  per-article. The DEBUG line surfaces the mix on demand
+  (`FORENSICS_LOG_LEVEL=DEBUG`) without spamming INFO.
+
+#### Unresolved Questions
+- **Wave 3.1 K1-K3 consumption of section_contrast.json.** This PR
+  produces the artifact; the reporting wiring lands in the K1-K3 unit.
+  No coordination required — schema is in `SectionContrastResult.to_dict()`
+  and pinned by `test_artifact_round_trips_through_json`.
+- **G2 wall-clock benchmark** is not in this unit. Per the spec G2 is
+  "opportunistic — only land if G1 leaves cores idle". The CI default
+  stays `feature_workers=1`; operators opt in on big-N authors. A real-
+  corpus benchmark vs `feature_workers=4` is a follow-up.
+
+#### G3 Audit Findings
+- **Default writer:** `forensics.storage.parquet.write_author_embedding_batch`
+  (packed `batch.npz`, called once per author from
+  `src/forensics/features/pipeline.py::_write_author_embedding_artifacts`).
+  Storage format: 3-key NPZ (`article_id_lengths`, `article_id_bytes`,
+  `vectors`), no pickled object arrays.
+- **Legacy `.npy` writer:** `forensics.storage.parquet.save_numpy_atomic`
+  is **only** called from `src/forensics/baseline/orchestrator.py` for
+  per-article AI baseline embeddings (intentional — different corpus
+  with no batching opportunity). The main embeddings stream does not
+  use it.
+- **Reader:** `src/forensics/analysis/drift.py::_load_embedding_row`
+  dispatches on suffix (`.npz` → packed batch with cache, anything else
+  → legacy `.npy`). Already handles both correctly.
+- **Big-N author audit:** the new DEBUG log
+  (`embedding I/O audit: slug=%s npz=%d npy=%d (default writer is batch.npz)`)
+  surfaces the mix on demand. Operators can run
+  `FORENSICS_LOG_LEVEL=DEBUG uv run forensics analyze --drift --author <slug>`
+  and grep for "embedding I/O audit" to verify a big-N author is
+  reading exclusively from `batch.npz`.
+- **Verdict:** No behavior change required. Writer is already
+  `batch.npz` by default; reader supports both formats; legacy `.npy`
+  files only exist in the AI baseline subtree where per-article writes
+  are intentional.
+
+#### Risks & Next Steps
+- **G2 thread safety**: `_changepoints_for_feature` reads from a shared
+  Polars DataFrame and a shared timestamps list. Polars reads are
+  immutable and timestamps is a list of `datetime` (immutable); no
+  shared mutable state in the per-feature path. Tests pin byte-identical
+  output across worker counts as a regression guard.
+- **Section contrast on tiny corpora**: `MIN_SECTION_ARTICLES = 30` is
+  the spec floor. With Welch + MW + per-family BH at this denominator
+  the test has limited power on small effect sizes; this is documented
+  in the module docstring under "Edge cases".
+- **CLI back-compat**: `forensics analyze` (flag-only) still works
+  exactly as before — `_apply_per_run_overrides` is a no-op when neither
+  flag is set. Verified by `tests/integration/test_cli.py` (3 tests
+  pass in the integration suite).
+
+---
+
 ## Phase 15 H1 + H2 + H3 — Reference fixtures + parallel parity + coverage bump (2026-04-24)
 
 ### Status
