@@ -11,6 +11,7 @@ from forensics.config.settings import SurveyConfig
 from forensics.models.article import Article
 from forensics.models.author import Author
 from forensics.storage.repository import Repository
+from forensics.survey.shared_byline import matching_rule as _shared_byline_rule
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,8 @@ class QualificationCriteria:
     min_articles_per_year: float = 12.0
     require_recent_activity: bool = True
     recent_activity_days: int = 180
+    # Phase 15 D — exclude newsroom-shared accounts (e.g. ``mediaite-staff``).
+    exclude_shared_bylines: bool = True
 
     @classmethod
     def from_settings(cls, survey: SurveyConfig) -> QualificationCriteria:
@@ -39,6 +42,7 @@ class QualificationCriteria:
             min_articles_per_year=survey.min_articles_per_year,
             require_recent_activity=survey.require_recent_activity,
             recent_activity_days=survey.recent_activity_days,
+            exclude_shared_bylines=survey.exclude_shared_bylines,
         )
 
 
@@ -91,6 +95,24 @@ def _summarize_author(author: Author, articles: list[Article]) -> QualifiedAutho
         avg_word_count=avg_wc,
         articles_per_year=articles_per_year,
     )
+
+
+def _shared_byline_disqualify(
+    author: Author,
+    criteria: QualificationCriteria,
+) -> str | None:
+    """Return a disqualification reason if the author is a shared byline.
+
+    Honours the persisted ``Author.is_shared_byline`` flag (Phase 0 / Phase D)
+    and re-runs the heuristic so older databases that pre-date the migration
+    backfill are still handled. If neither fires, returns ``None``.
+    """
+    if not criteria.exclude_shared_bylines:
+        return None
+    rule = _shared_byline_rule(author.slug, author.name, author.outlet)
+    if rule is None and not author.is_shared_byline:
+        return None
+    return f"shared_byline ({rule or 'flagged'})"
 
 
 def _check_criteria(
@@ -146,6 +168,13 @@ def qualify_authors(
     with Repository(db_path) as repo:
         authors = repo.all_authors()
         for author in authors:
+            # Shared-byline gate runs before counting articles so we don't
+            # waste IO on accounts we'd reject anyway.
+            shared_reason = _shared_byline_disqualify(author, criteria)
+            if shared_reason is not None:
+                disqualified.append(_build_empty_dq(author, shared_reason))
+                continue
+
             articles = repo.get_articles_by_author(author.id)
             if not articles:
                 disqualified.append(_build_empty_dq(author, "no_articles"))

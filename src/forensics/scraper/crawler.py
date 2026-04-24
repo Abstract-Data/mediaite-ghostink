@@ -28,6 +28,7 @@ from forensics.scraper.client import create_scraping_client
 from forensics.scraper.fetcher import RateLimiter, log_scrape_error, request_with_retry
 from forensics.scraper.parser import extract_article_text_from_rest
 from forensics.storage.repository import Repository, ensure_repo
+from forensics.survey.shared_byline import is_shared_byline
 from forensics.utils.datetime import parse_wp_datetime
 from forensics.utils.hashing import content_hash as compute_content_hash
 from forensics.utils.text import word_count
@@ -643,6 +644,8 @@ async def _ingest_author_posts(
         baseline_start=cfg.baseline_start,
         baseline_end=cfg.baseline_end,
         archive_url=cfg.archive_url,
+    ).with_updates(
+        is_shared_byline=is_shared_byline(cfg.slug, manifest_row.name, cfg.outlet),
     )
     async with db_lock:
         await asyncio.to_thread(repo.upsert_author, author)
