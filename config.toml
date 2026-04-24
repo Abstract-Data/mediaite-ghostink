@@ -52,8 +52,10 @@ min_articles_for_period = 5
 embedding_model = "sentence-transformers/all-MiniLM-L6-v2"
 embedding_model_version = "v2.0"
 changepoint_methods = ["pelt", "bocpd"]
-# Phase 15 F0 — PELT cost model. Default ``l2`` (1-D mean-shift, O(n)); ``rbf``
-# retained for comparison/audit runs. See docs/settings_phase15.md.
+# Phase 15 F0 — PELT cost model. Default flipped from ``rbf`` (O(n²) kernel,
+# 99.2% of analysis wall-clock per the Apr 24 2026 profile) to ``l2`` (1-D
+# mean-shift, O(n)); ``l1`` available for outlier-robust runs and ``rbf``
+# retained for comparison/audit. See docs/settings_phase15.md.
 pelt_cost_model = "l2"
 # Phase 15 A — BOCPD detection semantics. ``map_reset`` is the current default
 # (MAP run-length drop detection). ``p_r0_legacy`` kept for replication only;
@@ -65,8 +67,8 @@ bocpd_reset_cooldown = 3
 bocpd_merge_window = 2
 # Phase 15 A4 — Student-t posterior predictive (NIG conjugate).
 bocpd_student_t = true
-# Phase 15 B3: this ratio now applies over 8 feature families (not 23 raw
-# features). 0.50 asks for 4 of 8 independent axes to shift in the window.
+# Phase 15 B3 — convergence ratio is now interpreted against feature *families*
+# (≈8 independent axes). Default lowered from 0.60 → 0.50 (4-of-8 axes).
 convergence_min_feature_ratio = 0.50
 # Phase 15 J5 — which CP stream feeds convergence.
 convergence_cp_source = "section_adjusted"

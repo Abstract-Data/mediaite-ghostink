@@ -7,7 +7,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import polars as pl
@@ -24,6 +24,8 @@ from forensics.storage.repository import Repository
 from forensics.utils.datetime import timestamps_from_frame
 
 logger = logging.getLogger(__name__)
+
+PeltCostModel = Literal["l2", "l1", "rbf"]
 
 PELT_FEATURE_COLUMNS: tuple[str, ...] = (
     "ttr",
@@ -52,14 +54,24 @@ PELT_FEATURE_COLUMNS: tuple[str, ...] = (
 )
 
 
-def detect_pelt(signal: np.ndarray, pen: float = 3.0) -> list[int]:
-    """Run PELT change-point detection on a 1D signal (ruptures RBF model)."""
+def detect_pelt(
+    signal: np.ndarray,
+    pen: float = 3.0,
+    *,
+    cost_model: PeltCostModel = "l2",
+) -> list[int]:
+    """Run PELT change-point detection on a 1D signal.
+
+    Phase 15 F0 — default ``cost_model`` is ``"l2"`` (1-D mean-shift,
+    O(n)); ``"rbf"`` is the legacy O(n²) kernel kept for audit, ``"l1"``
+    is the outlier-robust alternative. See ``AnalysisConfig.pelt_cost_model``.
+    """
     y = np.asarray(signal, dtype=float).ravel()
     if len(y) < 10:
         return []
     if not np.isfinite(y).all():
         y = np.nan_to_num(y, nan=np.nanmedian(y))
-    algo = rpt.Pelt(model="rbf", min_size=5).fit(y.reshape(-1, 1))
+    algo = rpt.Pelt(model=cost_model, min_size=5).fit(y.reshape(-1, 1))
     breakpoints = algo.predict(pen=pen)
     return [int(b) for b in breakpoints[:-1]]
 
@@ -221,8 +233,10 @@ def changepoints_from_pelt(
     values: np.ndarray,
     timestamps: list[datetime],
     pen: float,
+    *,
+    cost_model: PeltCostModel = "l2",
 ) -> list[ChangePoint]:
-    breaks = detect_pelt(values, pen=pen)
+    breaks = detect_pelt(values, pen=pen, cost_model=cost_model)
     return _changepoints_from_breaks(
         feature_name,
         author_id,
@@ -264,6 +278,7 @@ def analyze_author_feature_changepoints(
     """Run configured changepoint methods on each numeric feature column."""
     methods = {m.lower() for m in settings.analysis.changepoint_methods}
     pen = settings.analysis.pelt_penalty
+    pelt_cost_model = settings.analysis.pelt_cost_model
     hazard = settings.analysis.bocpd_hazard_rate
     # Phase 15 Unit 1 — ``bocpd_threshold`` removed from settings because the
     # quantity it thresholds (``P(r=0)``) is algebraically pinned to the hazard
@@ -285,7 +300,16 @@ def analyze_author_feature_changepoints(
         if len(series) < 10:
             continue
         if "pelt" in methods:
-            out.extend(changepoints_from_pelt(col, author_id, series, timestamps, pen))
+            out.extend(
+                changepoints_from_pelt(
+                    col,
+                    author_id,
+                    series,
+                    timestamps,
+                    pen,
+                    cost_model=pelt_cost_model,
+                )
+            )
         if "bocpd" in methods:
             out.extend(
                 changepoints_from_bocpd(
