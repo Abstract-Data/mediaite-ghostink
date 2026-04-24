@@ -130,6 +130,155 @@ Older docs sometimes referenced `data/raw/documents.json`, `data/analysis/analys
 - Bootstrapped 95% confidence intervals (1000 resamples)
 - Benjamini-Hochberg multiple comparison correction
 
+## Phase 15 Analysis-Stage Updates
+
+Phase 15 (April 2026) restructured several analysis-stage internals while
+preserving stage boundaries and the on-disk artifact layout. The summary
+below tracks the post-Phase-15 contract; see
+`prompts/phase15-optimizations/v0.4.0.md` for the full rationale and PR
+list.
+
+### MAP-reset BOCPD (Phase A, PR #70)
+
+The Adams & MacKay BOCPD detector previously thresholded the run-length
+posterior `P(r_t = 0 | x_{1:t})`. Run-8 sensitivity review (April 2026)
+proved this quantity is algebraically pinned to the constant hazard rate
+`h`: under the canonical update, `log_pi_new[0] = log h + log evidence`,
+the continuation mass equals `(1 − h) × evidence`, and normalization
+divides by `evidence` — so `P(r=0) ≡ h` for every feature at every
+timestep regardless of σ², prior, or threshold.
+
+Phase A replaced the threshold rule with a **MAP run-length reset**:
+the detector emits a change-point when the posterior MAP run-length
+drops below a configurable fraction of its previous value. Two settings
+control the rule:
+
+- `bocpd_map_drop_ratio` (default `0.5`) — fraction of previous MAP
+  run-length that triggers a reset.
+- `bocpd_min_run_length` — minimum run-length floor before a reset is
+  considered.
+
+`bocpd_threshold` was removed from settings. `bocpd_detection_mode`
+(`"map_reset"` default) participates in the config hash; see also the
+GUARDRAILS Sign **"BOCPD `P(r=0)` Posterior Is Pinned to the Hazard
+Rate"**.
+
+### Feature-Family Registry & Per-Family FDR (Phases B + C, PRs #64, #66)
+
+The convergence detector previously required ≥ 60 % of all features to
+shift simultaneously inside a 90-day window. With ~ 50 features
+dominated by lexical-fingerprint variants, that threshold rarely fired
+because related features collapse into a single statistical signal.
+
+Phase B introduced a **`FEATURE_FAMILIES` registry** in
+`src/forensics/analysis/families.py` that groups features into four
+analytic families: lexical, structural, content, productivity (mirroring
+the documented Feature Families). The convergence rule now operates on
+**families**, not raw feature counts: a window converges when a
+configurable fraction of *families* show simultaneous shifts. The
+default per-family threshold dropped from 0.60 → 0.50 (Phase B3).
+
+`ConvergenceWindow` (and the persisted `*_convergence.json`) gained a
+`families_converging: list[str]` field listing the families that
+contributed to the window — this is what the narrative report cites.
+
+Phase C swapped the global Benjamini-Hochberg correction for
+**per-family BH** by default (`fdr_grouping = "family"`). Each family's
+test bundle is corrected independently so a single noisy family can no
+longer suppress signal in others. Legacy global behavior is recoverable
+via `fdr_grouping = "author"`. KS was also dropped from the default
+hypothesis-test battery (Step C1) to reduce redundancy with Welch's t
+and Mann-Whitney U.
+
+### Shared-Byline Filter (Phase D, PR #71)
+
+Authors whose byline is a newsroom group account (`mediaite`,
+`mediaite-staff`, etc.) pollute the stylometric baseline because their
+articles are written by many human authors. Phase D added an
+`is_shared_byline` boolean to the `Author` model and to the
+`authors` SQLite table (migration `Repository.apply_migrations()`),
+populated at ingest from a curated list of group-byline patterns.
+
+The survey qualification path now excludes shared bylines by default.
+Operators can include them for transparency / debugging via
+`forensics survey --include-shared-bylines`.
+
+### Section-Tag Enrichment & Section-Conditioned Analysis (Phase J, PRs #73, #75 …)
+
+WordPress `articles.metadata` carries section/tag fields for only ~ 0.01 %
+of rows because `scraping.bulk_fetch_mode = true` skips the per-article
+metadata pass. Phase J1 added a **`section` column at feature-extraction
+time** derived from the URL first-path-segment via
+`forensics.utils.url.section_from_url` (100 % coverage). The Phase-15
+parquet schema migration is `forensics features migrate`; legacy
+parquets without the column also fall back through `section_from_url`
+on-read.
+
+Phase J2 added an **advertorial / syndicated exclusion list**
+(`excluded_sections`) shared by `SurveyConfig` and `FeaturesConfig`
+(default: `sponsored`, `partner-content`, `crosspost`, …). Articles in
+those sections drop out of stylometric baselines unless an operator
+passes `--include-advertorial` on `forensics survey` or
+`forensics analyze`. Excluded rows are dumped to
+`data/survey/excluded_articles.csv` for editorial review.
+
+Phase J3 added **`forensics analyze section-profile`** — a newsroom-wide
+descriptive diagnostic: per-section centroids, an inter-section cosine
+distance matrix, and a per-feature Kruskal–Wallis omnibus ranking. Output
+artifacts under `data/analysis/`: `section_centroids.json`,
+`section_distance_matrix.json` (+ `.csv` mirror),
+`section_feature_ranking.json`, `section_profile_report.md` (with
+the J5 gate verdict embedded: `PASS` / `BORDERLINE` / `FAIL` /
+`DEGENERATE`).
+
+Phase J4 added per-author **section-mix time series** at
+`data/analysis/<slug>_section_mix.json` (consumed by the K2 reporting
+chart). Phase J6 added **`forensics analyze section-contrast
+[--author <slug>]`** — per-author, per-feature MWU contrasts across
+sections.
+
+Phase J5 (optional **section residualization** before BOCPD) is **gated
+on the J3 verdict against real corpus data** and ships behind
+`--residualize-sections` on `forensics analyze all`. The Wave 4 toggle
+decision waits on the J3 PASS/BORDERLINE/FAIL verdict from a populated
+features tree (smoke runs return `DEGENERATE` because the worktree has
+no `data/features/*.parquet`).
+
+### PELT Cost-Model Knob (Phase F0, PR #69)
+
+Profiling on April 24 2026 (preserved at
+`data/analysis/provenance/apr24_rbf_profile.txt`) showed
+`ruptures.costs.costrbf.error` accounted for 99.2 % of analysis
+wall-clock across 3.2 M calls. Phase F0 swapped the PELT cost model from
+RBF to L2 by default. The model is now a settings knob:
+
+- `pelt_cost_model: Literal["l2", "l1", "rbf"] = "l2"`
+
+L2 is mathematically equivalent for mean-shift detection on the
+features in scope and delivers ≥ 50 × speedup on the PELT phase. RBF
+remains selectable for sensitivity sweeps.
+
+### Parallelism Topology (Phase G)
+
+Phase 15 ships two layers of parallelism for `forensics analyze`:
+
+- **G1 — author-level (default, landed via PR #60).** `run_full_analysis`
+  fans out across authors via `ProcessPoolExecutor`. Surface knob:
+  `analysis.max_workers` (CLI: `--max-workers`). Parity is verified by
+  `tests/integration/test_parallel_parity.py`.
+- **G2 — feature-level (opt-in, PR #67 / `feature_workers`).** Within
+  `analyze_author_feature_changepoints`, per-feature change-point
+  computation can fan out across an inner pool. Each feature is an
+  independent 1D signal. Surface knob:
+  `analysis.feature_workers` (default `1`, opt-in). G2 is opportunistic
+  — recommended only when a single author has unusually many features
+  AND the per-author wall-clock is the bottleneck.
+- **G3 — embedding I/O audit.** Pipeline B reads embedding batches in
+  bulk; verified non-regressive in Phase 15.
+
+Both layers honor the same `config_hash` so parallel and serial runs
+produce byte-identical artifacts (see Phase H2 parity test).
+
 ## Design Pattern Guidance for Phases 4–7
 
 The implemented codebase (Phases 1–3) follows a deliberate pattern: Pydantic models for data contracts, classes for stateful services (`Repository`, `RateLimiter`), and pure functions for everything else. Phases 4–7 should preserve this balance but will likely need more classes due to the nature of the work.
