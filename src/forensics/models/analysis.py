@@ -23,6 +23,7 @@ class ConvergenceWindow(BaseModel):
     start_date: date
     end_date: date
     features_converging: list[str]
+    families_converging: list[str] = Field(default_factory=list)
     convergence_ratio: float
     pipeline_a_score: float
     pipeline_b_score: float
