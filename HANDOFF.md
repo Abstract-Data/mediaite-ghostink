@@ -3066,3 +3066,50 @@ uv run ruff check . && uv run ruff format --check .
 ### Risks & Next Steps
 - The simplified `stable_sort_artifact_list` returns its input unchanged when the `kind` resolves to an empty `_ARTIFACT_SORT_KEYS` tuple (would be a logic error — currently impossible since all three registered kinds are non-empty). If a future maintainer registers a kind with `tuple()`, every record sorts to the same key — keep this in mind.
 - The parity-test fixture stubs the orchestrator's `uuid4` and `datetime` only; if a future signal change introduces another stochastic source (e.g. random seed unset in a new bootstrap path) the parity test will fail loudly and pin where the new non-determinism lives. That's the test working as designed.
+
+---
+
+### Phase 15 J5 fix — Migration JOINs articles.db for section backfill
+**Status:** Complete
+**Date:** 2026-04-24
+**Agent/Session:** general-purpose subagent (wave2-parking worktree agent-ae4d6e56)
+
+#### What Was Done
+- Extended `migrate_feature_parquet` / `migrate_all` to look URLs up from `articles.db` when the parquet only carries `article_id` (the real corpus shape). The `{id: url}` dict is loaded once per `migrate_all` call and threaded through to each per-file call so SQLite isn't reopened per parquet or per row.
+- Added a `--articles-db` option to both the Typer CLI (`forensics features migrate`) and the standalone `scripts/migrate_feature_parquets.py` helper, defaulting to `<project_root>/data/articles.db`.
+- Used `forensics.storage.repository.open_repository_connection` (via lazy import to avoid the migrations <-> repository cycle) so the JOIN inherits the project's WAL / busy-timeout connection policy.
+- Per-file `WARNING` logs now fire when (a) any rows resolve to `section='unknown'` via the JOIN miss path, or (b) no URL source is available at all; the original "URL column present" path stays warning-free for legacy callers.
+- Added 6 new unit tests covering JOIN happy-path, JOIN miss, missing-DB fallback, regression-pinned `value_counts` for a fixed-seed corpus, URL-column path with bogus DB still works, and dry-run + DB writes nothing. Total now 10 tests in `tests/unit/test_feature_parquet_migration.py`.
+
+#### Files Modified
+- `src/forensics/storage/migrations/002_feature_parquet_section.py` — extracted `_load_article_url_map` + `_derive_section_column` helpers; added `articles_db` / `article_url_map` params; per-file WARNING logs.
+- `src/forensics/cli/migrate.py` — added `--articles-db` option to `features migrate`.
+- `scripts/migrate_feature_parquets.py` — added `--articles-db` to the standalone helper for parity.
+- `tests/unit/test_feature_parquet_migration.py` — 6 new tests + helpers (`_write_articles_db`, `_id_only_rows`, `_write_v1_id_only_parquet`).
+
+#### Verification Evidence
+```
+uv run python -m pytest tests/unit/test_feature_parquet_migration.py -v --no-cov
+  → 10 passed in 0.24s
+
+uv run python -m pytest tests/ -k "migration or parquet or features" --no-cov
+  → 96 passed, 641 deselected in 5.47s
+
+uv run ruff check . && uv run ruff format --check .
+  → ruff check: all clean; format: only pre-existing src/forensics/reporting/html_report.py formatting drift, untouched by this PR
+
+uv run python -m pytest tests/ --no-cov
+  → 733 passed, 3 deselected, 1 xfailed (J5 section_residualize placeholder, unrelated)
+```
+
+#### Decisions Made
+- Loaded the `{id: url}` map once at `migrate_all` and passed it down to each per-file call instead of opening SQLite per parquet — this is the canonical efficient path; the per-file `articles_db=` kwarg is kept as an ergonomic fallback for one-off single-file migrations.
+- Used `open_repository_connection` (with lazy import) rather than raw `sqlite3.connect` so the JOIN inherits ADR-005's WAL / busy-timeout / `check_same_thread=False` policy and matches the rest of the codebase (`utils/provenance.py`).
+- WARNING logs are intentionally per-file (not per-row): a degenerate-section parquet emits one log line that says "N/M rows are unknown via JOIN", which is the signal Phase 15 J5 needs to detect "this file produced a single-section profile".
+
+#### Unresolved Questions
+- None. The `--dry-run` + JOIN combination is exercised by `test_migrate_dry_run_with_articles_db_writes_nothing`.
+
+#### Risks & Next Steps
+- After this PR lands, re-run `forensics features migrate` + `forensics analyze section-profile` to get the real J5 verdict on the corpus. The previous run produced DEGENERATE solely because the migration backfilled `unknown` for every row.
+- The pre-existing `data/features/_pre_phase15_backup/` copy from the prior (URL-less) run will still be present — operators will want to delete or re-locate it before re-running so the next migration's backup doesn't shadow the original v1 fixtures.

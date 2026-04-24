@@ -39,17 +39,28 @@ def _main() -> int:
         help="Path to the features directory (default: <project_root>/data/features).",
     )
     parser.add_argument(
+        "--articles-db",
+        type=Path,
+        default=None,
+        help=(
+            "Path to the SQLite DB used for the article_id -> url JOIN "
+            "(default: <project_root>/data/articles.db)."
+        ),
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Log the would-be actions without writing backups or rewriting parquets.",
     )
     args = parser.parse_args()
 
-    root = args.features_dir or (get_project_root() / "data" / "features")
+    project_root = get_project_root()
+    root = args.features_dir or (project_root / "data" / "features")
     if not root.is_dir():
         logging.warning("features directory not found: %s", root)
         return 0
-    migrated, skipped = _mig.migrate_all(root, dry_run=args.dry_run)
+    db = args.articles_db or (project_root / "data" / "articles.db")
+    migrated, skipped = _mig.migrate_all(root, dry_run=args.dry_run, articles_db=db)
     logging.info(
         "migrate_feature_parquets: migrated=%d skipped=%d root=%s",
         migrated,
