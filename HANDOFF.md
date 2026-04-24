@@ -2188,3 +2188,58 @@ Operators who want the old behavior can pass `--include-shared-bylines` to `uv r
 #### Risks & Next Steps
 - Watch the next survey run's `disqualified` list and confirm no real reporters fall into the shared bucket. The token list (`staff`, `editors`, `newsroom`, `team`, `desk`, `contributor(s)`, `bureau`, `wire`) is intentionally narrow but a Mediaite reporter slug containing one of these as a hyphen-separated component would be a false positive.
 - If an outlet other than `mediaite.com` is added later, the `outlet_prefix` rule auto-handles it (uses `outlet.split(".")[0]`).
+
+---
+
+### Phase 15 J4: Per-author section-mix time series
+**Status:** Complete
+**Date:** 2026-04-24
+**Agent/Session:** subagent adb7f2bd (worktree)
+
+#### What Was Done
+- New `src/forensics/analysis/section_mix.py` providing:
+  - `SectionMixSeries` (frozen dataclass) — the canonical data shape: `author_id`, chronologically-sorted `months`, alphabetically-sorted `sections`, dense `shares` matrix where `shares[i][j]` is the share of `sections[j]` in `months[i]` (each row sums to 1.0; absent author-months are not emitted).
+  - `compute_section_mix(author_id, articles_df)` — Polars LazyFrame group_by `(month, section)`, `pl.len()` aggregation, single-pass matrix fill. Accepts `pl.DataFrame` or `pl.LazyFrame`; defers `.collect()` to the boundary.
+  - `_ensure_section_column` — falls back to deriving section from `url` via `forensics.utils.url.section_from_url` when J1's `section` column isn't present yet (Wave 2 ships J1 in parallel). Final fallback is `"unknown"`.
+  - `write_section_mix_artifact(series, path)` — atomic write with `sort_keys=True`, fixed indent, trailing newline. Byte-stable for a fixed fixture (regression-pinned).
+  - `section_mix_artifact_path(analysis_dir, slug)` — canonical path resolver.
+  - `compute_and_write_section_mix(...)` — convenience wrapper for K2 wiring.
+- 12 new unit tests in `tests/unit/test_section_mix.py` covering: happy-path 3 months × 2 sections, single-section author (`[[1.0]]`), other-author isolation, no-zero-fill contract, empty-author empty-series, URL-derived fallback, LazyFrame input, null-timestamp drop, missing-required-column ValueError, JSON round-trip, byte-stable SHA256 regression pin, and the `compute_and_write_section_mix` wrapper.
+- No reporting wiring (K2 is Wave 3's job); no orchestrator integration; no settings knobs.
+
+#### Files Modified
+- `src/forensics/analysis/section_mix.py` — NEW (~155 lines).
+- `tests/unit/test_section_mix.py` — NEW (12 tests).
+
+#### Verification Evidence
+```
+$ uv run python -m pytest tests/unit/test_section_mix.py -v --no-cov
+12 passed in 0.79s
+
+$ uv run python -m pytest tests/ -k "section_mix" -v --no-cov
+12 passed, 626 deselected in 77.82s
+
+$ uv run ruff check . && uv run ruff format --check .
+All checks passed!
+208 files already formatted
+
+$ uv run python -m pytest tests/ --no-cov
+635 passed, 3 deselected, 1 warning in 146.77s
+```
+
+#### Decisions Made
+- **No zero-fill for missing author-months.** A month with zero articles for the author is simply absent from `months` rather than represented as an all-zero row. The spec gave the implementer the call ("zero-share row OR skip the month — your choice, but be consistent"). Skipping keeps the matrix dense (no empty rows in stacked-area renders) and avoids fabricating an "all sections at 0%" data point that visually reads as "no posts" but takes up the same x-axis spacing as a real month. Documented in the `SectionMixSeries` docstring AND pinned by `test_compute_section_mix_unique_months_only_no_zero_filling`.
+- **Manual JSON serialisation rather than `write_json_artifact`.** The spec calls for `sort_keys=True` (Phase H2 contract). The current `write_json_artifact` does not expose `sort_keys`; H2 will centralise it. To keep J4 self-contained and byte-stable today, `write_section_mix_artifact` calls `json.dumps(..., sort_keys=True)` directly and routes through `write_text_atomic` (which already provides the atomic-rename ceremony). When H2 lands, this can collapse to one `write_json_artifact` call with no behaviour change.
+- **Sections sorted alphabetically; months sorted chronologically (string sort works for `YYYY-MM`).** Both are deterministic and human-readable. Pinned by the byte-stable regression test.
+- **`SectionMixSeries` is a frozen dataclass, not a Pydantic model.** The shape is purely structural (no validators, no JSON schema needed externally; the JSON shape is hand-controlled in `write_section_mix_artifact`). The H2 spec gives the implementer the choice ("Pydantic model OR typed dict — your call"); a frozen dataclass with `to_dict()` is the lightest option that still gives equality + slots and matches `_VelocityStats`/`ConvergenceInput` precedent in `convergence.py`.
+- **Single pass over `iter_rows`.** Earlier draft built `months` and `sections` axes in one pass over `iter_rows(named=True)` and then re-iterated for matrix fill. Simplified to a single pass that populates a `dict[(month, section), count]` plus the two axis sets, then slot-fills the matrix during share normalisation.
+- **`section_from_url` fallback duplicates the migration helper in `002_feature_parquet_section.py`.** Acceptable: the migration is a one-shot script with a different control flow (eager `pl.read_parquet`), and unifying them now would create a circular `analysis → storage.migrations` dependency. J1 will eventually make the fallback dead code.
+
+#### Unresolved Questions
+- **No orchestrator wiring yet.** J4 produces `data/analysis/<slug>_section_mix.json` only when called explicitly. The spec is clear that K2 (Wave 3) does the wiring; this PR intentionally stops at the data layer.
+- **`section` cardinality is unbounded** — every distinct first-path-segment becomes a column in the dense matrix. For Mediaite the empirical set is ~10 sections, but a pathological URL set would produce a wide matrix. Not a concern for this corpus; flag if the eventual corpus shows >50 sections per author.
+
+#### Risks & Next Steps
+- **Byte-stability is regression-pinned** by `test_write_section_mix_artifact_byte_stable_for_fixed_fixture`. Any change to indent, key order, separators, trailing newline, or sort discipline will fail this test by SHA256. When H2 centralises `sort_keys=True` in `write_json_artifact`, swap the manual `json.dumps` for `write_json_artifact(..., sort_keys=True)` and re-run the byte-pin to confirm parity.
+- **Wave 3 K2 wiring** can read the artifact directly (`json.loads(path.read_text())`) — no Pydantic model is required to consume it. Use `SectionMixSeries` only inside the analyze stage.
+- **No GUARDRAILS Sign needed** — no novel failure pattern was hit; the J1 column-derivation fallback is a documented design contingency, not a footgun.
