@@ -294,8 +294,7 @@ async def run_survey(
 
     run_id = resume or str(uuid4())
     run_dir = _run_dir_for(root, run_id)
-    run_dir.mkdir(parents=True, exist_ok=True)
-
+    # run_dir is created lazily by write_json_artifact on the first checkpoint/result write.
     report = SurveyReport(
         run_id=run_id,
         config_hash=_compute_config_hash(settings),

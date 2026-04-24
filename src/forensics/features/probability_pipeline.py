@@ -13,14 +13,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-import polars as pl
-
 from forensics.config import get_project_root
 from forensics.config.settings import ForensicsSettings, ProbabilityConfig
 from forensics.features.binoculars import compute_binoculars_score, load_binoculars_models
 from forensics.features.probability import compute_perplexity, load_reference_model
 from forensics.models.article import Article
 from forensics.models.author import Author
+from forensics.storage.json_io import write_text_atomic
+from forensics.storage.parquet import write_parquet_atomic
 from forensics.storage.repository import Repository
 
 logger = logging.getLogger(__name__)
@@ -56,7 +56,6 @@ def _model_card_payload(
 
 
 def _write_model_card(output_dir: Path, payload: dict) -> Path:
-    output_dir.mkdir(parents=True, exist_ok=True)
     path = output_dir / "model_card.json"
     existing: dict = {}
     if path.is_file():
@@ -71,7 +70,7 @@ def _write_model_card(output_dir: Path, payload: dict) -> Path:
             existing.get("model_card_digest"),
             payload["model_card_digest"],
         )
-    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    write_text_atomic(path, json.dumps(payload, indent=2))
     return path
 
 
@@ -211,8 +210,9 @@ def extract_probability_features(
                 device=device_cfg,
             )
 
+        # Parent directory creation handled inside write_parquet_atomic /
+        # write_text_atomic / _write_model_card (RF-DRY-004).
         output_dir = get_project_root() / "data" / "probability"
-        output_dir.mkdir(parents=True, exist_ok=True)
 
         total = 0
         for author in target_authors:
@@ -224,7 +224,7 @@ def extract_probability_features(
             rows = _score_author_articles(author, articles, model, tokenizer, binoc, cfg)
 
             out_path = output_dir / f"{author.slug}.parquet"
-            pl.DataFrame(rows).write_parquet(out_path)
+            write_parquet_atomic(out_path, rows)
             logger.info(
                 "probability: wrote %d rows to %s (binoculars=%s)",
                 len(rows),

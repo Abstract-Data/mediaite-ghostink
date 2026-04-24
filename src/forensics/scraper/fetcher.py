@@ -233,10 +233,11 @@ def _write_raw_html_file(root: Path, year: int, article_id: str, html: str) -> s
     if "/" in article_id or "\\" in article_id or ".." in article_id:
         msg = f"unsafe article_id for raw file: {article_id!r}"
         raise ValueError(msg)
+    from forensics.storage.json_io import write_text_atomic
+
     out_dir = root / "data" / "raw" / str(year)
-    out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / f"{article_id}.html"
-    path.write_text(html, encoding="utf-8")
+    write_text_atomic(path, html)
     return f"raw/{year}/{article_id}.html"
 
 

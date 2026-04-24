@@ -251,7 +251,7 @@ async def _run_trial_analysis(
     could be produced. The trial is fully isolated under ``trial_root`` so
     concurrent trials do not trample each other.
     """
-    trial_root.mkdir(parents=True, exist_ok=True)
+    # trial_root is created by Repository.__enter__ (db_path.parent mkdir).
     trial_db = trial_root / "articles.db"
     _write_corpus_to_db(trial_db, author, corpus.combined_articles)
 
@@ -420,8 +420,7 @@ async def run_calibration(
         )
         return report
 
-    run_dir.mkdir(parents=True, exist_ok=True)
-
+    # run_dir is created by the first write helper that lands an artifact into it.
     target_author, articles = _load_author_articles(db, author)
     if not articles:
         raise ValueError(f"author {target_author.slug!r} has no articles")
@@ -466,7 +465,7 @@ async def run_calibration(
 
 
 def _write_calibration_report(report: CalibrationReport, output_path: Path) -> None:
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+    # write_json_artifact (below) mkdirs the parent directory itself.
     payload: dict[str, Any] = {
         "sensitivity": report.sensitivity,
         "specificity": report.specificity,

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -16,6 +15,7 @@ from forensics.config import get_project_root, get_settings
 from forensics.config.settings import ForensicsSettings
 from forensics.pipeline_context import PipelineContext
 from forensics.preregistration import verify_preregistration
+from forensics.storage.json_io import write_json_artifact
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +62,7 @@ def _write_run_metadata(
     rid: str,
     meta: dict[str, object],
 ) -> None:
-    (analysis_dir / "run_metadata.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+    write_json_artifact(analysis_dir / "run_metadata.json", meta)
 
 
 def _run_compare_only_flow(ctx: AnalyzeContext) -> None:
@@ -71,8 +71,8 @@ def _run_compare_only_flow(ctx: AnalyzeContext) -> None:
     pipeline_ctx = PipelineContext.resolve()
     rid = pipeline_ctx.record_audit("forensics analyze --compare", optional=False, log=logger)
     assert rid is not None
+    # analysis_dir is mkdir'd inside _write_run_metadata → write_json_artifact.
     analysis_dir = ctx.paths.analysis_dir
-    analysis_dir.mkdir(parents=True, exist_ok=True)
     meta = {
         "run_id": rid,
         "run_timestamp": datetime.now(UTC).isoformat(),
@@ -175,8 +175,8 @@ def run_analyze(
     root = get_project_root()
     db_path = root / "data" / "articles.db"
     ctx = AnalyzeContext.build(db_path, settings, root=root, author=author)
+    # analysis_dir is created by the first write helper that lands an artifact.
     analysis_dir = ctx.paths.analysis_dir
-    analysis_dir.mkdir(parents=True, exist_ok=True)
 
     if verify_corpus:
         from forensics.utils.provenance import verify_corpus_hash

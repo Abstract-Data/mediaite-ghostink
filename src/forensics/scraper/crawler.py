@@ -204,10 +204,11 @@ def _load_authors_manifest(path: Path) -> dict[str, AuthorManifest]:
 
 
 def _write_authors_manifest(path: Path, rows: list[AuthorManifest]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as fh:
-        for row in rows:
-            fh.write(row.model_dump_json() + "\n")
+    # Serialize then write atomically via the centralised text writer.
+    from forensics.storage.json_io import write_text_atomic
+
+    body = "".join(row.model_dump_json() + "\n" for row in rows)
+    write_text_atomic(path, body)
 
 
 async def discover_authors(

@@ -15,6 +15,8 @@ from forensics.analysis.artifact_paths import AnalysisArtifactPaths
 from forensics.analysis.changepoint import PELT_FEATURE_COLUMNS
 from forensics.config.settings import ForensicsSettings
 from forensics.paths import load_feature_frame_for_author, resolve_author_rows
+from forensics.storage.json_io import write_text_atomic
+from forensics.storage.parquet import write_parquet_atomic
 from forensics.storage.repository import Repository
 from forensics.utils.datetime import parse_datetime, timestamps_from_frame
 
@@ -223,8 +225,8 @@ def run_timeseries_analysis(
 ) -> dict[str, Any]:
     """Write ``data/analysis/{slug}_timeseries.parquet`` with rolling + STL per numeric feature."""
     paths = AnalysisArtifactPaths.from_project(project_root, db_path)
+    # analysis_dir creation handled inside write_parquet_atomic / write_text_atomic.
     analysis_dir = paths.analysis_dir
-    analysis_dir.mkdir(parents=True, exist_ok=True)
     windows = settings.analysis.rolling_windows or [30, 90]
 
     with Repository(db_path) as repo:
@@ -254,21 +256,25 @@ def run_timeseries_analysis(
 
         out_path = analysis_dir / f"{author.slug}_timeseries.parquet"
         if feature_frames:
-            pl.concat(feature_frames, how="vertical_relaxed").write_parquet(out_path)
+            write_parquet_atomic(out_path, pl.concat(feature_frames, how="vertical_relaxed"))
         else:
-            pl.DataFrame(
-                {
-                    "author_id": [],
-                    "feature": [],
-                    "timestamp": [],
-                    "value": [],
-                }
-            ).write_parquet(out_path)
+            write_parquet_atomic(
+                out_path,
+                pl.DataFrame(
+                    {
+                        "author_id": [],
+                        "feature": [],
+                        "timestamp": [],
+                        "value": [],
+                    }
+                ),
+            )
         summary["authors"].append(author.slug)
         summary["timeseries_files"].append(str(out_path))
         burst_path = analysis_dir / f"{author.slug}_bursts.json"
         bursts = detect_bursts(timestamps, s=2.0)
-        burst_path.write_text(
+        write_text_atomic(
+            burst_path,
             json.dumps(
                 [
                     {"start": a.isoformat(), "end": b.isoformat(), "level": lev}
@@ -276,7 +282,6 @@ def run_timeseries_analysis(
                 ],
                 indent=2,
             ),
-            encoding="utf-8",
         )
         logger.info("timeseries: author=%s wrote %s", author.slug, out_path)
 

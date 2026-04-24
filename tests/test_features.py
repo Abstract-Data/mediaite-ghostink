@@ -41,29 +41,22 @@ def test_ttr_calculation(nlp) -> None:
     assert out["ttr"] == pytest.approx(3 / 4)
 
 
-@pytest.mark.xfail(
-    reason="Pre-existing: lexical.mattr returns NaN for all-unique inputs; "
-    "tracked as a separate feature-extractor bug (see HANDOFF Phase 13 Run 7).",
-    strict=False,
-)
 def test_mattr_window(nlp) -> None:
     from forensics.features import lexical
 
-    words = " ".join([f"w{i}" for i in range(60)])
+    # 60 unique all-alphabetic tokens so spaCy's ``is_alpha`` filter keeps them
+    # all (two-letter lowercase pairs: aa, ab, ac, ..., bh).
+    words = " ".join(chr(97 + i // 26) + chr(97 + i % 26) for i in range(60))
     doc = nlp(words)
     out = lexical.extract_lexical_features(words, doc)
     assert out["mattr"] == pytest.approx(1.0, rel=1e-2)
 
 
-@pytest.mark.xfail(
-    reason="Pre-existing: hapax_ratio definition mismatch (implementation uses "
-    "hapax/unique, test expects hapax/total); decide canonical formula and fix both "
-    "(see HANDOFF Phase 13 Run 7).",
-    strict=False,
-)
 def test_hapax_ratio(nlp) -> None:
     from forensics.features import lexical
 
+    # 4 tokens: "only" and "once" appear once (hapax=2), "repeats" appears twice.
+    # hapax_ratio = hapax / total_tokens = 2 / 4 = 0.5.
     text = "only once repeats repeats"
     doc = nlp(text)
     out = lexical.extract_lexical_features(text, doc)
@@ -141,16 +134,13 @@ def test_punctuation_profile(nlp) -> None:
     assert out["punctuation_profile"][";"] > 0
 
 
-@pytest.mark.xfail(
-    reason="Pre-existing: bigram_entropy returns NaN for the all-unique corpus, "
-    "breaking the diverse > repetitive ordering check (see HANDOFF Phase 13 Run 7).",
-    strict=False,
-)
 def test_bigram_entropy(nlp) -> None:
     from forensics.features import content
 
+    # "foo bar" repeated → one bigram ("foo_bar") → entropy ≈ 0.
     rep = "foo bar " * 40
-    diverse = " ".join([f"w{i}" for i in range(80)])
+    # All-alphabetic unique tokens so spaCy's is_alpha filter keeps them all.
+    diverse = " ".join(chr(97 + i // 26) + chr(97 + i % 26) for i in range(80))
     doc_r = nlp(rep)
     doc_d = nlp(diverse)
     er = content.extract_content_features(rep, doc_r, [], [])
@@ -158,32 +148,26 @@ def test_bigram_entropy(nlp) -> None:
     assert er["bigram_entropy"] < ed["bigram_entropy"]
 
 
-@pytest.mark.xfail(
-    reason="Pre-existing: self_similarity_30d returns None instead of ~1.0 when "
-    "peers are identical to target (see HANDOFF Phase 13 Run 7).",
-    strict=False,
-)
 def test_self_similarity(nlp) -> None:
     from forensics.features import content
 
+    # Self-similarity requires ≥ MIN_PEERS_FOR_SIMILARITY (=5) usable peers
+    # — supply six identical peers so TF-IDF cosine is ~1.0.
     t = "identical text " * 20
     doc = nlp(t)
-    sim = content.extract_content_features(t, doc, [t, t], [t, t])
+    peers = [t] * 6
+    sim = content.extract_content_features(t, doc, peers, peers)
     assert sim["self_similarity_30d"] == pytest.approx(1.0, abs=0.05)
 
 
-@pytest.mark.xfail(
-    reason="Pre-existing: self_similarity_30d returns None when blank peers are "
-    "present — blank-filtering short-circuits the whole similarity pass "
-    "(see HANDOFF Phase 13 Run 7).",
-    strict=False,
-)
 def test_self_similarity_ignores_blank_peers(nlp) -> None:
     from forensics.features import content
 
+    # Blank/whitespace peers are filtered, but there are still five non-blank
+    # identical peers — above the MIN_PEERS_FOR_SIMILARITY threshold.
     t = "identical text " * 20
     doc = nlp(t)
-    peers = ["", "  \n\t  ", t, t]
+    peers = ["", "  \n\t  ", t, t, t, t, t]
     sim = content.extract_content_features(t, doc, peers, peers)
     assert sim["self_similarity_30d"] == pytest.approx(1.0, abs=0.05)
 

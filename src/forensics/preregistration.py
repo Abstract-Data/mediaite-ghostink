@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from forensics.config.settings import ForensicsSettings, get_project_root
+from forensics.storage.json_io import write_text_atomic
 from forensics.utils.hashing import content_hash
 
 logger = logging.getLogger(__name__)
@@ -93,7 +94,6 @@ def lock_preregistration(
       for tamper detection.
     """
     lock_path = output_path if output_path is not None else _default_lock_path()
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
 
     analysis = _snapshot_thresholds(settings)
     payload: dict[str, Any] = {
@@ -102,9 +102,9 @@ def lock_preregistration(
         "content_hash": _canonical_hash(analysis),
     }
 
-    lock_path.write_text(
+    write_text_atomic(
+        lock_path,
         json.dumps(payload, indent=2, sort_keys=True, default=str) + "\n",
-        encoding="utf-8",
     )
     logger.info("preregistration: locked thresholds to %s", lock_path)
     return lock_path

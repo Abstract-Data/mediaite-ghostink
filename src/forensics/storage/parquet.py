@@ -32,11 +32,37 @@ def _serialize_record(rec: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def write_parquet_atomic(
+    path: Path,
+    frame: pl.DataFrame | list[dict[str, Any]],
+) -> None:
+    """Write a Polars frame (or list of dicts) to Parquet, mkdir'ing parent dirs.
+
+    Thin wrapper around ``pl.DataFrame.write_parquet`` that removes the
+    ``path.parent.mkdir(parents=True, exist_ok=True)`` ceremony from callers
+    (RF-DRY-004 / G1). Accepts an existing frame or a list of row dicts.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    df = frame if isinstance(frame, pl.DataFrame) else pl.DataFrame(frame)
+    df.write_parquet(path)
+
+
+def save_numpy_atomic(path: Path, array: np.ndarray) -> None:
+    """``np.save`` with mkdir on the parent directory (RF-DRY-004 / G1)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    np.save(path, array)
+
+
+def save_numpy_compressed_atomic(path: Path, **arrays: np.ndarray) -> None:
+    """``np.savez_compressed`` with mkdir on the parent directory (RF-DRY-004 / G1)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(path, **arrays)
+
+
 def write_features(features: list[FeatureVector], output_path: Path) -> None:
     """Write feature vectors to Parquet (dict fields as JSON strings)."""
-    output_path.parent.mkdir(parents=True, exist_ok=True)
     rows = [_serialize_record(f.to_flat_dict()) for f in features]
-    pl.DataFrame(rows).write_parquet(output_path)
+    write_parquet_atomic(output_path, rows)
 
 
 def scan_features(path: Path) -> pl.LazyFrame:

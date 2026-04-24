@@ -206,7 +206,7 @@ def _write_author_embedding_artifacts(
     """Persist the NPZ matrix for one author and build the manifest records."""
     abs_batch = paths.embeddings_dir / slug / AUTHOR_EMBEDDING_BATCH_BASENAME
     rel_batch = abs_batch.relative_to(paths.project_root)
-    abs_batch.parent.mkdir(parents=True, exist_ok=True)
+    # Parent dir created inside write_author_embedding_batch (RF-DRY-004).
     mat = np.stack([row[2] for row in embed_batch], axis=0)
     write_author_embedding_batch(
         abs_batch,
@@ -406,8 +406,8 @@ def extract_all_features(
     """
     root = _resolve_project_root(db_path, project_root)
     paths = AnalysisArtifactPaths.from_project(root, db_path)
-    paths.features_dir.mkdir(parents=True, exist_ok=True)
-    paths.embeddings_dir.mkdir(parents=True, exist_ok=True)
+    # Output dirs are created inside write_features / write_author_embedding_batch /
+    # write_embeddings_manifest / _archive_embeddings_if_mismatch.
 
     if not skip_embeddings:
         _archive_embeddings_if_mismatch(

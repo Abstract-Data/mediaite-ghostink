@@ -78,4 +78,33 @@ def write_json_artifact(
         raise
 
 
-__all__ = ["write_json_artifact"]
+def write_text_atomic(path: Path, text: str, *, encoding: str = "utf-8") -> None:
+    """Atomically write ``text`` to ``path``, creating parent dirs as needed.
+
+    Mirrors :func:`write_json_artifact`'s atomic-rename pattern for callers
+    that need to write pre-rendered text (Quarto-style reports, model cards,
+    custody records). Centralising this removes the
+    ``path.parent.mkdir(...)`` + ``path.write_text(...)`` pair from every
+    caller (RF-DRY-004 / G1).
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        "w",
+        encoding=encoding,
+        dir=str(path.parent),
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+        delete=False,
+    ) as tmp:
+        tmp.write(text)
+        tmp.flush()
+        os.fsync(tmp.fileno())
+        tmp_path = Path(tmp.name)
+    try:
+        os.replace(tmp_path, path)
+    except OSError:
+        tmp_path.unlink(missing_ok=True)
+        raise
+
+
+__all__ = ["write_json_artifact", "write_text_atomic"]
