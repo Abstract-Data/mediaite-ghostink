@@ -169,10 +169,10 @@ def apply_correction(
         msg = f"Unknown correction method: {method!r}"
         raise ValueError(msg)
 
-    for test, cp in zip(tests, corrected, strict=True):
-        test.corrected_p_value = cp
-        test.significant = cp < alpha
-    return tests
+    return [
+        test.model_copy(update={"corrected_p_value": cp, "significant": cp < alpha})
+        for test, cp in zip(tests, corrected, strict=True)
+    ]
 
 
 def filter_by_effect_size(
@@ -182,8 +182,9 @@ def filter_by_effect_size(
     alpha: float,
 ) -> list[HypothesisTest]:
     """Require both corrected significance and minimum |Cohen's d|."""
+    updated: list[HypothesisTest] = []
     for test in tests:
         sig_p = test.corrected_p_value < alpha
         sig_d = abs(test.effect_size_cohens_d) >= min_d
-        test.significant = sig_p and sig_d
-    return tests
+        updated.append(test.model_copy(update={"significant": sig_p and sig_d}))
+    return updated

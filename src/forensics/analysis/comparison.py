@@ -12,12 +12,12 @@ from scipy import stats
 
 from forensics.analysis.artifact_paths import AnalysisArtifactPaths
 from forensics.analysis.changepoint import PELT_FEATURE_COLUMNS, analyze_author_feature_changepoints
-from forensics.analysis.convergence import compute_convergence_scores
+from forensics.analysis.convergence import ConvergenceInput, compute_convergence_scores
 from forensics.analysis.drift import load_drift_summary
-from forensics.analysis.utils import intervals_overlap, load_feature_frame_for_author
 from forensics.config.settings import ForensicsSettings
 from forensics.models.analysis import ChangePoint, ConvergenceWindow, DriftScores
 from forensics.models.author import Author
+from forensics.paths import intervals_overlap, load_feature_frame_for_author
 from forensics.storage.repository import Repository
 
 logger = logging.getLogger(__name__)
@@ -175,15 +175,13 @@ def _summarize_control_authors(
 
         summary = load_drift_summary(slug, paths, settings=settings)
         cps = control_change_points[slug]
-        ac = settings.analysis
         control_windows[slug] = compute_convergence_scores(
-            cps,
-            summary.velocities,
-            summary.baseline_curve,
-            settings=settings,
-            use_permutation=ac.convergence_use_permutation,
-            n_permutations=ac.convergence_permutation_iterations,
-            permutation_seed=ac.convergence_permutation_seed,
+            ConvergenceInput.from_settings(
+                cps,
+                summary.velocities,
+                summary.baseline_curve,
+                settings,
+            )
         )
     return control_change_points, control_drift_scores, control_windows
 
@@ -209,15 +207,13 @@ def _editorial_signal_for_target(
 
     summary = load_drift_summary(target_id, paths, settings=settings)
 
-    ac = settings.analysis
     target_windows = compute_convergence_scores(
-        target_cps,
-        summary.velocities,
-        summary.baseline_curve,
-        settings=settings,
-        use_permutation=ac.convergence_use_permutation,
-        n_permutations=ac.convergence_permutation_iterations,
-        permutation_seed=ac.convergence_permutation_seed,
+        ConvergenceInput.from_settings(
+            target_cps,
+            summary.velocities,
+            summary.baseline_curve,
+            settings,
+        )
     )
     return compute_signal_attribution(target_windows, control_windows)
 

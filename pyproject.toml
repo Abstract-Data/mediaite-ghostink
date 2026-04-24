@@ -27,6 +27,7 @@ dependencies = [
   "ipython>=8.31.0",
   "ipykernel>=6.29.0",
   "pyarrow>=17.0",
+  "xxhash>=3.4",
   "en-core-web-md @ https://github.com/explosion/spacy-models/releases/download/en_core_web_md-3.8.0/en_core_web_md-3.8.0-py3-none-any.whl",
 ]
 
@@ -112,7 +113,11 @@ omit = [
 [tool.coverage.report]
 # Denominator includes features + storage (P1-TEST-001); optional-heavy paths (probability,
 # live fetches) keep aggregate modest — raise gradually as tests land. Phase 14 pushed
-# this from 65 → 66 once the RF-DRY-001/B/E helper tests landed; target remains 70.
+# this from 65 → 66. Phase 13 Run 7 F4 fixed the 3 broken spacy.load monkeypatch tests,
+# corrected the 5 lexical/content feature-extractor bugs (MATTR NaN, hapax_ratio
+# definition, bigram_entropy NaN, self_similarity peer-count) that were previously
+# xfailed, and added ~22 statistics-module tests. Measured coverage is ~67% (baseline
+# main was 63.4%). Next target: 70% once probability/baseline stages get test coverage.
 fail_under = 66
 show_missing = true
 skip_covered = false

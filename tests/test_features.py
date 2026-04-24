@@ -44,7 +44,9 @@ def test_ttr_calculation(nlp) -> None:
 def test_mattr_window(nlp) -> None:
     from forensics.features import lexical
 
-    words = " ".join([f"w{i}" for i in range(60)])
+    # 60 unique all-alphabetic tokens so spaCy's ``is_alpha`` filter keeps them
+    # all (two-letter lowercase pairs: aa, ab, ac, ..., bh).
+    words = " ".join(chr(97 + i // 26) + chr(97 + i % 26) for i in range(60))
     doc = nlp(words)
     out = lexical.extract_lexical_features(words, doc)
     assert out["mattr"] == pytest.approx(1.0, rel=1e-2)
@@ -53,6 +55,8 @@ def test_mattr_window(nlp) -> None:
 def test_hapax_ratio(nlp) -> None:
     from forensics.features import lexical
 
+    # 4 tokens: "only" and "once" appear once (hapax=2), "repeats" appears twice.
+    # hapax_ratio = hapax / total_tokens = 2 / 4 = 0.5.
     text = "only once repeats repeats"
     doc = nlp(text)
     out = lexical.extract_lexical_features(text, doc)
@@ -133,8 +137,10 @@ def test_punctuation_profile(nlp) -> None:
 def test_bigram_entropy(nlp) -> None:
     from forensics.features import content
 
+    # "foo bar" repeated → one bigram ("foo_bar") → entropy ≈ 0.
     rep = "foo bar " * 40
-    diverse = " ".join([f"w{i}" for i in range(80)])
+    # All-alphabetic unique tokens so spaCy's is_alpha filter keeps them all.
+    diverse = " ".join(chr(97 + i // 26) + chr(97 + i % 26) for i in range(80))
     doc_r = nlp(rep)
     doc_d = nlp(diverse)
     er = content.extract_content_features(rep, doc_r, [], [])
@@ -145,18 +151,23 @@ def test_bigram_entropy(nlp) -> None:
 def test_self_similarity(nlp) -> None:
     from forensics.features import content
 
+    # Self-similarity requires ≥ MIN_PEERS_FOR_SIMILARITY (=5) usable peers
+    # — supply six identical peers so TF-IDF cosine is ~1.0.
     t = "identical text " * 20
     doc = nlp(t)
-    sim = content.extract_content_features(t, doc, [t, t], [t, t])
+    peers = [t] * 6
+    sim = content.extract_content_features(t, doc, peers, peers)
     assert sim["self_similarity_30d"] == pytest.approx(1.0, abs=0.05)
 
 
 def test_self_similarity_ignores_blank_peers(nlp) -> None:
     from forensics.features import content
 
+    # Blank/whitespace peers are filtered, but there are still five non-blank
+    # identical peers — above the MIN_PEERS_FOR_SIMILARITY threshold.
     t = "identical text " * 20
     doc = nlp(t)
-    peers = ["", "  \n\t  ", t, t]
+    peers = ["", "  \n\t  ", t, t, t, t, t]
     sim = content.extract_content_features(t, doc, peers, peers)
     assert sim["self_similarity_30d"] == pytest.approx(1.0, abs=0.05)
 
@@ -293,6 +304,11 @@ def test_feature_pipeline_isolation(
     from forensics.features import lexical as lex_mod
     from forensics.features import pipeline as pl
 
+    # Loosen the abort ratio so 1-of-3 failure doesn't trip the batch guard —
+    # the point of this test is that one bad article is *isolated*, not that
+    # the guard fires. The guard itself is exercised by
+    # ``test_feature_pipeline_aborts_when_failure_ratio_exceeded``.
+    monkeypatch.setenv("FORENSICS_ANALYSIS__FEATURE_EXTRACTION_MAX_FAILURE_RATIO", "0.5")
     get_settings.cache_clear()
     db_path = tmp_path / "articles.db"
     init_db(db_path)
@@ -323,7 +339,7 @@ def test_feature_pipeline_isolation(
             )
             repo.upsert_article(a)
 
-    monkeypatch.setattr("forensics.features.pipeline.spacy.load", lambda name: nlp)
+    monkeypatch.setattr("forensics.features.pipeline._load_spacy_model", lambda *a, **kw: nlp)
     n = pl.extract_all_features(
         db_path,
         get_settings(),
@@ -370,7 +386,7 @@ def test_feature_pipeline_aborts_when_failure_ratio_exceeded(
             )
             repo.upsert_article(a)
 
-    monkeypatch.setattr("forensics.features.pipeline.spacy.load", lambda name: nlp)
+    monkeypatch.setattr("forensics.features.pipeline._load_spacy_model", lambda *a, **kw: nlp)
     with pytest.raises(RuntimeError, match="Feature extraction abort"):
         pl.extract_all_features(
             db_path,
@@ -432,7 +448,7 @@ def test_extract_all_features_writes_embedding_batch_not_per_article_npy(
         return np.linspace(0, 1, 8, dtype=np.float32)
 
     monkeypatch.setattr(emb_mod, "compute_embedding", _fake_vec)
-    monkeypatch.setattr("forensics.features.pipeline.spacy.load", lambda name: nlp)
+    monkeypatch.setattr("forensics.features.pipeline._load_spacy_model", lambda *a, **kw: nlp)
 
     db_path = tmp_path / "articles.db"
     init_db(db_path)

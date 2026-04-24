@@ -32,11 +32,37 @@ def _serialize_record(rec: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def write_parquet_atomic(
+    path: Path,
+    frame: pl.DataFrame | list[dict[str, Any]],
+) -> None:
+    """Write a Polars frame (or list of dicts) to Parquet, mkdir'ing parent dirs.
+
+    Thin wrapper around ``pl.DataFrame.write_parquet`` that removes the
+    ``path.parent.mkdir(parents=True, exist_ok=True)`` ceremony from callers
+    (RF-DRY-004 / G1). Accepts an existing frame or a list of row dicts.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    df = frame if isinstance(frame, pl.DataFrame) else pl.DataFrame(frame)
+    df.write_parquet(path)
+
+
+def save_numpy_atomic(path: Path, array: np.ndarray) -> None:
+    """``np.save`` with mkdir on the parent directory (RF-DRY-004 / G1)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    np.save(path, array)
+
+
+def save_numpy_compressed_atomic(path: Path, **arrays: np.ndarray) -> None:
+    """``np.savez_compressed`` with mkdir on the parent directory (RF-DRY-004 / G1)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(path, **arrays)
+
+
 def write_features(features: list[FeatureVector], output_path: Path) -> None:
     """Write feature vectors to Parquet (dict fields as JSON strings)."""
-    output_path.parent.mkdir(parents=True, exist_ok=True)
     rows = [_serialize_record(f.to_flat_dict()) for f in features]
-    pl.DataFrame(rows).write_parquet(output_path)
+    write_parquet_atomic(output_path, rows)
 
 
 def scan_features(path: Path) -> pl.LazyFrame:
@@ -58,17 +84,25 @@ def read_features(path: Path) -> pl.DataFrame:
     return scan_features(path).collect()
 
 
-def load_feature_frame_sorted(features_path: Path) -> pl.DataFrame:
-    """Load features Parquet, require ``timestamp``, return rows sorted by time.
+def load_feature_frame_sorted(features_path: Path) -> pl.LazyFrame:
+    """Return a ``LazyFrame`` for the feature Parquet, sorted by ``timestamp``.
 
-    Uses a ``LazyFrame`` scan so the planner can push the sort down and defer the
-    materialization — callers that filter/slice downstream get the benefit.
+    Returning a ``LazyFrame`` lets downstream callers push ``filter(...)``
+    predicates (e.g. per-author slicing) into the scan before materialization
+    (P2-PERF-002). Call ``.collect()`` at the boundary where a ``DataFrame`` is
+    required. For the small number of eager callers, use
+    :func:`load_feature_frame_sorted_eager`.
     """
     lf = scan_features(features_path)
     if "timestamp" not in lf.collect_schema().names():
         msg = f"features parquet missing timestamp: {features_path}"
         raise ValueError(msg)
-    return lf.sort("timestamp").collect()
+    return lf.sort("timestamp")
+
+
+def load_feature_frame_sorted_eager(features_path: Path) -> pl.DataFrame:
+    """Eager convenience wrapper around :func:`load_feature_frame_sorted`."""
+    return load_feature_frame_sorted(features_path).collect()
 
 
 def write_embeddings_manifest(records: list[EmbeddingRecord], path: Path) -> None:

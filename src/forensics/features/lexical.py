@@ -118,11 +118,17 @@ def _mattr(words: list[str], window: int = 50) -> float:
 
 
 def _hapax_ratio(words: list[str]) -> float:
+    """Hapax ratio = (# tokens that appear exactly once) / (# total tokens).
+
+    Uses token-denominator (not type-denominator) so the value scales with
+    sparsity of the distribution: purely repetitive text → 0, purely unique
+    vocabulary → 1. Downstream changepoint code relies on this ordering.
+    """
     if not words:
         return float("nan")
     counts = Counter(words)
     hapax = sum(1 for c in counts.values() if c == 1)
-    return hapax / len(counts)
+    return hapax / len(words)
 
 
 def _yules_k(words: list[str]) -> float:

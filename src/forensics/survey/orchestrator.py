@@ -226,7 +226,7 @@ async def _process_author(
         )
 
         paths = AnalysisArtifactPaths.from_project(project_root, db_path)
-        analysis_map = await run_full_analysis(
+        analysis_map = run_full_analysis(
             paths,
             settings,
             author_slug=slug,
@@ -294,8 +294,7 @@ async def run_survey(
 
     run_id = resume or str(uuid4())
     run_dir = _run_dir_for(root, run_id)
-    run_dir.mkdir(parents=True, exist_ok=True)
-
+    # run_dir is created lazily by write_json_artifact on the first checkpoint/result write.
     report = SurveyReport(
         run_id=run_id,
         config_hash=_compute_config_hash(settings),
@@ -401,14 +400,10 @@ async def run_survey(
         slug_to_idx = {qa.author.slug: i for i, qa in enumerate(qualified, start=1)}
         for qa in pending:
             if observer is not None:
-                observer.survey_author_started(
-                    qa.author.slug, slug_to_idx[qa.author.slug], total
-                )
+                observer.survey_author_started(qa.author.slug, slug_to_idx[qa.author.slug], total)
         with ProcessPoolExecutor(max_workers=workers) as executor:
             future_to_qa = {
-                executor.submit(
-                    _process_author_worker, qa, db, settings, root
-                ): qa
+                executor.submit(_process_author_worker, qa, db, settings, root): qa
                 for qa in pending
             }
             for future in as_completed(future_to_qa):

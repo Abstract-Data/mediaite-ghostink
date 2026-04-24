@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 
+import xxhash
+
 
 def content_hash(text: str) -> str:
     """SHA-256 hex digest of the normalized string."""
@@ -15,8 +17,37 @@ def simhash_hamming(a: int, b: int) -> int:
     return (a ^ b).bit_count()
 
 
+# Second xxh128 seed used to extend the 128-bit digest to 256 bits when
+# callers request ``hashbits > 128``. The constant is arbitrary but fixed so
+# fingerprints are deterministic across runs.
+_SIMHASH_HIGH_SEED: int = 0x9E3779B97F4A7C15
+
+
+def _gram_digest(gram_bytes: bytes, hashbits: int) -> int:
+    """Return a deterministic ``hashbits``-wide digest of ``gram_bytes``.
+
+    For ``hashbits <= 128`` one ``xxh128`` is enough. For ``129..256`` the
+    digest is the concatenation of two ``xxh128`` hashes with different seeds,
+    giving 256 independent bits; we slice to the requested width.
+    """
+    lo = xxhash.xxh128(gram_bytes).intdigest()
+    if hashbits <= 128:
+        return lo
+    hi = xxhash.xxh128(gram_bytes, seed=_SIMHASH_HIGH_SEED).intdigest()
+    return (hi << 128) | lo
+
+
 def simhash(text: str, hashbits: int = 128) -> int:
-    """Character n-gram simhash for near-duplicate detection (up to 256 bits)."""
+    """Character n-gram simhash for near-duplicate detection (up to 256 bits).
+
+    Uses xxhash-128 per n-gram instead of SHA-256 for a ~10–50× speedup on the
+    fingerprinting step (P3-PERF-001). When ``hashbits > 128``, two xxh128
+    digests with different seeds are concatenated to supply up to 256 bits, so
+    the old 256-bit API surface is preserved. The mathematical properties
+    (Hamming distance preservation under near-duplicate perturbations) are
+    unchanged; hash *values* are not comparable to pre-migration SHA-256
+    fingerprints, so any stored ``dedup_simhash`` columns must be recomputed.
+    """
     if hashbits < 1 or hashbits > 256:
         msg = "hashbits must be between 1 and 256"
         raise ValueError(msg)
@@ -29,12 +60,12 @@ def simhash(text: str, hashbits: int = 128) -> int:
             grams.append(cleaned[i : i + n])
     if not grams:
         grams = [cleaned or "\x00"]
+    top_bit = hashbits - 1
     vector = [0] * hashbits
     for gram in grams:
-        digest = hashlib.sha256(gram.encode("utf-8")).digest()
-        value = int.from_bytes(digest, "big")
+        value = _gram_digest(gram.encode("utf-8"), hashbits)
         for i in range(hashbits):
-            if value & (1 << (255 - i)):
+            if value & (1 << (top_bit - i)):
                 vector[i] += 1
             else:
                 vector[i] -= 1

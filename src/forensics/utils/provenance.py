@@ -5,12 +5,12 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
-from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from forensics.config.settings import ForensicsSettings
+from forensics.storage.json_io import write_json_artifact
 from forensics.storage.repository import open_repository_connection
 
 CUSTODY_FILENAME = "corpus_custody.json"
@@ -52,13 +52,12 @@ def get_run_metadata(settings: ForensicsSettings) -> dict[str, str]:
 
 def write_corpus_custody(db_path: Path, analysis_dir: Path) -> Path:
     """Record corpus hash at end of analysis for ``report --verify``."""
-    analysis_dir.mkdir(parents=True, exist_ok=True)
     payload = {
         "corpus_hash": compute_corpus_hash(db_path),
         "recorded_at": datetime.now(UTC).isoformat(),
     }
     path = analysis_dir / CUSTODY_FILENAME
-    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    write_json_artifact(path, payload)
     return path
 
 
@@ -88,7 +87,7 @@ def verify_corpus_hash(db_path: Path, analysis_dir: Path) -> tuple[bool, str]:
     return True, "Corpus hash matches custody record."
 
 
-def audit_scrape_timestamps(db_path: Path) -> Mapping[str, Any]:
+def audit_scrape_timestamps(db_path: Path) -> dict[str, Any]:
     """Summarize ``scraped_at`` coverage for chain-of-custody notebooks."""
     if not db_path.is_file():
         return {

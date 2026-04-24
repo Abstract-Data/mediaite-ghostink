@@ -42,17 +42,19 @@ from forensics.storage.parquet import (
     write_features,
 )
 from forensics.storage.repository import Repository
+from forensics.utils.model_cache import KeyedModelCache
 
 logger = logging.getLogger(__name__)
 
-# Expected failures from extractors, numpy I/O, and sentence-transformers encode.
-_FEATURE_EXTRACTION_ERRORS: tuple[type[BaseException], ...] = (
+# Recoverable failures from extractors, numpy I/O, and sentence-transformers encode.
+# MemoryError and RecursionError are intentionally excluded — they indicate
+# process-level failure and should halt the pipeline rather than be counted as
+# per-article extraction errors.
+_RECOVERABLE_EXTRACTION_ERRORS: tuple[type[Exception], ...] = (
     ArithmeticError,
     AttributeError,
     LookupError,
-    MemoryError,
     OSError,
-    RecursionError,
     RuntimeError,
     TypeError,
     ValueError,
@@ -118,15 +120,28 @@ def _resolve_project_root(db_path: Path, project_root: Path | None) -> Path:
     return get_project_root()
 
 
-def _load_spacy_model(model_name: str = "en_core_web_md") -> Any:
-    """Load the requested spaCy pipeline or raise."""
-    try:
-        import spacy
+_SPACY_MODEL_CACHE = KeyedModelCache()
 
-        return spacy.load(model_name)
-    except OSError as exc:
-        logger.error("spaCy model %s is required: %s", model_name, exc)
-        raise
+
+def _load_spacy_model(model_name: str = "en_core_web_md") -> Any:
+    """Load the requested spaCy pipeline (or return a cached handle) or raise."""
+
+    def _load() -> Any:
+        try:
+            import spacy
+
+            logger.info("Loading spaCy model: %s", model_name)
+            return spacy.load(model_name)
+        except OSError as exc:
+            logger.error("spaCy model %s is required: %s", model_name, exc)
+            raise
+
+    return _SPACY_MODEL_CACHE.get_or_load(model_name, _load)
+
+
+def clear_spacy_model_cache() -> None:
+    """Drop cached spaCy pipelines (tests)."""
+    _SPACY_MODEL_CACHE.clear()
 
 
 def _extract_features_for_article(
@@ -191,7 +206,7 @@ def _write_author_embedding_artifacts(
     """Persist the NPZ matrix for one author and build the manifest records."""
     abs_batch = paths.embeddings_dir / slug / AUTHOR_EMBEDDING_BATCH_BASENAME
     rel_batch = abs_batch.relative_to(paths.project_root)
-    abs_batch.parent.mkdir(parents=True, exist_ok=True)
+    # Parent dir created inside write_author_embedding_batch (RF-DRY-004).
     mat = np.stack([row[2] for row in embed_batch], axis=0)
     write_author_embedding_batch(
         abs_batch,
@@ -261,9 +276,7 @@ def _process_author_batch(
                 author_name,
             )
         try:
-            fv = _extract_features_for_article(
-                article, idx, articles_seq, nlp, settings, doc=doc
-            )
+            fv = _extract_features_for_article(article, idx, articles_seq, nlp, settings, doc=doc)
             result.features.append(fv)
 
             if not skip_embeddings:
@@ -276,7 +289,7 @@ def _process_author_batch(
                     )
                 )
             result.processed += 1
-        except _FEATURE_EXTRACTION_ERRORS as exc:
+        except _RECOVERABLE_EXTRACTION_ERRORS as exc:
             batch_failed += 1
             result.failed += 1
             logger.exception(
@@ -393,8 +406,8 @@ def extract_all_features(
     """
     root = _resolve_project_root(db_path, project_root)
     paths = AnalysisArtifactPaths.from_project(root, db_path)
-    paths.features_dir.mkdir(parents=True, exist_ok=True)
-    paths.embeddings_dir.mkdir(parents=True, exist_ok=True)
+    # Output dirs are created inside write_features / write_author_embedding_batch /
+    # write_embeddings_manifest / _archive_embeddings_if_mismatch.
 
     if not skip_embeddings:
         _archive_embeddings_if_mismatch(

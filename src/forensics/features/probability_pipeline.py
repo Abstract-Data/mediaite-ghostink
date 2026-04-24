@@ -11,14 +11,16 @@ import json
 import logging
 from datetime import UTC, datetime
 from pathlib import Path
-
-import polars as pl
+from typing import Any
 
 from forensics.config import get_project_root
-from forensics.config.settings import ForensicsSettings
+from forensics.config.settings import ForensicsSettings, ProbabilityConfig
 from forensics.features.binoculars import compute_binoculars_score, load_binoculars_models
 from forensics.features.probability import compute_perplexity, load_reference_model
 from forensics.models.article import Article
+from forensics.models.author import Author
+from forensics.storage.json_io import write_text_atomic
+from forensics.storage.parquet import write_parquet_atomic
 from forensics.storage.repository import Repository
 
 logger = logging.getLogger(__name__)
@@ -54,7 +56,6 @@ def _model_card_payload(
 
 
 def _write_model_card(output_dir: Path, payload: dict) -> Path:
-    output_dir.mkdir(parents=True, exist_ok=True)
     path = output_dir / "model_card.json"
     existing: dict = {}
     if path.is_file():
@@ -69,7 +70,7 @@ def _write_model_card(output_dir: Path, payload: dict) -> Path:
             existing.get("model_card_digest"),
             payload["model_card_digest"],
         )
-    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    write_text_atomic(path, json.dumps(payload, indent=2))
     return path
 
 
@@ -92,6 +93,67 @@ def _transformers_version() -> str:
     except ImportError:
         return "unknown"
     return getattr(transformers, "__version__", "unknown")
+
+
+def _score_author_articles(
+    author: Author,
+    articles: list[Article],
+    model: Any,
+    tokenizer: Any,
+    binoc: tuple[Any, Any, Any] | None,
+    cfg: ProbabilityConfig,
+) -> list[dict]:
+    """Score every eligible article for one author into Parquet-ready row dicts.
+
+    Extracted from ``extract_probability_features`` so the inner scoring loop
+    is independently testable (RF-CPLX-004); leaves the orchestrator focused
+    on DB access, model loading, and artifact writing.
+    """
+    rows: list[dict] = []
+    total = len(articles)
+    for idx, article in enumerate(articles, start=1):
+        ppl = compute_perplexity(
+            article.clean_text,
+            model,
+            tokenizer,
+            max_length=cfg.max_sequence_length,
+            stride=cfg.sliding_window_stride,
+            low_ppl_threshold=cfg.low_ppl_threshold,
+        )
+        bino: float | None = None
+        if binoc is not None:
+            model_base, model_inst, bino_tok = binoc
+            bino = compute_binoculars_score(
+                article.clean_text,
+                model_base,
+                model_inst,
+                bino_tok,
+                max_length=min(cfg.max_sequence_length, 512),
+            )
+
+        rows.append(
+            {
+                "article_id": article.id,
+                "author_id": article.author_id,
+                "publish_date": article.published_date.date(),
+                "mean_perplexity": ppl["mean_perplexity"],
+                "median_perplexity": ppl["median_perplexity"],
+                "perplexity_variance": ppl["perplexity_variance"],
+                "min_sentence_ppl": ppl["min_sentence_ppl"],
+                "max_sentence_ppl": ppl["max_sentence_ppl"],
+                "ppl_skewness": ppl["ppl_skewness"],
+                "low_ppl_sentence_ratio": ppl["low_ppl_sentence_ratio"],
+                "binoculars_score": bino,
+            }
+        )
+        if idx % 25 == 0:
+            logger.info(
+                "probability: %d/%d articles scored (%s)",
+                idx,
+                total,
+                author.slug,
+            )
+    return rows
 
 
 def extract_probability_features(
@@ -148,8 +210,9 @@ def extract_probability_features(
                 device=device_cfg,
             )
 
+        # Parent directory creation handled inside write_parquet_atomic /
+        # write_text_atomic / _write_model_card (RF-DRY-004).
         output_dir = get_project_root() / "data" / "probability"
-        output_dir.mkdir(parents=True, exist_ok=True)
 
         total = 0
         for author in target_authors:
@@ -158,52 +221,10 @@ def extract_probability_features(
                 logger.info("probability: no eligible articles for author=%s", author.slug)
                 continue
 
-            rows: list[dict] = []
-            for idx, article in enumerate(articles, start=1):
-                ppl = compute_perplexity(
-                    article.clean_text,
-                    model,
-                    tokenizer,
-                    max_length=cfg.max_sequence_length,
-                    stride=cfg.sliding_window_stride,
-                    low_ppl_threshold=cfg.low_ppl_threshold,
-                )
-                bino: float | None = None
-                if binoc is not None:
-                    model_base, model_inst, bino_tok = binoc
-                    bino = compute_binoculars_score(
-                        article.clean_text,
-                        model_base,
-                        model_inst,
-                        bino_tok,
-                        max_length=min(cfg.max_sequence_length, 512),
-                    )
-
-                rows.append(
-                    {
-                        "article_id": article.id,
-                        "author_id": article.author_id,
-                        "publish_date": article.published_date.date(),
-                        "mean_perplexity": ppl["mean_perplexity"],
-                        "median_perplexity": ppl["median_perplexity"],
-                        "perplexity_variance": ppl["perplexity_variance"],
-                        "min_sentence_ppl": ppl["min_sentence_ppl"],
-                        "max_sentence_ppl": ppl["max_sentence_ppl"],
-                        "ppl_skewness": ppl["ppl_skewness"],
-                        "low_ppl_sentence_ratio": ppl["low_ppl_sentence_ratio"],
-                        "binoculars_score": bino,
-                    }
-                )
-                if idx % 25 == 0:
-                    logger.info(
-                        "probability: %d/%d articles scored (%s)",
-                        idx,
-                        len(articles),
-                        author.slug,
-                    )
+            rows = _score_author_articles(author, articles, model, tokenizer, binoc, cfg)
 
             out_path = output_dir / f"{author.slug}.parquet"
-            pl.DataFrame(rows).write_parquet(out_path)
+            write_parquet_atomic(out_path, rows)
             logger.info(
                 "probability: wrote %d rows to %s (binoculars=%s)",
                 len(rows),

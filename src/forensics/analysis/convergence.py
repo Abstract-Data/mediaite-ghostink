@@ -11,11 +11,24 @@ import numpy as np
 
 from forensics.analysis.changepoint import PELT_FEATURE_COLUMNS
 from forensics.analysis.monthkeys import iter_months_in_window, month_key_to_range
-from forensics.analysis.utils import closed_interval_contains
 from forensics.config.settings import ForensicsSettings
 from forensics.models.analysis import ChangePoint, ConvergenceWindow
+from forensics.paths import closed_interval_contains
 
 logger = logging.getLogger(__name__)
+
+# Named convergence-scoring constants (RF-SMELL-003 / audit for pre-registration lock).
+PIPELINE_SCORE_PASS_THRESHOLD: float = 0.5
+"""Both pipeline A and pipeline B scores must exceed this for the window to pass on A/B alone."""
+
+EMBEDDING_DROP_EPSILON: float = 0.05
+"""Denominator epsilon for the head-vs-tail embedding similarity drop ratio."""
+
+AI_CURVE_NORMALIZATION_DIVISOR: float = 0.5
+"""Divisor that normalizes the AI-curve delta (last - first) to the [0, 1] score range."""
+
+AI_SINGLE_VALUE_FALLBACK: float = 0.25
+"""Fallback score when only one month of AI-curve data is available in the window."""
 
 
 @dataclass
@@ -174,15 +187,17 @@ def _embedding_similarity_signal(
     head = float(np.mean(sim_window[: max(1, len(sim_window) // 3)]))
     tail = float(np.mean(sim_window[-max(1, len(sim_window) // 3) :]))
     drop = head - tail
-    return float(min(1.0, max(0.0, drop / (abs(head) + 0.05))))
+    return float(min(1.0, max(0.0, drop / (abs(head) + EMBEDDING_DROP_EPSILON))))
 
 
 def _ai_curve_signal(ai_by_month: dict[str, float], months_in: list[str]) -> float:
     ai_vals = [ai_by_month[m] for m in months_in if m in ai_by_month]
     if len(ai_vals) >= 2:
-        return float(min(1.0, max(0.0, (ai_vals[-1] - ai_vals[0]) / 0.5)))
+        return float(
+            min(1.0, max(0.0, (ai_vals[-1] - ai_vals[0]) / AI_CURVE_NORMALIZATION_DIVISOR))
+        )
     if len(ai_vals) == 1:
-        return 0.25
+        return AI_SINGLE_VALUE_FALLBACK
     return 0.0
 
 
@@ -245,6 +260,40 @@ class ConvergenceInput:
             use_permutation=use_permutation,
             permutation_seed=permutation_seed,
             n_permutations=n_permutations,
+        )
+
+    @classmethod
+    def from_settings(
+        cls,
+        change_points: list[ChangePoint],
+        centroid_velocities: list[tuple[str, float]],
+        baseline_similarity_curve: list[tuple[datetime, float]],
+        settings: ForensicsSettings,
+        *,
+        ai_convergence_curve: list[tuple[str, float]] | None = None,
+        probability_trajectory: ProbabilityTrajectory | None = None,
+        total_feature_count: int | None = None,
+    ) -> ConvergenceInput:
+        """Build a ``ConvergenceInput`` using permutation knobs drawn from settings.
+
+        This is the common case for callers with a populated ``ForensicsSettings``;
+        it reads ``convergence_use_permutation`` /
+        ``convergence_permutation_iterations`` / ``convergence_permutation_seed``
+        from ``settings.analysis`` instead of forcing every call site to re-thread
+        those three attributes.
+        """
+        ac = settings.analysis
+        return cls.build(
+            change_points,
+            centroid_velocities,
+            baseline_similarity_curve,
+            settings=settings,
+            ai_convergence_curve=ai_convergence_curve,
+            probability_trajectory=probability_trajectory,
+            total_feature_count=total_feature_count,
+            use_permutation=ac.convergence_use_permutation,
+            n_permutations=ac.convergence_permutation_iterations,
+            permutation_seed=ac.convergence_permutation_seed,
         )
 
 
@@ -314,7 +363,10 @@ def _score_single_window(
         )
 
     passes_ratio = ratio >= input_.min_feature_ratio
-    passes_ab = pipeline_a_score > 0.5 and pipeline_b_score > 0.5
+    passes_ab = (
+        pipeline_a_score > PIPELINE_SCORE_PASS_THRESHOLD
+        and pipeline_b_score > PIPELINE_SCORE_PASS_THRESHOLD
+    )
     if not (passes_ratio or passes_ab):
         return None
 
@@ -376,49 +428,25 @@ def _run_permutation_test(
     )
 
 
-def compute_convergence_scores(
-    change_points: list[ChangePoint],
-    centroid_velocities: list[tuple[str, float]],
-    baseline_similarity_curve: list[tuple[datetime, float]],
-    window_days: int = 90,
-    min_feature_ratio: float = 0.6,
-    *,
-    total_feature_count: int | None = None,
-    ai_convergence_curve: list[tuple[str, float]] | None = None,
-    probability_trajectory: ProbabilityTrajectory | None = None,
-    settings: ForensicsSettings | None = None,
-    use_permutation: bool = False,
-    permutation_seed: int = 42,
-    n_permutations: int = 1000,
-) -> list[ConvergenceWindow]:
+def compute_convergence_scores(input_: ConvergenceInput) -> list[ConvergenceWindow]:
     """Quantify agreement between Pipeline A (stylometry), Pipeline B (embeddings), and C.
 
-    When ``use_permutation`` is True, each returned window's convergence ratio
+    When ``input_.use_permutation`` is True, each returned window's convergence ratio
     is additionally evaluated via a permutation test over the change-point
     timestamps. The empirical p-value is logged but does not alter the returned
     windows — the default path is unchanged.
+
+    Construct ``input_`` via :meth:`ConvergenceInput.from_settings` for the common
+    case (a populated ``ForensicsSettings``) or :meth:`ConvergenceInput.build` for
+    full control over the permutation knobs.
     """
-    input_ = ConvergenceInput.build(
-        change_points,
-        centroid_velocities,
-        baseline_similarity_curve,
-        window_days=window_days,
-        min_feature_ratio=min_feature_ratio,
-        total_feature_count=total_feature_count,
-        ai_convergence_curve=ai_convergence_curve,
-        probability_trajectory=probability_trajectory,
-        settings=settings,
-        use_permutation=use_permutation,
-        permutation_seed=permutation_seed,
-        n_permutations=n_permutations,
-    )
     if input_.total_feature_count <= 0:
         return []
 
-    velocity_stats = _precompute_velocity_stats(centroid_velocities)
-    sim_by_date = _baseline_curve_as_dates(baseline_similarity_curve)
-    ai_by_month = dict(ai_convergence_curve) if ai_convergence_curve else {}
-    starts = _window_start_candidates(change_points, sim_by_date, centroid_velocities)
+    velocity_stats = _precompute_velocity_stats(input_.centroid_velocities)
+    sim_by_date = _baseline_curve_as_dates(input_.baseline_similarity_curve)
+    ai_by_month = dict(input_.ai_convergence_curve) if input_.ai_convergence_curve else {}
+    starts = _window_start_candidates(input_.change_points, sim_by_date, input_.centroid_velocities)
     if not starts:
         return []
 

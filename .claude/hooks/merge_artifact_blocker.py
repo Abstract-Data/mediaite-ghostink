@@ -8,6 +8,7 @@ tools (GitButler, Claude migrations, etc.) and must never be tracked.
 Severity: BLOCKER
 Ported from: v0-quorum-report-redesign-concep/.husky/pre-commit
 """
+
 from __future__ import annotations
 
 import re

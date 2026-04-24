@@ -233,10 +233,11 @@ def _write_raw_html_file(root: Path, year: int, article_id: str, html: str) -> s
     if "/" in article_id or "\\" in article_id or ".." in article_id:
         msg = f"unsafe article_id for raw file: {article_id!r}"
         raise ValueError(msg)
+    from forensics.storage.json_io import write_text_atomic
+
     out_dir = root / "data" / "raw" / str(year)
-    out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / f"{article_id}.html"
-    path.write_text(html, encoding="utf-8")
+    write_text_atomic(path, html)
     return f"raw/{year}/{article_id}.html"
 
 
@@ -473,7 +474,27 @@ async def _handle_success(
     scraped_at: datetime,
     year: int,
 ) -> None:
-    """Parse HTML outside the lock, then persist under a second db_lock critical section."""
+    """Persist a fetched article using a deliberate read–parse–write double-lock pattern.
+
+    Concurrency contract (see RF-SMELL-002):
+
+    1. **First lock (read)** — acquire ``ctx.db_lock`` only long enough to load the
+       latest DB row for this article. Release the lock immediately so other coroutines
+       can keep progressing. If another worker already marked the article as fetched
+       (``_resume_skip_fetch``), bail out early.
+    2. **Parse outside the lock** — HTML parsing is CPU-bound and can be slow.
+       Running it under the DB lock would serialize fetchers; doing it *between*
+       the locks allows N workers to parse concurrently against a single SQLite
+       connection.
+    3. **Second lock (write)** — re-read the DB row under a fresh lock to detect
+       the race where a peer wrote the same article while we were parsing. If the
+       peer already committed, abort our write to keep upserts idempotent. Otherwise
+       persist the parsed result and bump the done counter.
+
+    The ``db_lock`` is the single serialization point for the SQLite connection,
+    which ``_connect`` opened with ``check_same_thread=False``. Skipping it on
+    either leg risks WAL-journal corruption or "database is locked" stalls.
+    """
     async with ctx.db_lock:
         article = await asyncio.to_thread(ctx.repo.get_article_by_id, row.article_id)
         if _resume_skip_fetch(article):

@@ -13,10 +13,12 @@ import polars as pl
 
 from forensics.analysis.artifact_paths import AnalysisArtifactPaths
 from forensics.analysis.changepoint import PELT_FEATURE_COLUMNS
-from forensics.analysis.utils import load_feature_frame_for_author, resolve_author_rows
 from forensics.config.settings import ForensicsSettings
+from forensics.paths import load_feature_frame_for_author, resolve_author_rows
+from forensics.storage.json_io import write_text_atomic
+from forensics.storage.parquet import write_parquet_atomic
 from forensics.storage.repository import Repository
-from forensics.utils.datetime import parse_datetime
+from forensics.utils.datetime import parse_datetime, timestamps_from_frame
 
 logger = logging.getLogger(__name__)
 
@@ -175,6 +177,45 @@ def detect_bursts(
     return bursts
 
 
+def _padded_column(values: list[float], length: int) -> list[float | None]:
+    """Pad ``values`` to ``length`` with ``None`` (used by rolling/STL outputs)."""
+    if len(values) >= length:
+        return [float(v) if v is not None else None for v in values[:length]]
+    out: list[float | None] = [float(v) if v is not None else None for v in values]
+    out.extend([None] * (length - len(values)))
+    return out
+
+
+def _compute_feature_timeseries(
+    author_id: str,
+    col: str,
+    timestamps: list[datetime],
+    floats: list[float],
+    windows: list[int],
+) -> pl.DataFrame:
+    """Build one author×feature timeseries frame using columnar operations.
+
+    Replaces the inner ``for i in range(len(timestamps))`` dict-append loop
+    with a single ``pl.DataFrame`` construction (RF-CPLX-003).
+    """
+    n = len(timestamps)
+    roll = compute_rolling_stats(timestamps, floats, windows=windows)
+    stl = stl_decompose(timestamps, floats, period=min(30, max(3, n // 3)))
+    data: dict[str, Any] = {
+        "author_id": [author_id] * n,
+        "feature": [col] * n,
+        "timestamp": [t.isoformat() for t in timestamps],
+        "value": floats,
+    }
+    for w, parts in roll.items():
+        data[f"rolling_{w}d_mean"] = _padded_column(parts["mean"], n)
+        data[f"rolling_{w}d_std"] = _padded_column(parts["std"], n)
+    data["stl_trend"] = _padded_column(stl["trend"], n)
+    data["stl_seasonal"] = _padded_column(stl["seasonal"], n)
+    data["stl_residual"] = _padded_column(stl["residual"], n)
+    return pl.DataFrame(data)
+
+
 def run_timeseries_analysis(
     db_path: Path,
     settings: ForensicsSettings,
@@ -184,8 +225,8 @@ def run_timeseries_analysis(
 ) -> dict[str, Any]:
     """Write ``data/analysis/{slug}_timeseries.parquet`` with rolling + STL per numeric feature."""
     paths = AnalysisArtifactPaths.from_project(project_root, db_path)
+    # analysis_dir creation handled inside write_parquet_atomic / write_text_atomic.
     analysis_dir = paths.analysis_dir
-    analysis_dir.mkdir(parents=True, exist_ok=True)
     windows = settings.analysis.rolling_windows or [30, 90]
 
     with Repository(db_path) as repo:
@@ -200,9 +241,8 @@ def run_timeseries_analysis(
         if df_a is None:
             logger.warning("Skipping timeseries for %s: missing %s", author.slug, feat_path)
             continue
-        ts_list = df_a["timestamp"].to_list()
-        timestamps = [parse_datetime(t) for t in ts_list]
-        rows: list[dict[str, Any]] = []
+        timestamps = timestamps_from_frame(df_a)
+        feature_frames: list[pl.DataFrame] = []
         for col in numeric_cols:
             if col not in df_a.columns:
                 continue
@@ -210,40 +250,31 @@ def run_timeseries_analysis(
             floats = [float(v) if v is not None else float("nan") for v in vals]
             if not floats:
                 continue
-            roll = compute_rolling_stats(timestamps, floats, windows=windows)
-            stl = stl_decompose(timestamps, floats, period=min(30, max(3, len(floats) // 3)))
-            for i in range(len(timestamps)):
-                rec: dict[str, Any] = {
-                    "author_id": author.id,
-                    "feature": col,
-                    "timestamp": timestamps[i].isoformat(),
-                    "value": floats[i],
-                }
-                for w, parts in roll.items():
-                    rec[f"rolling_{w}d_mean"] = parts["mean"][i] if i < len(parts["mean"]) else None
-                    rec[f"rolling_{w}d_std"] = parts["std"][i] if i < len(parts["std"]) else None
-                rec["stl_trend"] = stl["trend"][i] if i < len(stl["trend"]) else None
-                rec["stl_seasonal"] = stl["seasonal"][i] if i < len(stl["seasonal"]) else None
-                rec["stl_residual"] = stl["residual"][i] if i < len(stl["residual"]) else None
-                rows.append(rec)
+            feature_frames.append(
+                _compute_feature_timeseries(author.id, col, timestamps, floats, windows)
+            )
 
         out_path = analysis_dir / f"{author.slug}_timeseries.parquet"
-        if rows:
-            pl.DataFrame(rows).write_parquet(out_path)
+        if feature_frames:
+            write_parquet_atomic(out_path, pl.concat(feature_frames, how="vertical_relaxed"))
         else:
-            pl.DataFrame(
-                {
-                    "author_id": [],
-                    "feature": [],
-                    "timestamp": [],
-                    "value": [],
-                }
-            ).write_parquet(out_path)
+            write_parquet_atomic(
+                out_path,
+                pl.DataFrame(
+                    {
+                        "author_id": [],
+                        "feature": [],
+                        "timestamp": [],
+                        "value": [],
+                    }
+                ),
+            )
         summary["authors"].append(author.slug)
         summary["timeseries_files"].append(str(out_path))
         burst_path = analysis_dir / f"{author.slug}_bursts.json"
         bursts = detect_bursts(timestamps, s=2.0)
-        burst_path.write_text(
+        write_text_atomic(
+            burst_path,
             json.dumps(
                 [
                     {"start": a.isoformat(), "end": b.isoformat(), "level": lev}
@@ -251,7 +282,6 @@ def run_timeseries_analysis(
                 ],
                 indent=2,
             ),
-            encoding="utf-8",
         )
         logger.info("timeseries: author=%s wrote %s", author.slug, out_path)
 

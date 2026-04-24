@@ -182,11 +182,15 @@ def check_no_placeholder_authors(settings: _SettingsLike) -> PreflightCheck:
 
 def check_config_parses() -> PreflightCheck:
     """Hard-fail when ``config.toml`` is missing or fails to parse."""
+    import tomllib
+
+    import pydantic
+
     try:
         from forensics.config.settings import get_settings
 
         get_settings()
-    except Exception as exc:  # noqa: BLE001 - surface *any* parse issue to user
+    except (FileNotFoundError, tomllib.TOMLDecodeError, pydantic.ValidationError) as exc:
         return PreflightCheck("Config file", "fail", f"config.toml did not parse: {exc}")
     return PreflightCheck("Config file", "pass", "config.toml parses successfully")
 

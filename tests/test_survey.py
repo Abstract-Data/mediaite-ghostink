@@ -425,7 +425,7 @@ def _patch_orchestrator_side_effects(
         calls["extract"].append(author_slug or "")
         return 1
 
-    async def fake_run_full_analysis(paths, config, *, author_slug=None, **kwargs):
+    def fake_run_full_analysis(paths, config, *, author_slug=None, **kwargs):
         calls["analyze"].append(author_slug or "")
         result = AnalysisResult(
             author_id=f"author-{author_slug}",

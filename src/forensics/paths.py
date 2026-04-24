@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import date, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -107,12 +108,21 @@ class AnalysisArtifactPaths:
         )
 
 
-def intervals_overlap(a0, a1, b0, b1) -> bool:
+def intervals_overlap(
+    a0: datetime | date,
+    a1: datetime | date,
+    b0: datetime | date,
+    b1: datetime | date,
+) -> bool:
     """Return True if closed intervals ``[a0, a1]`` and ``[b0, b1]`` intersect."""
     return a0 <= b1 and b0 <= a1
 
 
-def closed_interval_contains(value, lo, hi) -> bool:
+def closed_interval_contains(
+    value: datetime | date,
+    lo: datetime | date,
+    hi: datetime | date,
+) -> bool:
     """Return True if ``lo <= value <= hi`` for mutually orderable operands (e.g. dates)."""
     return lo <= value <= hi
 
@@ -122,11 +132,16 @@ def load_feature_frame_for_author(
     slug: str,
     author_id: str,
 ) -> pl.DataFrame | None:
-    """Load sorted features for one author from ``{slug}.parquet`` if present."""
+    """Load sorted features for one author from ``{slug}.parquet`` if present.
+
+    Pushes the ``author_id`` predicate into the lazy scan so the Parquet
+    reader can project only the relevant row groups (P2-PERF-002).
+    """
     path = features_dir / f"{slug}.parquet"
     if not path.is_file():
         return None
-    dfc = load_feature_frame_sorted(path).filter(pl.col("author_id") == author_id)
+    lf = load_feature_frame_sorted(path)
+    dfc = lf.filter(pl.col("author_id") == author_id).collect()
     if dfc.is_empty():
         logger.warning(
             "No feature rows for author_id=%s in %s (slug=%s); loading full parquet "
@@ -135,7 +150,7 @@ def load_feature_frame_for_author(
             path.name,
             slug,
         )
-        dfc = load_feature_frame_sorted(path)
+        dfc = lf.collect()
     return dfc
 
 

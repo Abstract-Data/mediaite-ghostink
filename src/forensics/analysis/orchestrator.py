@@ -18,7 +18,11 @@ from forensics.analysis.changepoint import (
     analyze_author_feature_changepoints,
 )
 from forensics.analysis.comparison import compare_target_to_controls
-from forensics.analysis.convergence import ProbabilityTrajectory, compute_convergence_scores
+from forensics.analysis.convergence import (
+    ConvergenceInput,
+    ProbabilityTrajectory,
+    compute_convergence_scores,
+)
 from forensics.analysis.drift import compute_author_drift_pipeline, load_article_embeddings
 from forensics.analysis.statistics import (
     apply_correction,
@@ -31,7 +35,7 @@ from forensics.models.analysis import AnalysisResult, ChangePoint, DriftScores
 from forensics.storage.json_io import write_json_artifact
 from forensics.storage.parquet import load_feature_frame_sorted
 from forensics.storage.repository import Repository
-from forensics.utils.datetime import parse_datetime
+from forensics.utils.datetime import timestamps_from_frame
 from forensics.utils.provenance import write_corpus_custody
 
 logger = logging.getLogger(__name__)
@@ -91,12 +95,12 @@ def _run_hypothesis_tests_for_changepoints(
                 n_bootstrap=analysis_cfg.bootstrap_iterations,
             )
         )
-    apply_correction(
+    all_tests = apply_correction(
         all_tests,
         method=analysis_cfg.multiple_comparison_method,
         alpha=analysis_cfg.significance_threshold,
     )
-    filter_by_effect_size(
+    all_tests = filter_by_effect_size(
         all_tests,
         analysis_cfg.effect_size_threshold,
         alpha=analysis_cfg.significance_threshold,
@@ -122,10 +126,10 @@ def _run_per_author_analysis(
         logger.warning("analysis: skip %s (missing %s)", slug, feat_path)
         return None
 
-    df = load_feature_frame_sorted(feat_path)
-    df_author = df.filter(pl.col("author_id") == author.id)
+    lf_all = load_feature_frame_sorted(feat_path)
+    df_author = lf_all.filter(pl.col("author_id") == author.id).collect()
     if df_author.is_empty():
-        df_author = df
+        df_author = lf_all.collect()
 
     change_points = analyze_author_feature_changepoints(
         df_author,
@@ -158,21 +162,18 @@ def _run_per_author_analysis(
         vel_tuples = pair_months_with_velocities(drift_res.monthly_centroids, drift_res.velocities)
 
     prob = probability_trajectory_by_slug.get(slug)
-    ac = config.analysis
     convergence_windows = compute_convergence_scores(
-        change_points,
-        vel_tuples,
-        baseline_curve,
-        ai_convergence_curve=ai_conv,
-        probability_trajectory=prob,
-        settings=config,
-        use_permutation=ac.convergence_use_permutation,
-        n_permutations=ac.convergence_permutation_iterations,
-        permutation_seed=ac.convergence_permutation_seed,
+        ConvergenceInput.from_settings(
+            change_points,
+            vel_tuples,
+            baseline_curve,
+            config,
+            ai_convergence_curve=ai_conv,
+            probability_trajectory=prob,
+        )
     )
 
-    ts_list = df_author["timestamp"].to_list()
-    timestamps = [parse_datetime(t) for t in ts_list]
+    timestamps = timestamps_from_frame(df_author)
 
     all_tests = _run_hypothesis_tests_for_changepoints(
         df_author,
@@ -276,16 +277,23 @@ def assemble_analysis_result(
     )
 
 
-async def run_full_analysis(
+def run_full_analysis(
     paths: AnalysisArtifactPaths,
     config: ForensicsSettings,
     *,
     author_slug: str | None = None,
     probability_trajectory_by_slug: dict[str, ProbabilityTrajectory] | None = None,
 ) -> dict[str, AnalysisResult]:
-    """Run changepoint + drift + convergence + hypothesis tests; write JSON artifacts."""
-    paths.analysis_dir.mkdir(parents=True, exist_ok=True)
+    """Run changepoint + drift + convergence + hypothesis tests; write JSON artifacts.
 
+    Previously declared ``async`` for historical reasons — the body is entirely
+    synchronous (Repository / Polars / NumPy) so the coroutine wrapper was dead
+    weight. Callers now invoke the function directly instead of via
+    ``asyncio.run(...)``.
+    """
+    # Parent dirs for analysis outputs are created inside the write helpers
+    # (``write_json_artifact`` / ``write_corpus_custody``); no explicit mkdir
+    # needed here (RF-DRY-004).
     slugs = [author_slug] if author_slug else [a.slug for a in config.authors]
     prob_map = probability_trajectory_by_slug or {}
 
@@ -344,11 +352,21 @@ def run_compare_only(
     paths: AnalysisArtifactPaths,
     author_slug: str | None = None,
 ) -> dict[str, Any]:
-    """Regenerate ``comparison_report.json`` from on-disk artifacts."""
-    controls = [a.slug for a in config.authors if a.role == "control"]
-    targets = [a.slug for a in config.authors if a.role == "target"]
-    if author_slug:
-        targets = [author_slug] if author_slug in targets else [author_slug]
+    """Regenerate ``comparison_report.json`` from on-disk artifacts.
+
+    When ``author_slug`` is provided, the caller always wants that single
+    author compared even if it isn't in the configured target list (matches
+    the pre-Phase-13 CLI contract). A warning is logged so the ambiguity
+    surfaces in the operator's logs.
+    """
+    targets, controls = _resolve_targets_and_controls(config, author_slug)
+    if author_slug and author_slug not in targets:
+        logger.warning(
+            "compare-only: author_slug=%r is not a configured target; "
+            "forcing single-slug comparison (controls are still loaded from config)",
+            author_slug,
+        )
+        targets = [author_slug]
     out: dict[str, Any] = {"targets": {}}
     for tid in targets:
         try:

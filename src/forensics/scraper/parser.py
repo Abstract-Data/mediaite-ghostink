@@ -135,9 +135,44 @@ def extract_metadata(html: str) -> dict[str, Any]:
     return meta
 
 
+# Unambiguous co-author delimiters — direct substring match is safe.
+_COAUTHOR_WORDS: tuple[str, ...] = (" and ", " & ", " with ")
+
+# Name suffixes / credentials that should be ignored when deciding whether a
+# comma-separated byline represents multiple authors (e.g., "John Smith, Jr.").
+_SUFFIX_TOKENS: frozenset[str] = frozenset(
+    {
+        "jr",
+        "jr.",
+        "sr",
+        "sr.",
+        "ii",
+        "iii",
+        "iv",
+        "esq",
+        "esq.",
+        "phd",
+        "md",
+    },
+)
+
+
 def looks_coauthored(author_text: str) -> bool:
-    """Heuristic: multiple bylines often use `` and `` between names."""
+    """Heuristic: detect multi-author bylines.
+
+    Matches the unambiguous cases (``and`` / ``&`` / ``with``). Comma is
+    ambiguous between ``"Last, First"`` and ``"Name1, Name2"``; only count
+    commas when each side looks like a multi-word name (at least ``First
+    Last``) and isn't a suffix/credential token like ``Jr.`` or ``PhD``.
+    """
     t = author_text.strip()
     if not t:
         return False
-    return " and " in t.lower()
+    low = t.lower()
+    if any(sep in low for sep in _COAUTHOR_WORDS):
+        return True
+    if "," not in t:
+        return False
+    parts = [p.strip() for p in t.split(",")]
+    name_parts = [p for p in parts if p and p.lower().rstrip(".") not in _SUFFIX_TOKENS]
+    return len(name_parts) >= 2 and all(" " in p for p in name_parts)

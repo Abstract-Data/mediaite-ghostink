@@ -6,7 +6,7 @@ from datetime import date, datetime
 from typing import Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ChangePoint(BaseModel):
@@ -39,12 +39,24 @@ class DriftScores(BaseModel):
     @property
     def velocity_acceleration_ratio(self) -> float:
         """(late-early)/early split of ``monthly_centroid_velocities`` clamped to [0, 1]."""
+        # Deferred import breaks the models → analysis → models cycle
+        # (``forensics.analysis.utils`` re-exports helpers that themselves
+        # reference models in this module). Keeping it local to the property
+        # avoids the import happening at module-load time.
         from forensics.analysis.utils import compute_velocity_acceleration
 
         return compute_velocity_acceleration(self.monthly_centroid_velocities)
 
 
 class HypothesisTest(BaseModel):
+    """Immutable hypothesis-test record.
+
+    ``apply_correction`` and ``filter_by_effect_size`` now return new instances
+    via ``model_copy`` rather than mutating shared objects (P2-MAINT-002).
+    """
+
+    model_config = ConfigDict(frozen=True)
+
     test_name: str
     feature_name: str
     author_id: str

@@ -15,15 +15,17 @@ import numpy as np
 from scipy.spatial.distance import cosine
 
 from forensics.analysis.artifact_paths import AnalysisArtifactPaths
-from forensics.analysis.utils import pair_months_with_velocities, resolve_author_rows
+from forensics.analysis.utils import pair_months_with_velocities
 from forensics.config.settings import ForensicsSettings
 from forensics.models.analysis import DriftScores
+from forensics.paths import resolve_author_rows
 from forensics.storage.json_io import write_json_artifact
 from forensics.storage.parquet import (
     EMBEDDING_BATCH_KEY_BYTES,
     EMBEDDING_BATCH_KEY_LENGTHS,
     EMBEDDING_BATCH_KEY_VECTORS,
     read_embeddings_manifest,
+    save_numpy_compressed_atomic,
     unpack_article_ids_from_embedding_batch,
 )
 from forensics.storage.repository import Repository
@@ -470,11 +472,11 @@ def write_drift_artifacts(
     baseline_curve: list[tuple[datetime, float]],
     umap_payload: dict[str, Any],
 ) -> None:
-    paths.analysis_dir.mkdir(parents=True, exist_ok=True)
+    # Parent dir is created inside each writer (RF-DRY-004).
     write_json_artifact(paths.drift_json(author_slug), drift)
     months = np.array([m for m, _ in centroids], dtype="U7")
     vecs = np.stack([np.asarray(v, dtype=np.float32) for _, v in centroids], axis=0)
-    np.savez_compressed(
+    save_numpy_compressed_atomic(
         paths.centroids_npz(author_slug),
         months=months,
         centroids=vecs,

@@ -8,8 +8,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-import numpy as np
-
 from forensics.baseline.agent import BaselineDeps, GeneratedArticle, make_baseline_agent
 from forensics.baseline.prompts import PromptContext, build_prompt
 from forensics.baseline.topics import cycle_keywords, sample_topic_keywords, sample_word_counts
@@ -22,6 +20,8 @@ from forensics.baseline.utils import (
 from forensics.config import get_project_root
 from forensics.config.settings import ForensicsSettings
 from forensics.features import embeddings as embed_mod
+from forensics.storage.json_io import write_text_atomic
+from forensics.storage.parquet import save_numpy_atomic
 
 logger = logging.getLogger(__name__)
 
@@ -39,9 +39,9 @@ def _cell_dir(
 
 
 def _embed_article(payload: dict, model_name: str, emb_dir: Path) -> None:
-    emb_dir.mkdir(parents=True, exist_ok=True)
+    # Parent dir mkdir handled inside save_numpy_atomic (RF-DRY-004).
     vec = embed_mod.compute_embedding(payload.get("text", ""), model_name)
-    np.save(emb_dir / f"{payload['article_id']}.npy", vec)
+    save_numpy_atomic(emb_dir / f"{payload['article_id']}.npy", vec)
 
 
 def _article_record(
@@ -94,8 +94,9 @@ async def run_generation_matrix(
     cfg = settings.baseline
     n_per_cell = articles_per_cell or cfg.articles_per_cell
     root = project_root or get_project_root()
+    # ``base`` + per-author + per-cell dirs are created lazily by write helpers
+    # the first time they write into that path (RF-DRY-004).
     base = root / "data" / "ai_baseline"
-    base.mkdir(parents=True, exist_ok=True)
 
     topics = sample_topic_keywords(db_path, author_slug)
     n_total = n_per_cell * 2  # two modes share the word-count pool
@@ -130,8 +131,7 @@ async def run_generation_matrix(
                     )
         manifest["planned_cells"] = planned
         manifest_path = base / author_slug / "generation_manifest.json"
-        manifest_path.parent.mkdir(parents=True, exist_ok=True)
-        manifest_path.write_text(dump_manifest(manifest), encoding="utf-8")
+        write_text_atomic(manifest_path, dump_manifest(manifest))
         logger.info(
             "baseline: dry-run plan written to %s (%d cells)",
             manifest_path,
@@ -148,7 +148,7 @@ async def run_generation_matrix(
         for temperature in cfg.temperatures:
             for mode in PROMPT_MODES:
                 cell_dir = _cell_dir(base, author_slug, model_name, mode, temperature)
-                cell_dir.mkdir(parents=True, exist_ok=True)
+                # cell_dir + emb_dir are created inside the write helpers on first use.
                 emb_dir = cell_dir / "embeddings"
                 articles: list[dict[str, Any]] = []
 
@@ -189,8 +189,9 @@ async def run_generation_matrix(
                         elapsed_ms=elapsed_ms,
                         max_tokens=cfg.max_tokens,
                     )
-                    (cell_dir / f"{article_id}.json").write_text(
-                        json.dumps(record, indent=2), encoding="utf-8"
+                    write_text_atomic(
+                        cell_dir / f"{article_id}.json",
+                        json.dumps(record, indent=2),
                     )
                     _embed_article(record, settings.analysis.embedding_model, emb_dir)
                     articles.append(record)
@@ -213,8 +214,7 @@ async def run_generation_matrix(
 
     manifest["completed_at"] = datetime.now(UTC).isoformat()
     manifest_path = base / author_slug / "generation_manifest.json"
-    manifest_path.parent.mkdir(parents=True, exist_ok=True)
-    manifest_path.write_text(dump_manifest(manifest), encoding="utf-8")
+    write_text_atomic(manifest_path, dump_manifest(manifest))
     logger.info("baseline: wrote manifest %s", manifest_path)
     return manifest
 

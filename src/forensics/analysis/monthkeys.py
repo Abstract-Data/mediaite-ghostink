@@ -14,7 +14,7 @@ from collections.abc import Iterable, Iterator
 from datetime import date
 from typing import NewType
 
-from forensics.analysis.utils import intervals_overlap
+from forensics.paths import intervals_overlap
 
 # NewType is a lightweight alias — values are still plain ``str`` at runtime but
 # type-checkers will flag arbitrary strings being used where a ``MonthKey`` is
