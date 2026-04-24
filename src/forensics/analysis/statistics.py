@@ -81,20 +81,28 @@ def bootstrap_ci(
     *,
     seed: int = 42,
 ) -> tuple[float, float]:
-    """Percentile bootstrap CI for mean(group2) - mean(group1)."""
+    """Percentile bootstrap CI for ``mean(group2) - mean(group1)``.
+
+    Phase 15 F1: vectorized via a single ``rng.choice`` call per group.
+    The previous Python ``for`` loop drew ``a`` and ``b`` interleaved per
+    iteration; the vectorized form draws all ``n_bootstrap`` rows for ``a``
+    first, then ``b`` — so outputs differ from the pre-F1 implementation
+    even at the same seed. The regression test in
+    ``tests/unit/test_bootstrap_vectorized.py`` pins the post-F1 output for
+    a fixed ``(a, b, seed)`` triple; any intentional change to the sampling
+    or read-out (e.g. switching to percentile-t or BCa) must update those
+    constants deliberately.
+    """
     a = np.asarray(group1, dtype=float).ravel()
     b = np.asarray(group2, dtype=float).ravel()
     if a.size == 0 or b.size == 0:
         return (0.0, 0.0)
     rng = np.random.default_rng(seed)
-    diffs: list[float] = []
-    for _ in range(n_bootstrap):
-        s1 = rng.choice(a, size=a.size, replace=True)
-        s2 = rng.choice(b, size=b.size, replace=True)
-        diffs.append(float(np.mean(s2) - np.mean(s1)))
-    arr = np.asarray(diffs, dtype=float)
-    lo = float(np.percentile(arr, 100 * alpha / 2))
-    hi = float(np.percentile(arr, 100 * (1 - alpha / 2)))
+    s1 = rng.choice(a, size=(n_bootstrap, a.size), replace=True).mean(axis=1)
+    s2 = rng.choice(b, size=(n_bootstrap, b.size), replace=True).mean(axis=1)
+    diffs = s2 - s1
+    lo = float(np.percentile(diffs, 100 * alpha / 2))
+    hi = float(np.percentile(diffs, 100 * (1 - alpha / 2)))
     return (lo, hi)
 
 
