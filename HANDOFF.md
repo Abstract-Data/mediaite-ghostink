@@ -2507,3 +2507,99 @@ all green (full suite passes; previous run reported 581 passed)
 #### Risks & Next Steps
 - The default `excluded_sections` set is a frozenset on `SurveyConfig` and `FeaturesConfig`. If TOML loading produces a `list`, pydantic will coerce — but if an operator overrides via env vars, the parsing path needs to handle list/set conversion. Pydantic handles this for `frozenset[str]`, but worth a smoke test on the next live run.
 - An author with only excluded-section articles now reports a new disqualification reason `all_articles_excluded_by_section` — downstream consumers parsing the disqualification reason string need to recognise this new value.
+
+---
+
+### 2026-04-24 — Phase 15 K1+K2+K3: Reporting integration (families + section mix + section contrast)
+
+#### Status
+COMPLETE — narrative names family-representative features; HTML report
+helpers render the section-mix stacked area + section-contrast table.
+
+#### Files Changed
+- `src/forensics/reporting/narrative.py` — K1: `_convergence_sentences`
+  prefers `ConvergenceWindow.families_converging`, naming each family
+  with its representative feature ("readability (flesch_kincaid)" form).
+  Falls back to the legacy feature-level wording for older artifacts
+  whose `families_converging` list is empty.
+- `src/forensics/reporting/html_report.py` — NEW. Two free functions:
+  - `render_section_mix_chart(path, *, author_slug, div_id=None)` — reads
+    `<slug>_section_mix.json`, builds a `plotly.graph_objects` stacked
+    area trace per section (no pandas needed), emits an HTML fragment
+    with the verbatim K2 caption.
+  - `render_section_contrast_table(path, *, author_slug)` — reads
+    `<slug>_section_contrast.json`, renders a `pair × family` table whose
+    cells list the family-level BH-significant features. Soft-fails on
+    missing JSON ("No section-contrast data") and on
+    `disposition == "insufficient_section_volume"` ("Insufficient section
+    volume…"). Wave 3.3's J6 is a soft dependency.
+- `tests/unit/test_reporting_section.py` — NEW. 12 tests covering K1
+  family-aware narrative + K1 legacy fallback + K2 chart render with
+  caption + K2 missing-artifact soft fail + K3 table rows/columns + K3
+  missing artifact + K3 insufficient-volume + K3 byte-determinism + K3
+  SHA-256 pin (H2 contract) + parametrized div-id stability.
+
+#### Decisions Made
+- **`plotly.graph_objects` over `plotly.express.area`** for K2: `px.area`
+  requires pandas to be installed (it round-trips to `pd.DataFrame`).
+  This project is Polars-native — adding pandas as a transitive reporting
+  dep would have been a larger architectural change than the unit
+  warrants. `go.Scatter(stackgroup=…)` produces visually identical
+  output and stays pandas-free.
+- **Soft-fail on missing JSON** for both K2 and K3, returning a small
+  placeholder fragment rather than raising. Coordination with Wave 3.3
+  (J6) is asynchronous, and the report stage must still render when the
+  sibling artifact is absent.
+- **Re-derive family from `FEATURE_FAMILIES`** for the K1 sentence rather
+  than trusting positional alignment with `features_converging`. The
+  pipeline-A scorer already writes representative features sorted
+  alphabetically per family, but downstream filters could theoretically
+  reorder either list — re-deriving from the registry keeps the pairing
+  robust.
+- **SHA-256 pin** for the K3 contrast-table fragment (per H2 spec). The
+  K2 chart fragment intentionally is not byte-pinned because Plotly's
+  HTML output embeds a UUID/timestamp in the script payload; only the
+  `div id` and caption are pinned.
+
+#### Verification
+```bash
+$ uv run python -m pytest tests/unit/test_reporting_section.py -v --no-cov
+12 passed in 0.86s
+
+$ uv run python -m pytest tests/ -k "narrative or reporting or html_report" -v --no-cov
+19 passed, 1 skipped (textual missing — pre-existing) in 51.89s
+
+$ uv run ruff check . && uv run ruff format --check .
+All checks passed!  216 files already formatted
+
+$ uv run python -m pytest tests/ -v --no-cov
+685 passed, 4 skipped (textual TUI tests, pre-existing), 3 deselected
+in 168.65s
+```
+
+#### Unresolved Questions
+- **K2 hover counts**: spec asks for absolute article counts in the
+  hover; J4's `section_mix.json` only emits shares (fractions) and
+  cannot be reverse-engineered to integer counts from shares alone. The
+  current K2 implementation surfaces shares as percentages (`Share:
+  42.0%`). If the K2 ↔ J4 contract is revised to also emit a per-month
+  total or per-cell count, switch the `customdata` payload accordingly
+  in `render_section_mix_chart`.
+- **K3 cell wording**: the spec says "cell shows which families reach
+  family-level BH-significant contrast"; the table currently shows the
+  significant feature names within each family cell (e.g.
+  `flesch_kincaid, gunning_fog`) so reviewers can see *which* feature
+  drove the family-level signal. If the desired display is just the
+  family name or a checkmark, the format is one f-string in
+  `_render_contrast_table_html`.
+
+#### Risks & Next Steps
+- Wave 3.2 (K4–K6) will add helpers to the same `html_report.py`. The
+  module is structured as free functions with no shared state to
+  minimise the merge surface — adjust headers/comments only if the new
+  helpers want a different organisation.
+- The K2 chart uses `include_plotlyjs="cdn"` so the resulting HTML
+  pulls plotly.min.js from a CDN at view time. For a fully offline
+  report the caller can post-process the fragment, or the helper can
+  be retargeted to `include_plotlyjs=True` (~3 MB inline per author
+  page) — left for a follow-up if it becomes a constraint.

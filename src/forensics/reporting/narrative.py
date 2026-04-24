@@ -24,8 +24,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from forensics.analysis.feature_families import FAMILY_COUNT, FEATURE_FAMILIES
 from forensics.analysis.utils import describe_velocity_acceleration_pct
-from forensics.models.analysis import AnalysisResult
+from forensics.models.analysis import AnalysisResult, ConvergenceWindow
 from forensics.survey.scoring import (
     SignalStrength,
     SurveyScore,
@@ -68,22 +69,69 @@ def _preregistration_clause(verification: VerificationResult | None) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _convergence_sentences(analysis: AnalysisResult) -> list[str]:
-    if not analysis.convergence_windows:
-        return []
-    strongest = max(analysis.convergence_windows, key=lambda w: w.convergence_ratio)
-    features = strongest.features_converging
+def _family_representative_pairs(window: ConvergenceWindow) -> list[tuple[str, str]]:
+    """Return ``[(family, representative_feature), ...]`` for family-aware narratives.
+
+    The pipeline-A scorer in ``analysis/convergence.py`` writes one
+    representative feature per family into ``features_converging`` (see
+    ``_pipeline_a_from_stylometry``). Re-deriving the family-to-feature
+    mapping here, rather than trusting positional alignment with
+    ``families_converging``, keeps the pairing robust if either list is
+    reordered or filtered downstream. Only features that map to a family
+    listed in ``families_converging`` are returned.
+    """
+    families_in_window = set(window.families_converging)
+    pairs = [
+        (FEATURE_FAMILIES[feat], feat)
+        for feat in window.features_converging
+        if feat in FEATURE_FAMILIES and FEATURE_FAMILIES[feat] in families_in_window
+    ]
+    pairs.sort(key=lambda p: (p[0], p[1]))
+    return pairs
+
+
+def _families_convergence_sentence(window: ConvergenceWindow, author_slug: str) -> str | None:
+    """Phase 15 K1 — narrative sentence keyed on ``families_converging``.
+
+    Returns ``None`` when family-level data is absent so callers can fall back
+    to the legacy feature-level sentence (older artifacts).
+    """
+    if not window.families_converging:
+        return None
+    pairs = _family_representative_pairs(window)
+    if not pairs:
+        return None
+    family_phrase = ", ".join(f"{fam} ({feat})" for fam, feat in pairs)
+    month_year = window.start_date.strftime("%b %Y")
+    return (
+        f"{author_slug}'s {month_year} window shows convergence across "
+        f"{len(window.families_converging)} of {FAMILY_COUNT} feature families: "
+        f"{family_phrase}."
+    )
+
+
+def _legacy_convergence_sentence(window: ConvergenceWindow) -> str:
+    """Pre-Phase-15 narrative sentence for artifacts without families data."""
+    features = window.features_converging
     feature_preview = ", ".join(features[:5])
     if len(features) > 5:
         feature_preview += f", and {len(features) - 5} more"
-    return [
-        (
-            f"A convergence window beginning {strongest.start_date.isoformat()} "
-            f"spans {len(features)} feature(s) shifting simultaneously "
-            f"({feature_preview}), with an agreement ratio of "
-            f"{strongest.convergence_ratio:.0%}."
-        )
-    ]
+    return (
+        f"A convergence window beginning {window.start_date.isoformat()} "
+        f"spans {len(features)} feature(s) shifting simultaneously "
+        f"({feature_preview}), with an agreement ratio of "
+        f"{window.convergence_ratio:.0%}."
+    )
+
+
+def _convergence_sentences(analysis: AnalysisResult, author_slug: str) -> list[str]:
+    if not analysis.convergence_windows:
+        return []
+    strongest = max(analysis.convergence_windows, key=lambda w: w.convergence_ratio)
+    families_sentence = _families_convergence_sentence(strongest, author_slug)
+    if families_sentence is not None:
+        return [families_sentence]
+    return [_legacy_convergence_sentence(strongest)]
 
 
 def _effect_size_sentences(analysis: AnalysisResult) -> list[str]:
@@ -221,7 +269,7 @@ def generate_evidence_narrative(
             "No evidence of AI-assisted writing was detected above the pre-registered thresholds."
         )
     else:
-        sentences.extend(_convergence_sentences(analysis_result))
+        sentences.extend(_convergence_sentences(analysis_result, author_slug))
         sentences.extend(_effect_size_sentences(analysis_result))
         sentences.extend(_drift_sentences(analysis_result))
         sentences.extend(_change_point_sentences(analysis_result))
