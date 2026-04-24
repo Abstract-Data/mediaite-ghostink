@@ -35,27 +35,25 @@ except ImportError:  # pragma: no cover - fallback exercised only pre-Unit-4
         "flesch_kincaid": "readability",
         "coleman_liau": "readability",
         "gunning_fog": "readability",
-        # Sentence structure
+        # Sentence structure (incl. paragraph_length_variance)
         "sent_length_mean": "sentence_structure",
         "sent_length_std": "sentence_structure",
         "sent_length_skewness": "sentence_structure",
         "subordinate_clause_depth": "sentence_structure",
         "conjunction_freq": "sentence_structure",
         "passive_voice_ratio": "sentence_structure",
-        # Paragraph shape
-        "paragraph_length_variance": "paragraph_shape",
+        "paragraph_length_variance": "sentence_structure",
         # Entropy
         "bigram_entropy": "entropy",
         "trigram_entropy": "entropy",
         # Self-similarity
         "self_similarity_30d": "self_similarity",
         "self_similarity_90d": "self_similarity",
-        # AI / formula markers
+        # AI / formula / voice register markers
         "ai_marker_frequency": "ai_markers",
         "formula_opening_score": "ai_markers",
         "hedging_frequency": "ai_markers",
-        # Voice
-        "first_person_ratio": "voice",
+        "first_person_ratio": "ai_markers",
     }
     FAMILY_COUNT: int = len(set(FEATURE_FAMILIES.values()))
 

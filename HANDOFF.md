@@ -3066,3 +3066,92 @@ uv run ruff check . && uv run ruff format --check .
 ### Risks & Next Steps
 - The simplified `stable_sort_artifact_list` returns its input unchanged when the `kind` resolves to an empty `_ARTIFACT_SORT_KEYS` tuple (would be a logic error — currently impossible since all three registered kinds are non-empty). If a future maintainer registers a kind with `tuple()`, every record sorts to the same key — keep this in mind.
 - The parity-test fixture stubs the orchestrator's `uuid4` and `datetime` only; if a future signal change introduces another stochastic source (e.g. random seed unset in a new bootstrap path) the parity test will fail loudly and pin where the new non-determinism lives. That's the test working as designed.
+
+---
+
+### Fix #5: Convergence-ratio ceiling at 0.75 (regroup single-member families)
+**Status:** Complete
+**Date:** 2026-04-24
+**Agent/Session:** subagent on wave2-parking worktree (issue #5)
+
+#### What Was Done
+Phase 15 B-followup. The post-Phase-15 full-analysis run pinned 89.8% of windows
+at convergence_ratio = 0.75 because two single-member families never co-fired
+with the multi-member six. Folded both into related multi-member families to
+restore a 1.00 theoretical ceiling.
+
+- `voice` (`first_person_ratio`) → folded into `ai_markers` (first-person
+  suppression is a register marker AI tools systematically affect, alongside
+  hedging and formula openings).
+- `paragraph_shape` (`paragraph_length_variance`) → folded into
+  `sentence_structure` (paragraph shape is structural variance at the same
+  syntactic level the rest of that family already measures).
+- `FAMILY_COUNT` dropped 8 → 6.
+- New theoretical max convergence_ratio: **1.00** (was 0.75).
+- Added `test_single_member_families_were_eliminated` regression invariant so a
+  future feature addition cannot quietly re-introduce the ceiling.
+
+#### Decision: Approach A (regroup) over Approach B (drop threshold)
+Approach B (lowering `convergence_min_feature_ratio` from 0.50 → 0.40) was
+explicitly suggested as the pragmatic fix, but it does not address the root
+cause — the structural cap remains at 0.75 because the two singleton families
+stay unreachable. Lowering the threshold only makes the gate easier to pass; it
+does not let real, multi-axis convergence read above 0.75. Approach A removes
+the cap so the metric reflects actual feature-family agreement on the [0, 1]
+range. The two merges are principled (both fold a singleton into a related
+multi-member family along an existing semantic axis), so the regroup defends
+itself on substantive grounds rather than purely operational ones.
+
+The H2 preregistration claim in `data/preregistration/amendment_phase15.md`
+was DRAFT (no author sign-off), so updating it to reference the 6-family
+registry instead of the 8-family registry was in scope. The threshold value
+itself (0.50) is unchanged — only the denominator moved.
+
+#### Files Modified
+- `src/forensics/analysis/feature_families.py` — `FEATURE_FAMILIES` dict
+  remapped (singleton families folded), module docstring rewritten with the
+  rationale and the new ceiling.
+- `src/forensics/analysis/convergence.py` — pre-Unit-4 fallback dict updated
+  to mirror the canonical registry.
+- `tests/unit/test_feature_families.py` — `FAMILY_COUNT == 6` pin, updated
+  `family_for` assertions, new `test_single_member_families_were_eliminated`
+  invariant guard, updated `families_converging` example values.
+- `tests/unit/test_convergence.py` — `test_multi_feature_alignment_within_window_detected`
+  now uses one feature per surviving family (6 representatives); comment in
+  `test_single_changepoint_single_feature_emits_window` notes the new denominator.
+- `tests/unit/test_section_contrast.py` — assertion now expects
+  `first_person_ratio` under `ai_markers` instead of `voice`.
+- `tests/unit/test_reporting_section.py` — `_result_with_families` fixture
+  swapped `voice → entropy` representative; narrative assertion updated to
+  "5 of 6 feature families".
+- `data/preregistration/amendment_phase15.md` — H2 claim text references the
+  6-family registry; explanatory note added with the issue #5 rationale.
+
+#### Verification
+```
+uv run python -m pytest tests/unit/test_feature_families.py tests/unit/test_pipeline_a_family_score.py tests/unit/test_convergence.py -v --no-cov
+  → 20 passed
+
+uv run python -m pytest tests/ -k "convergence or families or family" -v --no-cov
+  → 42 passed
+
+uv run python -m pytest tests/unit/test_section_contrast.py tests/unit/test_reporting_section.py -v --no-cov
+  → 18 passed
+
+uv run python -m pytest tests/ --no-cov -q
+  → all green (1 pre-existing xfail in test_section_residualize.py — unrelated to this work)
+
+uv run ruff check . && uv run ruff format --check .
+  → all checks passed (1 pre-existing format diff in src/forensics/reporting/html_report.py
+    that is on main, not introduced here)
+```
+
+#### Risks & Next Steps
+- Cached pre-issue-#5 convergence artifacts on disk encode the old 8-family
+  ratios. They should be invalidated by the next analysis run because
+  `convergence_min_feature_ratio` is in the config-hash field set; consumers
+  that read raw `convergence_ratio` floats from old JSON without re-running
+  the pipeline will see a mix of 0.75-ceiling and 1.00-ceiling values.
+- The pre-Unit-4 fallback dict in `convergence.py` is still drift bait — it
+  duplicates the canonical registry. Consolidating it (or asserting equality
+  at import time) is out of scope here but worth a follow-up.

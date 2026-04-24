@@ -97,9 +97,11 @@ def test_happy_path_two_distinct_sections_produces_significant_pair() -> None:
     assert pair.section_b == "politics"
     assert pair.n_a == 60
     assert pair.n_b == 60
-    assert "voice" in pair.significant_features_by_family
-    assert "first_person_ratio" in pair.significant_features_by_family["voice"]
+    # Phase 15 B-followup (issue #5): ``first_person_ratio`` was folded into
+    # ``ai_markers`` to remove the convergence-ratio ceiling, so both
+    # voice-style and hedging features now surface under the same family.
     assert "ai_markers" in pair.significant_features_by_family
+    assert "first_person_ratio" in pair.significant_features_by_family["ai_markers"]
     assert "hedging_frequency" in pair.significant_features_by_family["ai_markers"]
     assert "readability" in pair.significant_features_by_family
     assert "flesch_kincaid" in pair.significant_features_by_family["readability"]

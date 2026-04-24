@@ -40,7 +40,15 @@ from forensics.reporting.narrative import generate_evidence_narrative
 
 
 def _result_with_families() -> AnalysisResult:
-    """Synthetic ``AnalysisResult`` exercising the families_converging path."""
+    """Synthetic ``AnalysisResult`` exercising the families_converging path.
+
+    Phase 15 B-followup (issue #5): the family registry was regrouped from
+    8 → 6 families. ``voice`` was folded into ``ai_markers`` and
+    ``paragraph_shape`` into ``sentence_structure``; the fixture below
+    represents 5 of the 6 surviving families with one canonical
+    representative feature each (mirroring what the per-family pipeline-A
+    scorer emits in production).
+    """
     slug = "david-gilmour"
     cps = [
         ChangePoint(
@@ -57,7 +65,7 @@ def _result_with_families() -> AnalysisResult:
             "mattr",
             "sent_length_mean",
             "ai_marker_frequency",
-            "first_person_ratio",
+            "bigram_entropy",
         )
     ]
     window = ConvergenceWindow(
@@ -65,19 +73,19 @@ def _result_with_families() -> AnalysisResult:
         end_date=date(2026, 2, 28),
         features_converging=[
             "ai_marker_frequency",
-            "first_person_ratio",
+            "bigram_entropy",
             "flesch_kincaid",
             "mattr",
             "sent_length_mean",
         ],
         families_converging=[
             "ai_markers",
+            "entropy",
             "lexical_richness",
             "readability",
             "sentence_structure",
-            "voice",
         ],
-        convergence_ratio=0.625,
+        convergence_ratio=5.0 / 6.0,
         pipeline_a_score=0.72,
         pipeline_b_score=0.0,
         pipeline_c_score=None,
@@ -147,16 +155,16 @@ def test_narrative_uses_families_converging() -> None:
     # Spec example wording: "<slug>'s <Mon YYYY> window shows convergence
     # across N of M feature families: family (feat), ..."
     expected_phrase = (
-        "david-gilmour's Dec 2025 window shows convergence across 5 of 8 feature families"
+        "david-gilmour's Dec 2025 window shows convergence across 5 of 6 feature families"
     )
     assert expected_phrase in text
     # Every family/representative pair should appear in "family (feature)" form.
     for family, feat in [
         ("ai_markers", "ai_marker_frequency"),
+        ("entropy", "bigram_entropy"),
         ("lexical_richness", "mattr"),
         ("readability", "flesch_kincaid"),
         ("sentence_structure", "sent_length_mean"),
-        ("voice", "first_person_ratio"),
     ]:
         assert f"{family} ({feat})" in text
 
