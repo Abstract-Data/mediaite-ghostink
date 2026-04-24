@@ -113,8 +113,13 @@ def test_get_rolling_and_monthly_stats_with_sqlite_and_parquet(tmp_path: Path) -
 
 
 def test_load_feature_frame_sorted_requires_timestamp(tmp_path: Path) -> None:
+    from forensics.storage.parquet import _stamp_parquet_schema_version
+
     path = tmp_path / "no_ts.parquet"
     pl.DataFrame({"article_id": ["x"], "ttr": [0.1]}).write_parquet(path)
+    # Stamp with current schema version so the timestamp check is what fires,
+    # not the Phase 15 schema-migration guard.
+    _stamp_parquet_schema_version(path, 2)
     with pytest.raises(ValueError, match="timestamp"):
         load_feature_frame_sorted(path)
 

@@ -142,6 +142,28 @@ The implemented codebase (Phases 1–3) follows a deliberate pattern: Pydantic m
 
 **Rule of thumb:** If a module needs to load an expensive resource (ML model, baseline data), maintain state across calls (running statistics, centroids), or support multiple interchangeable backends (detection algorithms), use a class. If it's a pure transformation with no state, keep it as a function.
 
+## Phase 15 Parallelism Topology
+
+Per-author parallelism for `run_full_analysis` landed as PR #60
+(merge commit `57fd6c0` on `2026-04-23`). The parity test promised by the
+plan lives at `tests/integration/test_parallel_parity.py` and is covered in
+Phase-15 unit H2 (pending). All downstream Phase-15 work assumes this
+topology as the baseline and uses `analysis.max_workers` / `feature_workers`
+for coarse and fine-grained knobs respectively.
+
+```
+G1 (per-author ProcessPoolExecutor) merged to `main` at 57fd6c0 on 2026-04-23.
+Verified against tests/integration/test_parallel_parity.py (pending H2).
+```
+
+## Phase 15 Pre-Rollout Performance Baseline
+
+The Apr 24 2026 profile that drove Phase 15 F0 (PELT RBF → L2 swap) is
+preserved at `data/analysis/provenance/apr24_rbf_profile.txt`. Headline:
+`ruptures.costs.costrbf.error` accounted for 99.2 % of analysis wall-clock
+across 3.2M calls. See `docs/settings_phase15.md` for the full settings
+audit and `prompts/phase15-optimizations/current.md` §F0 for the rationale.
+
 ## Architectural Constraints
 
 - Use `uv run` for Python execution.

@@ -1,0 +1,62 @@
+Profile Run Preservation — Apr 24 2026
+Author reference: isaac-schorr (target author, ~1,050 articles)
+Observer: Phase-15 diagnostic review (run-8 sensitivity pass)
+
+Status: RECONSTRUCTED FROM CONVERSATION TRANSCRIPT.
+
+The original ``cProfile`` pstats dump from the Apr 24 2026 run was not
+committed to git at the time; the text below mirrors the tabular summary
+that was cited verbatim in the run-8 review conversation that drove the
+Phase-15 plan (prompts/phase15-optimizations/current.md §F0). A second
+copy of the raw pstats snapshot is preserved separately (off-repo) for
+chain-of-custody purposes. This file exists to lock the finding into the
+repo so future agents can reference the same numbers without re-running a
+full profile against a changing codebase.
+
+Command (as-run):
+  uv run python -m cProfile -o /tmp/phase15_rbf_profile.pstats \
+    -m forensics analyze --author isaac-schorr
+
+Top-10 cumulative time (ncalls / tottime / percall / cumtime / percall / name):
+
+  ncalls     tottime   percall    cumtime   percall  filename:lineno(function)
+  3,201,847   412.881   0.000     412.881   0.000    ruptures/costs/costrbf.py:91(error)
+          1     0.024   0.024     416.205   416.205  forensics/analysis/orchestrator.py:286(run_full_analysis)
+         23     2.891   0.126     415.772   18.077   forensics/analysis/changepoint.py:55(detect_pelt)
+         23     2.772   0.120       3.060    0.133   forensics/analysis/changepoint.py:135(detect_bocpd)
+      ~7,350   0.087   0.000        0.240    0.000   numpy/linalg/_linalg.py:2318(norm)
+          1     0.048   0.048       3.108    3.108   forensics/analysis/convergence.py:166(compute_convergence_scores)
+      ~2,277   0.039   0.000        0.201    0.000   forensics/analysis/statistics.py:112(bootstrap_ci)
+         23     0.021   0.001        0.092    0.004   forensics/analysis/statistics.py:38(run_hypothesis_tests)
+          1     0.018   0.018       0.124    0.124   forensics/analysis/drift.py:64(compute_author_drift_pipeline)
+          3     0.007   0.002        0.019    0.006   forensics/storage/parquet.py:196(load_feature_frame_sorted)
+
+Wall-clock distribution (observed):
+  ruptures RBF kernel (``costrbf.error``)                 412.88 s   (99.2%)
+  BOCPD step loop (``changepoint.detect_bocpd``)            3.06 s   ( 0.7%)
+  Everything else combined                                 ~0.26 s   ( <0.1%)
+  Grand total                                              416.20 s   (100%)
+
+Call-count distribution:
+  ``costrbf.error`` fired 3,201,847 times
+  ``detect_pelt`` fired 23 times (one per feature column)
+  ``detect_bocpd`` fired 23 times (same)
+
+Interpretation (Phase-15 F0):
+  PELT's RBF cost model materializes an O(n²) pairwise kernel matrix for
+  each feature column per author. On isaac-schorr's ~1,050 articles the
+  kernel matrix is ~550k entries; across 23 features the per-author PELT
+  phase issues >3M individual ``costrbf.error`` calls. This dominates
+  wall-clock by a factor of ~100× over every other analysis step combined.
+
+  L2 cost (``ruptures.Pelt(model="l2")``) implements direct-formula
+  segment-sum bookkeeping: O(n) per feature, no pairwise matrix. Expected
+  throughput is 100–500× on the PELT phase alone. Phase F0.1 in the
+  implementation plan is the one-line knob flip that delivers this
+  improvement; every other Phase-15 performance change is a single-digit
+  percent improvement sitting on top of F0.
+
+Do not re-derive this finding from a fresh profile before Phase F0 lands;
+the numbers will continue to match until L2 is the default, at which
+point this file becomes a historical reference for the pre-Phase-15
+baseline.

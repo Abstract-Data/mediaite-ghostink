@@ -88,6 +88,7 @@ def _root(
 from forensics.cli.analyze import analyze  # noqa: E402
 from forensics.cli.calibrate import calibrate_app  # noqa: E402
 from forensics.cli.extract import extract  # noqa: E402
+from forensics.cli.migrate import features_app, migrate  # noqa: E402
 from forensics.cli.report import report  # noqa: E402
 from forensics.cli.scrape import scrape_app  # noqa: E402
 from forensics.cli.survey import survey_app  # noqa: E402
@@ -95,9 +96,11 @@ from forensics.cli.survey import survey_app  # noqa: E402
 app.add_typer(scrape_app, name="scrape")
 app.add_typer(survey_app, name="survey")
 app.add_typer(calibrate_app, name="calibrate")
+app.add_typer(features_app, name="features")
 app.command(name="extract")(extract)
 app.command(name="analyze")(analyze)
 app.command(name="report")(report)
+app.command(name="migrate")(migrate)
 
 
 _SETTINGS_LOAD_ERRORS: tuple[type[BaseException], ...] | None = None

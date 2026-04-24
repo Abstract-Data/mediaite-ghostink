@@ -210,6 +210,71 @@ uv run pytest tests/ -v --cov=src --cov-report=term-missing
 uv run pytest tests/ -v --hypothesis-show-statistics
 ```
 
+## Migrations (Phase 15)
+
+Storage-layer migrations now land through the Typer CLI rather than the old
+``scripts/`` only path. Two entry points, both idempotent:
+
+```bash
+# SQLite: authors.is_shared_byline, schema_version bookkeeping
+uv run forensics migrate
+
+# Feature parquets: stamp forensics.schema_version + add section column
+uv run forensics features migrate              # in place (writes backup copy)
+uv run forensics features migrate --dry-run    # preview only, no writes
+```
+
+- ``forensics migrate`` calls ``Repository.apply_migrations()``; the same
+  runner also fires on every ``Repository`` context-manager open, so
+  operators rarely need to invoke it directly — but it's the canonical
+  surface for a ``migrate-then-analyze`` deploy script.
+- ``forensics features migrate`` walks ``data/features/*.parquet`` and runs
+  the Phase-15 Step-0.3 helper. Backups land under
+  ``data/features/_pre_phase15_backup/`` (filename-preserving). Rollback is
+  a straight ``mv`` of the backup copy.
+- Both commands tolerate missing target dirs (``data/``, ``data/features/``)
+  with a friendly stderr message and exit code ``0``.
+
+### Typer subcommand registration pattern (Phase 15 L6)
+
+New CLI subcommands follow this pattern so the dispatch table in
+``src/forensics/cli/__init__.py`` stays the single registration surface:
+
+```python
+# src/forensics/cli/foo.py
+from typing import Annotated
+import typer
+
+foo_app = typer.Typer(name="foo", help="One-line description.", no_args_is_help=True)
+
+@foo_app.command(name="bar")
+def bar(
+    flag: Annotated[bool, typer.Option("--flag", help="...")] = False,
+) -> None:
+    """Subcommand docstring."""
+    # imports inside the function body keep CLI startup fast
+    ...
+
+# Simple top-level command (no sub-app):
+def my_cmd(
+    arg: Annotated[str | None, typer.Option("--arg", help="...")] = None,
+) -> None:
+    """Docstring — this is what shows in --help."""
+    ...
+```
+
+And register inside ``src/forensics/cli/__init__.py``:
+
+```python
+from forensics.cli.foo import foo_app, my_cmd  # noqa: E402
+
+app.add_typer(foo_app, name="foo")        # nested sub-app
+app.command(name="mycmd")(my_cmd)         # top-level command
+```
+
+This is what Phase-15 L6 uses for ``forensics features migrate`` (sub-app)
+and ``forensics migrate`` (top-level).
+
 ## Git workflow (GitButler)
 
 Use GitButler CLI (`but`) for writes (commit, push, branch, merge, stash, rebase-style edits). The full command map and recipes live in the repo-local skill:

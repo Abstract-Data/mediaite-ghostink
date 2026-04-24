@@ -476,8 +476,7 @@ class ArticleHtmlFetchContext:
         missing = [name for name, value in legacy_required if value is None]
         if missing:
             raise TypeError(
-                "ArticleHtmlFetchContext legacy constructor missing required: "
-                + ", ".join(missing)
+                "ArticleHtmlFetchContext legacy constructor missing required: " + ", ".join(missing)
             )
         self.config = FetchConfig(
             root=root,

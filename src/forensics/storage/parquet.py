@@ -23,6 +23,74 @@ _DICT_FIELDS = frozenset(
     },
 )
 
+# Phase 15 Step 0.3 — feature parquet schema bookkeeping. Writers stamp
+# ``forensics.schema_version`` into parquet key/value metadata; the loader
+# rejects parquets stamped with a lower version and demands a migration
+# (see ``src/forensics/storage/migrations/002_feature_parquet_section.py``).
+FEATURE_PARQUET_SCHEMA_METADATA_KEY = "forensics.schema_version"
+
+
+class SchemaMigrationRequired(RuntimeError):
+    """Raised when a feature parquet needs migration to the current schema.
+
+    Operators resolve this by running ``forensics features migrate`` (see
+    ``src/forensics/cli/migrate.py``). The message carries both the observed
+    on-disk version and the version the current settings demand.
+    """
+
+    def __init__(self, path: Path, found: int | None, required: int) -> None:
+        self.path = path
+        self.found = found
+        self.required = required
+        found_str = "absent" if found is None else str(found)
+        super().__init__(
+            f"feature parquet at {path} requires schema migration: "
+            f"found={found_str}, required={required}. "
+            "Run `forensics features migrate` (see docs/RUNBOOK.md)."
+        )
+
+
+def _read_parquet_schema_version(path: Path) -> int | None:
+    """Return the ``forensics.schema_version`` stamped in parquet metadata, or None."""
+    try:
+        import pyarrow.parquet as pq
+    except ImportError:  # pragma: no cover — pyarrow ships with polars
+        return None
+    try:
+        meta = pq.read_metadata(path)
+    except (OSError, ValueError):
+        return None
+    kv = meta.metadata or {}
+    raw = kv.get(FEATURE_PARQUET_SCHEMA_METADATA_KEY.encode())
+    if raw is None:
+        return None
+    try:
+        return int(raw.decode("utf-8") if isinstance(raw, bytes) else raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _stamp_parquet_schema_version(path: Path, version: int) -> None:
+    """Rewrite ``path`` preserving data but adding our schema-version key.
+
+    Parquet metadata is immutable in-place, so we round-trip the file through
+    pyarrow to attach the key. Called from :func:`write_parquet_atomic` and
+    :func:`write_features` after the initial Polars write.
+    """
+    try:
+        import pyarrow.parquet as pq
+    except ImportError:  # pragma: no cover
+        return
+    try:
+        table = pq.read_table(path)
+    except (OSError, ValueError):
+        return
+    existing = dict(table.schema.metadata or {})
+    existing[FEATURE_PARQUET_SCHEMA_METADATA_KEY.encode()] = str(version).encode()
+    new_schema = table.schema.with_metadata(existing)
+    table = table.replace_schema_metadata(new_schema.metadata)
+    pq.write_table(table, path)
+
 
 def _serialize_record(rec: dict[str, Any]) -> dict[str, Any]:
     out: dict[str, Any] = {}
@@ -37,16 +105,30 @@ def _serialize_record(rec: dict[str, Any]) -> dict[str, Any]:
 def write_parquet_atomic(
     path: Path,
     frame: pl.DataFrame | list[dict[str, Any]],
+    *,
+    stamp_feature_schema: bool = True,
 ) -> None:
     """Write a Polars frame (or list of dicts) to Parquet, mkdir'ing parent dirs.
 
     Thin wrapper around ``pl.DataFrame.write_parquet`` that removes the
     ``path.parent.mkdir(parents=True, exist_ok=True)`` ceremony from callers
     (RF-DRY-004 / G1). Accepts an existing frame or a list of row dicts.
+
+    When ``stamp_feature_schema`` is True (the default, Phase 15 Step 0.3) the
+    current ``feature_parquet_schema_version`` is written into parquet
+    key/value metadata so downstream readers can detect out-of-date files and
+    demand a migration. The extra round-trip is cheap; opt out only for
+    unit-level tests that deliberately need an unstamped parquet.
     """
     ensure_parent(path)
     df = frame if isinstance(frame, pl.DataFrame) else pl.DataFrame(frame)
     df.write_parquet(path)
+    if stamp_feature_schema:
+        # Import here to avoid a module-load circular with settings.
+        from forensics.config import get_settings
+
+        version = get_settings().features.feature_parquet_schema_version
+        _stamp_parquet_schema_version(path, version)
 
 
 def save_numpy_atomic(path: Path, array: np.ndarray) -> None:
@@ -62,7 +144,12 @@ def save_numpy_compressed_atomic(path: Path, **arrays: np.ndarray) -> None:
 
 
 def write_features(features: list[FeatureVector], output_path: Path) -> None:
-    """Write feature vectors to Parquet (dict fields as JSON strings)."""
+    """Write feature vectors to Parquet (dict fields as JSON strings).
+
+    ``write_parquet_atomic`` stamps the current
+    ``feature_parquet_schema_version`` into parquet key/value metadata
+    automatically (Phase 15 Step 0.3).
+    """
     rows = [_serialize_record(f.to_flat_dict()) for f in features]
     write_parquet_atomic(output_path, rows)
 
@@ -103,7 +190,18 @@ def load_feature_frame_sorted(features_path: Path) -> pl.LazyFrame:
     (P2-PERF-002). Call ``.collect()`` at the boundary where a ``DataFrame`` is
     required. For the small number of eager callers, use
     :func:`load_feature_frame_sorted_eager`.
+
+    Raises :class:`SchemaMigrationRequired` when the parquet's stamped
+    ``forensics.schema_version`` is absent or below
+    ``settings.features.feature_parquet_schema_version`` (Phase 15 Step 0.3).
     """
+    # Import here so this module is safe to import before config is wired.
+    from forensics.config import get_settings
+
+    required = get_settings().features.feature_parquet_schema_version
+    found = _read_parquet_schema_version(features_path)
+    if found is None or found < required:
+        raise SchemaMigrationRequired(features_path, found, required)
     lf = scan_features(features_path)
     if "timestamp" not in lf.collect_schema().names():
         msg = f"features parquet missing timestamp: {features_path}"

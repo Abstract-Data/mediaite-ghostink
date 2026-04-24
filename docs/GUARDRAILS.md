@@ -118,6 +118,24 @@ Each Sign has:
 - Reason: C901 suppressions grew from 7 to 9 across review runs without corresponding reduction effort. Each suppression hides real complexity debt.
 - Provenance: Agent-learned — 2026-04-22 cross-run pattern analysis.
 
+**Sign: BOCPD `P(r=0)` Posterior Is Pinned to the Hazard Rate**
+- Trigger: Any code (new or reviewed) threshold-compares `P(r_t = 0 | x_{1:t})` or `log_pi_new[0]` against a tunable constant, expecting it to rise on true changepoints under constant-hazard Adams & MacKay BOCPD.
+- Instruction: Do NOT threshold this quantity under constant hazard — it collapses algebraically to the hazard rate itself (`log_pi_new[0] = log_h + log_evidence`; continuation mass `= (1−h) × evidence`; normalization `= evidence`; therefore `P(r=0) ≡ h`). Use a MAP-run-length reset rule instead: emit a change-point when the posterior MAP run-length drops below a configurable fraction of its previous value (`bocpd_map_drop_ratio`, `bocpd_min_run_length`). See Phase A in `prompts/phase15-optimizations/current.md`.
+- Reason: Run-8 sensitivity review (Apr 24 2026) found that BOCPD emitted `p_cp ≡ hazard_rate` for every feature and every timestep across all 10 authors. No tuning of σ², prior, or threshold could move the quantity off `h`. Phase 15 removed `bocpd_threshold` from the settings for this reason.
+- Provenance: Agent-learned — 2026-04-24 Phase-15 sensitivity review.
+
+**Sign: `bulk_fetch_mode` Metadata Column Is Effectively Empty**
+- Trigger: New analysis code reads `articles.metadata` (JSON column) expecting populated `category` / `tag` fields from WordPress.
+- Instruction: Do NOT assume `articles.metadata` carries section / category info — only 11 of 77,862 rows (0.01%) have it populated because `scraping.bulk_fetch_mode = true` skips the per-article metadata pass in favour of `content.rendered` bulk-fetch. Use the URL first-path-segment as the canonical section tag: `forensics.utils.url.section_from_url(url)` gives 100% coverage. See Phase J1 in `prompts/phase15-optimizations/current.md`.
+- Reason: Reading the empty column wastes compute, silently degrades section-conditioned analyses, and hides the real source-of-truth (the URL path).
+- Provenance: Agent-learned — 2026-04-24 article-tag audit (Phase 15 Unit 1 prep).
+
+**Sign: Do Not Mix Pre- and Post-Phase-15 Artifacts in One Analysis Run**
+- Trigger: Any code path (report builder, comparison loader, cache resolver, etc.) consumes `data/analysis/*_result.json` files from runs with different `config_hash` values.
+- Instruction: Treat mismatched `config_hash` values as incompatible by design — the hash invalidates across the Phase-15 boundary because several signal-bearing fields (`bocpd_detection_mode`, `convergence_min_feature_ratio`, `fdr_grouping`, `pelt_cost_model`, etc.) now participate via `json_schema_extra={"include_in_config_hash": True}`. Force a recompute (re-run `forensics analyze`) rather than attempting to merge. See `docs/settings_phase15.md` for the authoritative hash-participating field list.
+- Reason: Pooling pre- and post-Phase-15 artifacts mixes detections produced by incompatible detection rules, giving false confidence intervals and wrong FDR counts. The hash boundary exists to make the failure loud.
+- Provenance: Agent-learned — 2026-04-24 Phase-15 provenance pre-registration (Unit 1 L5).
+
 ## Agent and Change Management
 
 - Follow `AGENTS.md` in dev mode and `AGENTS.staging.md` in staging mode.

@@ -69,8 +69,18 @@ def _snapshot_thresholds(settings: ForensicsSettings) -> dict[str, Any]:
         "convergence_perplexity_drop_ratio": analysis.convergence_perplexity_drop_ratio,
         "convergence_burstiness_drop_ratio": analysis.convergence_burstiness_drop_ratio,
         "pelt_penalty": analysis.pelt_penalty,
+        "pelt_cost_model": analysis.pelt_cost_model,
         "bocpd_hazard_rate": analysis.bocpd_hazard_rate,
-        "bocpd_threshold": analysis.bocpd_threshold,
+        # Phase 15 Unit 1 — ``bocpd_threshold`` removed; the detection rule is
+        # now parameterised by ``bocpd_detection_mode`` + map_reset knobs.
+        "bocpd_detection_mode": analysis.bocpd_detection_mode,
+        "bocpd_map_drop_ratio": analysis.bocpd_map_drop_ratio,
+        "bocpd_min_run_length": analysis.bocpd_min_run_length,
+        "bocpd_student_t": analysis.bocpd_student_t,
+        "convergence_cp_source": analysis.convergence_cp_source,
+        "fdr_grouping": analysis.fdr_grouping,
+        "pipeline_b_mode": analysis.pipeline_b_mode,
+        "section_residualize_features": analysis.section_residualize_features,
     }
 
 
