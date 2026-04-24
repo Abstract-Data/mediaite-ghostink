@@ -71,3 +71,29 @@ def test_ingest_single_post_handles_missing_modified() -> None:
     article = _ingest_single_post(post, "author-123")
     assert article is not None
     assert article.modified_date is None
+
+
+def test_ingest_single_post_returns_none_for_missing_required_field() -> None:
+    # link missing → _wp_post_to_article raises KeyError; helper must swallow.
+    bad = {
+        "id": 1,
+        "title": {"rendered": "no link"},
+        "date": "2024-01-01T00:00:00",
+    }
+    assert _ingest_single_post(bad, "author-123") is None
+
+
+def test_ingest_single_post_returns_none_for_bad_title_shape() -> None:
+    # title is a string instead of the expected {"rendered": ...} dict.
+    bad = {
+        "id": 2,
+        "link": "https://www.mediaite.com/x/",
+        "title": "Unwrapped title",
+        "date": "2024-01-01T00:00:00",
+    }
+    assert _ingest_single_post(bad, "author-123") is None
+
+
+def test_ingest_single_post_returns_none_for_unparseable_date() -> None:
+    bad = _wp_post(date="not-a-date")
+    assert _ingest_single_post(bad, "author-123") is None

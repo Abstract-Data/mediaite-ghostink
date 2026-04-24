@@ -218,14 +218,27 @@ def test_extract_metadata_fixture() -> None:
 
 
 def test_looks_coauthored() -> None:
+    # Unambiguous delimiters.
     assert looks_coauthored("Alice and Bob")
     assert looks_coauthored("Alice & Bob")
     assert looks_coauthored("Alice with Bob")
-    assert looks_coauthored("Alice, Bob")
-    assert looks_coauthored("Alice AND Bob")
+    assert looks_coauthored("Alice AND Bob")  # case-insensitive
+    # Multi-word comma separation: clearly two names.
+    assert looks_coauthored("Alice Smith, Bob Jones")
+    assert looks_coauthored("Alice Smith, Bob Jones, Carol Davis")
+    # Single-author bylines must not flag.
     assert not looks_coauthored("Alice Smith")
     assert not looks_coauthored("")
     assert not looks_coauthored("   ")
+    # "Last, First" format — single author with comma. Must not false-positive.
+    assert not looks_coauthored("Smith, John")
+    assert not looks_coauthored("Smith, John Michael")
+    # Suffix/credential tokens after a comma are not additional authors.
+    assert not looks_coauthored("John Smith, Jr.")
+    assert not looks_coauthored("John Smith, PhD")
+    assert not looks_coauthored("John Smith, III")
+    # Ambiguous single-word pairs are conservatively rejected.
+    assert not looks_coauthored("Alice, Bob")
 
 
 def test_mediaite_host_detection() -> None:

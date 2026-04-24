@@ -352,8 +352,21 @@ def run_compare_only(
     paths: AnalysisArtifactPaths,
     author_slug: str | None = None,
 ) -> dict[str, Any]:
-    """Regenerate ``comparison_report.json`` from on-disk artifacts."""
+    """Regenerate ``comparison_report.json`` from on-disk artifacts.
+
+    When ``author_slug`` is provided, the caller always wants that single
+    author compared even if it isn't in the configured target list (matches
+    the pre-Phase-13 CLI contract). A warning is logged so the ambiguity
+    surfaces in the operator's logs.
+    """
     targets, controls = _resolve_targets_and_controls(config, author_slug)
+    if author_slug and author_slug not in targets:
+        logger.warning(
+            "compare-only: author_slug=%r is not a configured target; "
+            "forcing single-slug comparison (controls are still loaded from config)",
+            author_slug,
+        )
+        targets = [author_slug]
     out: dict[str, Any] = {"targets": {}}
     for tid in targets:
         try:

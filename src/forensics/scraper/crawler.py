@@ -444,14 +444,24 @@ async def collect_article_metadata(
 def _ingest_single_post(post: object, author_id: str) -> Article | None:
     """Parse one WordPress ``wp/v2/posts`` element into an ``Article``.
 
-    Pure function: no I/O, no locks, no async. Returns ``None`` if the item
-    isn't a dict (the WP API occasionally returns stub rows on rate-limit).
-    Kept small so the ingest loop in :func:`_ingest_author_posts` stays
-    readable and the parse step is independently testable (RF-CPLX-002).
+    Pure function: no I/O, no locks, no async. Returns ``None`` when the
+    item isn't a dict (the WP API occasionally returns stub rows on
+    rate-limit) or when required fields are missing/malformed. Kept small
+    so the ingest loop in :func:`_ingest_author_posts` stays readable and
+    the parse step is independently testable (RF-CPLX-002).
     """
     if not isinstance(post, dict):
         return None
-    return _wp_post_to_article(post, author_id)
+    try:
+        return _wp_post_to_article(post, author_id)
+    except (KeyError, TypeError, ValueError) as exc:
+        logger.warning(
+            "skipping malformed WP post for author_id=%s (%s): %s",
+            author_id,
+            type(exc).__name__,
+            exc,
+        )
+        return None
 
 
 async def _persist_page_articles(
