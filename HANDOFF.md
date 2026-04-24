@@ -3540,3 +3540,64 @@ only ``author_id`` present in the manifest. See "Risks & Next Steps".
   ``passes_via`` field will continue to load via the model's default
   factory; downstream code that wants to surface drift-only windows must
   branch on ``"drift_only" in window.passes_via``.
+
+---
+
+## Report-E: Notebook 09 executive summary (2026-04-24)
+
+### Task Title
+Convert `notebooks/09_full_report.ipynb` from a narrative-only template into an executable executive summary that synthesizes the post-fix Mediaite findings.
+
+**Status:** Complete
+**Date:** 2026-04-24
+**Agent/Session:** general-purpose subagent (worktree `agent-a706be83`, branch `report-e-nb09`, PR #92)
+
+#### What Was Done
+- Replaced all four placeholder markdown cells in `notebooks/09_full_report.ipynb` with a nine-cell executive summary: title + cover, Executive Summary prose (4 headline findings + caveats), top-line metrics intro, live metrics code cell, finding-strength classification intro, classification code cell, recommendations + methodology pointers, provenance intro, and provenance code cell.
+- Headline numbers in the metrics table are computed live from `data/analysis/*_result.json`, not hardcoded — every cell run re-derives `pb_max>0` author count, FDR-significant test totals, and per-author convergence stats.
+- Classification cell hydrates `ConvergenceWindow` and `HypothesisTest` pydantic models from each per-author result, picks the best window (max `pa+pb`), and runs `forensics.models.report.classify_finding_strength` against the live `comparison_report.json` (falls back to neutral when absent). Probability features flagged unavailable so Pipeline C clause does not gate STRONG.
+- Provenance cell prints `git rev-parse HEAD` (via `subprocess`) plus `compute_model_config_hash(settings.analysis)` plus an ISO-8601 UTC timestamp.
+
+#### Files Modified
+- `notebooks/09_full_report.ipynb` — replaced 4 narrative-only markdown cells with 9 cells (5 markdown + 4 code, of which 3 produce displayed outputs). 396 insertions / 27 deletions.
+
+#### Verification Evidence
+```
+JUPYTER_CONFIG_DIR=/tmp/jupyter-empty-cfg uv run --with nbconvert --with ipykernel \
+  jupyter nbconvert --to notebook --execute notebooks/09_full_report.ipynb \
+  --output 09_full_report.ipynb
+  → [NbConvertApp] Writing 25637 bytes to notebooks/09_full_report.ipynb (no errors)
+
+uv run ruff check notebooks/09_full_report.ipynb
+  → All checks passed!
+
+# Headline numbers from baked-in cell outputs:
+| authors with PB_max > 0          | 14/14                    |
+| significant tests (BH-FDR)       | 11,842/113,840           |
+| colby-hall PB_max                | 0.589                    |
+| colby-hall PA_max                | 0.94                     |
+| convergence ratio max            | 1.00                     |
+| colby-hall AB-confirmed windows  | 170                      |
+
+# Provenance cell output:
+| Git SHA              | 6a5ef918c3fabbb4386f89c322a7c7152087078c |
+| Analysis-config hash | ab3c7a2c55defcac                         |
+| Python               | 3.13.13                                  |
+```
+
+#### Decisions Made
+- **Live computation over hardcoded numbers**: every metric in the pre-fix vs post-fix table is derived from `data/analysis/` at execute time. The "pre-fix" column stays hardcoded (it is historical context, not a re-runnable measurement) but the "post-fix" column will track future runs without notebook edits.
+- **AB-confirmed = `'ab' in passes_via`**: the convergence orchestrator already labels windows that pass both Pipeline A and Pipeline B with the `'ab'` flag. Using that flag (rather than re-deriving thresholds in the notebook) keeps the notebook in sync with whatever thresholds the orchestrator uses.
+- **Classification picks max(pa+pb) window**: avoids privileging either pipeline and matches how the headline `colby-hall` finding was originally framed.
+- **`comparison_report.json` is optional**: the file may not exist in every analysis bundle; the notebook silently falls back to a neutral control score (`editorial_vs_author_signal=0.0`) so cell execution never depends on a sidecar that downstream operators might not regenerate.
+- **No charts**: the task spec explicitly called the chapter "more prose-heavy than the others" with "minimal" code cells. Tables (one Markdown summary + two polars DataFrames) are sufficient for the executive layer; charts live in chapters 05-08.
+- **Symlinked `data/` into worktree only for execution**: removed the symlink and restored the worktree-local `data/` stubs before staging so the commit only contains the notebook diff.
+
+#### Unresolved Questions
+- The "convergence ratio max = 0.75" pre-fix value in the metrics table comes from the user-supplied baseline; it was not independently re-derived against a pre-Phase-15 artifact set in this session.
+- `mediaite` and `mediaite-staff` still appear in the strength-classification table. The user's caveat (filter shared bylines via the survey gate) is documented in the Recommendations cell but not enforced in the notebook itself — applying the gate would change the visible top-line and is left for the survey-gate integration round.
+
+#### Risks & Next Steps
+- The classification cell currently labels `colby-hall` as `moderate` (not `strong`) because the chosen "best" window has only ~1094 significant tests but few of them clear the `corrected_p_value < 0.01 AND |d| >= 0.8` strong-test bar. If a future stricter prereg lock raises that bar, expect more authors to drop to `weak`/`none`; if it loosens it, `colby-hall` should be the first to promote to `strong`.
+- The provenance cell uses the worktree's HEAD, not the parent repo's. Operators rendering the report from a worktree need to be aware that the recorded SHA is the branch HEAD, not the published main commit.
+- Pipeline C remains 0.0 across the board; the executive summary's "2-of-3 ensemble" framing will need to be revisited once Phase 9 token-probability data lands.
