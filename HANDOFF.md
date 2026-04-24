@@ -3361,3 +3361,76 @@ uv run forensics analyze section-profile --features-dir data/features --output /
 ### Risks & Next Steps
 - If a future change adds a new analysis-threshold field to `_snapshot_thresholds` without bumping the template's narrative pointer (`amended_from`), an existing filled lock will read as `mismatch` against the new field. That's the correct behaviour but worth noting in a future amendment file when it happens.
 - `verify_preregistration`'s template short-circuit checks for `locked_at is None` AND `analysis` absent. If an operator partially fills the template (e.g. sets `locked_at` but leaves `analysis` empty), the function falls into the existing diff path and logs a `mismatch` against every threshold. That's intentional — partial locks should not pretend to be confirmatory — but the operator-facing message could be clearer; defer to a follow-up if it comes up in practice.
+
+---
+
+## Phase 15 G1 + G3 + Pipeline-C wiring — Parallel orchestrator + per-stage timings + explicit compare pair (2026-04-24)
+
+### Status
+Complete — `--max-workers` is wired through the CLI into a `ProcessPoolExecutor` dispatch, the bench script emits non-zero per-stage timings via a new `AnalysisTimings` dataclass, and `forensics analyze --compare-pair TARGET,CONTROL` runs a one-off comparison that bypasses the configured target/control role assignments.
+
+### What Was Done
+
+#### Pipeline C wiring (Issue #2)
+- `src/forensics/analysis/orchestrator.py::_resolve_targets_and_controls` accepts an optional `compare_pair` kwarg; when supplied it overrides the configured `[[authors]] role` resolution.
+- `run_full_analysis(..., compare_pair=...)` and `run_compare_only(..., compare_pair=...)` thread the explicit pair through to the existing `compare_target_to_controls` call.
+- `src/forensics/cli/analyze.py` adds `--compare-pair TARGET,CONTROL` (parsed via `_parse_compare_pair`, raises `typer.BadParameter` on malformed input). `AnalyzeContext` carries the typed pair so both `_run_full_analysis_stage` and `_run_compare_only_flow` consume it.
+- Note: the codebase's "Pipeline C" in `convergence.py` is the *probability* trajectory (perplexity / burstiness) pipeline, separate from the target/control comparison stage. The user's bug report referred to the comparison wiring; that's what this change fixes. Pipeline C scores in `convergence_windows` remain `None` until a Phase-9 probability trajectory is supplied.
+
+#### G1 max_workers orchestrator wiring (Issue #7)
+- `run_full_analysis(..., max_workers=N)` resolves to `_resolve_max_workers(config, override)` (override > `settings.analysis.max_workers` > `cpu_count() - 1`, always ≥ 1).
+- When the resolved worker count > 1 and there are ≥ 2 authors, the per-author loop dispatches via `concurrent.futures.ProcessPoolExecutor`. Each `_per_author_worker` opens its own `Repository` (SQLite handles aren't fork-safe), writes its per-author JSON artifacts via the existing atomic `write_json_artifact` path, and returns the assembled `AnalysisResult` plus per-stage timings to the main process.
+- Single-author runs short-circuit to serial dispatch (`if len(slugs) <= 1: workers = 1`) so `forensics analyze --author <slug>` doesn't pay the spawn / fork cost.
+- `mp_context` parameter (default `None`) lets the parity test select the fork start method when needed; production callers leave it unset.
+- `--max-workers N` CLI flag mirrors the orchestrator parameter via `AnalyzeContext.max_workers`.
+
+#### G3 bench per-stage timings (Issue #8)
+- New `AnalysisTimings` dataclass in `forensics.analysis.orchestrator` (per-author dict + `compare` + `total`).
+- New `_StageTimer` helper threads `time.perf_counter()` brackets through `_run_per_author_analysis` without polluting the call site with `if stage_timings is not None:` guards.
+- `_load_drift_signals` extracted from `_run_per_author_analysis` to keep that function under the McCabe complexity ceiling once the timing brackets land.
+- `scripts/bench_phase15.py::_bench_one_author` allocates an `AnalysisTimings` instance, threads it via `timings_out=...`, and copies the per-author stage buckets into the bench JSON. The legacy zero-init dict is gone.
+
+### Files Modified
+- `src/forensics/analysis/orchestrator.py` — new `AnalysisTimings`, `_StageTimer`, `_per_author_worker`, `_resolve_max_workers`; `run_full_analysis` accepts `max_workers` / `compare_pair` / `timings_out` / `mp_context`; `_resolve_targets_and_controls` and `run_compare_only` accept `compare_pair`; extracted `_load_drift_signals` to keep complexity ≤ 10.
+- `src/forensics/cli/analyze.py` — `AnalyzeContext` carries `max_workers` / `compare_pair`; new `_parse_compare_pair`; `--max-workers` and `--compare-pair` Typer options; `_run_full_analysis_stage` and `_run_compare_only_flow` thread the new fields through.
+- `scripts/bench_phase15.py` — `_bench_one_author` reads `AnalysisTimings` populated by `run_full_analysis(timings_out=...)`.
+- `tests/integration/test_parallel_parity.py` — byte-identity test pinned to `max_workers=1` (in-process patches survive); new `test_parallel_dispatch_emits_same_per_author_artifacts` asserts structural parity for the parallel path.
+- `tests/unit/test_analyze_compare.py` — NEW (10 tests): `_parse_compare_pair` arity / malformed input, `_resolve_targets_and_controls` precedence, `run_compare_only(compare_pair=...)`, `_resolve_max_workers` precedence, `run_full_analysis(timings_out=...)` populates per-stage buckets, parallel dispatch happy path, `_per_author_worker` direct invocation + unknown-slug bail.
+
+### Decisions Made
+- **Default to parallel when CPU budget is available**: `_resolve_max_workers` falls back to `cpu_count() - 1` so the orchestrator picks up the available parallelism without operator intervention. `--max-workers 1` flips back to serial when needed.
+- **Single-author runs always serial**: avoids the spawn / fork overhead for the common `forensics analyze --author <slug>` invocation and keeps the in-process `monkeypatch` fixtures behaving as expected for the calibration runner.
+- **Byte-identity parity stays serial-only**: in-process monkeypatching of `uuid4` / `datetime.now` cannot survive the `ProcessPoolExecutor` spawn boundary. `multiprocessing.get_context("fork")` deadlocks on macOS once `polars` / `ruptures` have loaded their native libraries. Rather than route test-only pinning hooks through worker code, the parallel parity test asserts *structural* parity (same per-author files, same return-dict keys, non-empty result JSON) so a pickling regression / SQLite handle leak still fires the test loudly.
+- **`compare_pair` is independent of `--author`**: the explicit pair takes precedence over both `--author` and the configured `[[authors]] role` so a one-off `--compare-pair tgt,ctrl` doesn't have to match the configured target list. `run_compare_only` documents this precedence in its docstring.
+
+### Verification Evidence
+```
+uv run python -m pytest tests/unit/test_analyze_compare.py -v --no-cov
+  → 10 passed in 2.1s
+
+uv run python -m pytest tests/integration/test_parallel_parity.py -v --no-cov
+  → 3 passed in 2.2s
+
+uv run python -m pytest tests/ -k "orchestrator or analyze or compare or bench" -v --no-cov
+  → 21 passed, 1 skipped, 708 deselected in 108.9s
+
+uv run ruff check . && uv run ruff format --check .
+  → ruff check: clean
+  → ruff format: pre-existing drift in src/forensics/reporting/html_report.py (untouched by this change)
+
+uv run python -m pytest tests/ --no-cov
+  → 727 passed, 4 skipped, 3 deselected, 1 xfailed
+
+uv run python scripts/bench_phase15.py --author placeholder-target --output /tmp/bench-smoke.json
+  → bench writes JSON; per-stage zeros for placeholder slug (worker bails on
+    missing author / parquet) but `compare` and `total` buckets populate.
+```
+
+### Unresolved Questions
+- Coverage on this branch reports 73.31% (baseline `main` reports 72.91% in the same venv) — both below the configured 75% `fail_under`. The `pyproject.toml` HANDOFF entry from PR #81 quoted 76.43% but a flaky test (`test_survey_orchestrator_checkpoints_after_each_author`) appears to vary by run order; that flake hides ~3 percentage points of coverage. Not introduced by this change — see PR #81 for the original target.
+- Subprocess code paths in the parallel branch (`_per_author_worker` body, `as_completed` exception handler) are exercised by the integration parity test but coverage instrumentation does not follow `ProcessPoolExecutor` workers by default. Could be addressed by enabling `coverage.run.concurrency = ["multiprocessing"]` + `parallel = true`, but that's a wider config change.
+
+### Risks & Next Steps
+- The bench placeholder slug emits zero per-stage timings because the worker bails before any stage runs. Operators benching real authors will see populated buckets — this is the documented behavior, not a bug.
+- `mp_context="fork"` is exposed as a public parameter on `run_full_analysis`. If a future operator passes it on macOS with native libraries already loaded, the worker pool will deadlock. The docstring flags this explicitly and the parity test learned the lesson — no production caller currently passes the parameter.
+- The `--compare-pair` flag is purely advisory: it does not validate that both slugs exist as authors in the database. The downstream `compare_target_to_controls` call already raises `ValueError` on unknown slugs and is logged at WARNING by `_run_target_control_comparisons`. Consider adding a CLI-level pre-flight check if user reports surface here.

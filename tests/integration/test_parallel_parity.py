@@ -5,13 +5,16 @@ The spec calls for ``run_full_analysis`` to be invoked twice on the same
 ``max_workers=os.cpu_count()`` — and for the JSON artifacts to be byte-
 identical via ``hashlib.sha256``.
 
-Until Phase 15 G1 wires ``max_workers`` into the orchestrator, the spec is
-satisfied by proving the *output is fully deterministic*: two back-to-back
-serial runs on the same fixture produce byte-identical artifacts (every
-list-valued field is sorted, every dict is ``sort_keys=True``, and the
-non-deterministic ``run_id`` / ``run_timestamp`` fields are pinned via
-patching). When G1 lands, swap the second invocation to use a real worker
-pool and the same parity assertion proves no race introduced ordering drift.
+Phase 15 G1 wired ``max_workers`` into the orchestrator. The byte-identity
+assertion runs against two serial dispatches with ``max_workers=1`` so the
+monkeypatched ``uuid4`` / ``datetime`` pinning applies in-process. A second
+test asserts the parallel ``ProcessPoolExecutor`` dispatch
+(``max_workers > 1``) returns the same per-author result keys and
+non-empty per-author JSON artifacts as the serial path — byte-identity
+across the spawn boundary requires worker-side pinning hooks that aren't
+appropriate for production code (``multiprocessing.get_context("fork")``
+deadlocks on macOS once ``polars`` / ``ruptures`` have loaded their
+native libraries; see ``HANDOFF.md`` for the trade-off rationale).
 
 Inputs are intentionally small (3 authors, ~12 articles each) and the
 heavy embedding-drift / hypothesis-testing paths are exercised on whatever
@@ -23,6 +26,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Literal
@@ -207,23 +211,25 @@ def test_serial_run_produces_byte_identical_artifacts_across_invocations(
     parity_corpus: tuple[AnalysisArtifactPaths, AnalysisArtifactPaths],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """H2 byte-identity: two runs of the same fixture produce identical artifact bytes.
+    """H2 byte-identity: two serial runs produce identical artifact bytes.
 
-    Run A and run B both execute serially through ``run_full_analysis``. With
+    Run A and run B both execute through ``run_full_analysis`` with
+    ``max_workers=1`` (legacy serial dispatch). With
     ``write_json_artifact`` enforcing ``sort_keys=True`` and
-    ``stable_sort_artifact_list`` ordering each list-valued payload, the SHA-256
-    of every emitted JSON must agree across runs.
+    ``stable_sort_artifact_list`` ordering each list-valued payload, the
+    SHA-256 of every emitted JSON must agree across runs.
 
-    When Phase 15 G1 lands (``max_workers`` actually wired into the
-    orchestrator), swap run B to use a real worker pool — the same assertion
-    proves the parallel dispatch did not introduce ordering drift.
+    The Phase 15 G1 parallel dispatch adds a separate process boundary that
+    breaks in-process monkeypatching of ``uuid4`` / ``datetime`` — its
+    structural parity is asserted in
+    ``test_parallel_dispatch_emits_same_per_author_artifacts``.
     """
     serial_paths, parallel_paths = parity_corpus
 
     _pin_nondeterminism(monkeypatch)
     settings = get_settings()
-    run_full_analysis(serial_paths, settings)
-    run_full_analysis(parallel_paths, settings)
+    run_full_analysis(serial_paths, settings, max_workers=1)
+    run_full_analysis(parallel_paths, settings, max_workers=1)
 
     a = _hash_artifact_dir(serial_paths.analysis_dir)
     b = _hash_artifact_dir(parallel_paths.analysis_dir)
@@ -241,8 +247,40 @@ def test_run_metadata_top_level_lists_sort_alphabetically(
     """Spec lines 1614-1615: ``full_analysis_authors`` + ``comparison_targets`` are sorted."""
     serial_paths, _ = parity_corpus
     _pin_nondeterminism(monkeypatch)
-    run_full_analysis(serial_paths, get_settings())
+    run_full_analysis(serial_paths, get_settings(), max_workers=1)
 
     meta = json.loads(serial_paths.run_metadata_json().read_text(encoding="utf-8"))
     assert meta["full_analysis_authors"] == sorted(meta["full_analysis_authors"])
     assert meta["comparison_targets"] == sorted(meta["comparison_targets"])
+
+
+def test_parallel_dispatch_emits_same_per_author_artifacts(
+    parity_corpus: tuple[AnalysisArtifactPaths, AnalysisArtifactPaths],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """G1 structural parity: parallel dispatch returns the same author keys + writes the same files.
+
+    Byte-identity across the ``ProcessPoolExecutor`` boundary is sacrificed
+    because (a) ``mp_context="fork"`` deadlocks on macOS once polars /
+    ruptures have loaded native libraries, and (b) ``"spawn"`` workers do
+    not inherit in-process monkeypatching of ``uuid4`` / ``datetime``.
+    Instead, structural parity is asserted: the parallel run emits the same
+    per-author file set, the same author keys appear in
+    ``run_full_analysis``'s return value, and each author's
+    ``*_result.json`` is non-empty JSON with an ``author_id``. If a future
+    refactor breaks the worker dispatch (pickling regression, SQLite handle
+    leak, etc.) this assertion catches it without locking us into
+    fork-only behaviour.
+    """
+    _serial_paths, parallel_paths = parity_corpus
+    settings = get_settings()
+    workers = max(2, min(os.cpu_count() or 2, 4))
+    results = run_full_analysis(parallel_paths, settings, max_workers=workers)
+
+    assert set(results) == {"alpha", "bravo", "charlie"}, results
+
+    for slug in ("alpha", "bravo", "charlie"):
+        result_path = parallel_paths.analysis_dir / f"{slug}_result.json"
+        assert result_path.is_file(), f"missing result artifact for {slug}"
+        body = json.loads(result_path.read_text(encoding="utf-8"))
+        assert body.get("author_id") == f"author-{slug}", body

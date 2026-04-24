@@ -4,8 +4,14 @@ from __future__ import annotations
 
 import json
 import logging
+import multiprocessing
+import os
+import time
 from bisect import bisect_left
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
@@ -41,10 +47,26 @@ from forensics.utils.provenance import compute_model_config_hash, write_corpus_c
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "AnalysisTimings",
     "assemble_analysis_result",
     "run_compare_only",
     "run_full_analysis",
 ]
+
+
+@dataclass
+class AnalysisTimings:
+    """Per-stage wall-clock seconds captured during ``run_full_analysis``.
+
+    ``per_author`` maps ``slug → {stage_name: seconds}`` so the bench script
+    can emit non-zero per-stage timings instead of only ``total``. ``compare``
+    is a single newsroom-wide bucket because the comparison stage runs once
+    per target outside the per-author loop.
+    """
+
+    per_author: dict[str, dict[str, float]] = field(default_factory=dict)
+    compare: float = 0.0
+    total: float = 0.0
 
 
 def _ts_key(t: datetime) -> float:
@@ -179,6 +201,30 @@ def _run_hypothesis_tests_for_changepoints(
     return all_tests
 
 
+class _StageTimer:
+    """Context-manager-free stopwatch that no-ops when ``sink is None``.
+
+    ``record(stage_name)`` writes the wall-clock since the last call (or
+    since construction) into ``sink[stage_name]`` and resets the clock. Used
+    by ``_run_per_author_analysis`` to thread per-stage timings through to
+    the bench script without polluting the call site with branchy
+    ``if stage_timings is not None:`` guards.
+    """
+
+    __slots__ = ("_sink", "_t")
+
+    def __init__(self, sink: dict[str, float] | None) -> None:
+        self._sink = sink
+        self._t = time.perf_counter()
+
+    def record(self, stage: str) -> None:
+        if self._sink is None:
+            return
+        now = time.perf_counter()
+        self._sink[stage] = now - self._t
+        self._t = now
+
+
 def _run_per_author_analysis(
     slug: str,
     repo: Repository,
@@ -186,8 +232,15 @@ def _run_per_author_analysis(
     config: ForensicsSettings,
     *,
     probability_trajectory_by_slug: dict[str, ProbabilityTrajectory],
+    stage_timings: dict[str, float] | None = None,
 ) -> tuple[AnalysisResult, list[ChangePoint], list, list] | None:
-    """Changepoint, drift, convergence, and hypothesis testing for one author slug."""
+    """Changepoint, drift, convergence, and hypothesis testing for one author slug.
+
+    When ``stage_timings`` is provided, the per-stage wall-clock seconds are
+    written into the dict (keys: ``extract``, ``changepoint``, ``drift``,
+    ``convergence``, ``hypothesis_tests``) so the bench script can emit
+    non-zero per-stage measurements instead of only the grand ``total``.
+    """
     author = repo.get_author_by_slug(slug)
     if author is None:
         logger.warning("analysis: unknown slug=%s", slug)
@@ -197,18 +250,78 @@ def _run_per_author_analysis(
         logger.warning("analysis: skip %s (missing %s)", slug, feat_path)
         return None
 
+    timer = _StageTimer(stage_timings)
     lf_all = load_feature_frame_sorted(feat_path)
     lf_author = lf_all.filter(pl.col("author_id") == author.id)
     df_author = lf_author.collect()
     if df_author.is_empty():
         df_author = lf_all.collect()
+    timer.record("extract")
 
     change_points = analyze_author_feature_changepoints(
         df_author,
         author_id=author.id,
         settings=config,
     )
+    timer.record("changepoint")
 
+    drift, baseline_curve, vel_tuples, ai_conv = _load_drift_signals(slug, author.id, paths, config)
+    timer.record("drift")
+
+    prob = probability_trajectory_by_slug.get(slug)
+    convergence_windows = compute_convergence_scores(
+        ConvergenceInput.from_settings(
+            change_points,
+            vel_tuples,
+            baseline_curve,
+            config,
+            ai_convergence_curve=ai_conv,
+            probability_trajectory=prob,
+        )
+    )
+    timer.record("convergence")
+
+    timestamps = timestamps_from_frame(df_author)
+    all_tests = _run_hypothesis_tests_for_changepoints(
+        df_author,
+        timestamps,
+        change_points,
+        author.id,
+        config.analysis,
+    )
+    timer.record("hypothesis_tests")
+
+    assembled = assemble_analysis_result(
+        author.id,
+        change_points,
+        convergence_windows,
+        drift,
+        all_tests,
+        config.analysis,
+    )
+    return assembled, change_points, convergence_windows, all_tests
+
+
+def _load_drift_signals(
+    slug: str,
+    author_id: str,
+    paths: AnalysisArtifactPaths,
+    config: ForensicsSettings,
+) -> tuple[
+    DriftScores | None,
+    list[tuple[datetime, float]],
+    list[tuple[str, float]],
+    list[tuple[str, float]] | None,
+]:
+    """Load embeddings and run the per-author drift pipeline.
+
+    Extracted from :func:`_run_per_author_analysis` (Phase 15 G3) to keep the
+    parent function under the McCabe complexity ceiling once per-stage
+    timing brackets and the early-out ``return None`` paths are factored
+    in. Returns ``(drift, baseline_curve, vel_tuples, ai_conv)`` with
+    permissive defaults (empty lists / ``None``) when embeddings are
+    unavailable.
+    """
     baseline_curve: list[tuple[datetime, float]] = []
     vel_tuples: list[tuple[str, float]] = []
     ai_conv: list[tuple[str, float]] | None = None
@@ -222,7 +335,7 @@ def _run_per_author_analysis(
 
     drift_res = compute_author_drift_pipeline(
         slug,
-        author.id,
+        author_id,
         pairs,
         config,
         paths=paths,
@@ -232,44 +345,24 @@ def _run_per_author_analysis(
         baseline_curve = drift_res.baseline_curve
         ai_conv = drift_res.ai_convergence
         vel_tuples = pair_months_with_velocities(drift_res.monthly_centroids, drift_res.velocities)
-
-    prob = probability_trajectory_by_slug.get(slug)
-    convergence_windows = compute_convergence_scores(
-        ConvergenceInput.from_settings(
-            change_points,
-            vel_tuples,
-            baseline_curve,
-            config,
-            ai_convergence_curve=ai_conv,
-            probability_trajectory=prob,
-        )
-    )
-
-    timestamps = timestamps_from_frame(df_author)
-
-    all_tests = _run_hypothesis_tests_for_changepoints(
-        df_author,
-        timestamps,
-        change_points,
-        author.id,
-        config.analysis,
-    )
-
-    assembled = assemble_analysis_result(
-        author.id,
-        change_points,
-        convergence_windows,
-        drift,
-        all_tests,
-        config.analysis,
-    )
-    return assembled, change_points, convergence_windows, all_tests
+    return drift, baseline_curve, vel_tuples, ai_conv
 
 
 def _resolve_targets_and_controls(
     config: ForensicsSettings,
     author_slug: str | None,
+    *,
+    compare_pair: tuple[str, str] | None = None,
 ) -> tuple[list[str], list[str]]:
+    """Resolve the target and control slug lists for the comparison stage.
+
+    When ``compare_pair`` is provided as ``(target_slug, control_slug)`` the
+    explicit pair takes precedence over ``settings.authors`` role assignments
+    so operators can pin a one-off comparison without editing ``config.toml``.
+    """
+    if compare_pair is not None:
+        target_slug, control_slug = compare_pair
+        return [target_slug], [control_slug]
     controls = [a.slug for a in config.authors if a.role == "control"]
     targets = [a.slug for a in config.authors if a.role == "target"]
     if author_slug:
@@ -350,12 +443,81 @@ def assemble_analysis_result(
     )
 
 
+def _per_author_worker(
+    slug: str,
+    db_path: Path,
+    paths: AnalysisArtifactPaths,
+    config: ForensicsSettings,
+    prob_map: dict[str, ProbabilityTrajectory],
+) -> tuple[str, AnalysisResult | None, dict[str, float]]:
+    """ProcessPool worker: opens its own ``Repository`` (SQLite is not fork-safe).
+
+    Returns ``(slug, assembled_or_None, stage_timings)``. The worker writes
+    the per-author JSON artifacts directly via ``write_json_artifact`` (atomic
+    rename); the main process aggregates the assembled results dict and
+    handles newsroom-wide artifacts (``comparison_report.json``,
+    ``run_metadata.json``, ``corpus_custody.json``).
+
+    Log lines are tagged with ``slug=%s`` so concurrent worker output can be
+    disambiguated when grepping the run log.
+    """
+    stage_timings: dict[str, float] = {}
+    with Repository(db_path) as repo:
+        per_author = _run_per_author_analysis(
+            slug,
+            repo,
+            paths,
+            config,
+            probability_trajectory_by_slug=prob_map,
+            stage_timings=stage_timings,
+        )
+    if per_author is None:
+        logger.info("analysis: slug=%s skipped (missing author or features)", slug)
+        return slug, None, stage_timings
+    assembled, change_points, convergence_windows, all_tests = per_author
+    _write_per_author_json_artifacts(
+        slug,
+        paths,
+        change_points,
+        convergence_windows,
+        assembled,
+        all_tests,
+    )
+    logger.info(
+        "analysis: slug=%s change_points=%d windows=%d tests=%d",
+        slug,
+        len(change_points),
+        len(convergence_windows),
+        len(all_tests),
+    )
+    return slug, assembled, stage_timings
+
+
+def _resolve_max_workers(config: ForensicsSettings, override: int | None) -> int:
+    """Resolve the worker count: explicit override > config > ``cpu_count - 1``.
+
+    Always returns ``>= 1``. ``override`` of ``1`` (or any non-positive value
+    from config / CPU detection) keeps the legacy serial dispatch.
+    """
+    if override is not None:
+        return max(1, int(override))
+    cfg = config.analysis.max_workers
+    if cfg is not None:
+        return max(1, int(cfg))
+    cpu = os.cpu_count() or 1
+    return max(1, cpu - 1)
+
+
 def run_full_analysis(
     paths: AnalysisArtifactPaths,
     config: ForensicsSettings,
     *,
     author_slug: str | None = None,
     probability_trajectory_by_slug: dict[str, ProbabilityTrajectory] | None = None,
+    max_workers: int | None = None,
+    compare_pair: tuple[str, str] | None = None,
+    timings_out: AnalysisTimings | None = None,
+    mp_context: str | None = None,
 ) -> dict[str, AnalysisResult]:
     """Run changepoint + drift + convergence + hypothesis tests; write JSON artifacts.
 
@@ -363,45 +525,127 @@ def run_full_analysis(
     synchronous (Repository / Polars / NumPy) so the coroutine wrapper was dead
     weight. Callers now invoke the function directly instead of via
     ``asyncio.run(...)``.
+
+    Phase 15 G1: when ``max_workers`` (or ``settings.analysis.max_workers``)
+    resolves to ``> 1`` the per-author loop dispatches via
+    :class:`concurrent.futures.ProcessPoolExecutor`. Each worker opens its own
+    :class:`Repository` (SQLite handles are not safe to fork), writes its own
+    per-author JSON artifacts (atomic via ``write_json_artifact``), and
+    returns the assembled :class:`AnalysisResult` plus per-stage timings to
+    the main process for aggregation. The main process owns the newsroom-wide
+    artifacts (``comparison_report.json``, ``run_metadata.json``,
+    ``corpus_custody.json``) so there is no shared mutable state.
+
+    ``compare_pair`` overrides the ``settings.authors`` target/control roles
+    for the explicit ``(target_slug, control_slug)`` pair so the
+    ``forensics analyze --compare TARGET,CONTROL`` flag can drive a one-off
+    comparison without editing ``config.toml``.
+
+    ``timings_out`` (when provided) is populated in-place with per-author
+    stage wall-clock seconds plus the newsroom-wide ``compare`` and ``total``
+    buckets so the bench script can emit non-zero per-stage measurements.
+
+    ``mp_context`` selects the ``multiprocessing`` start method for the
+    worker pool (e.g. ``"fork"`` / ``"spawn"`` / ``"forkserver"``). The
+    ``"fork"`` context inherits the parent process' module state — used by
+    the parity test in ``tests/integration/test_parallel_parity.py`` so the
+    monkeypatched ``uuid4`` / ``datetime`` pinning propagates into workers.
+    Production callers should leave this ``None`` (system default).
     """
     # Parent dirs for analysis outputs are created inside the write helpers
     # (``write_json_artifact`` / ``write_corpus_custody``); no explicit mkdir
     # needed here (RF-DRY-004).
     slugs = [author_slug] if author_slug else [a.slug for a in config.authors]
     prob_map = probability_trajectory_by_slug or {}
+    workers = _resolve_max_workers(config, max_workers)
+    # Always serial when there's only one author — spinning up a ProcessPool
+    # for a single task wastes seconds of fork / spawn overhead and forfeits
+    # the in-process monkeypatching the parity test relies on.
+    if len(slugs) <= 1:
+        workers = 1
 
+    t_total = time.perf_counter()
     results: dict[str, AnalysisResult] = {}
+    per_author_timings: dict[str, dict[str, float]] = {}
 
-    with Repository(paths.db_path) as repo:
-        for slug in slugs:
-            per_author = _run_per_author_analysis(
-                slug,
-                repo,
-                paths,
-                config,
-                probability_trajectory_by_slug=prob_map,
-            )
-            if per_author is None:
-                continue
-            assembled, change_points, convergence_windows, all_tests = per_author
-            results[slug] = assembled
-            _write_per_author_json_artifacts(
-                slug,
-                paths,
-                change_points,
-                convergence_windows,
-                assembled,
-                all_tests,
-            )
-            logger.info(
-                "analysis: author=%s change_points=%d windows=%d tests=%d",
-                slug,
-                len(change_points),
-                len(convergence_windows),
-                len(all_tests),
-            )
+    if workers <= 1:
+        with Repository(paths.db_path) as repo:
+            for slug in slugs:
+                stage_timings: dict[str, float] = {}
+                per_author = _run_per_author_analysis(
+                    slug,
+                    repo,
+                    paths,
+                    config,
+                    probability_trajectory_by_slug=prob_map,
+                    stage_timings=stage_timings,
+                )
+                per_author_timings[slug] = stage_timings
+                if per_author is None:
+                    continue
+                assembled, change_points, convergence_windows, all_tests = per_author
+                results[slug] = assembled
+                _write_per_author_json_artifacts(
+                    slug,
+                    paths,
+                    change_points,
+                    convergence_windows,
+                    assembled,
+                    all_tests,
+                )
+                logger.info(
+                    "analysis: author=%s change_points=%d windows=%d tests=%d",
+                    slug,
+                    len(change_points),
+                    len(convergence_windows),
+                    len(all_tests),
+                )
+    else:
+        # ProcessPool dispatch: each worker owns its own Repository handle.
+        # Sort the futures by slug on completion so log ordering and any
+        # downstream metadata aggregation stays deterministic.
+        worker_count = min(workers, max(1, len(slugs)))
+        logger.info(
+            "analysis: dispatching %d author(s) across %d worker(s)",
+            len(slugs),
+            worker_count,
+        )
+        ctx = multiprocessing.get_context(mp_context) if mp_context else None
+        with ProcessPoolExecutor(max_workers=worker_count, mp_context=ctx) as executor:
+            future_to_slug = {
+                executor.submit(
+                    _per_author_worker,
+                    slug,
+                    paths.db_path,
+                    paths,
+                    config,
+                    prob_map,
+                ): slug
+                for slug in slugs
+            }
+            for future in as_completed(future_to_slug):
+                slug = future_to_slug[future]
+                try:
+                    returned_slug, assembled, stage_timings = future.result()
+                except Exception as exc:  # noqa: BLE001 - log + continue per-author
+                    logger.error(
+                        "analysis: worker crashed for slug=%s (%s)",
+                        slug,
+                        exc,
+                        exc_info=True,
+                    )
+                    per_author_timings[slug] = {}
+                    continue
+                per_author_timings[returned_slug] = stage_timings
+                if assembled is not None:
+                    results[returned_slug] = assembled
 
-    targets, controls = _resolve_targets_and_controls(config, author_slug)
+    t_compare = time.perf_counter()
+    targets, controls = _resolve_targets_and_controls(
+        config,
+        author_slug,
+        compare_pair=compare_pair,
+    )
     comparison_payload = _run_target_control_comparisons(
         targets,
         controls,
@@ -409,12 +653,18 @@ def run_full_analysis(
         paths=paths,
         config=config,
     )
+    compare_seconds = time.perf_counter() - t_compare
 
     write_json_artifact(paths.comparison_report_json(), comparison_payload)
 
     _merge_run_metadata(paths, results, comparison_payload)
 
     write_corpus_custody(paths.db_path, paths.analysis_dir)
+
+    if timings_out is not None:
+        timings_out.per_author = per_author_timings
+        timings_out.compare = compare_seconds
+        timings_out.total = time.perf_counter() - t_total
 
     return results
 
@@ -424,22 +674,35 @@ def run_compare_only(
     *,
     paths: AnalysisArtifactPaths,
     author_slug: str | None = None,
+    compare_pair: tuple[str, str] | None = None,
 ) -> dict[str, Any]:
     """Regenerate ``comparison_report.json`` from on-disk artifacts.
 
-    When ``author_slug`` is provided, the caller always wants that single
-    author compared even if it isn't in the configured target list (matches
-    the pre-Phase-13 CLI contract). A warning is logged so the ambiguity
-    surfaces in the operator's logs.
+    When ``compare_pair`` is supplied as ``(target_slug, control_slug)`` the
+    explicit pair takes precedence over both ``author_slug`` and the
+    configured author roles, so operators can pin a one-off comparison
+    without editing ``config.toml``.
+
+    When ``author_slug`` is provided (and ``compare_pair`` is not), the
+    caller always wants that single author compared even if it isn't in the
+    configured target list (matches the pre-Phase-13 CLI contract). A warning
+    is logged so the ambiguity surfaces in the operator's logs.
     """
-    targets, controls = _resolve_targets_and_controls(config, author_slug)
-    if author_slug and author_slug not in targets:
-        logger.warning(
-            "compare-only: author_slug=%r is not a configured target; "
-            "forcing single-slug comparison (controls are still loaded from config)",
-            author_slug,
+    if compare_pair is not None:
+        targets, controls = _resolve_targets_and_controls(
+            config,
+            author_slug=None,
+            compare_pair=compare_pair,
         )
-        targets = [author_slug]
+    else:
+        targets, controls = _resolve_targets_and_controls(config, author_slug)
+        if author_slug and author_slug not in targets:
+            logger.warning(
+                "compare-only: author_slug=%r is not a configured target; "
+                "forcing single-slug comparison (controls are still loaded from config)",
+                author_slug,
+            )
+            targets = [author_slug]
     out: dict[str, Any] = {"targets": {}}
     for tid in targets:
         try:

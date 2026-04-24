@@ -48,6 +48,8 @@ class AnalyzeContext:
     settings: ForensicsSettings
     paths: AnalysisArtifactPaths
     author_slug: str | None
+    max_workers: int | None = None
+    compare_pair: tuple[str, str] | None = None
 
     @classmethod
     def build(
@@ -57,6 +59,8 @@ class AnalyzeContext:
         *,
         root: Path,
         author: str | None,
+        max_workers: int | None = None,
+        compare_pair: tuple[str, str] | None = None,
     ) -> AnalyzeContext:
         """Construct a context from the ambient project layout."""
         return cls(
@@ -64,12 +68,34 @@ class AnalyzeContext:
             settings=settings,
             paths=AnalysisArtifactPaths.from_project(root, db_path),
             author_slug=author,
+            max_workers=max_workers,
+            compare_pair=compare_pair,
         )
 
     @property
     def root(self) -> Path:
         """Project root backing the artifact layout."""
         return self.paths.project_root
+
+
+def _parse_compare_pair(raw: str | None) -> tuple[str, str] | None:
+    """Parse ``--compare TARGET,CONTROL`` into a typed pair.
+
+    Returns ``None`` when ``raw`` is ``None`` (the legacy ``--compare`` boolean
+    path). Raises :class:`typer.BadParameter` when the value is malformed so
+    operators get a clear error instead of a silent fall-through to the
+    config-driven target/control resolution.
+    """
+    if raw is None:
+        return None
+    parts = [p.strip() for p in raw.split(",")]
+    if len(parts) != 2 or not all(parts):
+        msg = (
+            f"--compare expected 'TARGET,CONTROL' (got {raw!r}); "
+            "both slugs must be non-empty and separated by a single comma."
+        )
+        raise typer.BadParameter(msg)
+    return parts[0], parts[1]
 
 
 def _write_run_metadata(
@@ -95,9 +121,15 @@ def _run_compare_only_flow(ctx: AnalyzeContext) -> None:
         "config_hash": pipeline_ctx.config_hash,
         "compare_only": True,
         "author": ctx.author_slug,
+        "compare_pair": list(ctx.compare_pair) if ctx.compare_pair else None,
     }
     _write_run_metadata(analysis_dir, rid=rid, meta=meta)
-    run_compare_only(ctx.settings, paths=ctx.paths, author_slug=ctx.author_slug)
+    run_compare_only(
+        ctx.settings,
+        paths=ctx.paths,
+        author_slug=ctx.author_slug,
+        compare_pair=ctx.compare_pair,
+    )
     logger.info("analyze: compare-only complete author=%s", ctx.author_slug or "all")
 
 
@@ -141,7 +173,13 @@ def _run_drift_stage(ctx: AnalyzeContext) -> None:
 def _run_full_analysis_stage(ctx: AnalyzeContext) -> None:
     from forensics.analysis.orchestrator import run_full_analysis
 
-    run_full_analysis(ctx.paths, ctx.settings, author_slug=ctx.author_slug)
+    run_full_analysis(
+        ctx.paths,
+        ctx.settings,
+        author_slug=ctx.author_slug,
+        max_workers=ctx.max_workers,
+        compare_pair=ctx.compare_pair,
+    )
 
 
 def _run_ai_baseline_stage(
@@ -268,11 +306,19 @@ def run_analyze(
     include_advertorial: bool = False,
     residualize_sections: bool = False,
     include_shared_bylines: bool = False,
+    max_workers: int | None = None,
+    compare_pair: tuple[str, str] | None = None,
 ) -> None:
     """Execute the analyze stage as a plain Python function.
 
     Kept separate from the Typer ``analyze`` callback so the `forensics all`
     orchestrator can call this without fighting Typer's option defaults.
+
+    ``max_workers`` overrides ``settings.analysis.max_workers`` for this run
+    only — useful when the operator wants to pin the worker count from the
+    command line without editing ``config.toml``. ``compare_pair`` flips on a
+    one-off ``(target, control)`` comparison that bypasses the configured
+    target/control role assignment for this run only.
     """
     settings = _apply_per_run_overrides(
         get_settings(),
@@ -288,7 +334,14 @@ def run_analyze(
             author_slug=author,
             include_shared_bylines=include_shared_bylines,
         )
-    ctx = AnalyzeContext.build(db_path, settings, root=root, author=author)
+    ctx = AnalyzeContext.build(
+        db_path,
+        settings,
+        root=root,
+        author=author,
+        max_workers=max_workers,
+        compare_pair=compare_pair,
+    )
     # analysis_dir is created by the first write helper that lands an artifact.
     analysis_dir = ctx.paths.analysis_dir
 
@@ -459,12 +512,37 @@ def analyze(
             ),
         ),
     ] = False,
+    max_workers: Annotated[
+        int | None,
+        typer.Option(
+            "--max-workers",
+            metavar="N",
+            help=(
+                "Override analysis.max_workers for this run only. N=1 forces "
+                "the legacy serial dispatch; N>1 fans the per-author loop out "
+                "across a ProcessPoolExecutor (Phase 15 G1)."
+            ),
+        ),
+    ] = None,
+    compare_pair: Annotated[
+        str | None,
+        typer.Option(
+            "--compare-pair",
+            metavar="TARGET,CONTROL",
+            help=(
+                "Run a one-off target↔control comparison for the named slugs, "
+                "bypassing the configured author roles. Example: "
+                "'--compare-pair isaac-schorr,john-doe'."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Run analysis pipeline (change-point, drift, convergence, comparison)."""
     # When a sub-command is invoked (e.g. ``analyze section-profile``),
     # Typer still runs the callback first; let the sub-command own the flow.
     if ctx.invoked_subcommand is not None:
         return
+    parsed_pair = _parse_compare_pair(compare_pair)
     run_analyze(
         changepoint=changepoint,
         timeseries=timeseries,
@@ -480,6 +558,8 @@ def analyze(
         include_advertorial=include_advertorial,
         residualize_sections=residualize_sections,
         include_shared_bylines=include_shared_bylines,
+        max_workers=max_workers,
+        compare_pair=parsed_pair,
     )
 
 
