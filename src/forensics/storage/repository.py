@@ -14,7 +14,19 @@ from uuid import uuid4
 
 from forensics.models.article import Article
 from forensics.models.author import Author
+from forensics.storage.json_io import ensure_parent
 from forensics.utils.datetime import parse_datetime
+
+__all__ = [
+    "Repository",
+    "RepositoryReader",
+    "UnfetchedArticle",
+    "UnfetchedUrl",
+    "ensure_repo",
+    "init_db",
+    "insert_analysis_run",
+    "open_repository_connection",
+]
 
 
 class UnfetchedUrl(NamedTuple):
@@ -151,6 +163,12 @@ def _author_row_to_model(row: sqlite3.Row) -> Author:
     )
 
 
+def _validate_batch_size(batch_size: int) -> None:
+    if batch_size < 1:
+        msg = f"batch_size must be >= 1, got {batch_size}"
+        raise ValueError(msg)
+
+
 def _row_to_article(row: sqlite3.Row) -> Article:
     metadata_raw = row["metadata"]
     metadata: dict[str, object] = json.loads(metadata_raw) if metadata_raw else {}
@@ -178,72 +196,10 @@ def _row_to_article(row: sqlite3.Row) -> Article:
     )
 
 
-class Repository:
-    """SQLite access for authors and articles.
+class RepositoryReader:
+    """Read-only queries and iterators mixed into :class:`Repository` (P2-ARCH-001)."""
 
-    Use as a context manager to hold one connection for a batch of operations::
-
-        with Repository(db_path) as repo:
-            repo.upsert_article(...)
-
-    The class is partitioned (RF-SMELL-001) into three logical groups separated
-    by ``# -- ... --`` banner comments below:
-
-    * **Author** — author CRUD, unfetched-URL queries (lines tagged with
-      ``-- Author CRUD / queries --``).
-    * **Article** — article CRUD + streaming iterators + dedup flags + archive
-      path rewrites (``-- Article CRUD / iterators / dedup --``).
-    * **Analysis runs** — audit-trail inserts (``-- Analysis run audit --``).
-
-    The sections are kept in one class to preserve the single-connection
-    context-manager contract and the ``__slots__`` memory footprint; extract
-    to genuine mixin classes only once a consumer needs just one slice.
-    """
-
-    __slots__ = ("_db_path", "_conn")
-
-    def __init__(self, db_path: Path) -> None:
-        self._db_path = Path(db_path)
-        self._conn: sqlite3.Connection | None = None
-
-    @property
-    def db_path(self) -> Path:
-        return self._db_path
-
-    def __enter__(self) -> Repository:
-        self._db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = _connect(self._db_path)
-        self._conn.row_factory = sqlite3.Row
-        self._conn.executescript(_SCHEMA)
-        _migrate_articles_columns(self._conn)
-        self._conn.commit()
-        return self
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc: BaseException | None,
-        tb: TracebackType | None,
-    ) -> None:
-        if self._conn is not None:
-            if exc is not None:
-                self._conn.rollback()
-            else:
-                self._conn.commit()
-            self._conn.close()
-            self._conn = None
-
-    def _require_conn(self) -> sqlite3.Connection:
-        if self._conn is None:
-            msg = "Repository is not in an active session; use `with Repository(path) as repo:`"
-            raise RuntimeError(msg)
-        return self._conn
-
-    def ensure_schema(self) -> None:
-        """Create tables if missing (requires active ``with`` session)."""
-        conn = self._require_conn()
-        conn.executescript(_SCHEMA)
-        _migrate_articles_columns(conn)
+    __slots__ = ()
 
     def get_author(self, author_id: str) -> Author | None:
         conn = self._require_conn()
@@ -286,6 +242,175 @@ class Repository:
         rows = conn.execute(sql, params).fetchall() if params else conn.execute(sql).fetchall()
         return [_row_to_article(row) for row in rows]
 
+    def article_url_exists(self, url: str) -> bool:
+        """Return True if an article with this canonical URL is already stored."""
+        conn = self._require_conn()
+        row = conn.execute("SELECT 1 FROM articles WHERE url = ?", (url,)).fetchone()
+        return row is not None
+
+    def get_article_by_id(self, article_id: str) -> Article | None:
+        conn = self._require_conn()
+        row = conn.execute("SELECT * FROM articles WHERE id = ?", (article_id,)).fetchone()
+        if row is None:
+            return None
+        return _row_to_article(row)
+
+    def get_articles_by_author(self, author_id: str) -> list[Article]:
+        """Eager load — prefer :meth:`iter_articles_by_author` for large authors."""
+        return list(self.iter_articles_by_author(author_id))
+
+    def iter_articles_by_author(
+        self, author_id: str, *, batch_size: int = 500
+    ) -> Iterator[Article]:
+        """Yield one author's articles in ``published_date`` order without full load."""
+        _validate_batch_size(batch_size)
+        conn = self._require_conn()
+        cursor = conn.execute(
+            "SELECT * FROM articles WHERE author_id = ? ORDER BY published_date",
+            (author_id,),
+        )
+        while True:
+            rows = cursor.fetchmany(batch_size)
+            if not rows:
+                break
+            for row in rows:
+                yield _row_to_article(row)
+
+    def get_all_articles(self) -> list[Article]:
+        """Eager load — prefer :meth:`iter_all_articles` for the full corpus."""
+        return list(self.iter_all_articles())
+
+    def iter_all_articles(self, *, batch_size: int = 500) -> Iterator[Article]:
+        """Yield every article in ``published_date`` order without loading the full table."""
+        _validate_batch_size(batch_size)
+        conn = self._require_conn()
+        cursor = conn.execute("SELECT * FROM articles ORDER BY published_date")
+        while True:
+            rows = cursor.fetchmany(batch_size)
+            if not rows:
+                break
+            for row in rows:
+                yield _row_to_article(row)
+
+    def iter_dedup_source_rows(
+        self, *, batch_size: int = 500
+    ) -> Iterator[tuple[str, datetime, str, str]]:
+        """Yield ``(id, published_date, title, clean_text)`` for simhash deduplication.
+
+        Matches the historical in-memory pool filter: non-empty body and not a
+        ``[REDIRECT:`` prefix (same rules as ``deduplicate_articles``).
+        """
+        _validate_batch_size(batch_size)
+        conn = self._require_conn()
+        sql = """
+            SELECT id, published_date, title, clean_text
+            FROM articles
+            WHERE clean_text IS NOT NULL
+              AND clean_text != ''
+              AND (length(clean_text) < 10 OR substr(clean_text, 1, 10) != '[REDIRECT:')
+            ORDER BY published_date
+        """
+        cursor = conn.execute(sql)
+        while True:
+            rows = cursor.fetchmany(batch_size)
+            if not rows:
+                break
+            for row in rows:
+                yield (
+                    str(row["id"]),
+                    parse_datetime(row["published_date"]),
+                    str(row["title"]),
+                    str(row["clean_text"]),
+                )
+
+    def get_unfetched_urls(self) -> list[UnfetchedUrl]:
+        """Return rows where body text has not been fetched yet."""
+        conn = self._require_conn()
+        rows = conn.execute(
+            "SELECT id, url FROM articles WHERE clean_text = '' OR clean_text IS NULL"
+        ).fetchall()
+        return [UnfetchedUrl(str(r[0]), str(r[1])) for r in rows]
+
+    def list_unfetched_for_fetch(self) -> list[UnfetchedArticle]:
+        """Return unfetched articles with author name and publish date for fetch ordering."""
+        conn = self._require_conn()
+        rows = conn.execute(
+            """
+            SELECT a.id, a.url, au.name AS author_name, a.published_date
+            FROM articles a
+            JOIN authors au ON a.author_id = au.id
+            WHERE a.clean_text = '' OR a.clean_text IS NULL
+            ORDER BY a.published_date
+            """
+        ).fetchall()
+        return [
+            UnfetchedArticle(
+                str(row["id"]),
+                str(row["url"]),
+                str(row["author_name"]),
+                parse_datetime(row["published_date"]),
+            )
+            for row in rows
+        ]
+
+
+class Repository(RepositoryReader):
+    """SQLite access for authors and articles.
+
+    Use as a context manager to hold one connection for a batch of operations::
+
+        with Repository(db_path) as repo:
+            repo.upsert_article(...)
+
+    Read/query methods live on :class:`RepositoryReader` (P2-ARCH-001); this class
+    holds connection lifecycle, schema, and mutation APIs.
+    """
+
+    __slots__ = ("_db_path", "_conn")
+
+    def __init__(self, db_path: Path) -> None:
+        self._db_path = Path(db_path)
+        self._conn: sqlite3.Connection | None = None
+
+    @property
+    def db_path(self) -> Path:
+        return self._db_path
+
+    def __enter__(self) -> Repository:
+        ensure_parent(self._db_path)
+        self._conn = _connect(self._db_path)
+        self._conn.row_factory = sqlite3.Row
+        self._conn.executescript(_SCHEMA)
+        _migrate_articles_columns(self._conn)
+        self._conn.commit()
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
+        if self._conn is not None:
+            if exc is not None:
+                self._conn.rollback()
+            else:
+                self._conn.commit()
+            self._conn.close()
+            self._conn = None
+
+    def _require_conn(self) -> sqlite3.Connection:
+        if self._conn is None:
+            msg = "Repository is not in an active session; use `with Repository(path) as repo:`"
+            raise RuntimeError(msg)
+        return self._conn
+
+    def ensure_schema(self) -> None:
+        """Create tables if missing (requires active ``with`` session)."""
+        conn = self._require_conn()
+        conn.executescript(_SCHEMA)
+        _migrate_articles_columns(conn)
+
     def upsert_author(self, author: Author) -> None:
         conn = self._require_conn()
         conn.execute(
@@ -314,12 +439,6 @@ class Repository:
                 author.archive_url,
             ),
         )
-
-    def article_url_exists(self, url: str) -> bool:
-        """Return True if an article with this canonical URL is already stored."""
-        conn = self._require_conn()
-        row = conn.execute("SELECT 1 FROM articles WHERE url = ?", (url,)).fetchone()
-        return row is not None
 
     def upsert_article(self, article: Article) -> None:
         payload = article.model_dump(mode="json")
@@ -367,87 +486,6 @@ class Repository:
             ),
         )
 
-    def get_article_by_id(self, article_id: str) -> Article | None:
-        conn = self._require_conn()
-        row = conn.execute("SELECT * FROM articles WHERE id = ?", (article_id,)).fetchone()
-        if row is None:
-            return None
-        return _row_to_article(row)
-
-    def get_articles_by_author(self, author_id: str) -> list[Article]:
-        """Eager load — prefer :meth:`iter_articles_by_author` for large authors."""
-        return list(self.iter_articles_by_author(author_id))
-
-    def iter_articles_by_author(
-        self, author_id: str, *, batch_size: int = 500
-    ) -> Iterator[Article]:
-        """Yield one author's articles in ``published_date`` order without full load."""
-        if batch_size < 1:
-            msg = f"batch_size must be >= 1, got {batch_size}"
-            raise ValueError(msg)
-        conn = self._require_conn()
-        cursor = conn.execute(
-            "SELECT * FROM articles WHERE author_id = ? ORDER BY published_date",
-            (author_id,),
-        )
-        while True:
-            rows = cursor.fetchmany(batch_size)
-            if not rows:
-                break
-            for row in rows:
-                yield _row_to_article(row)
-
-    def get_all_articles(self) -> list[Article]:
-        """Eager load — prefer :meth:`iter_all_articles` for the full corpus."""
-        return list(self.iter_all_articles())
-
-    def iter_all_articles(self, *, batch_size: int = 500) -> Iterator[Article]:
-        """Yield every article in ``published_date`` order without loading the full table."""
-        if batch_size < 1:
-            msg = f"batch_size must be >= 1, got {batch_size}"
-            raise ValueError(msg)
-        conn = self._require_conn()
-        cursor = conn.execute("SELECT * FROM articles ORDER BY published_date")
-        while True:
-            rows = cursor.fetchmany(batch_size)
-            if not rows:
-                break
-            for row in rows:
-                yield _row_to_article(row)
-
-    def iter_dedup_source_rows(
-        self, *, batch_size: int = 500
-    ) -> Iterator[tuple[str, datetime, str, str]]:
-        """Yield ``(id, published_date, title, clean_text)`` for simhash deduplication.
-
-        Matches the historical in-memory pool filter: non-empty body and not a
-        ``[REDIRECT:`` prefix (same rules as ``deduplicate_articles``).
-        """
-        if batch_size < 1:
-            msg = f"batch_size must be >= 1, got {batch_size}"
-            raise ValueError(msg)
-        conn = self._require_conn()
-        sql = """
-            SELECT id, published_date, title, clean_text
-            FROM articles
-            WHERE clean_text IS NOT NULL
-              AND clean_text != ''
-              AND (length(clean_text) < 10 OR substr(clean_text, 1, 10) != '[REDIRECT:')
-            ORDER BY published_date
-        """
-        cursor = conn.execute(sql)
-        while True:
-            rows = cursor.fetchmany(batch_size)
-            if not rows:
-                break
-            for row in rows:
-                yield (
-                    str(row["id"]),
-                    parse_datetime(row["published_date"]),
-                    str(row["title"]),
-                    str(row["clean_text"]),
-                )
-
     def clear_duplicate_flags(self, article_ids: Iterable[str], *, chunk_size: int = 500) -> int:
         """Set ``is_duplicate = 0`` for the given ids.
 
@@ -483,36 +521,6 @@ class Repository:
             if cur.rowcount >= 0:
                 total += cur.rowcount
         return total
-
-    def get_unfetched_urls(self) -> list[UnfetchedUrl]:
-        """Return rows where body text has not been fetched yet."""
-        conn = self._require_conn()
-        rows = conn.execute(
-            "SELECT id, url FROM articles WHERE clean_text = '' OR clean_text IS NULL"
-        ).fetchall()
-        return [UnfetchedUrl(str(r[0]), str(r[1])) for r in rows]
-
-    def list_unfetched_for_fetch(self) -> list[UnfetchedArticle]:
-        """Return unfetched articles with author name and publish date for fetch ordering."""
-        conn = self._require_conn()
-        rows = conn.execute(
-            """
-            SELECT a.id, a.url, au.name AS author_name, a.published_date
-            FROM articles a
-            JOIN authors au ON a.author_id = au.id
-            WHERE a.clean_text = '' OR a.clean_text IS NULL
-            ORDER BY a.published_date
-            """
-        ).fetchall()
-        return [
-            UnfetchedArticle(
-                str(row["id"]),
-                str(row["url"]),
-                str(row["author_name"]),
-                parse_datetime(row["published_date"]),
-            )
-            for row in rows
-        ]
 
     def rewrite_raw_paths_after_archive(self, year: int) -> int:
         """Rewrite ``raw_html_path`` after year folder is archived to a tar member ref.

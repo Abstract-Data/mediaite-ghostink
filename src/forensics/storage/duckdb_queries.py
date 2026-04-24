@@ -11,6 +11,8 @@ from pathlib import Path
 import duckdb
 import polars as pl
 
+from forensics.storage.json_io import ensure_parent
+
 logger = logging.getLogger(__name__)
 
 
@@ -230,7 +232,7 @@ def export_to_duckdb(
         raise FileNotFoundError(msg)
 
     out_path = Path(output).expanduser()
-    out_path.parent.mkdir(parents=True, exist_ok=True)
+    ensure_parent(out_path)
     if out_path.exists():
         out_path.unlink()
 

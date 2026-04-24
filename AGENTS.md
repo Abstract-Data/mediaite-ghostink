@@ -1,6 +1,6 @@
 # AGENTS.md
 # Version: 0.4.0
-# Last Updated: 2026-04-22
+# Last Updated: 2026-04-23
 # Environment: dev
 # Model: gpt-5-3-codex
 # Fallback Model: gpt-5.1
@@ -477,17 +477,19 @@ See `prompts/README.md` for the full versioning contract, bump rules, and releas
 - For Notion-linked specs or reports in this workspace, use the Notion MCP tools when a normal URL fetch returns no page body (Notion pages are often auth-walled to anonymous HTTP).
 - When syncing GitButler guidance from Notion into this repo, add a companion skill under a distinct name (for example `gitbutler-workflow`) rather than replacing the existing GitButler skill wholesale.
 - For Typer/Rich CLI help tests that assert literal `--flag` substrings, disable color on `CliRunner.invoke` and strip ANSI escape sequences so Rich markup does not break contiguous flag text.
+- Prefer refactoring long functions and shared helpers over adding new McCabe C901 suppressions; if a suppression is unavoidable, pair it with a short decomposition plan or tracking comment rather than silent noqa growth.
+- When expanding README or onboarding docs for this repo, document which models and measurements the pipeline uses, how to run it locally, and chain-of-custody style forensic expectations; add diagrams or flow figures when they materially clarify stages or data flow.
 
 ## Learned Workspace Facts
 
 - Git remote `origin` targets **Abstract-Data/mediaite-ghostink** on GitHub; `git remote -v` may show an SSH form if HTTPS URLs are rewritten in Git config.
 - Architectural decision records live under **`docs/adr/`**; keep a single ADR-style tree rather than reintroducing a parallel `docs/decisions/` layout unless the repo convention is explicitly changed.
-- **`requires-python`** in `pyproject.toml` is **`>=3.13,<3.14`** so the declared scientific and ML dependency set resolves against published wheels.
-- Ruff **`[tool.ruff.lint.per-file-ignores]`** entries in `pyproject.toml` must remain valid TOML (for example a multi-line table); inline tables cannot span lines and will break parsing.
+- Ruff: this repo’s **`.ruff.toml`** only **`extend`s `pyproject.toml`**, so lint rules (including **`C901`**) come from **`[tool.ruff.lint]`** in `pyproject.toml`. If you add **`[tool.ruff.lint.per-file-ignores]`** in `pyproject.toml`, keep valid TOML (for example a multi-line table); inline tables cannot span lines and will break parsing. CI (`.github/workflows/ci-tests.yml`) uses **`uv sync --extra dev --extra tui`** and relies on **`addopts`** for **`--cov=forensics`** so **`coverage.json`** matches a local **`uv run pytest`** (no second **`--cov=src`** flag).
 - Phase 2 discovery and metadata scraping persist **`data/authors_manifest.jsonl`**, **`data/scrape_errors.jsonl`**, and **`data/articles.db`** at the repository root (paths resolved via `get_project_root()`).
 - GitButler (`but`): follow the repo-local skill at `.claude/skills/gitbutler/SKILL.md` (mirrored at `.cursor/skills/gitbutler/SKILL.md`). For the Notion playbook add-on (parallel agents, JSON workflow), see `.claude/skills/gitbutler-workflow/SKILL.md` (mirrored under `.cursor/skills/gitbutler-workflow/`). From this repo: authenticate the forge once (`but config forge auth`); for GitHub PRs ensure the integration target is **`origin/main`** (not `gb-local/main`). If `but config target` refuses while virtual branches are applied, `but unapply` the stack first, set the target, then `but apply` again before `but push` / `but pr new`.
 - The `forensics` console script imports the **`forensics.cli` package** (`src/forensics/cli/` Typer app); the old monolithic `src/forensics/cli.py` was removed after the Typer migration—treat package modules as the CLI source of truth when updating docs or tracing dispatch.
-- `forensics scrape --all-authors` walks **every** author in `data/authors_manifest.jsonl` for metadata (and skips the placeholder guard on scrape-like invocations); `extract` / `analyze` / reporting still resolve study authors from `config.toml` via `resolve_author_rows` unless narrowed with `--author`.
+- `forensics scrape --all-authors` walks **every** author in `data/authors_manifest.jsonl` for metadata (and skips the placeholder guard on scrape-like invocations); `extract` / `analyze` / reporting still resolve study authors from `config.toml` via `resolve_author_rows` unless narrowed with `--author`. Survey scrape paths accept **`--post-year-min`** and **`--post-year-max`** (inclusive calendar years) to bound WordPress article pulls without ingesting full site history.
+- **`forensics dashboard`** runs the Textual full-screen pipeline view (install the **`tui`** extra); it conflicts with **`--no-progress`**. For non-TUI runs, root **`--no-progress`** turns off Rich live progress (including on `forensics all`, `forensics survey`, scrape, and extract); only one live UI mode should be active at a time.
 - README-aligned local modeling and reporting expect **`uv run python -m spacy download en_core_web_md`** for extraction and **Quarto on `PATH`** when running **`forensics report`** or **`forensics all`** (plus non-placeholder `config.toml` authors for guarded scrape paths).
 - In `collect_article_metadata`, author ingestion runs **concurrently** up to **`scraping.max_concurrent`**, all tasks share one **`RateLimiter`**, SQLite writes go through a per-run **`asyncio.Lock`**, and per-author failures append to **`data/scrape_errors.jsonl`** without stopping the whole batch.
 - Each **`forensics analyze`** run invokes **`verify_preregistration(settings)`** before downstream stages; **`data/analysis/run_metadata.json`** records **`preregistration_status`** (`ok`, `missing`, or `mismatch`). Optional convergence permutation nulls are configured on **`AnalysisConfig`** (`convergence_use_permutation` defaults false, plus iteration count and seed) and are passed into **`compute_convergence_scores`** from the analysis orchestrator and comparison paths; when enabled, empirical p-values are **logged only** and do not change detected windows.

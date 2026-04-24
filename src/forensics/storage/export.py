@@ -8,6 +8,7 @@ import weakref
 from pathlib import Path
 from typing import Any
 
+from forensics.storage.json_io import ensure_parent
 from forensics.storage.repository import Repository
 
 _loop_jsonl_locks: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Lock] = (
@@ -25,7 +26,7 @@ def _jsonl_append_lock_for_current_loop() -> asyncio.Lock:
 
 
 def append_jsonl(path: Path, record: dict[str, object]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
+    ensure_parent(path)
     with path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(record, default=str) + "\n")
 
@@ -35,7 +36,7 @@ async def append_jsonl_async(path: Path, record: dict[str, Any]) -> None:
 
     Safe for concurrent async callers (per-event-loop lock + thread I/O).
     """
-    path.parent.mkdir(parents=True, exist_ok=True)
+    ensure_parent(path)
     line = json.dumps(record, default=str) + "\n"
 
     def _write() -> None:
@@ -52,7 +53,7 @@ def export_articles_jsonl(db_path: Path, output_path: Path, *, batch_size: int =
     Streams from SQLite so memory stays proportional to ``batch_size`` rather than
     corpus size.
     """
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+    ensure_parent(output_path)
     count = 0
     with Repository(db_path) as repo, output_path.open("w", encoding="utf-8") as handle:
         for article in repo.iter_all_articles(batch_size=batch_size):

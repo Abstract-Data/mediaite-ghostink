@@ -6,6 +6,7 @@ import hashlib
 import math
 import re
 from collections import Counter, OrderedDict
+from threading import Lock
 from typing import Any, Final
 
 import numpy as np
@@ -24,6 +25,7 @@ MIN_PEERS_FOR_SIMILARITY: Final[int] = 5
 # cache does not retain long peer strings (only ``current`` is held per entry).
 _SELF_SIM_CACHE_MAX: Final[int] = 256
 _self_similarity_cache: OrderedDict[tuple[str, bytes], float] = OrderedDict()
+_self_similarity_lock = Lock()
 
 
 def _peer_tuple_fingerprint(peers: tuple[str, ...]) -> bytes:
@@ -68,16 +70,17 @@ def _self_similarity_tfidf_mean(current: str, peers: tuple[str, ...]) -> float:
 def _self_similarity_cached(current: str, peers: tuple[str, ...]) -> float:
     """TF-IDF mean cosine sim; LRU keyed by ``current`` + digest of ``peers``."""
     key = (current, _peer_tuple_fingerprint(peers))
-    cache = _self_similarity_cache
-    if key in cache:
+    with _self_similarity_lock:
+        cache = _self_similarity_cache
+        if key in cache:
+            cache.move_to_end(key)
+            return cache[key]
+        value = _self_similarity_tfidf_mean(current, peers)
+        cache[key] = value
         cache.move_to_end(key)
-        return cache[key]
-    value = _self_similarity_tfidf_mean(current, peers)
-    cache[key] = value
-    cache.move_to_end(key)
-    while len(cache) > _SELF_SIM_CACHE_MAX:
-        cache.popitem(last=False)
-    return value
+        while len(cache) > _SELF_SIM_CACHE_MAX:
+            cache.popitem(last=False)
+        return value
 
 
 def _self_similarity(current: str, peers: list[str]) -> float | None:

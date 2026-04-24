@@ -37,22 +37,8 @@ def _gram_digest(gram_bytes: bytes, hashbits: int) -> int:
     return (hi << 128) | lo
 
 
-def simhash(text: str, hashbits: int = 128) -> int:
-    """Character n-gram simhash for near-duplicate detection (up to 256 bits).
-
-    Uses xxhash-128 per n-gram instead of SHA-256 for a ~10–50× speedup on the
-    fingerprinting step (P3-PERF-001). When ``hashbits > 128``, two xxh128
-    digests with different seeds are concatenated to supply up to 256 bits, so
-    the old 256-bit API surface is preserved. The mathematical properties
-    (Hamming distance preservation under near-duplicate perturbations) are
-    unchanged; hash *values* are not comparable to pre-migration SHA-256
-    fingerprints, so any stored ``dedup_simhash`` columns must be recomputed.
-    """
-    if hashbits < 1 or hashbits > 256:
-        msg = "hashbits must be between 1 and 256"
-        raise ValueError(msg)
+def _simhash_char_ngrams(cleaned: str) -> list[str]:
     grams: list[str] = []
-    cleaned = text.replace("\n", " ")
     for n in (3, 4):
         if len(cleaned) < n:
             continue
@@ -60,6 +46,10 @@ def simhash(text: str, hashbits: int = 128) -> int:
             grams.append(cleaned[i : i + n])
     if not grams:
         grams = [cleaned or "\x00"]
+    return grams
+
+
+def _simhash_from_grams(grams: list[str], hashbits: int) -> int:
     top_bit = hashbits - 1
     vector = [0] * hashbits
     for gram in grams:
@@ -74,3 +64,22 @@ def simhash(text: str, hashbits: int = 128) -> int:
         if weight > 0:
             fingerprint |= 1 << i
     return fingerprint
+
+
+def simhash(text: str, hashbits: int = 128) -> int:
+    """Character n-gram simhash for near-duplicate detection (up to 256 bits).
+
+    Uses xxhash-128 per n-gram instead of SHA-256 for a ~10–50× speedup on the
+    fingerprinting step (P3-PERF-001). When ``hashbits > 128``, two xxh128
+    digests with different seeds are concatenated to supply up to 256 bits, so
+    the old 256-bit API surface is preserved. The mathematical properties
+    (Hamming distance preservation under near-duplicate perturbations) are
+    unchanged; hash *values* are not comparable to pre-migration SHA-256
+    fingerprints, so any stored ``dedup_simhash`` columns must be recomputed.
+    """
+    if hashbits < 1 or hashbits > 256:
+        msg = "hashbits must be between 1 and 256"
+        raise ValueError(msg)
+    cleaned = text.replace("\n", " ")
+    grams = _simhash_char_ngrams(cleaned)
+    return _simhash_from_grams(grams, hashbits)

@@ -14,6 +14,8 @@ into ``analysis/`` (see RF-ARCH-001).
 
 from __future__ import annotations
 
+from typing import NamedTuple
+
 # DEPRECATED re-exports — import from forensics.paths directly (RF-ARCH-001 / G2).
 from forensics.paths import (
     closed_interval_contains,
@@ -23,10 +25,17 @@ from forensics.paths import (
 )
 
 
+class MonthlyLabeledVelocity(NamedTuple):
+    """Month key (``YYYY-MM``) with embedding drift velocity (RF-SMELL-006)."""
+
+    month: str
+    velocity: float
+
+
 def pair_months_with_velocities(
     monthly: list[tuple[str, object]],
     velocities: list[float],
-) -> list[tuple[str, float]]:
+) -> list[MonthlyLabeledVelocity]:
     """Pair each velocity with the month label of the *later* of the two centroids.
 
     ``monthly`` is a list of ``(YYYY-MM, centroid_vector)`` tuples ordered by
@@ -34,7 +43,7 @@ def pair_months_with_velocities(
     and month ``i+1``, so we label it with ``monthly[i + 1][0]``.
     """
     return [
-        (monthly[i + 1][0], velocities[i])
+        MonthlyLabeledVelocity(monthly[i + 1][0], velocities[i])
         for i in range(min(len(velocities), max(len(monthly) - 1, 0)))
     ]
 
@@ -78,6 +87,7 @@ def describe_velocity_acceleration_pct(velocities: list[float]) -> str | None:
 
 
 __all__ = [
+    "MonthlyLabeledVelocity",
     "closed_interval_contains",
     "compute_velocity_acceleration",
     "describe_velocity_acceleration_pct",

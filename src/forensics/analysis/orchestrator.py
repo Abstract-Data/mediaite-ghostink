@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 from bisect import bisect_left
@@ -36,9 +35,15 @@ from forensics.storage.json_io import write_json_artifact
 from forensics.storage.parquet import load_feature_frame_sorted
 from forensics.storage.repository import Repository
 from forensics.utils.datetime import timestamps_from_frame
-from forensics.utils.provenance import write_corpus_custody
+from forensics.utils.provenance import compute_model_config_hash, write_corpus_custody
 
 logger = logging.getLogger(__name__)
+
+__all__ = [
+    "assemble_analysis_result",
+    "run_compare_only",
+    "run_full_analysis",
+]
 
 
 def _ts_key(t: datetime) -> float:
@@ -127,7 +132,8 @@ def _run_per_author_analysis(
         return None
 
     lf_all = load_feature_frame_sorted(feat_path)
-    df_author = lf_all.filter(pl.col("author_id") == author.id).collect()
+    lf_author = lf_all.filter(pl.col("author_id") == author.id)
+    df_author = lf_author.collect()
     if df_author.is_empty():
         df_author = lf_all.collect()
 
@@ -214,6 +220,7 @@ def _run_target_control_comparisons(
     config: ForensicsSettings,
 ) -> dict[str, Any]:
     comparison_payload: dict[str, Any] = {"targets": {}}
+    changepoints_memory = {slug: list(res.change_points) for slug, res in results.items()}
     for tid in targets:
         if tid not in results:
             continue
@@ -223,6 +230,7 @@ def _run_target_control_comparisons(
                 controls,
                 paths,
                 settings=config,
+                changepoints_memory=changepoints_memory,
             )
             comparison_payload["targets"][tid] = report
         except (ValueError, OSError) as exc:
@@ -262,9 +270,7 @@ def assemble_analysis_result(
     config: AnalysisConfig,
 ) -> AnalysisResult:
     """Build ``AnalysisResult`` with a short deterministic hash of analysis settings."""
-    payload = config.model_dump(mode="json", round_trip=True)
-    raw = json.dumps(payload, sort_keys=True, default=str).encode()
-    config_hash = hashlib.sha256(raw).hexdigest()[:16]
+    config_hash = compute_model_config_hash(config, length=16, round_trip=True)
     return AnalysisResult(
         author_id=author_id,
         run_id=str(uuid4()),

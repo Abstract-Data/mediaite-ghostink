@@ -58,7 +58,10 @@ def _load_or_compute_changepoints(
     settings: ForensicsSettings,
     *,
     feature_frame: pl.DataFrame | None = None,
+    changepoints_memory: dict[str, list[ChangePoint]] | None = None,
 ) -> list[ChangePoint]:
+    if changepoints_memory is not None and slug in changepoints_memory:
+        return list(changepoints_memory[slug])
     cp_json = paths.changepoints_json(slug)
     if cp_json.is_file():
         raw = json.loads(cp_json.read_text(encoding="utf-8"))
@@ -148,6 +151,8 @@ def _summarize_control_authors(
     paths: AnalysisArtifactPaths,
     settings: ForensicsSettings,
     control_feature_frames: dict[str, pl.DataFrame],
+    *,
+    changepoints_memory: dict[str, list[ChangePoint]] | None = None,
 ) -> tuple[
     dict[str, list[ChangePoint]],
     dict[str, DriftScores | None],
@@ -164,6 +169,7 @@ def _summarize_control_authors(
             paths,
             settings,
             feature_frame=control_feature_frames.get(slug),
+            changepoints_memory=changepoints_memory,
         )
 
         drift_path = paths.drift_json(slug)
@@ -193,18 +199,15 @@ def _editorial_signal_for_target(
     paths: AnalysisArtifactPaths,
     settings: ForensicsSettings,
     control_windows: dict[str, list[ConvergenceWindow]],
+    *,
+    changepoints_memory: dict[str, list[ChangePoint]] | None = None,
 ) -> float:
-    target_cp_path = paths.changepoints_json(target_id)
-    if target_cp_path.is_file():
-        raw_cp = json.loads(target_cp_path.read_text(encoding="utf-8"))
-        target_cps = [ChangePoint.model_validate(x) for x in raw_cp]
+    if changepoints_memory is not None and target_id in changepoints_memory:
+        target_cps = list(changepoints_memory[target_id])
     else:
-        target_cps = analyze_author_feature_changepoints(
-            df_t,
-            author_id=target_author.id,
-            settings=settings,
+        target_cps = _editorial_target_changepoints_disk_or_compute(
+            target_id, target_author, df_t, paths, settings
         )
-
     summary = load_drift_summary(target_id, paths, settings=settings)
 
     target_windows = compute_convergence_scores(
@@ -218,12 +221,31 @@ def _editorial_signal_for_target(
     return compute_signal_attribution(target_windows, control_windows)
 
 
+def _editorial_target_changepoints_disk_or_compute(
+    target_id: str,
+    target_author: Author,
+    df_t: pl.DataFrame,
+    paths: AnalysisArtifactPaths,
+    settings: ForensicsSettings,
+) -> list[ChangePoint]:
+    target_cp_path = paths.changepoints_json(target_id)
+    if target_cp_path.is_file():
+        raw_cp = json.loads(target_cp_path.read_text(encoding="utf-8"))
+        return [ChangePoint.model_validate(x) for x in raw_cp]
+    return analyze_author_feature_changepoints(
+        df_t,
+        author_id=target_author.id,
+        settings=settings,
+    )
+
+
 def compare_target_to_controls(
     target_id: str,
     control_ids: list[str],
     paths: AnalysisArtifactPaths,
     *,
     settings: ForensicsSettings,
+    changepoints_memory: dict[str, list[ChangePoint]] | None = None,
 ) -> dict[str, Any]:
     """Two-sample tests (target vs pooled controls) plus cached change-point / drift summaries."""
     with Repository(paths.db_path) as repo:
@@ -236,6 +258,7 @@ def compare_target_to_controls(
             paths,
             settings,
             control_feature_frames,
+            changepoints_memory=changepoints_memory,
         )
         editorial_vs_author_signal = _editorial_signal_for_target(
             target_id,
@@ -244,6 +267,7 @@ def compare_target_to_controls(
             paths,
             settings,
             control_windows,
+            changepoints_memory=changepoints_memory,
         )
 
         ccp_out = {

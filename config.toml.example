@@ -1,0 +1,113 @@
+# Example configuration for mediaite-ghostink (copy or symlink).
+#
+# Typical workflow: copy this file to `config.toml` in the project root, replace
+# placeholder author rows with real study authors, then run `uv run forensics validate`.
+# Alternatively set `FORENSICS_CONFIG_FILE` to point at any TOML path.
+#
+# The tracked `config.toml` in the repo is the same template as this file; keep them
+# in sync when adding new settings sections.
+
+# Mediaite AI writing forensics — local configuration (Phase 1 template).
+# Override with FORENSICS_* environment variables (see pydantic-settings nested keys).
+
+[[authors]]
+name = "Placeholder Target"
+slug = "placeholder-target"
+outlet = "mediaite.com"
+role = "target"
+archive_url = "https://www.mediaite.com/author/placeholder-target/"
+baseline_start = 2020-01-01
+baseline_end = 2023-12-31
+
+[[authors]]
+name = "Placeholder Control"
+slug = "placeholder-control"
+outlet = "mediaite.com"
+role = "control"
+archive_url = "https://www.mediaite.com/author/placeholder-control/"
+baseline_start = 2020-01-01
+baseline_end = 2023-12-31
+
+# spaCy pipeline used for feature extraction and preflight validation.
+# Changing this requires: `uv run python -m spacy download <model>`.
+spacy_model = "en_core_web_md"
+
+[scraping]
+rate_limit_seconds = 0.5
+rate_limit_jitter = 0.5
+respect_robots_txt = true
+user_agent = "AI-Writing-Forensics/1.0 (research)"
+max_concurrent = 3
+max_retries = 3
+retry_backoff_seconds = 5.0
+# Near-duplicate threshold (hamming distance over 128-bit simhash); lower is stricter.
+simhash_threshold = 3
+# When true, the metadata phase pulls `content.rendered` (100 posts per request)
+# and writes body text inline, so `fetch_articles` becomes a no-op. Trades
+# per-article OG/ld+json metadata for ~100× fewer HTTP requests.
+bulk_fetch_mode = true
+# Optional inclusive calendar-year window for WordPress wp/v2/posts (after/before).
+# Both must be set together, or omit both for full history. Override via CLI or
+# FORENSICS_SCRAPING__POST_YEAR_MIN / FORENSICS_SCRAPING__POST_YEAR_MAX.
+# post_year_min = 2019
+# post_year_max = 2025
+
+[analysis]
+rolling_windows = [30, 90]
+significance_threshold = 0.05
+multiple_comparison_method = "benjamini_hochberg"
+bootstrap_iterations = 200
+min_articles_for_period = 5
+embedding_model = "sentence-transformers/all-MiniLM-L6-v2"
+embedding_model_version = "v2.0"
+changepoint_methods = ["pelt", "bocpd"]
+# Convergence permutation null (Phase 12 §5b) — logs empirical p-values; off by default (CPU).
+# convergence_use_permutation = false
+# convergence_permutation_iterations = 1000
+# convergence_permutation_seed = 42
+
+[survey]
+# Phase 12 §1 — blind newsroom-wide survey mode thresholds.
+min_articles = 50
+min_span_days = 730
+min_words_per_article = 200
+min_articles_per_year = 12.0
+require_recent_activity = true
+recent_activity_days = 180
+
+[probability]
+# Phase 9 — token-level probability features (perplexity, burstiness, Binoculars).
+# Requires the `probability` optional-extra:  uv sync --extra probability
+reference_model = "gpt2"
+reference_model_revision = "e7da7f2"
+binoculars_model_base = "tiiuae/falcon-7b"
+binoculars_model_instruct = "tiiuae/falcon-7b-instruct"
+binoculars_enabled = false
+max_sequence_length = 1024
+sliding_window_stride = 512
+batch_size = 16
+device = "auto"
+low_ppl_threshold = 20.0
+
+[baseline]
+# Phase 10 — AI baseline generation via local Ollama models.
+# Requires the `baseline` optional-extra:  uv sync --extra baseline
+# Tags must exist locally (`ollama list`); Phase 9 probability uses HF separately (`uv sync --extra probability`).
+ollama_base_url = "http://localhost:11434"
+models = ["llama3.2:latest"]
+temperatures = [0.0, 0.8]
+articles_per_cell = 30
+max_tokens = 1500
+request_timeout = 120
+
+[chain_of_custody]
+verify_corpus_hash = true
+verify_raw_archives = true
+log_all_generations = true
+
+[report]
+title = "Writing Forensics Analysis"
+output_format = "both"
+include_sections = []
+chart_theme = "plotly_white"
+cloudflare_deploy = false

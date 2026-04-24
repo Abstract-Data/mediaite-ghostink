@@ -18,18 +18,19 @@ jobs:
         with:
           enable-cache: true
       - run: uv python install ${{ matrix.python-version }}
-      - run: uv sync --frozen --extra dev
+      - run: uv sync --frozen --extra dev --extra tui
 
       - name: Install spaCy English model (Phase 4 features)
         run: uv run python -m spacy download en_core_web_md
 
+      # Coverage target and fail_under come from pyproject.toml addopts + [tool.coverage.*]
+      # (--cov=forensics). Do not pass a second --cov=src here; it skews coverage.json vs local.
       - name: Run tests with coverage
         run: >-
           uv run pytest tests/
           --junitxml=test-results.xml
-          --cov=src
           --cov-report=json:coverage.json
-          --cov-report=term
+          --cov-report=term-missing
           -v
 
       - name: Upload test reports

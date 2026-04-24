@@ -5,9 +5,12 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+from collections.abc import Set
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+from pydantic import BaseModel
 
 from forensics.config.settings import ForensicsSettings
 from forensics.storage.json_io import write_json_artifact
@@ -16,11 +19,31 @@ from forensics.storage.repository import open_repository_connection
 CUSTODY_FILENAME = "corpus_custody.json"
 
 
-def compute_config_hash(settings: ForensicsSettings) -> str:
-    """Deterministic short hash of the pipeline configuration."""
-    payload = settings.model_dump(mode="json", exclude={"db_path"})
+def compute_model_config_hash(
+    config: BaseModel,
+    *,
+    length: int = 16,
+    exclude: Set[str] | frozenset[str] | None = None,
+    round_trip: bool = False,
+) -> str:
+    """SHA-256 prefix of a deterministic JSON serialization of ``config`` (RF-DRY-003)."""
+    dump_kw: dict[str, Any] = {"mode": "json"}
+    if exclude:
+        dump_kw["exclude"] = set(exclude)
+    if round_trip:
+        dump_kw["round_trip"] = True
+    payload = config.model_dump(**dump_kw)
     config_str = json.dumps(payload, sort_keys=True, default=str)
-    return hashlib.sha256(config_str.encode()).hexdigest()[:12]
+    return hashlib.sha256(config_str.encode()).hexdigest()[:length]
+
+
+def compute_config_hash(settings: ForensicsSettings) -> str:
+    """Deterministic short hash of the pipeline configuration (excludes volatile ``db_path``)."""
+    return compute_model_config_hash(
+        settings,
+        length=12,
+        exclude=frozenset({"db_path"}),
+    )
 
 
 def compute_corpus_hash(db_path: Path) -> str:

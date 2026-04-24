@@ -18,8 +18,8 @@ format-check: ## Check formatting without changes
 test: ## Run all tests
 	uv run pytest tests/ -v
 
-coverage: ## Run tests with coverage
-	uv run pytest tests/ -v --cov=src --cov-report=term-missing
+coverage: ## Run tests with coverage (see pyproject.toml addopts / fail_under)
+	uv run pytest tests/ -v
 
 clean: ## Clean generated data and caches
 	rm -rf data/raw data/features data/analysis data/reports data/pipeline

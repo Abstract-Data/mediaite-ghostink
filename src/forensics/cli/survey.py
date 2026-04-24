@@ -30,6 +30,55 @@ _STRENGTH_ICONS: dict[str, str] = {
 }
 
 
+def _survey_dry_run_echo(db_path, criteria) -> None:
+    qualified, disqualified = qualify_authors(db_path, criteria)
+    typer.echo("")
+    typer.echo(f"Qualified: {len(qualified)} authors")
+    typer.echo(f"Disqualified: {len(disqualified)} authors")
+    typer.echo("")
+    for qa in qualified:
+        typer.echo(
+            f"  {qa.author.name:<30} {qa.total_articles:>5} articles  "
+            f"{qa.date_range_days:>5}d span  {qa.articles_per_year:>5.1f}/yr"
+        )
+    if disqualified:
+        typer.echo("")
+        typer.echo(f"Disqualified ({len(disqualified)}):")
+        for dq in disqualified[:10]:
+            typer.echo(f"  {dq.author.name:<30} reason: {dq.disqualification_reason}")
+        if len(disqualified) > 10:
+            typer.echo(f"  ... and {len(disqualified) - 10} more")
+
+
+def _survey_print_report(report) -> None:
+    typer.echo("")
+    typer.echo("=" * 70)
+    typer.echo(f"SURVEY COMPLETE — run_id={report.run_id}")
+    typer.echo(f"{len(report.results)} authors analyzed")
+    typer.echo("=" * 70)
+    typer.echo("")
+
+    for r in report.results[:20]:
+        if r.score is not None:
+            icon = _STRENGTH_ICONS.get(r.score.strength.value, "???")
+            typer.echo(
+                f"  [{icon}] {r.author_name:<30} "
+                f"score={r.score.composite:.3f}  "
+                f"strength={r.score.strength.value:<10} "
+                f"{r.score.evidence_summary[:60]}"
+            )
+        elif r.error is not None:
+            typer.echo(f"  [ERR] {r.author_name:<30} {r.error[:60]}")
+
+    if report.natural_controls:
+        typer.echo("")
+        typer.echo(f"Natural control cohort: {len(report.natural_controls)} author(s)")
+
+    if report.run_dir is not None:
+        typer.echo("")
+        typer.echo(f"Full results: {report.run_dir}")
+
+
 @survey_app.callback(invoke_without_command=True)
 def survey(
     ctx: typer.Context,
@@ -108,23 +157,7 @@ def survey(
     criteria = replace(QualificationCriteria.from_settings(settings.survey), **overrides)
 
     if dry_run:
-        qualified, disqualified = qualify_authors(db_path, criteria)
-        typer.echo("")
-        typer.echo(f"Qualified: {len(qualified)} authors")
-        typer.echo(f"Disqualified: {len(disqualified)} authors")
-        typer.echo("")
-        for qa in qualified:
-            typer.echo(
-                f"  {qa.author.name:<30} {qa.total_articles:>5} articles  "
-                f"{qa.date_range_days:>5}d span  {qa.articles_per_year:>5.1f}/yr"
-            )
-        if disqualified:
-            typer.echo("")
-            typer.echo(f"Disqualified ({len(disqualified)}):")
-            for dq in disqualified[:10]:
-                typer.echo(f"  {dq.author.name:<30} reason: {dq.disqualification_reason}")
-            if len(disqualified) > 10:
-                typer.echo(f"  ... and {len(disqualified) - 10} more")
+        _survey_dry_run_echo(db_path, criteria)
         raise typer.Exit(0)
 
     from forensics.survey.orchestrator import run_survey
@@ -147,29 +180,4 @@ def survey(
             )
         )
 
-    typer.echo("")
-    typer.echo("=" * 70)
-    typer.echo(f"SURVEY COMPLETE — run_id={report.run_id}")
-    typer.echo(f"{len(report.results)} authors analyzed")
-    typer.echo("=" * 70)
-    typer.echo("")
-
-    for r in report.results[:20]:
-        if r.score is not None:
-            icon = _STRENGTH_ICONS.get(r.score.strength.value, "???")
-            typer.echo(
-                f"  [{icon}] {r.author_name:<30} "
-                f"score={r.score.composite:.3f}  "
-                f"strength={r.score.strength.value:<10} "
-                f"{r.score.evidence_summary[:60]}"
-            )
-        elif r.error is not None:
-            typer.echo(f"  [ERR] {r.author_name:<30} {r.error[:60]}")
-
-    if report.natural_controls:
-        typer.echo("")
-        typer.echo(f"Natural control cohort: {len(report.natural_controls)} author(s)")
-
-    if report.run_dir is not None:
-        typer.echo("")
-        typer.echo(f"Full results: {report.run_dir}")
+    _survey_print_report(report)

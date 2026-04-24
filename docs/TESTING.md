@@ -29,8 +29,10 @@ uv run pytest tests/evals/ -v
 # Run specific test
 uv run pytest -k "test_feature_extraction" -v
 
-# With coverage
-uv run pytest tests/ -v --cov=src --cov-report=term-missing
+# With coverage (uses ``[tool.pytest.ini_options]`` addopts: ``--cov=forensics``, ``fail_under``)
+# Install ``dev`` + ``tui`` extras so Textual-backed modules count toward the gate:
+# ``uv sync --extra dev --extra tui``
+uv run pytest tests/ -v
 
 # Property-based testing with statistics
 uv run pytest tests/ -v --hypothesis-show-statistics
@@ -44,7 +46,16 @@ uv run pytest tests/unit -x
 - Lint must pass: `uv run ruff check .`
 - Format check must pass: `uv run ruff format --check .`
 - Test suite must pass before merging.
-- Coverage target: 60% (enforced in `pyproject.toml` via `fail_under = 60`). Raise this threshold only when the omitted modules are brought under test.
+- Coverage target: 72% (enforced in `pyproject.toml` via `fail_under = 72` on the `forensics` package). Raise this threshold only when the omitted modules are brought under test.
+
+## Known low-coverage hotspots (triage)
+
+After a full `uv run pytest` coverage report, these areas often remain thin until dedicated work lands. Use them as a backlog hint, not a blocker for unrelated PRs:
+
+- `forensics.analysis.orchestrator` — `run_full_analysis` / `_run_per_author_analysis` (heavy fixtures); `run_compare_only` and `compare_target_to_controls` are covered in `tests/unit/test_comparison_target_controls.py`.
+- `forensics.reporting` Quarto subprocess paths — require Quarto on `PATH` for integration tests.
+- `forensics.cli` subcommands beyond help smoke — deepen with Typer `CliRunner` scenarios per command.
+- `forensics.tui.screens.launch` / `preflight` — mostly manual or snapshot-style coverage.
 
 ## Coverage Omission Policy
 

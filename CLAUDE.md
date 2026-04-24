@@ -29,6 +29,7 @@
 - `docs/RUNBOOK.md` — operational quick reference and debug commands (includes GitButler-oriented git workflow)
 - `.claude/skills/gitbutler/SKILL.md` — GitButler (`but`) version-control skill (mirrored under `.cursor/skills/gitbutler/`)
 - `.claude/skills/gitbutler-workflow/SKILL.md` — Notion playbook add-on: virtual branches vs worktrees, JSON status workflow (mirrored under `.cursor/skills/gitbutler-workflow/`)
+- `.claude/skills/adversarial-review/SKILL.md` — adversarial architecture review adapted for this pipeline's stack (mirrored under `.cursor/skills/adversarial-review/`)
 - `prompts/README.md` — prompt versioning contract (semver, immutability, release workflow)
 - `config.toml` — pipeline configuration (scraper, features, analysis settings)
 

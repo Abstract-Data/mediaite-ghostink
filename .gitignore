@@ -30,8 +30,10 @@ build/
 .coverage
 .coverage.*
 coverage.xml
+coverage.json
 htmlcov/
 junit.xml
+test-results.xml
 
 # Environment & secrets
 .env
@@ -44,14 +46,30 @@ junit.xml
 # Pipeline & local data (see src/forensics/config — default data_dir is ./data)
 data/raw/*
 data/features/*
+# Embedding batches (per-author *.npz) and manifest — large generated artifacts
+data/embeddings/
 data/analysis/*
 data/reports/*
 data/pipeline/*
+# Probability-model outputs (per-author Parquet + sidecars)
+data/probability/
+# Phase 10 synthetic baseline tree (JSON + per-article npy/embeddings)
+data/ai_baseline/
 # Runtime data subdirs produced by pre-registration, calibration, and survey runs.
 data/preregistration/
 data/calibration/
 data/survey/
 !data/.gitkeep
+# JSONL exports and scrape/discovery logs at repo data root
+data/articles.jsonl
+data/authors_manifest.jsonl
+data/scrape_errors.jsonl
+data/extraction_warnings.jsonl
+data/coauthored_articles.jsonl
+# FUSE/overlay temp files (e.g. editors touching data/ on sshfs)
+data/.fuse_hidden*
+# Ad-hoc local review / export notes dropped next to corpus artifacts
+data/adversarial_review*.md
 # DB artifacts often live directly under data/ (e.g. articles.db)
 data/*.db
 data/*.db-journal

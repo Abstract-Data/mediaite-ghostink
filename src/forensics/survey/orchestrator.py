@@ -8,11 +8,11 @@ interruption.
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 import logging
 import os
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -38,6 +38,7 @@ from forensics.survey.scoring import (
     identify_natural_controls,
     validate_against_controls,
 )
+from forensics.utils.provenance import compute_model_config_hash
 
 logger = logging.getLogger(__name__)
 
@@ -72,8 +73,7 @@ class SurveyReport:
 
 
 def _compute_config_hash(settings: ForensicsSettings) -> str:
-    payload = json.dumps(settings.analysis.model_dump(mode="json"), sort_keys=True, default=str)
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+    return compute_model_config_hash(settings.analysis, length=16)
 
 
 def _run_dir_for(project_root: Path, run_id: str) -> Path:
@@ -242,6 +242,188 @@ async def _process_author(
     return result
 
 
+@contextmanager
+def _observer_phase(observer: PipelineObserver | None, phase: PipelineRunPhase):
+    if observer is not None:
+        observer.pipeline_run_phase_start(phase)
+    try:
+        yield
+    finally:
+        if observer is not None:
+            observer.pipeline_run_phase_end(phase)
+
+
+async def _maybe_run_survey_scrape(
+    *,
+    skip_scrape: bool,
+    dry_run: bool,
+    post_year_min: int | None,
+    post_year_max: int | None,
+    observer: PipelineObserver | None,
+    report: SurveyReport,
+) -> bool:
+    """Run the survey scrape phase when needed.
+
+    Returns ``True`` if the caller should return ``report`` immediately (failure).
+    """
+    if skip_scrape or dry_run:
+        return False
+    from forensics.cli.scrape import dispatch_scrape
+
+    logger.info("survey: running full scrape pipeline first (all authors)")
+    with _observer_phase(observer, PipelineRunPhase.SCRAPE):
+        rc = await dispatch_scrape(
+            discover=False,
+            metadata=False,
+            fetch=False,
+            dedup=False,
+            archive=False,
+            dry_run=False,
+            force_refresh=False,
+            all_authors=True,
+            post_year_min=post_year_min,
+            post_year_max=post_year_max,
+            observer=observer,
+        )
+    if rc != 0:
+        logger.error("survey: scrape failed with exit code %d", rc)
+        report.results = []
+        report.aborted_reason = "scrape_failed"
+        _write_checkpoint(report)
+        _write_survey_results(report)
+        return True
+    return False
+
+
+async def _run_authors_parallel(
+    *,
+    pending: list[QualifiedAuthor],
+    qualified: list[QualifiedAuthor],
+    total: int,
+    report: SurveyReport,
+    db: Path,
+    settings: ForensicsSettings,
+    root: Path,
+    observer: PipelineObserver | None,
+    workers: int,
+) -> None:
+    """ProcessPool workers run in subprocesses; per-author Rich extract is not applied here."""
+    slug_to_idx = {qa.author.slug: i for i, qa in enumerate(qualified, start=1)}
+    for qa in pending:
+        if observer is not None:
+            observer.survey_author_started(qa.author.slug, slug_to_idx[qa.author.slug], total)
+    with ProcessPoolExecutor(max_workers=workers) as executor:
+        future_to_qa = {
+            executor.submit(_process_author_worker, qa, db, settings, root): qa for qa in pending
+        }
+        for future in as_completed(future_to_qa):
+            qa = future_to_qa[future]
+            slug = qa.author.slug
+            idx = slug_to_idx[slug]
+            try:
+                result = future.result()
+            except Exception as exc:  # noqa: BLE001
+                logger.error("survey: worker crashed on %s (%s)", slug, exc, exc_info=True)
+                result = SurveyResult(
+                    author_slug=slug,
+                    author_name=qa.author.name,
+                    qualification=qa,
+                    error=str(exc),
+                )
+            logger.info(
+                "survey: [%d/%d] finished %s (%d articles)%s",
+                idx,
+                total,
+                slug,
+                qa.total_articles,
+                f" [ERROR: {result.error}]" if result.error else "",
+            )
+            if observer is not None:
+                observer.survey_author_finished(slug, result.error)
+            report.results.append(result)
+            _write_checkpoint(report)
+
+
+async def _run_authors_sequential(
+    *,
+    qualified: list[QualifiedAuthor],
+    completed_slugs: set[str],
+    total: int,
+    report: SurveyReport,
+    db: Path,
+    settings: ForensicsSettings,
+    root: Path,
+    observer: PipelineObserver | None,
+    rich_extract: bool,
+) -> None:
+    for idx, qa in enumerate(qualified, start=1):
+        slug = qa.author.slug
+        if slug in completed_slugs:
+            continue
+
+        logger.info(
+            "survey: [%d/%d] processing %s (%d articles)",
+            idx,
+            total,
+            slug,
+            qa.total_articles,
+        )
+
+        if observer is not None:
+            observer.survey_author_started(slug, idx, total)
+        result: SurveyResult | None = None
+        try:
+            result = await _process_author(
+                qa,
+                db_path=db,
+                settings=settings,
+                project_root=root,
+                show_rich_progress=rich_extract,
+            )
+        finally:
+            if observer is not None:
+                observer.survey_author_finished(slug, result.error if result else None)
+        report.results.append(result)
+        _write_checkpoint(report)
+
+
+def _finalize_survey(report: SurveyReport, observer: PipelineObserver | None) -> None:
+    with _observer_phase(observer, PipelineRunPhase.SURVEY_FINALIZE):
+        _rank_results(report)
+
+        score_map: dict[str, SurveyScore] = {
+            r.author_slug: r.score for r in report.results if r.score is not None
+        }
+        for r in report.results:
+            if r.error is not None and r.author_slug not in score_map:
+                score_map[r.author_slug] = SurveyScore(
+                    composite=-1.0,
+                    strength=SignalStrength.ERROR,
+                    pipeline_a_score=0.0,
+                    pipeline_b_score=0.0,
+                    pipeline_c_score=None,
+                    convergence_score=0.0,
+                    num_convergence_windows=0,
+                    strongest_window_ratio=0.0,
+                    max_effect_size=0.0,
+                    evidence_summary=r.error,
+                )
+
+        report.natural_controls = identify_natural_controls(score_map)
+        validation = validate_against_controls(score_map, report.natural_controls)
+        logger.info(
+            "survey: complete — %d processed, %d errors, %d natural controls "
+            "(mean composite=%.3f, max=%.3f)",
+            len(report.results),
+            sum(1 for r in report.results if r.error),
+            validation.num_controls,
+            validation.mean_composite,
+            validation.max_composite,
+        )
+
+        _write_survey_results(report)
+
+
 async def run_survey(
     settings: ForensicsSettings,
     *,
@@ -313,37 +495,15 @@ async def run_survey(
     effective_criteria = criteria or QualificationCriteria.from_settings(settings.survey)
     rich_extract = show_rich_progress and live_ui_mode(observer) != "textual"
 
-    if not skip_scrape and not dry_run:
-        # Survey mode uses the discovered manifest, not config.toml authors.
-        from forensics.cli.scrape import dispatch_scrape
-
-        logger.info("survey: running full scrape pipeline first (all authors)")
-        if observer is not None:
-            observer.pipeline_run_phase_start(PipelineRunPhase.SCRAPE)
-        try:
-            rc = await dispatch_scrape(
-                discover=False,
-                metadata=False,
-                fetch=False,
-                dedup=False,
-                archive=False,
-                dry_run=False,
-                force_refresh=False,
-                all_authors=True,
-                post_year_min=post_year_min,
-                post_year_max=post_year_max,
-                observer=observer,
-            )
-        finally:
-            if observer is not None:
-                observer.pipeline_run_phase_end(PipelineRunPhase.SCRAPE)
-        if rc != 0:
-            logger.error("survey: scrape failed with exit code %d", rc)
-            report.results = []
-            report.aborted_reason = "scrape_failed"
-            _write_checkpoint(report)
-            _write_survey_results(report)
-            return report
+    if await _maybe_run_survey_scrape(
+        skip_scrape=skip_scrape,
+        dry_run=dry_run,
+        post_year_min=post_year_min,
+        post_year_max=post_year_max,
+        observer=observer,
+        report=report,
+    ):
+        return report
 
     qualified, disqualified = qualify_authors(db, effective_criteria)
     report.total_qualified = len(qualified)
@@ -389,118 +549,34 @@ async def run_survey(
     use_parallel = workers > 1 and len(pending) > 1
 
     if use_parallel:
-        # Process authors concurrently via a ProcessPoolExecutor. Each worker runs
-        # its own asyncio loop inside _process_author_worker; the Rich live UI is
-        # disabled to avoid fighting over stdout between subprocesses.
         logger.info(
             "survey: processing %d author(s) with %d parallel workers",
             len(pending),
             workers,
         )
-        slug_to_idx = {qa.author.slug: i for i, qa in enumerate(qualified, start=1)}
-        for qa in pending:
-            if observer is not None:
-                observer.survey_author_started(qa.author.slug, slug_to_idx[qa.author.slug], total)
-        with ProcessPoolExecutor(max_workers=workers) as executor:
-            future_to_qa = {
-                executor.submit(_process_author_worker, qa, db, settings, root): qa
-                for qa in pending
-            }
-            for future in as_completed(future_to_qa):
-                qa = future_to_qa[future]
-                slug = qa.author.slug
-                idx = slug_to_idx[slug]
-                try:
-                    result = future.result()
-                except Exception as exc:  # noqa: BLE001
-                    logger.error("survey: worker crashed on %s (%s)", slug, exc, exc_info=True)
-                    result = SurveyResult(
-                        author_slug=slug,
-                        author_name=qa.author.name,
-                        qualification=qa,
-                        error=str(exc),
-                    )
-                logger.info(
-                    "survey: [%d/%d] finished %s (%d articles)%s",
-                    idx,
-                    total,
-                    slug,
-                    qa.total_articles,
-                    f" [ERROR: {result.error}]" if result.error else "",
-                )
-                if observer is not None:
-                    observer.survey_author_finished(slug, result.error)
-                report.results.append(result)
-                _write_checkpoint(report)
+        await _run_authors_parallel(
+            pending=pending,
+            qualified=qualified,
+            total=total,
+            report=report,
+            db=db,
+            settings=settings,
+            root=root,
+            observer=observer,
+            workers=workers,
+        )
     else:
-        for idx, qa in enumerate(qualified, start=1):
-            slug = qa.author.slug
-            if slug in completed_slugs:
-                continue
-
-            logger.info(
-                "survey: [%d/%d] processing %s (%d articles)",
-                idx,
-                total,
-                slug,
-                qa.total_articles,
-            )
-
-            if observer is not None:
-                observer.survey_author_started(slug, idx, total)
-            result: SurveyResult | None = None
-            try:
-                result = await _process_author(
-                    qa,
-                    db_path=db,
-                    settings=settings,
-                    project_root=root,
-                    show_rich_progress=rich_extract,
-                )
-            finally:
-                if observer is not None:
-                    observer.survey_author_finished(slug, result.error if result else None)
-            report.results.append(result)
-            _write_checkpoint(report)
-
-    if observer is not None:
-        observer.pipeline_run_phase_start(PipelineRunPhase.SURVEY_FINALIZE)
-    try:
-        _rank_results(report)
-
-        score_map: dict[str, SurveyScore] = {
-            r.author_slug: r.score for r in report.results if r.score is not None
-        }
-        # Error entries — mark as ERROR so identify_natural_controls skips them.
-        for r in report.results:
-            if r.error is not None and r.author_slug not in score_map:
-                score_map[r.author_slug] = SurveyScore(
-                    composite=-1.0,
-                    strength=SignalStrength.ERROR,
-                    pipeline_a_score=0.0,
-                    pipeline_b_score=0.0,
-                    pipeline_c_score=None,
-                    convergence_score=0.0,
-                    num_convergence_windows=0,
-                    strongest_window_ratio=0.0,
-                    max_effect_size=0.0,
-                    evidence_summary=r.error,
-                )
-
-        report.natural_controls = identify_natural_controls(score_map)
-        validation = validate_against_controls(score_map, report.natural_controls)
-        logger.info(
-            "survey: complete — %d processed, %d errors, %d natural controls "
-            "(mean composite=%.3f, max=%.3f)",
-            len(report.results),
-            sum(1 for r in report.results if r.error),
-            validation.num_controls,
-            validation.mean_composite,
-            validation.max_composite,
+        await _run_authors_sequential(
+            qualified=qualified,
+            completed_slugs=completed_slugs,
+            total=total,
+            report=report,
+            db=db,
+            settings=settings,
+            root=root,
+            observer=observer,
+            rich_extract=rich_extract,
         )
 
-        _write_survey_results(report)
-    finally:
-        if observer is not None:
-            observer.pipeline_run_phase_end(PipelineRunPhase.SURVEY_FINALIZE)
+    _finalize_survey(report, observer)
     return report

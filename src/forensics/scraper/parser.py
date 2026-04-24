@@ -7,7 +7,7 @@ import logging
 import re
 from typing import Any
 
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Tag
 
 from forensics.utils.text import clean_text as normalize_article_text
 
@@ -24,6 +24,17 @@ _REMOVE_CLASS_SUBSTRINGS = (
 )
 
 
+def _sanitize_and_extract(root: BeautifulSoup | Tag) -> str:
+    """Strip boilerplate tags/classes then normalize body text (RF-DRY-001)."""
+    for tag in root.find_all(["script", "style", "nav", "aside", "footer"]):
+        tag.decompose()
+    for el in root.find_all(True):
+        classes = " ".join(el.get("class") or []).lower()
+        if any(s in classes for s in _REMOVE_CLASS_SUBSTRINGS):
+            el.decompose()
+    return normalize_article_text(root.get_text(separator="\n"))
+
+
 def extract_article_text(html: str) -> str:
     """Pull main article body text from Mediaite / WordPress HTML."""
     soup = BeautifulSoup(html, "lxml")
@@ -35,17 +46,7 @@ def extract_article_text(html: str) -> str:
     if container is None:
         logger.warning("extract_article_text: no content container found")
         return ""
-
-    for tag in container.find_all(["script", "style", "nav", "aside", "footer"]):
-        tag.decompose()
-
-    for el in container.find_all(True):
-        classes = " ".join(el.get("class") or []).lower()
-        if any(s in classes for s in _REMOVE_CLASS_SUBSTRINGS):
-            el.decompose()
-
-    raw_text = container.get_text(separator="\n")
-    return normalize_article_text(raw_text)
+    return _sanitize_and_extract(container)
 
 
 def extract_article_text_from_rest(content_rendered: str) -> str:
@@ -53,13 +54,7 @@ def extract_article_text_from_rest(content_rendered: str) -> str:
     if not content_rendered:
         return ""
     soup = BeautifulSoup(content_rendered, "lxml")
-    for tag in soup.find_all(["script", "style", "nav", "aside", "footer"]):
-        tag.decompose()
-    for el in soup.find_all(True):
-        classes = " ".join(el.get("class") or []).lower()
-        if any(s in classes for s in _REMOVE_CLASS_SUBSTRINGS):
-            el.decompose()
-    return normalize_article_text(soup.get_text(separator="\n"))
+    return _sanitize_and_extract(soup)
 
 
 def _meta_content(soup: BeautifulSoup, *, prop: str | None = None, name: str | None = None) -> str:
@@ -92,11 +87,7 @@ def _ld_json_blobs(soup: BeautifulSoup) -> list[dict[str, Any]]:
     return out
 
 
-def extract_metadata(html: str) -> dict[str, Any]:
-    """Extract supplemental metadata (Open Graph, article tags, schema.org)."""
-    soup = BeautifulSoup(html, "lxml")
-    meta: dict[str, Any] = {}
-
+def _apply_open_graph_meta(soup: BeautifulSoup, meta: dict[str, Any]) -> None:
     section = _meta_content(soup, prop="og:section") or _meta_content(soup, name="section")
     if section:
         meta["og_section"] = section
@@ -115,23 +106,33 @@ def extract_metadata(html: str) -> dict[str, Any]:
     if author_meta:
         meta["page_author"] = author_meta
 
-    for blob in _ld_json_blobs(soup):
-        typ = blob.get("@type")
-        types = typ if isinstance(typ, list) else ([typ] if typ else [])
-        if "NewsArticle" in types or "Article" in types:
-            if blob.get("author"):
-                meta.setdefault("schema_author", blob.get("author"))
-            if blob.get("datePublished"):
-                meta.setdefault("schema_date_published", blob.get("datePublished"))
-            article_section = blob.get("articleSection")
-            if article_section and "og_section" not in meta:
-                meta["og_section"] = str(article_section)
-            keywords = blob.get("keywords")
-            if isinstance(keywords, str) and "article_tags" not in meta:
-                parts = [k.strip() for k in re.split(r"[,;]", keywords) if k.strip()]
-                if parts:
-                    meta["article_tags"] = parts
 
+def _merge_ld_json_news_article(blob: dict[str, Any], meta: dict[str, Any]) -> None:
+    typ = blob.get("@type")
+    types = typ if isinstance(typ, list) else ([typ] if typ else [])
+    if "NewsArticle" not in types and "Article" not in types:
+        return
+    if blob.get("author"):
+        meta.setdefault("schema_author", blob.get("author"))
+    if blob.get("datePublished"):
+        meta.setdefault("schema_date_published", blob.get("datePublished"))
+    article_section = blob.get("articleSection")
+    if article_section and "og_section" not in meta:
+        meta["og_section"] = str(article_section)
+    keywords = blob.get("keywords")
+    if isinstance(keywords, str) and "article_tags" not in meta:
+        parts = [k.strip() for k in re.split(r"[,;]", keywords) if k.strip()]
+        if parts:
+            meta["article_tags"] = parts
+
+
+def extract_metadata(html: str) -> dict[str, Any]:
+    """Extract supplemental metadata (Open Graph, article tags, schema.org)."""
+    soup = BeautifulSoup(html, "lxml")
+    meta: dict[str, Any] = {}
+    _apply_open_graph_meta(soup, meta)
+    for blob in _ld_json_blobs(soup):
+        _merge_ld_json_news_article(blob, meta)
     return meta
 
 
