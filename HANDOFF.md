@@ -2191,6 +2191,93 @@ Operators who want the old behavior can pass `--include-shared-bylines` to `uv r
 
 ---
 
+### Phase 15 J1 — Section column derivation from URL
+**Status:** Complete
+**Date:** 2026-04-24
+**Agent/Session:** Wave-2 J1 subagent (`worktree-agent-a9721dcc`)
+
+#### What Was Done
+- Added `section: str = "unknown"` field to `FeatureVector` (top-level, sibling of `article_id` / `author_id`) and threaded it through `to_flat_dict`, so every newly-written feature parquet shard now carries a `section: pl.Utf8` column.
+- Wired `forensics.utils.url.section_from_url` into `build_feature_vector_from_extractors` via a small `_derive_section(article)` helper. The helper emits a `WARNING` log line whenever the regex falls through to `"unknown"`, so URL-shape regressions surface in routine pipeline runs (per the J1 spec).
+- The `section_from_url` helper itself (and the schema-version metadata stamping + Phase-15 schema-migration runner) already landed in Unit 1 / Phase 0.3, so this unit only needed to wire the column into the feature pipeline and lock the contract with tests. `feature_parquet_schema_version` is already `2` in `FeaturesConfig` and `config.toml`.
+- Added regression-pinned tests covering the helper, the assembler integration, the parquet schema, the default-fallback semantics, and the legacy-row migration path.
+
+#### Files Modified
+- `src/forensics/models/features.py` — added `section: str = "unknown"` field to `FeatureVector`; serialized it in `to_flat_dict`; updated docstring.
+- `src/forensics/features/assembler.py` — new `_derive_section(article)` helper (logs WARNING on "unknown"); pass `section=_derive_section(article)` to the `FeatureVector` constructor.
+- `src/forensics/storage/parquet.py` — docstring update on `write_features` documenting the new `section` column and the migration path.
+- `tests/unit/test_section_extraction.py` — NEW. 22 tests: helper happy paths, empty/None edge case, lowercase-normalization, 12 regression-pinned real Mediaite URLs (`@parametrize`), assembler populates section, assembler logs WARNING for unknown, parquet writes `section: pl.Utf8`, `FeatureVector` defaults to `"unknown"`, and migration of legacy v1 parquet (with `url` column) back-fills `section` correctly.
+
+#### Verification Evidence
+```
+$ uv run python -m pytest tests/unit/test_section_extraction.py -v --no-cov
+22 passed in 0.23s
+
+$ uv run python -m pytest tests/ -k "url or section or features or parquet" -v --no-cov
+106 passed, 542 deselected in 75.61s
+
+$ uv run ruff check . && uv run ruff format --check .
+All checks passed!
+207 files already formatted
+
+$ uv run python -m pytest tests/ -v
+644 passed, 1 failed (tests/test_survey.py::test_survey_observer_hooks_fire_per_author),
+3 deselected, 1 warning in 187s
+Total coverage: 75.32% (gate 72% — PASS)
+
+# The one failure is a flaky timing-based observer test unrelated to J1:
+$ uv run python -m pytest tests/test_survey.py::test_survey_observer_hooks_fire_per_author -v --no-cov
+1 passed in 71.86s
+
+# And the survey suite + new tests together also pass cleanly:
+$ uv run python -m pytest tests/test_survey.py tests/unit/test_section_extraction.py -v --no-cov
+39 passed in 133.59s
+```
+
+#### Decisions Made
+- **`section` lives on `FeatureVector` directly, not under a `ProvenanceFeatures` family.** The downstream J-phase work (J2/J3/J4/J6) treats it as a row-level filter / group key, not a stylometric feature, so promoting it to a sibling of `article_id`/`author_id` keeps the per-family models pure.
+- **Default `"unknown"`** (not `None`) so legacy callers and the existing `test_write_features_roundtrip` / `test_feature_vector_parquet_dict_field_roundtrip` tests that omit `section` still validate without modification. Matches the helper's fall-through value and avoids `pl.Null` plumbing in the parquet schema.
+- **WARNING fires inside the assembler**, not inside `section_from_url`. The pure helper stays side-effect-free (so the migration script can call it row-by-row without log spam); the assembler is the right boundary because it has the article id for the log message.
+- **No new public surface on the `forensics` package.** `_derive_section` is private to `assembler.py` because it has only one caller and exists purely to keep `build_feature_vector_from_extractors` readable.
+- **SQL view `articles_with_section` deferred.** The J1 spec mentions exposing it on `articles.db` for ad-hoc SQL, but the unit's "Files to edit" list does not include `repository.py` and the view is not consumed by any production code. Tracked as a follow-up if/when an analyst asks for it.
+
+#### Unresolved Questions
+- The flaky `test_survey_observer_hooks_fire_per_author` failure is reproducible only when the full suite runs serially after the Polars-heavy parquet tests; passes both in isolation and in subset. Pre-existing test infra concern, not a J1 regression. Worth tracking separately.
+- No real-corpus run was performed in this worktree (the checked-in `data/articles.db` is the 41 KB stub). The first full feature-extraction run on a real corpus should monitor the WARNING-line count to confirm 100% URL coverage; if any rows fall through to `"unknown"`, the helper's regex needs the new path-segment shape added.
+
+#### Risks & Next Steps
+- **Existing `data/features/*.parquet` shards must be migrated before any J2+ consumer runs.** The migration runner is already in place: `uv run forensics features migrate` (or the script `scripts/migrate_feature_parquets.py`). `load_feature_frame_sorted` raises `SchemaMigrationRequired` until the upgrade runs.
+- **Downstream J-units (J2 advertorial exclusion, J3/J4/J6) can now read `section` directly off the feature parquet.** They MUST go through the parquet column, not re-derive from the URL — keeps the migration story single-source.
+- **Per-section calibration / FDR work (J3/J4) should use the regression-pinned URL list in `tests/unit/test_section_extraction.py` as the canonical section vocabulary.** Anything not in that list will appear as `"unknown"` until the regression-pin grows.
+
+---
+
+### Phase 15 F1 + F3 — Bootstrap vectorization + constant-signal early exit
+**Status:** Complete
+**Date:** 2026-04-24
+**Agent/Session:** worktree-agent-a1dca89c
+
+#### What Was Done
+- **F1:** Replaced the 1000-iteration Python loop in `bootstrap_ci` with a single vectorized `np.random.default_rng(seed).choice(..., size=(n_bootstrap, n)).mean(axis=1)` per group. Function signature already had `seed: int = 42` from a prior pass; only the body changed.
+- **F3:** Added a `np.std(series) < 1e-9` early-exit at the top of the per-feature loop in `analyze_author_feature_changepoints`. Skips both PELT and BOCPD, logs at DEBUG (`changepoint: author=<slug> feature=<col> skipped — constant signal`).
+- Two new test files (3+ tests each) covering regression-pin, edge cases, determinism (F1) and constant-zero / near-constant / negative cases (F3).
+
+#### Files Modified
+- `src/forensics/analysis/statistics.py` — `bootstrap_ci` loop → vectorized; docstring expanded to document the intentional output drift vs. pre-F1 (RNG draws are no longer interleaved per iteration).
+- `src/forensics/analysis/changepoint.py` — early-exit guard inside `analyze_author_feature_changepoints` (kept as a small wrapper at the top of the per-feature loop to avoid Wave 3 conflicts).
+- `tests/unit/test_bootstrap_vectorized.py` (new) — 4 tests: pinned reference, empty group, same-seed determinism, different-seed divergence.
+- `tests/unit/test_constant_signal_early_exit.py` (new) — 3 tests: constant zero, near-constant + DEBUG log audit, non-constant negative test.
+
+#### Verification Evidence
+```
+$ uv run pytest tests/unit/test_bootstrap_vectorized.py tests/unit/test_constant_signal_early_exit.py -v
+7 passed in 2.42s
+
+$ uv run pytest tests/ -k "bootstrap or statistics or changepoint" --no-cov -v
+36 passed, 1 skipped, 589 deselected in 33.75s
+
+---
+
 ### Phase 15 J4: Per-author section-mix time series
 **Status:** Complete
 **Date:** 2026-04-24
@@ -2223,6 +2310,7 @@ $ uv run ruff check . && uv run ruff format --check .
 All checks passed!
 208 files already formatted
 
+<<<<<<< HEAD
 $ uv run python -m pytest tests/ --no-cov
 635 passed, 3 deselected, 1 warning in 146.77s
 ```
@@ -2243,3 +2331,20 @@ $ uv run python -m pytest tests/ --no-cov
 - **Byte-stability is regression-pinned** by `test_write_section_mix_artifact_byte_stable_for_fixed_fixture`. Any change to indent, key order, separators, trailing newline, or sort discipline will fail this test by SHA256. When H2 centralises `sort_keys=True` in `write_json_artifact`, swap the manual `json.dumps` for `write_json_artifact(..., sort_keys=True)` and re-run the byte-pin to confirm parity.
 - **Wave 3 K2 wiring** can read the artifact directly (`json.loads(path.read_text())`) — no Pydantic model is required to consume it. Use `SectionMixSeries` only inside the analyze stage.
 - **No GUARDRAILS Sign needed** — no novel failure pattern was hit; the J1 column-derivation fallback is a documented design contingency, not a footgun.
+=======
+$ uv run pytest tests/ --no-cov
+619 passed, 4 skipped, 3 deselected, 1 warning in 198.21s
+```
+
+#### Decisions Made
+- **F1 reference values are post-F1, not pre-F1.** The spec text in `prompts/phase15-optimizations/v0.4.0.md:1067-1072` calls for "bit-for-bit parity with the loop reference" at the same seed, but this is mathematically impossible — the loop calls `rng.choice(a, ...)` then `rng.choice(b, ...)` interleaved per iteration, while the vectorized form draws all rows for `a` first then all rows for `b`. They consume the RNG stream in different orders and cannot agree at any seed. I captured `_REF_LO=0.2601315351229742` and `_REF_HI=1.1295517416236465` from the post-F1 vectorized implementation on the spec's `(default_rng(0).normal(0, 1, 30), default_rng(0).normal(0.3, 1, 40), seed=42, n_bootstrap=200)` triple. This still satisfies the spec's stated *purpose* (lines 1075-1078): "Any future change ... must update these constants deliberately." The output-shape change from loop → vector is itself the deliberate change being pinned.
+- **F3 threshold is `1e-9` (per spec).** This catches both literal-zero series and near-constant ones (e.g. `np.full(60, 0.4) + tiny noise` with `std ~ 1e-13`). PELT alone would already return `[]` on these, but BOCPD's `_bocpd_init_prior` uses `max(np.var(...), 1e-12)` as a floor — the predictive then divides by ~zero and produces unstable / meaningless emits. Skipping at the analyze layer keeps the audit log clean.
+- **Wrapped the F3 guard at the top of the per-feature loop, after the existing `len(series) < 10` guard.** Phase F0 (cost_model threading) and Phase A (BOCPD knobs) already touched this function — the F3 patch is 11 lines, fully inside the existing loop, no signature changes, minimal blast radius for Wave 3 merges.
+
+#### Unresolved Questions
+- None. The work matches the F1 + F3 specs from `prompts/phase15-optimizations/v0.4.0.md`. F2 (per-feature series cache in orchestrator) is a separate unit and remains untouched here.
+
+#### Risks & Next Steps
+- The output drift in `bootstrap_ci` (from loop to vector at the same seed) is a one-time, deliberate change. Any downstream test/artifact that pinned outputs against the pre-F1 implementation will need updating; none were found in the test suite (only ordering / determinism / empty-input tests existed prior). Production CI artifacts are not seed-pinned, so no impact.
+- The F3 DEBUG log is silent at the default INFO log level. Audits that need to see the skipped features should run with `LOGLEVEL=DEBUG forensics changepoint ...`.
+>>>>>>> 2d51e1d639a3b2a7def03229e4dbfbb2483ab7c8

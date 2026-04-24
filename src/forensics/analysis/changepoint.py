@@ -521,6 +521,17 @@ def analyze_author_feature_changepoints(
             series = np.nan_to_num(series, nan=np.nanmedian(series))
         if len(series) < 10:
             continue
+        # Phase 15 F3: skip flat series. PELT cannot produce meaningful CPs on
+        # a constant signal, and BOCPD's variance normalization divides by
+        # ~zero (sigma2 floored to 1e-12 — unstable predictive). Early-exit
+        # before either detector to keep audits clean.
+        if float(np.std(series)) < 1e-9:
+            logger.debug(
+                "changepoint: author=%s feature=%s skipped — constant signal",
+                author_id,
+                col,
+            )
+            continue
         if "pelt" in methods:
             out.extend(
                 changepoints_from_pelt(
