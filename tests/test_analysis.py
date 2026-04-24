@@ -154,7 +154,15 @@ def test_cohens_d_calculation() -> None:
 
 def test_convergence_window() -> None:
     base = datetime(2024, 1, 1, tzinfo=UTC)
-    names = [f"f{i}" for i in range(5)]
+    # Phase 15 B2: feature names must belong to the FEATURE_FAMILIES registry.
+    # Pick one feature per distinct family so ratio = 5/8 clears min_feature_ratio=0.6.
+    names = [
+        "ttr",  # lexical_richness
+        "flesch_kincaid",  # readability
+        "sent_length_mean",  # sentence_structure
+        "bigram_entropy",  # entropy
+        "self_similarity_30d",  # self_similarity
+    ]
     cps = [
         ChangePoint(
             feature_name=names[i],
