@@ -3069,6 +3069,139 @@ uv run ruff check . && uv run ruff format --check .
 
 ---
 
+### Phase 15 J5 fix — Migration JOINs articles.db for section backfill
+**Status:** Complete
+**Date:** 2026-04-24
+**Agent/Session:** general-purpose subagent (wave2-parking worktree agent-ae4d6e56)
+
+#### What Was Done
+- Extended `migrate_feature_parquet` / `migrate_all` to look URLs up from `articles.db` when the parquet only carries `article_id` (the real corpus shape). The `{id: url}` dict is loaded once per `migrate_all` call and threaded through to each per-file call so SQLite isn't reopened per parquet or per row.
+- Added a `--articles-db` option to both the Typer CLI (`forensics features migrate`) and the standalone `scripts/migrate_feature_parquets.py` helper, defaulting to `<project_root>/data/articles.db`.
+- Used `forensics.storage.repository.open_repository_connection` (via lazy import to avoid the migrations <-> repository cycle) so the JOIN inherits the project's WAL / busy-timeout connection policy.
+- Per-file `WARNING` logs now fire when (a) any rows resolve to `section='unknown'` via the JOIN miss path, or (b) no URL source is available at all; the original "URL column present" path stays warning-free for legacy callers.
+- Added 6 new unit tests covering JOIN happy-path, JOIN miss, missing-DB fallback, regression-pinned `value_counts` for a fixed-seed corpus, URL-column path with bogus DB still works, and dry-run + DB writes nothing. Total now 10 tests in `tests/unit/test_feature_parquet_migration.py`.
+
+#### Files Modified
+- `src/forensics/storage/migrations/002_feature_parquet_section.py` — extracted `_load_article_url_map` + `_derive_section_column` helpers; added `articles_db` / `article_url_map` params; per-file WARNING logs.
+- `src/forensics/cli/migrate.py` — added `--articles-db` option to `features migrate`.
+- `scripts/migrate_feature_parquets.py` — added `--articles-db` to the standalone helper for parity.
+- `tests/unit/test_feature_parquet_migration.py` — 6 new tests + helpers (`_write_articles_db`, `_id_only_rows`, `_write_v1_id_only_parquet`).
+
+#### Verification Evidence
+```
+uv run python -m pytest tests/unit/test_feature_parquet_migration.py -v --no-cov
+  → 10 passed in 0.24s
+
+uv run python -m pytest tests/ -k "migration or parquet or features" --no-cov
+  → 96 passed, 641 deselected in 5.47s
+
+uv run ruff check . && uv run ruff format --check .
+  → ruff check: all clean; format: only pre-existing src/forensics/reporting/html_report.py formatting drift, untouched by this PR
+
+uv run python -m pytest tests/ --no-cov
+  → 733 passed, 3 deselected, 1 xfailed (J5 section_residualize placeholder, unrelated)
+```
+
+#### Decisions Made
+- Loaded the `{id: url}` map once at `migrate_all` and passed it down to each per-file call instead of opening SQLite per parquet — this is the canonical efficient path; the per-file `articles_db=` kwarg is kept as an ergonomic fallback for one-off single-file migrations.
+- Used `open_repository_connection` (with lazy import) rather than raw `sqlite3.connect` so the JOIN inherits ADR-005's WAL / busy-timeout / `check_same_thread=False` policy and matches the rest of the codebase (`utils/provenance.py`).
+- WARNING logs are intentionally per-file (not per-row): a degenerate-section parquet emits one log line that says "N/M rows are unknown via JOIN", which is the signal Phase 15 J5 needs to detect "this file produced a single-section profile".
+
+#### Unresolved Questions
+- None. The `--dry-run` + JOIN combination is exercised by `test_migrate_dry_run_with_articles_db_writes_nothing`.
+
+#### Risks & Next Steps
+- After this PR lands, re-run `forensics features migrate` + `forensics analyze section-profile` to get the real J5 verdict on the corpus. The previous run produced DEGENERATE solely because the migration backfilled `unknown` for every row.
+- The pre-existing `data/features/_pre_phase15_backup/` copy from the prior (URL-less) run will still be present — operators will want to delete or re-locate it before re-running so the next migration's backup doesn't shadow the original v1 fixtures.
+
+---
+
+### Phase 15 J5 Gate Verdict — Real Corpus Run
+**Status:** Decision recorded — J5 deferred per v0.4.0 gate spec
+**Date:** 2026-04-24
+**Agent/Session:** post-PR-#82 verdict computation
+
+#### What Was Done
+- Restored 14 feature parquets from `data/features/_pre_phase15_backup/` (rolling back the prior URL-less migration that filled `section="unknown"` for every row).
+- Re-ran `forensics features migrate --articles-db data/articles.db` against the patched migration script (PR #82). Result: `section` column populated from real URLs across 14 parquets.
+- Verified backfill on `sarah-rumpf.parquet` (2,707 rows): `media` 1,368 / `politics` 702 / `online` 219 / `crime` 171 / `opinion` 105 / `analysis` 67 / `lawcrime` 48 / `election-2022` 20 / `uncategorized` 7. Zero `unknown`.
+- Re-ran `forensics analyze section-profile`. **Verdict: BORDERLINE.**
+- Report written to `data/analysis/section_profile_report.md`.
+
+#### Verdict Detail
+- **9 sections retained** (≥ 50 articles each): analysis, crime, lawcrime, media, online, opinion, politics, uk, uncategorized.
+- **Significant feature families (p < 0.01): 6** ✅ (gate criterion ≥ 3 satisfied)
+  - ai_markers, entropy, lexical_richness, readability, self_similarity, sentence_structure
+- **Max off-diagonal cosine distance: 0.0005** ❌ (gate criterion > 0.3 NOT satisfied)
+- Top features by η²: `bigram_entropy` (0.059), `trigram_entropy` (0.058), `self_similarity_30d` (0.046), `coleman_liau` (0.044), `self_similarity_90d` (0.041), `gunning_fog` (0.033), `flesch_kincaid` (0.033), `mattr` (0.028), `sent_length_mean` (0.023), `ttr` (0.019).
+- All top-10 features have p < 1e-198 (effectively zero), so per-feature variance IS section-driven — but the per-section centroids are extremely close (max cosine 0.0005). Mediaite writes most sections in a similar register; subtle per-feature shifts exist but the multivariate effect is too small to justify residualization.
+
+#### Decision
+Per v0.4.0 prompt lines 1295-1304: "If only one condition holds, document the borderline finding in HANDOFF.md and default-disable J5." → **Wave 4 (J5 section-residualize) NOT shipped.** `section_residualize_features` stays at its `False` default.
+
+#### Side Artifacts Gap
+The J3 spec (lines 1280-1289) calls for four artifacts: `section_centroids.json`, `section_distance_matrix.json`, `section_distance_matrix.csv`, `section_feature_ranking.json`. PR #75's implementation writes only the markdown `section_profile_report.md`. The verdict + matrix + top-10 table are all in the markdown so the gate decision is auditable, but the structured side artifacts are missing. Recorded as a follow-up gap; non-blocking for the J5 decision.
+
+#### Files Touched
+- `data/features/*.parquet` — re-migrated to v2 with real `section` values
+- `data/features/_pre_phase15_backup/*.parquet` — backups updated by the second migration run
+- `data/analysis/section_profile_report.md` — new
+
+#### Follow-Up
+- Optional: small PR to add the missing J3 side artifacts (centroids JSON, distance matrix JSON+CSV, feature ranking JSON) per spec lines 1280-1289.
+- Backup directory currently holds the v1-shape parquets from the second migration; operators wanting the original pre-Phase-15 fixtures should refresh from VCS.
+- Phase 15 is COMPLETE. All 47 in-scope steps landed across 20 PRs (#63-#82). G1 (`max_workers` orchestrator wiring) was flagged by H2 as not-yet-wired; it is the only remaining gap and is independent of Phase 15.
+
+---
+
+## 2026-04-24 — Real authors in config.toml + survey gate in `forensics analyze` CLI
+
+### Status
+COMPLETE — committed to main (no PR).
+
+### Context
+The Phase-15 full-analysis run had two bypass gaps:
+1. `config.toml` shipped with two `placeholder-target` / `placeholder-control` `[[authors]]` blocks, so `forensics analyze` (no `--author`) iterated phantoms and bailed out instantly.
+2. `forensics analyze --author <slug>` accepted shared-byline slugs (`mediaite`, `mediaite-staff`) even though the Phase 15 D survey gate disqualifies them, producing meaningless PA=1.00 readings on aggregate-author corpora.
+
+### What Was Done
+- `config.toml`: replaced both placeholders with the 12 survey-qualified Mediaite reporters (ahmad-austin, alex-griffing, charlie-nash, colby-hall, david-gilmour, isaac-schorr, jennifer-bowers-bahney, joe-depaolo, michael-luciano, sarah-rumpf, tommy-christopher, zachary-leeman). All carry `role="target"`. The two shared-byline accounts (`mediaite`, `mediaite-staff`) are intentionally omitted — analysis re-includes them via the new flag.
+- `src/forensics/cli/analyze.py`: added `_enforce_shared_byline_gate()` plus a `--include-shared-bylines` Typer flag mirroring the survey CLI. The gate consults the persisted `Author.is_shared_byline` flag first and falls back to the slug heuristic so older databases still trip it. `run_analyze(...)` now refuses shared bylines via `typer.BadParameter` unless `include_shared_bylines=True`.
+- `tests/unit/test_analyze_survey_gate.py` (NEW, 6 tests): happy path (real author), refuse-without-flag, allow-with-flag, heuristic fallback when DB flag is False, `author=None` bypasses gate, signature contract.
+
+### Files Touched
+- `config.toml`
+- `src/forensics/cli/analyze.py`
+- `tests/unit/test_analyze_survey_gate.py` (NEW)
+- `HANDOFF.md` (this block)
+
+### Decisions
+- **Gate fires only when `--author <slug>` is passed.** Newsroom-wide invocations iterate every configured author; the configured roster is now the gate (placeholders dropped).
+- **DB-then-config-then-heuristic precedence.** A shared byline can be detected three ways: (1) persisted `is_shared_byline=1` row, (2) configured-but-unflagged outlet/name on a DB row that doesn't exist yet, (3) pure slug heuristic. Each successive fallback handles a different real-world drift (fresh checkout, missing scrape, etc.).
+- **No CLI subcommand.** Reuses the existing `analyze_app` callback (PR #75 J3 made it `invoke_without_command=True`); the new flag rides alongside `--author` and `--include-advertorial`.
+
+### Verification
+```
+.venv/bin/pytest tests/unit/test_analyze_survey_gate.py -v --no-cov
+  → 6 passed
+
+.venv/bin/pytest tests/ --no-cov
+  → 733 passed, 3 deselected, 1 xfailed (pre-existing J5 placeholder)
+
+.venv/bin/ruff check src/forensics/cli/analyze.py tests/unit/test_analyze_survey_gate.py
+  → All checks passed!
+
+.venv/bin/ruff format --check src/forensics/cli/analyze.py tests/unit/test_analyze_survey_gate.py
+  → already formatted
+```
+
+### Unresolved
+- `scripts/bench_phase15.py` still iterates `settings.authors`; with the new roster it will benchmark all 12 real authors instead of two phantoms, which is the desired behaviour. No code change needed there.
+- `mediaite` and `mediaite-staff` parquets remain on disk under `data/features/`. Operators who need them should pass `forensics analyze --author mediaite-staff --include-shared-bylines` for the audit / replication path.
+
+
+---
+
 ### Fix #5: Convergence-ratio ceiling at 0.75 (regroup single-member families)
 **Status:** Complete
 **Date:** 2026-04-24
