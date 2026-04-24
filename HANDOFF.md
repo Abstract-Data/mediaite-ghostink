@@ -2188,3 +2188,64 @@ Operators who want the old behavior can pass `--include-shared-bylines` to `uv r
 #### Risks & Next Steps
 - Watch the next survey run's `disqualified` list and confirm no real reporters fall into the shared bucket. The token list (`staff`, `editors`, `newsroom`, `team`, `desk`, `contributor(s)`, `bureau`, `wire`) is intentionally narrow but a Mediaite reporter slug containing one of these as a hyphen-separated component would be a false positive.
 - If an outlet other than `mediaite.com` is added later, the `outlet_prefix` rule auto-handles it (uses `outlet.split(".")[0]`).
+
+---
+
+### Phase 15 J1 — Section column derivation from URL
+**Status:** Complete
+**Date:** 2026-04-24
+**Agent/Session:** Wave-2 J1 subagent (`worktree-agent-a9721dcc`)
+
+#### What Was Done
+- Added `section: str = "unknown"` field to `FeatureVector` (top-level, sibling of `article_id` / `author_id`) and threaded it through `to_flat_dict`, so every newly-written feature parquet shard now carries a `section: pl.Utf8` column.
+- Wired `forensics.utils.url.section_from_url` into `build_feature_vector_from_extractors` via a small `_derive_section(article)` helper. The helper emits a `WARNING` log line whenever the regex falls through to `"unknown"`, so URL-shape regressions surface in routine pipeline runs (per the J1 spec).
+- The `section_from_url` helper itself (and the schema-version metadata stamping + Phase-15 schema-migration runner) already landed in Unit 1 / Phase 0.3, so this unit only needed to wire the column into the feature pipeline and lock the contract with tests. `feature_parquet_schema_version` is already `2` in `FeaturesConfig` and `config.toml`.
+- Added regression-pinned tests covering the helper, the assembler integration, the parquet schema, the default-fallback semantics, and the legacy-row migration path.
+
+#### Files Modified
+- `src/forensics/models/features.py` — added `section: str = "unknown"` field to `FeatureVector`; serialized it in `to_flat_dict`; updated docstring.
+- `src/forensics/features/assembler.py` — new `_derive_section(article)` helper (logs WARNING on "unknown"); pass `section=_derive_section(article)` to the `FeatureVector` constructor.
+- `src/forensics/storage/parquet.py` — docstring update on `write_features` documenting the new `section` column and the migration path.
+- `tests/unit/test_section_extraction.py` — NEW. 22 tests: helper happy paths, empty/None edge case, lowercase-normalization, 12 regression-pinned real Mediaite URLs (`@parametrize`), assembler populates section, assembler logs WARNING for unknown, parquet writes `section: pl.Utf8`, `FeatureVector` defaults to `"unknown"`, and migration of legacy v1 parquet (with `url` column) back-fills `section` correctly.
+
+#### Verification Evidence
+```
+$ uv run python -m pytest tests/unit/test_section_extraction.py -v --no-cov
+22 passed in 0.23s
+
+$ uv run python -m pytest tests/ -k "url or section or features or parquet" -v --no-cov
+106 passed, 542 deselected in 75.61s
+
+$ uv run ruff check . && uv run ruff format --check .
+All checks passed!
+207 files already formatted
+
+$ uv run python -m pytest tests/ -v
+644 passed, 1 failed (tests/test_survey.py::test_survey_observer_hooks_fire_per_author),
+3 deselected, 1 warning in 187s
+Total coverage: 75.32% (gate 72% — PASS)
+
+# The one failure is a flaky timing-based observer test unrelated to J1:
+$ uv run python -m pytest tests/test_survey.py::test_survey_observer_hooks_fire_per_author -v --no-cov
+1 passed in 71.86s
+
+# And the survey suite + new tests together also pass cleanly:
+$ uv run python -m pytest tests/test_survey.py tests/unit/test_section_extraction.py -v --no-cov
+39 passed in 133.59s
+```
+
+#### Decisions Made
+- **`section` lives on `FeatureVector` directly, not under a `ProvenanceFeatures` family.** The downstream J-phase work (J2/J3/J4/J6) treats it as a row-level filter / group key, not a stylometric feature, so promoting it to a sibling of `article_id`/`author_id` keeps the per-family models pure.
+- **Default `"unknown"`** (not `None`) so legacy callers and the existing `test_write_features_roundtrip` / `test_feature_vector_parquet_dict_field_roundtrip` tests that omit `section` still validate without modification. Matches the helper's fall-through value and avoids `pl.Null` plumbing in the parquet schema.
+- **WARNING fires inside the assembler**, not inside `section_from_url`. The pure helper stays side-effect-free (so the migration script can call it row-by-row without log spam); the assembler is the right boundary because it has the article id for the log message.
+- **No new public surface on the `forensics` package.** `_derive_section` is private to `assembler.py` because it has only one caller and exists purely to keep `build_feature_vector_from_extractors` readable.
+- **SQL view `articles_with_section` deferred.** The J1 spec mentions exposing it on `articles.db` for ad-hoc SQL, but the unit's "Files to edit" list does not include `repository.py` and the view is not consumed by any production code. Tracked as a follow-up if/when an analyst asks for it.
+
+#### Unresolved Questions
+- The flaky `test_survey_observer_hooks_fire_per_author` failure is reproducible only when the full suite runs serially after the Polars-heavy parquet tests; passes both in isolation and in subset. Pre-existing test infra concern, not a J1 regression. Worth tracking separately.
+- No real-corpus run was performed in this worktree (the checked-in `data/articles.db` is the 41 KB stub). The first full feature-extraction run on a real corpus should monitor the WARNING-line count to confirm 100% URL coverage; if any rows fall through to `"unknown"`, the helper's regex needs the new path-segment shape added.
+
+#### Risks & Next Steps
+- **Existing `data/features/*.parquet` shards must be migrated before any J2+ consumer runs.** The migration runner is already in place: `uv run forensics features migrate` (or the script `scripts/migrate_feature_parquets.py`). `load_feature_frame_sorted` raises `SchemaMigrationRequired` until the upgrade runs.
+- **Downstream J-units (J2 advertorial exclusion, J3/J4/J6) can now read `section` directly off the feature parquet.** They MUST go through the parquet column, not re-derive from the URL — keeps the migration story single-source.
+- **Per-section calibration / FDR work (J3/J4) should use the regression-pinned URL list in `tests/unit/test_section_extraction.py` as the canonical section vocabulary.** Anything not in that list will appear as `"unknown"` until the regression-pin grows.
