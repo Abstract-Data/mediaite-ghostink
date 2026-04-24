@@ -32,7 +32,7 @@ from forensics.analysis.statistics import (
 from forensics.analysis.utils import pair_months_with_velocities
 from forensics.config.settings import AnalysisConfig, ForensicsSettings
 from forensics.models.analysis import AnalysisResult, ChangePoint, DriftScores
-from forensics.storage.json_io import write_json_artifact
+from forensics.storage.json_io import stable_sort_artifact_list, write_json_artifact
 from forensics.storage.parquet import load_feature_frame_sorted
 from forensics.storage.repository import Repository
 from forensics.utils.datetime import timestamps_from_frame
@@ -68,10 +68,21 @@ def _write_per_author_json_artifacts(
     assembled: AnalysisResult,
     all_tests: list,
 ) -> None:
-    write_json_artifact(paths.changepoints_json(slug), change_points)
-    write_json_artifact(paths.convergence_json(slug), convergence_windows)
+    # Phase 15 H2 — sort list-valued artifact bodies on the stable-tuple spec
+    # so parallel and serial dispatch produce byte-identical JSON.
+    write_json_artifact(
+        paths.changepoints_json(slug),
+        stable_sort_artifact_list(change_points, kind="change_points"),
+    )
+    write_json_artifact(
+        paths.convergence_json(slug),
+        stable_sort_artifact_list(convergence_windows, kind="convergence_windows"),
+    )
     write_json_artifact(paths.result_json(slug), assembled)
-    write_json_artifact(paths.hypothesis_tests_json(slug), all_tests)
+    write_json_artifact(
+        paths.hypothesis_tests_json(slug),
+        stable_sort_artifact_list(all_tests, kind="hypothesis_tests"),
+    )
 
 
 def _clean_feature_series(df_author: pl.DataFrame, feature_name: str) -> list[float]:
@@ -306,10 +317,11 @@ def _merge_run_metadata(
             prev = {}
     else:
         prev = {}
+    # Phase 15 H2 — sort top-level lists for parallel/serial byte-identity.
     prev.update(
         {
-            "full_analysis_authors": list(results.keys()),
-            "comparison_targets": list(comparison_payload["targets"].keys()),
+            "full_analysis_authors": sorted(results.keys()),
+            "comparison_targets": sorted(comparison_payload["targets"].keys()),
             "completed_at": datetime.now(UTC).isoformat(),
         }
     )
