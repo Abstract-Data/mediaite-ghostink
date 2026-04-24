@@ -78,6 +78,7 @@ def _snapshot_thresholds(settings: ForensicsSettings) -> dict[str, Any]:
         "bocpd_min_run_length": analysis.bocpd_min_run_length,
         "bocpd_student_t": analysis.bocpd_student_t,
         "convergence_cp_source": analysis.convergence_cp_source,
+        "convergence_drift_only_pb_threshold": analysis.convergence_drift_only_pb_threshold,
         "fdr_grouping": analysis.fdr_grouping,
         "pipeline_b_mode": analysis.pipeline_b_mode,
         "section_residualize_features": analysis.section_residualize_features,
