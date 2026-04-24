@@ -71,10 +71,11 @@ def test_no_changepoints_returns_empty() -> None:
 
 def test_single_changepoint_single_feature_emits_window() -> None:
     """A lone strong CP still emits a window via the Pipeline-A >0.5 / B threshold path."""
-    # Under Phase 15 B2, the ratio is len(families)/FAMILY_COUNT == 1/8 so the
-    # ratio gate fails; the window survives only because the A-score (0.9*0.8)
-    # clears 0.5 AND pipeline_b_score clears 0.5 via strong velocity+similarity
-    # signals. That drives the regression fixture below.
+    # Under Phase 15 B2 (post-issue-#5 regroup, FAMILY_COUNT == 6) the ratio
+    # is len(families)/FAMILY_COUNT == 1/6 so the ratio gate fails; the
+    # window survives only because the A-score (0.9*0.8) clears 0.5 AND
+    # pipeline_b_score clears 0.5 via strong velocity+similarity signals.
+    # That drives the regression fixture below.
     cp_time = datetime(2024, 3, 15, tzinfo=UTC)
     cps = [_cp("ttr", cp_time)]
 
@@ -113,15 +114,16 @@ def test_multi_feature_alignment_within_window_detected() -> None:
     """Multiple families inside the window trigger convergence via the ratio gate."""
     base = datetime(2024, 6, 1, tzinfo=UTC)
     # One feature per distinct family so ratio = FAMILY_COUNT/FAMILY_COUNT = 1.0
+    # Phase 15 B-followup (issue #5): post-regroup the registry has 6
+    # families (voice/paragraph_shape were folded). Picking one
+    # representative per family covers them all.
     feature_names = [
         "ttr",  # lexical_richness
         "flesch_kincaid",  # readability
-        "sent_length_mean",  # sentence_structure
-        "paragraph_length_variance",  # paragraph_shape
+        "sent_length_mean",  # sentence_structure (now incl. paragraph_length_variance)
         "bigram_entropy",  # entropy
         "self_similarity_30d",  # self_similarity
-        "ai_marker_frequency",  # ai_markers
-        "first_person_ratio",  # voice
+        "ai_marker_frequency",  # ai_markers (now incl. first_person_ratio)
     ]
     cps = [_cp(name, base + timedelta(days=i * 3)) for i, name in enumerate(feature_names)]
 
