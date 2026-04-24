@@ -35,7 +35,11 @@ from forensics.storage.json_io import write_json_artifact
 from forensics.storage.parquet import load_feature_frame_sorted
 from forensics.storage.repository import Repository
 from forensics.utils.datetime import timestamps_from_frame
-from forensics.utils.provenance import compute_model_config_hash, write_corpus_custody
+from forensics.utils.provenance import (
+    compute_model_config_hash,
+    validate_analysis_result_config_hashes,
+    write_corpus_custody,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -211,6 +215,18 @@ def _resolve_targets_and_controls(
     return targets, controls
 
 
+def _validate_compare_artifact_hashes(
+    targets: list[str],
+    controls: list[str],
+    paths: AnalysisArtifactPaths,
+    config: ForensicsSettings,
+) -> None:
+    author_slugs = sorted(set(targets) | set(controls))
+    ok, msg = validate_analysis_result_config_hashes(config, paths.analysis_dir, author_slugs)
+    if not ok:
+        raise ValueError(msg)
+
+
 def _run_target_control_comparisons(
     targets: list[str],
     controls: list[str],
@@ -220,6 +236,7 @@ def _run_target_control_comparisons(
     config: ForensicsSettings,
 ) -> dict[str, Any]:
     comparison_payload: dict[str, Any] = {"targets": {}}
+    _validate_compare_artifact_hashes(targets, controls, paths, config)
     changepoints_memory = {slug: list(res.change_points) for slug, res in results.items()}
     for tid in targets:
         if tid not in results:
@@ -373,6 +390,7 @@ def run_compare_only(
             author_slug,
         )
         targets = [author_slug]
+    _validate_compare_artifact_hashes(targets, controls, paths, config)
     out: dict[str, Any] = {"targets": {}}
     for tid in targets:
         try:

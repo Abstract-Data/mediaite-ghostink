@@ -11,19 +11,20 @@ from pathlib import Path
 from forensics.config import ForensicsSettings, get_project_root, get_settings
 from forensics.models.report_args import ReportArgs
 from forensics.storage.json_io import ensure_dir
-from forensics.utils.provenance import verify_corpus_hash
+from forensics.utils.provenance import validate_analysis_result_config_hashes, verify_corpus_hash
 
 logger = logging.getLogger(__name__)
 
 
 def _analysis_artifacts_ok(settings: ForensicsSettings, analysis_dir: Path) -> tuple[bool, str]:
-    missing: list[str] = []
-    for a in settings.authors:
-        p = analysis_dir / f"{a.slug}_result.json"
-        if not p.is_file():
-            missing.append(str(p))
-    if missing:
-        return False, "Missing analysis artifacts: " + "; ".join(missing)
+    author_slugs = [a.slug for a in settings.authors]
+    return validate_analysis_result_config_hashes(settings, analysis_dir, author_slugs)
+
+
+def _legacy_db_artifact_ok(root: Path) -> tuple[bool, str]:
+    legacy_db = root / "data" / "forensics.db"
+    if legacy_db.is_file() and legacy_db.stat().st_size == 0:
+        return False, f"Remove zero-byte legacy SQLite artifact before reporting: {legacy_db}"
     return True, ""
 
 
@@ -58,6 +59,10 @@ def _validate_report_prerequisites(
     """Return ``(ok, exit_code, quarto_path)``; ``quarto_path`` is set only when ``ok``."""
     analysis_dir = root / "data" / "analysis"
     ok, msg = _analysis_artifacts_ok(settings, analysis_dir)
+    if not ok:
+        logger.error("report: %s", msg)
+        return False, 1, None
+    ok, msg = _legacy_db_artifact_ok(root)
     if not ok:
         logger.error("report: %s", msg)
         return False, 1, None

@@ -17,6 +17,7 @@ from forensics.config import get_settings
 from forensics.models import Author
 from forensics.storage.parquet import write_parquet_atomic
 from forensics.storage.repository import Repository, init_db
+from forensics.utils.provenance import compute_analysis_config_hash
 
 _COMPARE_CONFIG_TOML = """
 [[authors]]
@@ -85,6 +86,15 @@ def _feature_frame(author_id: str, *, ttr_base: float, n: int = 6) -> pl.DataFra
     return pl.DataFrame(rows)
 
 
+def _write_current_result_hashes(paths: AnalysisArtifactPaths, slugs: tuple[str, ...]) -> None:
+    current_hash = compute_analysis_config_hash(get_settings())
+    for slug in slugs:
+        paths.result_json(slug).write_text(
+            json.dumps({"config_hash": current_hash}),
+            encoding="utf-8",
+        )
+
+
 @pytest.fixture
 def compare_project(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -129,6 +139,7 @@ def test_compare_target_to_controls_returns_stable_shape(
     paths, _cfg_path = compare_project
     settings = get_settings()
     memory = {"t1": [], "c1": [], "c2": []}
+    _write_current_result_hashes(paths, ("t1", "c1", "c2"))
     out = compare_target_to_controls(
         "t1",
         ["c1", "c2"],
@@ -138,6 +149,7 @@ def test_compare_target_to_controls_returns_stable_shape(
     )
     assert set(out) == {
         "feature_comparisons",
+        "feature_coverage_diagnostics",
         "control_change_points",
         "control_drift_scores",
         "editorial_vs_author_signal",
@@ -159,6 +171,7 @@ def test_run_compare_only_writes_comparison_report_json(
     settings = get_settings()
     for slug in ("t1", "c1", "c2"):
         paths.changepoints_json(slug).write_text("[]", encoding="utf-8")
+    _write_current_result_hashes(paths, ("t1", "c1", "c2"))
 
     report_path = paths.comparison_report_json()
     assert not report_path.is_file()
@@ -187,8 +200,48 @@ def test_run_compare_only_forces_slug_with_warning(
     paths.changepoints_json("orph").write_text("[]", encoding="utf-8")
     for slug in ("c1", "c2"):
         paths.changepoints_json(slug).write_text("[]", encoding="utf-8")
+    _write_current_result_hashes(paths, ("orph", "c1", "c2"))
 
     caplog.set_level("WARNING", logger="forensics.analysis.orchestrator")
     out = run_compare_only(settings, paths=paths, author_slug="orph")
     assert "orph" in out["targets"]
     assert any("compare-only" in r.message for r in caplog.records)
+
+
+def test_compare_target_to_controls_filters_nan_values(
+    compare_project: tuple[AnalysisArtifactPaths, Path],
+) -> None:
+    paths, _cfg_path = compare_project
+    write_parquet_atomic(
+        paths.features_dir / "t1.parquet",
+        pl.DataFrame(
+            {
+                "article_id": [f"t-{i}" for i in range(5)],
+                "author_id": ["author-t1"] * 5,
+                "timestamp": [datetime(2024, 1, 1 + i, tzinfo=UTC) for i in range(5)],
+                "ttr": [0.6, float("nan"), 0.7, 0.8, 0.9],
+            }
+        ),
+    )
+    write_parquet_atomic(
+        paths.features_dir / "c1.parquet",
+        pl.DataFrame(
+            {
+                "article_id": [f"c-{i}" for i in range(5)],
+                "author_id": ["author-c1"] * 5,
+                "timestamp": [datetime(2024, 1, 1 + i, tzinfo=UTC) for i in range(5)],
+                "ttr": [0.3, 0.4, float("nan"), 0.5, 0.6],
+            }
+        ),
+    )
+    _write_current_result_hashes(paths, ("t1", "c1", "c2"))
+    out = compare_target_to_controls(
+        "t1",
+        ["c1", "c2"],
+        paths,
+        settings=get_settings(),
+        changepoints_memory={"t1": [], "c1": [], "c2": []},
+    )
+    fc = out["feature_comparisons"]["ttr"]["all"]
+    assert fc["p_value"] == pytest.approx(fc["p_value"])
+    assert "ttr" in out["feature_coverage_diagnostics"]["target"]["has_non_finite"]

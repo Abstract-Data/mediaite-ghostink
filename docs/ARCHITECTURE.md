@@ -88,6 +88,15 @@ Canonical layout (see also [`README.md`](../README.md) **Data layout**):
 
 Older docs sometimes referenced `data/raw/documents.json`, `data/analysis/analysis.json`, or `data/pipeline/summary.json`; those paths are **not** the current contract—prefer the list above and the storage modules under `src/forensics/storage/`.
 
+### Analysis Hash Contracts
+
+The pipeline intentionally records two different hashes:
+
+- `data/analysis/run_metadata.json` `config_hash` is the broad raw pipeline settings hash used for audit metadata.
+- Each `data/analysis/{author_slug}_result.json` `config_hash` is the analysis-settings compatibility hash from `compute_model_config_hash(settings.analysis, length=16, round_trip=True)`.
+
+Report rendering and compare-only analysis require every configured author result they consume to match the current analysis-settings hash. Mixed or stale per-author result hashes must be recomputed with `uv run forensics analyze` instead of merged into a single evidence chain.
+
 ## Key Modules
 
 - `src/forensics/config/` — runtime configuration (pydantic-settings, config.toml + FORENSICS_ env prefix)

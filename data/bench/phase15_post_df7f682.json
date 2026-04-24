@@ -1,0 +1,52 @@
+{
+  "bench_schema_version": 1,
+  "captured_at": "2026-04-24T11:58:06.108771+00:00",
+  "git_sha": "df7f682",
+  "config_hash": "322929f40de495fd",
+  "grand_total_seconds": 0.3264842499993392,
+  "newsroom_fdr_significant_total": 0,
+  "per_author": [
+    {
+      "author_slug": "placeholder-target",
+      "timings": {
+        "extract": 0.0,
+        "changepoint": 0.0,
+        "drift": 0.0,
+        "convergence": 0.0,
+        "hypothesis_tests": 0.0,
+        "compare": 0.0,
+        "total": 0.1769538750013453
+      },
+      "cp_count_pelt": 0,
+      "cp_count_bocpd": 0,
+      "convergence_windows": 0,
+      "max_convergence_ratio": 0.0,
+      "pipeline_a_max": 0.0,
+      "pipeline_b_max": 0.0,
+      "pipeline_c_max": 0.0,
+      "fdr_significant_count": 0,
+      "error": "no AnalysisResult emitted"
+    },
+    {
+      "author_slug": "placeholder-control",
+      "timings": {
+        "extract": 0.0,
+        "changepoint": 0.0,
+        "drift": 0.0,
+        "convergence": 0.0,
+        "hypothesis_tests": 0.0,
+        "compare": 0.0,
+        "total": 0.14913795899883553
+      },
+      "cp_count_pelt": 0,
+      "cp_count_bocpd": 0,
+      "convergence_windows": 0,
+      "max_convergence_ratio": 0.0,
+      "pipeline_a_max": 0.0,
+      "pipeline_b_max": 0.0,
+      "pipeline_c_max": 0.0,
+      "fdr_significant_count": 0,
+      "error": "no AnalysisResult emitted"
+    }
+  ]
+}

@@ -152,6 +152,26 @@ def _run_ai_baseline_stage(
         raise typer.Exit(code=1) from exc
 
 
+def _verify_requested_ai_baseline_vectors(ctx: AnalyzeContext) -> None:
+    from forensics.analysis.drift import load_ai_baseline_embeddings
+
+    slugs = (
+        [ctx.author_slug] if ctx.author_slug else [author.slug for author in ctx.settings.authors]
+    )
+    missing: list[str] = []
+    for slug in slugs:
+        if not ctx.paths.drift_json(slug).is_file():
+            continue
+        if not load_ai_baseline_embeddings(slug, ctx.paths):
+            missing.append(slug)
+    if missing:
+        logger.error(
+            "ai-baseline requested but drift artifacts have no usable AI baseline vectors: %s",
+            ", ".join(missing),
+        )
+        raise typer.Exit(code=1)
+
+
 def run_analyze(
     *,
     changepoint: bool = False,
@@ -233,6 +253,7 @@ def run_analyze(
             articles_per_cell=articles_per_cell,
             baseline_model=baseline_model,
         )
+        _verify_requested_ai_baseline_vectors(ctx)
     logger.info(
         "analyze: completed (changepoint=%s, timeseries=%s, drift=%s, "
         "full_analysis=%s, ai_baseline=%s, author=%s)",

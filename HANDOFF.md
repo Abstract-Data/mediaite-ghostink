@@ -1901,3 +1901,52 @@ uv run pytest tests/unit/test_config_hash.py -v
 - **Bench schema (`bench_schema_version: 1`):** bump if per-stage timings become non-flat (e.g. stage-level phases).
 - **Pre/post-Phase-15 boundary:** the new Sign in `docs/GUARDRAILS.md` is now the contract. Any pipeline code that pools `*_result.json` from different `config_hash` values must either force-recompute or explicitly filter to one hash.
 - **Smoke command for the bench (no real DB present):** `uv run python scripts/bench_phase15.py --output /tmp/phase15_pre_bench.json` runs end-to-end against the stub DB in ~8 ms and produces a valid schema-v1 JSON with `error="no AnalysisResult emitted"` per author. Re-run against a real corpus DB to get a meaningful baseline.
+
+---
+
+### Forensic Reliability Plan — TASK-1 Artifact Inventory
+**Status:** Complete
+**Date:** 2026-04-24
+**Agent/Session:** Cursor Agent artifact-inventory
+
+#### What Was Done
+- Inventoried current analysis, AI baseline, feature, embedding, and SQLite artifacts using `AnalysisArtifactPaths.from_project(...)` for the canonical layout.
+- Wrote the diagnostic snapshot to `data/analysis/diagnostics/artifact_inventory_20260424T233241Z.json`.
+- Confirmed the current evidence-chain baseline:
+  - 14 per-author `*_result.json` artifacts and 14 per-author `*_drift.json` artifacts.
+  - 14 feature Parquet files and 14 embedding author directories.
+  - No `data/ai_baseline/` directory and zero AI-baseline `.npy` files.
+  - All 14 result/drift artifacts have `ai_baseline_similarity = null`.
+  - All 14 result artifacts share one analysis `config_hash`: `d5c12a3aae737aa2`.
+  - `data/analysis/comparison_report.json` contains 8 NaN values, all under Colby Hall comparisons for `subordinate_clause_depth`, `paragraph_length_variance`, `first_person_ratio`, and `hedging_frequency` `t_stat` / `p_value`.
+  - `data/articles.db` is the populated canonical SQLite store; `data/forensics.db` is a zero-byte legacy artifact.
+
+#### Files Modified
+- `data/analysis/diagnostics/artifact_inventory_20260424T233241Z.json` — NEW diagnostic inventory.
+- `HANDOFF.md` — appended this completion block.
+
+#### Verification Evidence
+```
+uv run python - <<'PY' ... PY
+  -> wrote data/analysis/diagnostics/artifact_inventory_20260424T233241Z.json
+  -> analysis_results=14, feature_parquets=14
+  -> ai_baseline_exists=false, ai_baseline_npy_count=0
+  -> null_result_ai_baseline_similarity=14
+  -> null_drift_ai_baseline_similarity=14
+  -> config_hash_group_count=1
+  -> comparison_nan_or_inf_count=8
+  -> legacy_forensics_db_zero_byte=true
+```
+
+#### Decisions Made
+- Kept this task read-mostly and artifact-only; no source code, plan file, runbook, or guardrail changes were made.
+- Stored the inventory as a timestamped JSON diagnostic instead of changing pipeline behavior, matching the plan's Phase 0 before/after-baseline intent.
+
+#### Unresolved Questions
+- Whether `data/forensics.db` can be deleted should be decided by TASK-4 after confirming no code path references it.
+- Whether missing AI-baseline vectors are expected or a path-contract bug should be decided by TASK-2.
+
+#### Risks & Next Steps
+- TASK-2 should use this snapshot to verify AI-baseline repair fills `ai_baseline_similarity` only when valid baseline vectors exist.
+- TASK-3 should use the recorded comparison NaNs as the before-state for finite-value filtering and extractor regressions.
+- TASK-4 should treat `data/forensics.db` as a candidate zero-byte legacy artifact, not as canonical storage.

@@ -1,0 +1,31 @@
+{
+  "bench_schema_version": 1,
+  "captured_at": "2026-04-24T12:05:08.723226+00:00",
+  "git_sha": "df7f682",
+  "config_hash": "322929f40de495fd",
+  "grand_total_seconds": 350.59944441600055,
+  "newsroom_fdr_significant_total": 6080,
+  "per_author": [
+    {
+      "author_slug": "tommy-christopher",
+      "timings": {
+        "extract": 0.0,
+        "changepoint": 0.0,
+        "drift": 0.0,
+        "convergence": 0.0,
+        "hypothesis_tests": 0.0,
+        "compare": 0.0,
+        "total": 350.58978754200143
+      },
+      "cp_count_pelt": 5922,
+      "cp_count_bocpd": 4083,
+      "convergence_windows": 1328,
+      "max_convergence_ratio": 0.75,
+      "pipeline_a_max": 0.3684500058303489,
+      "pipeline_b_max": 0.5282638874244487,
+      "pipeline_c_max": 0.0,
+      "fdr_significant_count": 6080,
+      "error": null
+    }
+  ]
+}

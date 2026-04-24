@@ -74,9 +74,13 @@ class AnalysisArtifactPaths:
     def combined_umap_json(self) -> Path:
         return self.analysis_dir / "combined_umap.json"
 
+    def ai_baseline_dir(self, author_slug: str) -> Path:
+        """Root directory for one author's synthetic AI baseline artifacts."""
+        return self.project_root / "data" / "ai_baseline" / author_slug
+
     def ai_baseline_embeddings_dir(self, author_slug: str) -> Path:
         """Directory of per-article ``.npy`` vectors for synthetic AI baseline (Phase 10)."""
-        return self.project_root / "data" / "ai_baseline" / author_slug / "embeddings"
+        return self.ai_baseline_dir(author_slug) / "embeddings"
 
     @classmethod
     def from_project(cls, project_root: Path, db_path: Path | None = None) -> AnalysisArtifactPaths:

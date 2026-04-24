@@ -104,3 +104,4 @@ Thumbs.db
 .claude/hooks/logs/
 .claude/worktrees/
 .cursor/hooks/state/
+.gitnexus

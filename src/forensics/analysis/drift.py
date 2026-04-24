@@ -33,6 +33,8 @@ from forensics.utils.datetime import parse_datetime
 
 logger = logging.getLogger(__name__)
 
+AI_BASELINE_EMBEDDING_DIM = 384
+
 
 @dataclass(frozen=True, slots=True)
 class DriftPipelineResult:
@@ -385,13 +387,47 @@ def load_article_embeddings(
         return pairs
 
 
+def _iter_ai_baseline_embedding_paths(author_slug: str, paths: AnalysisArtifactPaths) -> list[Path]:
+    """Return legacy and nested generated AI baseline vector paths."""
+    author_root = paths.ai_baseline_dir(author_slug)
+    legacy_dir = paths.ai_baseline_embeddings_dir(author_slug)
+    candidates: set[Path] = set()
+    if legacy_dir.is_dir():
+        candidates.update(legacy_dir.glob("*.npy"))
+    manifest_path = author_root / "generation_manifest.json"
+    if author_root.is_dir() and manifest_path.is_file():
+        candidates.update(p for p in author_root.rglob("*.npy") if "embeddings" in p.parts)
+    return sorted(candidates)
+
+
+def _load_ai_baseline_vector(path: Path) -> np.ndarray | None:
+    """Load and validate one AI baseline embedding vector."""
+    try:
+        vec = np.asarray(np.load(path), dtype=np.float32).ravel()
+    except (OSError, ValueError) as exc:
+        logger.warning("Could not read AI baseline embedding %s: %s", path, exc)
+        return None
+    if vec.shape != (AI_BASELINE_EMBEDDING_DIM,):
+        logger.warning(
+            "Skipping AI baseline embedding with unexpected dimension: %s shape=%s expected=(%d,)",
+            path,
+            vec.shape,
+            AI_BASELINE_EMBEDDING_DIM,
+        )
+        return None
+    return vec
+
+
 def load_ai_baseline_embeddings(author_slug: str, paths: AnalysisArtifactPaths) -> list[np.ndarray]:
-    base = paths.ai_baseline_embeddings_dir(author_slug)
-    if not base.is_dir():
+    """Load generated AI baseline embeddings from legacy or nested Phase 10 layouts."""
+    embedding_paths = _iter_ai_baseline_embedding_paths(author_slug, paths)
+    if not embedding_paths:
         return []
     out: list[np.ndarray] = []
-    for path in sorted(base.glob("*.npy")):
-        out.append(np.load(path))
+    for path in embedding_paths:
+        vec = _load_ai_baseline_vector(path)
+        if vec is not None:
+            out.append(vec)
     return out
 
 

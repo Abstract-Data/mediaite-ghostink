@@ -77,6 +77,46 @@ def compute_config_hash(settings: ForensicsSettings) -> str:
     )
 
 
+def compute_analysis_config_hash(settings: ForensicsSettings) -> str:
+    """Deterministic short hash for per-author analysis result compatibility."""
+    return compute_model_config_hash(settings.analysis, length=16, round_trip=True)
+
+
+def validate_analysis_result_config_hashes(
+    settings: ForensicsSettings,
+    analysis_dir: Path,
+    author_slugs: list[str],
+) -> tuple[bool, str]:
+    """Validate that per-author results match the current analysis config hash."""
+    expected = compute_analysis_config_hash(settings)
+    missing: list[str] = []
+    mismatched: list[str] = []
+    invalid: list[str] = []
+    for slug in author_slugs:
+        path = analysis_dir / f"{slug}_result.json"
+        if not path.is_file():
+            missing.append(str(path))
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            invalid.append(str(path))
+            continue
+        actual = payload.get("config_hash")
+        if actual != expected:
+            mismatched.append(f"{path} config_hash={actual!r} expected={expected!r}")
+    problems: list[str] = []
+    if missing:
+        problems.append("missing result artifacts: " + "; ".join(missing))
+    if invalid:
+        problems.append("invalid result artifacts: " + "; ".join(invalid))
+    if mismatched:
+        problems.append("stale or mixed analysis config hashes: " + "; ".join(mismatched))
+    if problems:
+        return False, "Analysis artifact compatibility failed: " + " | ".join(problems)
+    return True, "Analysis result config hashes match current analysis settings."
+
+
 def compute_corpus_hash(db_path: Path) -> str:
     """Hash ordered ``content_hash`` values from the articles table."""
     if not db_path.is_file():

@@ -51,6 +51,37 @@ def _numeric_feature_columns(df: pl.DataFrame) -> list[str]:
     return [c for c in PELT_FEATURE_COLUMNS if c in df.columns]
 
 
+def _finite_values(df: pl.DataFrame, col: str) -> np.ndarray:
+    vals = df[col].cast(pl.Float64, strict=False).drop_nulls().to_numpy()
+    return vals[np.isfinite(vals)]
+
+
+def _feature_coverage_diagnostics(df: pl.DataFrame, columns: list[str]) -> dict[str, list[str]]:
+    diagnostics = {
+        "all_zero": [],
+        "all_null": [],
+        "all_nan": [],
+        "has_non_finite": [],
+    }
+    for col in columns:
+        if col not in df.columns:
+            continue
+        series = df[col].cast(pl.Float64, strict=False)
+        values = series.drop_nulls().to_numpy()
+        if len(values) == 0:
+            diagnostics["all_null"].append(col)
+            continue
+        finite = values[np.isfinite(values)]
+        if len(finite) == 0 and np.isnan(values).all():
+            diagnostics["all_nan"].append(col)
+            continue
+        if len(finite) != len(values):
+            diagnostics["has_non_finite"].append(col)
+        if len(finite) > 0 and np.all(finite == 0.0):
+            diagnostics["all_zero"].append(col)
+    return diagnostics
+
+
 def _load_or_compute_changepoints(
     slug: str,
     repo: Repository,
@@ -127,13 +158,15 @@ def _two_sample_feature_comparisons(
     feature_comparisons: dict[str, dict[str, Any]] = {}
     cols = _numeric_feature_columns(df_t)
     for col in cols:
-        tvals = df_t[col].cast(pl.Float64, strict=False).drop_nulls().to_numpy()
+        tvals = _finite_values(df_t, col)
         if pooled.is_empty() or col not in pooled.columns:
             continue
-        cvals = pooled[col].cast(pl.Float64, strict=False).drop_nulls().to_numpy()
+        cvals = _finite_values(pooled, col)
         if tvals.size < 3 or cvals.size < 3:
             continue
         t_stat, p_two = stats.ttest_ind(tvals, cvals, equal_var=False)
+        if not np.isfinite(t_stat) or not np.isfinite(p_two):
+            continue
         feature_comparisons[col] = {
             "all": {
                 "t_stat": float(t_stat),
@@ -143,6 +176,22 @@ def _two_sample_feature_comparisons(
             }
         }
     return feature_comparisons
+
+
+def _comparison_feature_coverage(
+    df_t: pl.DataFrame,
+    pooled: pl.DataFrame,
+    control_feature_frames: dict[str, pl.DataFrame],
+) -> dict[str, Any]:
+    cols = sorted(set(_numeric_feature_columns(df_t)) | set(_numeric_feature_columns(pooled)))
+    return {
+        "target": _feature_coverage_diagnostics(df_t, cols),
+        "pooled_controls": _feature_coverage_diagnostics(pooled, cols),
+        "controls": {
+            slug: _feature_coverage_diagnostics(frame, cols)
+            for slug, frame in control_feature_frames.items()
+        },
+    }
 
 
 def _summarize_control_authors(
@@ -252,6 +301,7 @@ def compare_target_to_controls(
         target_author, df_t = _load_target_author_and_frame(repo, paths, target_id)
         pooled, control_feature_frames = _load_control_frames_and_pooled(repo, paths, control_ids)
         feature_comparisons = _two_sample_feature_comparisons(df_t, pooled)
+        feature_coverage = _comparison_feature_coverage(df_t, pooled, control_feature_frames)
         control_change_points, control_drift_scores, control_windows = _summarize_control_authors(
             control_ids,
             repo,
@@ -275,6 +325,7 @@ def compare_target_to_controls(
         }
         return {
             "feature_comparisons": feature_comparisons,
+            "feature_coverage_diagnostics": feature_coverage,
             "control_change_points": ccp_out,
             "control_drift_scores": {
                 k: (v.model_dump(mode="json") if v else None)

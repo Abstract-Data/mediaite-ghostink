@@ -48,6 +48,7 @@ def test_analysis_artifact_paths_layout(tmp_path: Path) -> None:
     assert paths2.changepoints_json(slug).name == "alice_changepoints.json"
     assert paths2.drift_json(slug).parent == paths2.analysis_dir
     expected_ai_emb = root / "data" / "ai_baseline" / slug / "embeddings"
+    assert paths2.ai_baseline_dir(slug) == root / "data" / "ai_baseline" / slug
     assert paths2.ai_baseline_embeddings_dir(slug) == expected_ai_emb
     assert paths2.comparison_report_json() == paths2.analysis_dir / "comparison_report.json"
 

@@ -23,6 +23,7 @@ from forensics.reporting import (
 from forensics.utils import charts as charts_mod
 from forensics.utils.charts import apply_baseline_shading, apply_change_point_annotations
 from forensics.utils.provenance import (
+    compute_analysis_config_hash,
     compute_config_hash,
     compute_corpus_hash,
     load_corpus_custody,
@@ -44,6 +45,14 @@ def _minimal_forensics_settings(**kwargs) -> ForensicsSettings:
         )
     ]
     return ForensicsSettings(authors=authors, **kwargs)
+
+
+def _write_result_json(analysis: Path, slug: str, settings: ForensicsSettings) -> None:
+    analysis.mkdir(parents=True, exist_ok=True)
+    (analysis / f"{slug}_result.json").write_text(
+        json.dumps({"config_hash": compute_analysis_config_hash(settings)}),
+        encoding="utf-8",
+    )
 
 
 def test_chart_theme_loads() -> None:
@@ -219,12 +228,12 @@ def test_resolve_notebook_path_not_found(tmp_path: Path) -> None:
 
 
 def test_analysis_artifacts_ok_complete(tmp_path: Path) -> None:
+    settings = _minimal_forensics_settings()
     analysis = tmp_path / "analysis"
-    analysis.mkdir()
-    (analysis / "a_result.json").write_text("{}", encoding="utf-8")
-    ok, msg = _analysis_artifacts_ok(_minimal_forensics_settings(), analysis)
+    _write_result_json(analysis, "a", settings)
+    ok, msg = _analysis_artifacts_ok(settings, analysis)
     assert ok is True
-    assert msg == ""
+    assert "match" in msg
 
 
 def test_analysis_artifacts_ok_missing(tmp_path: Path) -> None:
@@ -232,7 +241,7 @@ def test_analysis_artifacts_ok_missing(tmp_path: Path) -> None:
     analysis.mkdir()
     ok, msg = _analysis_artifacts_ok(_minimal_forensics_settings(), analysis)
     assert ok is False
-    assert "Missing analysis artifacts" in msg
+    assert "missing result artifacts" in msg
     assert "a_result.json" in msg
 
 
@@ -259,11 +268,23 @@ def test_analysis_artifacts_ok_multiple_authors(tmp_path: Path) -> None:
     ]
     settings = ForensicsSettings(authors=authors)
     analysis = tmp_path / "analysis"
-    analysis.mkdir()
-    (analysis / "a_result.json").write_text("{}", encoding="utf-8")
+    _write_result_json(analysis, "a", settings)
     ok, msg = _analysis_artifacts_ok(settings, analysis)
     assert ok is False
     assert "b_result.json" in msg
+
+
+def test_analysis_artifacts_ok_rejects_stale_config_hash(tmp_path: Path) -> None:
+    settings = _minimal_forensics_settings()
+    analysis = tmp_path / "analysis"
+    analysis.mkdir()
+    (analysis / "a_result.json").write_text(
+        json.dumps({"config_hash": "oldhash"}),
+        encoding="utf-8",
+    )
+    ok, msg = _analysis_artifacts_ok(settings, analysis)
+    assert ok is False
+    assert "stale or mixed analysis config hashes" in msg
 
 
 def test_quarto_bin_delegates_to_which(monkeypatch: pytest.MonkeyPatch) -> None:

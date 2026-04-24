@@ -172,6 +172,24 @@ def test_self_similarity_ignores_blank_peers(nlp) -> None:
     assert sim["self_similarity_30d"] == pytest.approx(1.0, abs=0.05)
 
 
+def test_content_features_regression_values(nlp) -> None:
+    from forensics.features import content
+
+    text = "Perhaps we might agree. I could be argued into it. Our view appears to hold."
+    out = content.extract_content_features(text, nlp(text), [], [])
+    assert out["hedging_frequency"] > 0
+    assert out["first_person_ratio"] > 0
+
+
+def test_structural_features_regression_values(nlp) -> None:
+    from forensics.features import structural
+
+    text = "Because the hearing ended, the senator left.\n\nA short paragraph."
+    out = structural.extract_structural_features(text, nlp(text))
+    assert np.isfinite(out["subordinate_clause_depth"])
+    assert np.isfinite(out["paragraph_length_variance"])
+
+
 def test_lda_document_corpus_skips_empty_and_caps_tail() -> None:
     from forensics.features import content as c
 
