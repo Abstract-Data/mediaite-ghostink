@@ -2833,3 +2833,169 @@ $ uv run pytest tests/ --no-cov
 - **Plotly `to_html(include_plotlyjs="cdn")`** requires network on render-time. If the report is built offline, switch to `"inline"` or `"directory"` — left for whichever sibling owns the final stitching path.
 
 ---
+
+---
+
+### Phase 15 J6 + J7 + G2 + G3 — Section contrast + CLI surface + per-feature parallel + embedding I/O audit
+**Status:** Complete
+**Date:** 2026-04-24
+**Agent/Session:** worktree-agent-a11c3526
+
+#### What Was Done
+- **J6 (per-author section contrast)** — new module
+  `src/forensics/analysis/section_contrast.py` runs pairwise Welch +
+  Mann-Whitney tests per PELT feature on every (section_a, section_b)
+  pair an author has, where each section meets `MIN_SECTION_ARTICLES = 30`.
+  Per-family BH correction reuses Phase 15 C2's `apply_correction_grouped`
+  helper. Output: `data/analysis/<slug>_section_contrast.json` with the
+  schema in the spec (lines 1429-1444). Edge cases: insufficient section
+  volume → `disposition: "insufficient_section_volume"` + empty `pairs`;
+  all features pass → WARNING (`ALL_FEATURES_PASS_WARNING` template).
+- **J7 (CLI surface)** — registered `forensics analyze section-contrast`
+  subcommand on the existing `analyze_app` Typer sub-app (PR #75 J3
+  pattern). Added `--residualize-sections` flag on `analyze` (and
+  threaded through `run_analyze` so `forensics all` can flip it). The
+  flag is a per-run override that copies settings via `model_copy` —
+  `config.toml` is never mutated, the global `get_settings()` cache is
+  preserved. Documented all three section subcommands in
+  `docs/RUNBOOK.md` under a new `## Section diagnostics (Phase 15 J3 / J6 / J7)`
+  section.
+- **G2 (per-feature parallelism)** — refactored
+  `analyze_author_feature_changepoints` to dispatch the 23-feature loop
+  to a `ThreadPoolExecutor` when `settings.analysis.feature_workers > 1`.
+  Used the result-collector pattern (`{feature_name: [ChangePoint]}`
+  dict, walked in PELT_FEATURE_COLUMNS order) so output is byte-identical
+  to the serial path. Default `feature_workers=1` keeps the legacy serial
+  branch with zero executor overhead. ThreadPool (not Process) chosen
+  because: (a) G1 already wraps per-author in processes — nesting would
+  deadlock on macOS spawn semantics; (b) PELT/BOCPD do enough numpy work
+  to release the GIL.
+- **G3 (embedding I/O audit)** — added `_classify_embedding_path` helper
+  and a per-author DEBUG log line in `load_article_embeddings`
+  summarising the mix of `npz` vs `npy` reads. The audit confirms the
+  default writer for the main embedding path
+  (`forensics.features.pipeline._write_author_embedding_artifacts`) is
+  already `write_author_embedding_batch` → packed `batch.npz`. The
+  legacy per-article `.npy` writer (`save_numpy_atomic`) is only used by
+  the AI-baseline orchestrator at `src/forensics/baseline/orchestrator.py`,
+  which is a separate corpus from the main embeddings stream. **No
+  behavior change required.**
+
+#### Files Modified
+- `src/forensics/analysis/section_contrast.py` — NEW J6 module.
+- `src/forensics/analysis/changepoint.py` — extracted
+  `_changepoints_for_feature` helper + opportunistic ThreadPoolExecutor
+  branch in `analyze_author_feature_changepoints`.
+- `src/forensics/analysis/drift.py` — added DEBUG audit log on embedding
+  read with format-mix counts; new `_classify_embedding_path` helper.
+- `src/forensics/cli/analyze.py` — `--residualize-sections` flag on
+  `analyze`, `_apply_per_run_overrides` extraction (resolves C901 too-
+  complex), `section-contrast` subcommand wiring.
+- `tests/unit/test_section_contrast.py` — NEW (6 tests: happy path,
+  insufficient volume, no qualifying sections, all-features-pass
+  warning, JSON round-trip, three-pair combinatorics).
+- `tests/unit/test_g2_per_feature_parallel.py` — NEW (5 tests:
+  workers=2 byte parity, workers=4 byte parity, single-feature
+  over-provision, BOCPD parity, PELT-order preservation).
+- `docs/RUNBOOK.md` — new section documenting `section-profile`,
+  `section-contrast`, and `--residualize-sections`.
+
+#### Verification Evidence
+```
+$ uv run python -m pytest tests/unit/test_section_contrast.py tests/unit/test_g2_per_feature_parallel.py -v --no-cov
+11 passed in 1.08s
+
+$ uv run python -m pytest tests/ -k "section_contrast or contrast or feature_parallel or changepoint or analyze" -v --no-cov
+26 passed, 672 deselected in 4.09s
+
+$ uv run ruff check . && uv run ruff format --check .
+All checks passed!
+215 files already formatted
+
+$ uv run python -m pytest tests/ -v --no-cov
+695 passed, 3 deselected, 1 warning in 165.45s
+
+$ uv run forensics analyze --help     # shows --residualize-sections + section-contrast
+$ uv run forensics analyze section-contrast --help  # shows --author / --features-dir
+```
+
+#### Decisions Made
+- **ThreadPoolExecutor over ProcessPoolExecutor for G2** — per the spec:
+  G1 already wraps per-author in processes; nested ProcessPools deadlock
+  on macOS spawn semantics. PELT/BOCPD release the GIL on numpy ops,
+  so threads give real parallelism here.
+- **Result-collector dict keyed by feature name** in G2 instead of a
+  list of `as_completed` futures. Walking `PELT_FEATURE_COLUMNS` after
+  the executor finishes preserves byte-identical output ordering vs the
+  serial path. Tested directly by `test_output_walks_pelt_feature_columns_order`.
+- **Hand-rolled HypothesisTest construction in J6** rather than reusing
+  `statistics._hypothesis_test`. The latter is module-private and emits
+  a different `test_name` format; J6 needs `(section_a, section_b)` in
+  the name for traceability when the artifact lands on disk. Effect-size
+  + CI fields are zeroed because the J6 artifact only consumes
+  feature-level significance flags rolled up by family — saves a per-
+  feature bootstrap call per pair.
+- **`_apply_per_run_overrides` extracted from `run_analyze`** to keep
+  the function under C901 complexity. Both `--include-advertorial` (J2)
+  and `--residualize-sections` (J7) flow through it; future per-run
+  escape hatches add a single branch instead of expanding the runner.
+- **`--residualize-sections` is a per-run override only** — no edits to
+  `config.toml`, no config-hash impact (the persisted setting still
+  governs preregistration). Operators wanting durable residualization
+  flip `[analysis] section_residualize_features = true` in the file.
+- **G3: no code change beyond DEBUG log.** The audit confirmed the
+  packed-batch writer is the default for the main embedding stream;
+  `.npy` only appears in the AI baseline subtree
+  (`src/forensics/baseline/orchestrator.py`) which is intentionally
+  per-article. The DEBUG line surfaces the mix on demand
+  (`FORENSICS_LOG_LEVEL=DEBUG`) without spamming INFO.
+
+#### Unresolved Questions
+- **Wave 3.1 K1-K3 consumption of section_contrast.json.** This PR
+  produces the artifact; the reporting wiring lands in the K1-K3 unit.
+  No coordination required — schema is in `SectionContrastResult.to_dict()`
+  and pinned by `test_artifact_round_trips_through_json`.
+- **G2 wall-clock benchmark** is not in this unit. Per the spec G2 is
+  "opportunistic — only land if G1 leaves cores idle". The CI default
+  stays `feature_workers=1`; operators opt in on big-N authors. A real-
+  corpus benchmark vs `feature_workers=4` is a follow-up.
+
+#### G3 Audit Findings
+- **Default writer:** `forensics.storage.parquet.write_author_embedding_batch`
+  (packed `batch.npz`, called once per author from
+  `src/forensics/features/pipeline.py::_write_author_embedding_artifacts`).
+  Storage format: 3-key NPZ (`article_id_lengths`, `article_id_bytes`,
+  `vectors`), no pickled object arrays.
+- **Legacy `.npy` writer:** `forensics.storage.parquet.save_numpy_atomic`
+  is **only** called from `src/forensics/baseline/orchestrator.py` for
+  per-article AI baseline embeddings (intentional — different corpus
+  with no batching opportunity). The main embeddings stream does not
+  use it.
+- **Reader:** `src/forensics/analysis/drift.py::_load_embedding_row`
+  dispatches on suffix (`.npz` → packed batch with cache, anything else
+  → legacy `.npy`). Already handles both correctly.
+- **Big-N author audit:** the new DEBUG log
+  (`embedding I/O audit: slug=%s npz=%d npy=%d (default writer is batch.npz)`)
+  surfaces the mix on demand. Operators can run
+  `FORENSICS_LOG_LEVEL=DEBUG uv run forensics analyze --drift --author <slug>`
+  and grep for "embedding I/O audit" to verify a big-N author is
+  reading exclusively from `batch.npz`.
+- **Verdict:** No behavior change required. Writer is already
+  `batch.npz` by default; reader supports both formats; legacy `.npy`
+  files only exist in the AI baseline subtree where per-article writes
+  are intentional.
+
+#### Risks & Next Steps
+- **G2 thread safety**: `_changepoints_for_feature` reads from a shared
+  Polars DataFrame and a shared timestamps list. Polars reads are
+  immutable and timestamps is a list of `datetime` (immutable); no
+  shared mutable state in the per-feature path. Tests pin byte-identical
+  output across worker counts as a regression guard.
+- **Section contrast on tiny corpora**: `MIN_SECTION_ARTICLES = 30` is
+  the spec floor. With Welch + MW + per-family BH at this denominator
+  the test has limited power on small effect sizes; this is documented
+  in the module docstring under "Edge cases".
+- **CLI back-compat**: `forensics analyze` (flag-only) still works
+  exactly as before — `_apply_per_run_overrides` is a no-op when neither
+  flag is set. Verified by `tests/integration/test_cli.py` (3 tests
+  pass in the integration suite).

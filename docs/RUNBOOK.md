@@ -210,6 +210,47 @@ uv run pytest tests/ -v --cov=src --cov-report=term-missing
 uv run pytest tests/ -v --hypothesis-show-statistics
 ```
 
+## Section diagnostics (Phase 15 J3 / J6 / J7)
+
+URL-derived `section` tags (Phase 15 J1) unlock three diagnostic surfaces on
+the `analyze` sub-app. All commands write deterministic JSON / CSV / Markdown
+under `data/analysis/`; legacy `forensics analyze --changepoint` etc. still
+work unchanged.
+
+```bash
+# J3 — newsroom-wide section descriptive report + J5 gate verdict.
+# Persists section_centroids.json, section_distance_matrix.{json,csv},
+# section_feature_ranking.json, and section_profile_report.md.
+uv run forensics analyze section-profile
+uv run forensics analyze section-profile --output /tmp/profile.md
+uv run forensics analyze section-profile --features-dir path/to/features
+
+# J6 — per-author section-contrast tests (Welch + Mann-Whitney + per-family
+# BH; Phase 15 C2 helper). Output: data/analysis/<slug>_section_contrast.json.
+uv run forensics analyze section-contrast                    # every author
+uv run forensics analyze section-contrast --author jane-doe  # one author
+
+# J7 — residualize-sections per-run override. Flips
+# analysis.section_residualize_features for the current process only;
+# config.toml is NOT modified. Use this for A/B comparisons against the
+# unadjusted CP run without touching the persisted config.
+uv run forensics analyze --residualize-sections --changepoint
+uv run forensics analyze all --residualize-sections          # via run_analyze()
+```
+
+Operational notes:
+
+- `section-contrast` requires authors to have ≥ 2 sections each with ≥ 30
+  articles (`MIN_SECTION_ARTICLES`). Authors below the bar emit
+  `{"pairs": [], "disposition": "insufficient_section_volume"}` rather than
+  raising — downstream consumers must render "N/A".
+- A WARNING is emitted when **every** PELT feature passes BH for a single
+  pair — wholly different registers across the entire feature set is
+  suspicious and warrants a spot-check.
+- `--residualize-sections` is a hot-fix knob. Persistent toggling lives in
+  `config.toml` under `[analysis] section_residualize_features = true` so
+  the change is captured by the config hash + preregistration lock.
+
 ## Migrations (Phase 15)
 
 Storage-layer migrations now land through the Typer CLI rather than the old
