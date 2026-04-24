@@ -1,8 +1,38 @@
-"""Hypothesis tests, effect sizes, bootstrap CIs, and multiple-comparison correction (Phase 7)."""
+"""Hypothesis tests, effect sizes, bootstrap CIs, and multiple-comparison correction (Phase 7).
+
+Per-family vs per-author FDR (Phase 15 C2)
+------------------------------------------
+
+Benjamini–Hochberg (BH) assumes the p-values it corrects are drawn from
+independent hypotheses. In this pipeline, many stylometric features live in
+the same logical "family" and test correlated hypotheses of the same
+underlying shift (e.g. ``flesch_kincaid`` / ``coleman_liau`` / ``gunning_fog``
+all read "this author got easier to read"; the passive-voice /
+nominalization / first-person-plural features all move together when a
+writer leans on AI-style boilerplate).
+
+Running a single author-wide BH collapses those correlated families into one
+pooled denominator, inflates ``n`` in ``rank * alpha / n``, and over-corrects
+away real signal. The methodologically preferable alternative — implemented
+by :func:`apply_correction_grouped` — is to run BH independently within
+each feature family and concatenate the results. Each family becomes its own
+FDR regime (so ``n`` is the within-family test count) while the across-
+family denominator stays honest because families are, by construction,
+designed to be independent axes of writing style.
+
+Residual within-family correlation (e.g. three readability formulas inside
+one ``readability`` family) still over-corrects slightly: BH is conservative
+under positive dependence. Closing that gap requires an effective-N
+correction (correlation-matrix estimation per author) and is out of scope
+for v0.4.0; it is documented as a known limitation rather than silently
+adjusted here.
+"""
 
 from __future__ import annotations
 
 import math
+from collections import defaultdict
+from collections.abc import Callable
 
 import numpy as np
 from scipy import stats
@@ -190,6 +220,32 @@ def apply_correction(
         test.model_copy(update={"corrected_p_value": cp, "significant": cp < alpha})
         for test, cp in zip(tests, corrected, strict=True)
     ]
+
+
+def apply_correction_grouped(
+    tests: list[HypothesisTest],
+    group_key: Callable[[HypothesisTest], str],
+    method: str = "benjamini_hochberg",
+    alpha: float = 0.05,
+) -> list[HypothesisTest]:
+    """Group ``tests`` by ``group_key``, apply BH per group, then concatenate.
+
+    Singleton groups return raw p-values unchanged (BH is a no-op when the
+    denominator ``n == 1``) — this is mathematically correct and intentional;
+    do not "patch" it. Empty groups (should never occur given ``defaultdict``
+    semantics, but guarded defensively) are skipped.
+
+    See the module docstring for the per-family BH rationale (Phase 15 C2).
+    """
+    groups: dict[str, list[HypothesisTest]] = defaultdict(list)
+    for test in tests:
+        groups[group_key(test)].append(test)
+    out: list[HypothesisTest] = []
+    for _key, group in groups.items():
+        if not group:
+            continue
+        out.extend(apply_correction(group, method=method, alpha=alpha))
+    return out
 
 
 def filter_by_effect_size(

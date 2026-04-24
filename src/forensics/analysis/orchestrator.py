@@ -25,6 +25,7 @@ from forensics.analysis.convergence import (
 from forensics.analysis.drift import compute_author_drift_pipeline, load_article_embeddings
 from forensics.analysis.statistics import (
     apply_correction,
+    apply_correction_grouped,
     filter_by_effect_size,
     run_hypothesis_tests,
 )
@@ -73,6 +74,58 @@ def _write_per_author_json_artifacts(
     write_json_artifact(paths.hypothesis_tests_json(slug), all_tests)
 
 
+def _clean_feature_series(df_author: pl.DataFrame, feature_name: str) -> list[float]:
+    """Cast to float, median-impute NaN / inf, and return a plain ``list[float]``.
+
+    Hoisted out of :func:`_run_hypothesis_tests_for_changepoints` so the per-
+    feature cleaning can be cached across multiple change-points on the same
+    feature (Phase 15 F2) and so tests can monkeypatch this symbol to assert
+    cache-hit behaviour.
+    """
+    raw = df_author[feature_name].cast(pl.Float64, strict=False).to_numpy()
+    finite = raw[np.isfinite(raw)]
+    med = float(np.nanmedian(finite)) if finite.size else 0.0
+    clean = np.nan_to_num(raw, nan=med)
+    return [float(x) for x in clean]
+
+
+def _family_bh_correct(
+    tests: list,
+    analysis_cfg: AnalysisConfig,
+) -> list:
+    """Apply BH correction, grouped per feature-family when configured (Phase 15 C2).
+
+    Falls back to per-author BH (the legacy behaviour) when
+    ``fdr_grouping == "author"`` or when ``forensics.analysis.feature_families``
+    cannot be imported (Unit 4 may not have landed yet).
+    """
+    if analysis_cfg.fdr_grouping == "family":
+        try:
+            from forensics.analysis.feature_families import FEATURE_FAMILIES
+        except ImportError:
+            logger.warning(
+                "analysis: fdr_grouping='family' requested but "
+                "forensics.analysis.feature_families is unavailable; "
+                "falling back to per-author BH.",
+            )
+        else:
+
+            def _family_key(t) -> str:
+                return FEATURE_FAMILIES.get(t.feature_name, "unknown")
+
+            return apply_correction_grouped(
+                tests,
+                group_key=_family_key,
+                method=analysis_cfg.multiple_comparison_method,
+                alpha=analysis_cfg.significance_threshold,
+            )
+    return apply_correction(
+        tests,
+        method=analysis_cfg.multiple_comparison_method,
+        alpha=analysis_cfg.significance_threshold,
+    )
+
+
 def _run_hypothesis_tests_for_changepoints(
     df_author: pl.DataFrame,
     timestamps: list[datetime],
@@ -80,15 +133,20 @@ def _run_hypothesis_tests_for_changepoints(
     author_id: str,
     analysis_cfg: AnalysisConfig,
 ) -> list:
+    # Phase 15 F2: cache cleaned per-feature series so multiple CPs on the
+    # same feature reuse one median-imputation pass instead of re-scanning
+    # the dataframe each iteration.
+    feature_cache: dict[str, tuple[list[float], int]] = {}
     all_tests: list = []
     for cp in change_points:
         if cp.feature_name not in df_author.columns:
             continue
-        raw = df_author[cp.feature_name].cast(pl.Float64, strict=False).to_numpy()
-        med = float(np.nanmedian(raw[np.isfinite(raw)])) if np.any(np.isfinite(raw)) else 0.0
-        raw = np.nan_to_num(raw, nan=med)
-        series = [float(x) for x in raw]
-        if len(series) < 6 or len(series) != len(timestamps):
+        cached = feature_cache.get(cp.feature_name)
+        if cached is None:
+            series = _clean_feature_series(df_author, cp.feature_name)
+            feature_cache[cp.feature_name] = (series, len(series))
+        series, n = feature_cache[cp.feature_name]
+        if n < 6 or n != len(timestamps):
             continue
         bidx = _breakpoint_index(timestamps, cp.timestamp)
         all_tests.extend(
@@ -100,11 +158,7 @@ def _run_hypothesis_tests_for_changepoints(
                 n_bootstrap=analysis_cfg.bootstrap_iterations,
             )
         )
-    all_tests = apply_correction(
-        all_tests,
-        method=analysis_cfg.multiple_comparison_method,
-        alpha=analysis_cfg.significance_threshold,
-    )
+    all_tests = _family_bh_correct(all_tests, analysis_cfg)
     all_tests = filter_by_effect_size(
         all_tests,
         analysis_cfg.effect_size_threshold,
