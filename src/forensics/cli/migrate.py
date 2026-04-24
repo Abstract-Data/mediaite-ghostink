@@ -71,6 +71,16 @@ def features_migrate(
             help="Override the features directory (default: <project_root>/data/features).",
         ),
     ] = None,
+    articles_db: Annotated[
+        Path | None,
+        typer.Option(
+            "--articles-db",
+            help=(
+                "Override the SQLite DB used for the article_id -> url JOIN "
+                "(default: <project_root>/data/articles.db)."
+            ),
+        ),
+    ] = None,
     dry_run: Annotated[
         bool,
         typer.Option(
@@ -79,12 +89,19 @@ def features_migrate(
         ),
     ] = False,
 ) -> None:
-    """Upgrade every feature parquet to the current schema version."""
+    """Upgrade every feature parquet to the current schema version.
+
+    Real-corpus parquets store only ``article_id``; URLs live in
+    ``articles.db``. The migrator JOINs against that DB once per run to derive
+    ``section`` for every row. If the DB is missing, rows without a ``url``
+    column fall back to ``section = "unknown"`` (with a WARNING per file).
+    """
     from forensics.config import get_project_root
 
     logger = logging.getLogger(__name__)
     mig = importlib.import_module("forensics.storage.migrations.002_feature_parquet_section")
-    target = features_dir or (get_project_root() / "data" / "features")
+    project_root = get_project_root()
+    target = features_dir or (project_root / "data" / "features")
     if not target.is_dir():
         typer.echo(
             f"features directory not found: {target} (nothing to migrate).",
@@ -92,11 +109,16 @@ def features_migrate(
         )
         return
 
-    migrated, skipped = mig.migrate_all(target, dry_run=dry_run)
+    db_target = articles_db or (project_root / "data" / "articles.db")
+    migrated, skipped = mig.migrate_all(target, dry_run=dry_run, articles_db=db_target)
     logger.info(
-        "features migrate: migrated=%d skipped=%d dry_run=%s",
+        "features migrate: migrated=%d skipped=%d dry_run=%s articles_db=%s",
         migrated,
         skipped,
         dry_run,
+        db_target,
     )
-    typer.echo(f"features migrate: migrated={migrated} skipped={skipped} dry_run={dry_run}")
+    typer.echo(
+        f"features migrate: migrated={migrated} skipped={skipped} "
+        f"dry_run={dry_run} articles_db={db_target}"
+    )
