@@ -1,0 +1,30 @@
+{
+  "family": "phase15-optimizations",
+  "current_version": "0.3.0",
+  "versions": [
+    {
+      "version": "0.1.0",
+      "date": "2026-04-24",
+      "status": "superseded",
+      "model": "claude-opus-4-7",
+      "file": "v0.1.0.md",
+      "changelog_entry": "9-phase (A-I) plan addressing the Apr 24 2026 run-8 sensitivity review: MAP-reset BOCPD rewrite (structural fix for P(r=0) collapse), FEATURE_FAMILIES registry with per-family convergence ratio (threshold 0.60 -> 0.50), drop KS + per-family Benjamini-Hochberg, shared-byline filter on Author (default-exclude with --include-shared-bylines), Pipeline B component logging + conditional formula recalibration, bootstrap_ci vectorization, per-feature series caching, constant-signal early exit, ProcessPoolExecutor per-author parallelism in run_full_analysis with byte-identical-artifact parity test, optional per-feature ThreadPoolExecutor, embedding batch-npz audit, coverage lift target 68+. Target: >= 5x wall-clock improvement on mediaite-staff (738 articles)."
+    },
+    {
+      "version": "0.2.0",
+      "date": "2026-04-24",
+      "status": "superseded",
+      "model": "claude-opus-4-7",
+      "file": "v0.2.0.md",
+      "changelog_entry": "MINOR bump: adds Phase J (section-tag enrichment and section-conditioned analysis) alongside unchanged Phases A-I. New work: derive section column from URL first-path-segment at feature-extraction time (100% corpus coverage); exclude sponsored/partner-content/crosspost from stylometry by default; newsroom-wide section-level descriptive report (per-section centroids, inter-section cosine distance matrix, feature MANOVA) to gate residualization; per-author section-mix-over-time chart wired into narrative as confound visual; OLS residualization of features on one-hot sections before PELT/BOCPD (conditional on descriptive-report findings); per-author pairwise Welch+MW section-contrast tests with per-family BH. New CLI subcommands section-profile and section-contrast plus --residualize-sections flag. Effort table: 29 steps / 20-28h -> 36 steps / 24-34h."
+    },
+    {
+      "version": "0.3.0",
+      "date": "2026-04-24",
+      "status": "active",
+      "model": "claude-opus-4-7",
+      "file": "v0.3.0.md",
+      "changelog_entry": "MINOR bump: adds Phase F0 (PELT RBF -> L2 kernel swap) as the highest-leverage performance step after profile evidence showed costrbf.error consumes 99.2% of analysis wall-clock (BOCPD 0.7%, bootstrap < 0.1%). One-line change with 100-500x expected throughput on PELT; methodologically aligned with Phase C1's KS drop. Also: A4 (Student-t predictive) promoted from optional to ship-directly-after-A2; G1 status corrected to LANDED (PR #60); J5 gate quantified (>= 3 families MANOVA p<0.01 AND max off-diagonal cosine distance > 0.3); fast-path workflow documented (snapshot RBF CPs -> land F0 -> rerun 14 authors -> diff -> ship) for complete dataset ahead of full Phase 15 rollout. Effort table: 36 steps / 24-34h -> 37 steps / 22-32h (F0 +30min, G1 deducted as landed)."
+    }
+  ]
+}

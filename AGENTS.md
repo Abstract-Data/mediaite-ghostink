@@ -1,6 +1,6 @@
 # AGENTS.md
 # Version: 0.4.0
-# Last Updated: 2026-04-22
+# Last Updated: 2026-04-23
 # Environment: dev
 # Model: gpt-5-3-codex
 # Fallback Model: gpt-5.1
@@ -484,7 +484,7 @@ See `prompts/README.md` for the full versioning contract, bump rules, and releas
 
 - Git remote `origin` targets **Abstract-Data/mediaite-ghostink** on GitHub; `git remote -v` may show an SSH form if HTTPS URLs are rewritten in Git config.
 - Architectural decision records live under **`docs/adr/`**; keep a single ADR-style tree rather than reintroducing a parallel `docs/decisions/` layout unless the repo convention is explicitly changed.
-- Ruff: this repo’s **`.ruff.toml`** only **`extend`s `pyproject.toml`**, so lint rules (including **`C901`**) come from **`[tool.ruff.lint]`** in `pyproject.toml`. If you add **`[tool.ruff.lint.per-file-ignores]`**, keep valid TOML (for example a multi-line table); inline tables cannot span lines and will break parsing.
+- Ruff: this repo’s **`.ruff.toml`** only **`extend`s `pyproject.toml`**, so lint rules (including **`C901`**) come from **`[tool.ruff.lint]`** in `pyproject.toml`. If you add **`[tool.ruff.lint.per-file-ignores]`** in `pyproject.toml`, keep valid TOML (for example a multi-line table); inline tables cannot span lines and will break parsing. CI (`.github/workflows/ci-tests.yml`) uses **`uv sync --extra dev --extra tui`** and relies on **`addopts`** for **`--cov=forensics`** so **`coverage.json`** matches a local **`uv run pytest`** (no second **`--cov=src`** flag).
 - Phase 2 discovery and metadata scraping persist **`data/authors_manifest.jsonl`**, **`data/scrape_errors.jsonl`**, and **`data/articles.db`** at the repository root (paths resolved via `get_project_root()`).
 - GitButler (`but`): follow the repo-local skill at `.claude/skills/gitbutler/SKILL.md` (mirrored at `.cursor/skills/gitbutler/SKILL.md`). For the Notion playbook add-on (parallel agents, JSON workflow), see `.claude/skills/gitbutler-workflow/SKILL.md` (mirrored under `.cursor/skills/gitbutler-workflow/`). From this repo: authenticate the forge once (`but config forge auth`); for GitHub PRs ensure the integration target is **`origin/main`** (not `gb-local/main`). If `but config target` refuses while virtual branches are applied, `but unapply` the stack first, set the target, then `but apply` again before `but push` / `but pr new`.
 - The `forensics` console script imports the **`forensics.cli` package** (`src/forensics/cli/` Typer app); the old monolithic `src/forensics/cli.py` was removed after the Typer migration—treat package modules as the CLI source of truth when updating docs or tracing dispatch.
