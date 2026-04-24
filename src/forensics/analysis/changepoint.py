@@ -265,7 +265,13 @@ def analyze_author_feature_changepoints(
     methods = {m.lower() for m in settings.analysis.changepoint_methods}
     pen = settings.analysis.pelt_penalty
     hazard = settings.analysis.bocpd_hazard_rate
-    bocpd_threshold = settings.analysis.bocpd_threshold
+    # Phase 15 Unit 1 — ``bocpd_threshold`` removed from settings because the
+    # quantity it thresholds (``P(r=0)``) is algebraically pinned to the hazard
+    # rate under constant-hazard A&M BOCPD (see docs/GUARDRAILS.md). Phase A
+    # replaces this with a MAP-run-length-reset rule and swaps the setting;
+    # until that ships, the legacy threshold is inlined here at its previous
+    # default so existing callers behave identically.
+    bocpd_threshold = 0.5
     out: list[ChangePoint] = []
 
     timestamps = timestamps_from_frame(df)

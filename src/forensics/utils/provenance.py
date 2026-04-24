@@ -19,6 +19,27 @@ from forensics.storage.repository import open_repository_connection
 CUSTODY_FILENAME = "corpus_custody.json"
 
 
+def _collect_hash_enumerated_fields(model: BaseModel) -> set[str] | None:
+    """Return the set of field names on ``model`` flagged for inclusion in the hash.
+
+    A field participates in the deterministic analysis config hash iff its
+    pydantic ``json_schema_extra`` contains ``{"include_in_config_hash": True}``.
+    Returns ``None`` when the model declares no such annotations — in that case
+    the legacy behaviour (hash the whole ``model_dump``) applies.
+
+    This enumeration approach (Phase 15 Step 0.4) makes it explicit which knobs
+    are signal-bearing (must invalidate cached artifacts on change) versus
+    ergonomic/performance-only (should NOT force recompute). See
+    ``docs/settings_phase15.md`` for the per-field rationale.
+    """
+    included: set[str] = set()
+    for name, info in model.__class__.model_fields.items():
+        extra = info.json_schema_extra
+        if isinstance(extra, dict) and extra.get("include_in_config_hash") is True:
+            included.add(name)
+    return included or None
+
+
 def compute_model_config_hash(
     config: BaseModel,
     *,
@@ -26,12 +47,22 @@ def compute_model_config_hash(
     exclude: Set[str] | frozenset[str] | None = None,
     round_trip: bool = False,
 ) -> str:
-    """SHA-256 prefix of a deterministic JSON serialization of ``config`` (RF-DRY-003)."""
+    """SHA-256 prefix of a deterministic JSON serialization of ``config`` (RF-DRY-003).
+
+    If any field on ``config`` is annotated with
+    ``json_schema_extra={"include_in_config_hash": True}``, only those fields
+    participate in the hash (Phase 15 Step 0.4). Otherwise the full
+    ``model_dump`` (minus anything in ``exclude``) is hashed — preserving the
+    legacy behaviour for settings that have not been explicitly enumerated.
+    """
     dump_kw: dict[str, Any] = {"mode": "json"}
     if exclude:
         dump_kw["exclude"] = set(exclude)
     if round_trip:
         dump_kw["round_trip"] = True
+    enumerated = _collect_hash_enumerated_fields(config)
+    if enumerated is not None:
+        dump_kw["include"] = enumerated
     payload = config.model_dump(**dump_kw)
     config_str = json.dumps(payload, sort_keys=True, default=str)
     return hashlib.sha256(config_str.encode()).hexdigest()[:length]

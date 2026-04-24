@@ -1805,3 +1805,99 @@ with Repository(db_path) as repo:
 - **Follow-up (not in this PR):** re-run `python-project-review` (or equivalent) to validate Run 7 outcome metrics (overall score 7.6 → 8.0+, testing 6 → 7+, zero Critical/High RF issues remaining).
 - **B5 async removal:** survey and calibration callers used to `await run_full_analysis`. They're now direct calls inside their async contexts. Any future caller that needs the event loop free during analysis can wrap it in `asyncio.to_thread`.
 - **E1 LazyFrame:** `load_feature_frame_sorted` is now lazy; the sole eager caller goes through the new `load_feature_frame_sorted_eager` wrapper. External consumers (notebooks, ad-hoc scripts) may need to add `.collect()`.
+
+---
+
+### Phase 15 Unit 1 — Foundations (Phase 0 + L)
+**Status:** Complete
+**Date:** 2026-04-24
+**Agent/Session:** Wave-1 blocker for Phase-15 Unit 1
+
+#### What Was Done
+
+**Phase 0 — Settings & Storage Foundations**
+- 0.1 Added 18 new analysis/survey/features knobs to `src/forensics/config/settings.py` (every Phase-15-owned field) and mirrored them in `config.toml` with inline phase-ownership comments. Removed `bocpd_threshold`. Added new `FeaturesConfig` and wired `features: FeaturesConfig` onto `ForensicsSettings`.
+- 0.2 Added forward-only SQLite migrations runner at `src/forensics/storage/migrations/__init__.py` + migration 001 adding `authors.is_shared_byline`. `Repository.__enter__` now calls `apply_migrations()`; `Repository.apply_migrations()` is exposed for CLI use.
+- 0.3 Added `SchemaMigrationRequired` exception and metadata-version check to `src/forensics/storage/parquet.py`. `write_parquet_atomic` now stamps `forensics.schema_version` by default; `load_feature_frame_sorted` refuses parquets stamped below `settings.features.feature_parquet_schema_version`. Migration helper at `src/forensics/storage/migrations/002_feature_parquet_section.py` and runner at `scripts/migrate_feature_parquets.py`. Added `src/forensics/utils/url.py::section_from_url`.
+- 0.4 `compute_model_config_hash` in `src/forensics/utils/provenance.py` now inspects `json_schema_extra={"include_in_config_hash": True}` annotations and hashes only the enumerated fields. Annotated 16 fields across `AnalysisConfig` + `FeaturesConfig`. Added `tests/unit/test_config_hash.py` pinning inclusion and exclusion in both directions.
+- 0.5 New audit doc `docs/settings_phase15.md` mapping every Phase-15 knob → phase → default → hash-status → rationale. Referenced from `config.toml` and `docs/ARCHITECTURE.md`.
+
+**Phase L — Provenance & Pre-Registration**
+- L1 Bench script at `scripts/bench_phase15.py` (versioned JSON, per-stage and per-author). Ran once on worktree state; the checked-in `data/articles.db` here is a 41 KB stub DB with placeholder authors only, so no meaningful `phase15_pre_<sha>.json` artifact was committed. Bench run command is documented below. `data/bench/.gitkeep` is the placeholder.
+- L2 Preserved the Apr 24 2026 profile at `data/analysis/provenance/apr24_rbf_profile.txt` (reconstructed from conversation transcript, marked as such). Referenced from `docs/ARCHITECTURE.md` §"Phase 15 Pre-Rollout Performance Baseline".
+- L3 Pre-registration amendment at `data/preregistration/amendment_phase15.md` (7 confirmatory hypotheses H1–H7, sign-off block pending maintainer).
+- L4 Pinned G1 provenance: PR #60 merged to `main` at `57fd6c0` on `2026-04-23`. Recorded in `docs/ARCHITECTURE.md` parallelism section.
+- L5 Appended three new Agent-Learned Signs to `docs/GUARDRAILS.md`: BOCPD `P(r=0)` pinning; `bulk_fetch_mode` metadata-column emptiness; pre/post-Phase-15 artifact mixing.
+- L6 Typer subcommand registration pattern documented in `docs/RUNBOOK.md` with `forensics migrate` / `forensics features migrate` as worked examples. Added `src/forensics/cli/migrate.py` and registered on the root app in `src/forensics/cli/__init__.py`.
+
+#### Files Modified
+- `config.toml` — mirrored 18 new knobs + `[features]` section with per-phase comments.
+- `.gitignore` — allow-list for `data/analysis/provenance/`, `data/preregistration/amendment_*.md`, `data/bench/`.
+- `src/forensics/config/settings.py` — new `FeaturesConfig`; 18 knobs on `AnalysisConfig`/`SurveyConfig`; `include_in_config_hash` annotations on 16 fields; removed `bocpd_threshold`.
+- `src/forensics/utils/provenance.py` — field-enumeration path in `compute_model_config_hash`.
+- `src/forensics/utils/url.py` — NEW; `section_from_url` helper.
+- `src/forensics/storage/migrations/__init__.py` — NEW; forward-only runner + `schema_version` table.
+- `src/forensics/storage/migrations/001_author_shared_byline.py` — NEW.
+- `src/forensics/storage/migrations/002_feature_parquet_section.py` — NEW.
+- `src/forensics/storage/parquet.py` — `SchemaMigrationRequired`, metadata stamping, version-check in `load_feature_frame_sorted`.
+- `src/forensics/storage/repository.py` — migrations fire on `__enter__`; `apply_migrations()` exposed.
+- `src/forensics/cli/__init__.py` — register `migrate` + `features` subapp.
+- `src/forensics/cli/migrate.py` — NEW.
+- `src/forensics/analysis/changepoint.py` — inline constant for removed `bocpd_threshold`.
+- `src/forensics/preregistration.py` — snapshot schema updated for new knobs.
+- `scripts/bench_phase15.py` — NEW.
+- `scripts/migrate_feature_parquets.py` — NEW.
+- `src/forensics/scraper/fetcher.py` — unrelated ruff format fix surfaced by Phase 0.
+- `tests/test_parquet_embeddings_duckdb.py` — manual schema stamp so timestamp-check test still fires.
+- `tests/test_preregistration.py` — expected keys updated for the new snapshot schema.
+- `tests/unit/test_config_hash.py` — NEW; pins hash enumeration.
+- `docs/ARCHITECTURE.md` — parallelism topology; performance baseline reference.
+- `docs/GUARDRAILS.md` — three new Phase-15 Signs.
+- `docs/RUNBOOK.md` — migrations section + Typer registration pattern.
+- `docs/settings_phase15.md` — NEW.
+- `data/analysis/provenance/apr24_rbf_profile.txt` — NEW.
+- `data/preregistration/amendment_phase15.md` — NEW.
+- `data/bench/.gitkeep` — NEW placeholder.
+
+#### Verification Evidence
+```
+uv run ruff check .               → All checks passed!
+uv run ruff format --check .      → 195 files already formatted
+uv run pytest tests/ -v --cov=src → 552 passed, 3 deselected, 1 warning in 174.80s
+                                    Total coverage: 73.52% (gate 72% — PASS)
+uv run forensics migrate --db /tmp/test_migrate.db
+                                  → Applying sqlite migration 001_author_shared_byline (v1)
+                                    No pending SQLite migrations.
+                                    (re-run) No pending SQLite migrations.   (idempotent ✓)
+uv run forensics features migrate --features-dir /tmp/test_features --dry-run
+                                  → DRY-RUN would migrate ... to v2 (backup -> ...)
+                                    migrate: migrated=1 skipped=0 dry_run=True
+uv run forensics features migrate --features-dir /tmp/test_features
+                                  → backed up ... migrated ... to v2
+                                    migrate: migrated=1 skipped=0 dry_run=False
+                                    (re-run) migrate: migrated=0 skipped=1   (idempotent ✓)
+uv run pytest tests/unit/test_config_hash.py -v
+                                  → 21 passed (hash inclusion + exclusion pinned)
+```
+
+#### Decisions Made
+- **`bocpd_threshold` removal:** settings field removed per plan; `changepoint.py` keeps the legacy `0.5` constant inlined until Phase A rewrites the detector. This keeps the pre-A behaviour identical while preventing any new code from mis-using the setting.
+- **`write_parquet_atomic` stamps by default:** stamping is opt-out (`stamp_feature_schema=False`), not opt-in. Simpler for downstream writers and keeps existing tests green without forcing every caller to learn about the metadata key. Non-feature parquets carrying an extra metadata key is harmless.
+- **Non-hash knobs:** `max_workers`, `feature_workers`, `section_min_articles`, `min_articles_per_section_for_residualize`, `bocpd_reset_cooldown`, `bocpd_merge_window` deliberately omitted from the hash. Rationale: tuning wall-clock or emit-stream density does not change detection semantics. Documented in `docs/settings_phase15.md` and pinned by `tests/unit/test_config_hash.py`.
+- **Bench artifact:** the committed DB is a stub (41 KB, placeholder authors only). Running the bench produces a technically-valid JSON but with zero signal; the command is documented instead of committing an uninformative file. First real bench snapshot lands when an operator runs against a full `data/articles.db`.
+- **Amendment sign-off:** the amendment markdown is frozen in structure but the sign-off block is blank, awaiting maintainer.
+- **GitButler use:** version-control commands per project CLAUDE/GUARDRAILS. Not invoked by this subagent; caller is expected to drive commit/push via GitButler.
+
+#### PR #60 SHA (Phase L4)
+`57fd6c0` on `2026-04-23`. Details: `gitbutler/workspace` branch base; merged from `Abstract-Data/j-branch-5`. Recorded in `docs/ARCHITECTURE.md`.
+
+#### Unresolved Questions
+- Does the main-repo `data/articles.db` on a full-corpus machine change the Phase-F0 wall-clock baseline enough to revise the ≥5× DoD gate? Will be answered when Phase-F0 lands and the bench is re-run against a real DB.
+- Should the sign-off block of the pre-registration amendment be auto-filled by a CI hook once the PR merges, or stay manual? Left manual for Unit 1.
+
+#### Risks & Next Steps
+- **Wave-2 units must consume this unit's settings hash + migration runner.** Any unit that adds a new signal-bearing knob MUST annotate it with `json_schema_extra={"include_in_config_hash": True}` AND add a parametrize entry to `tests/unit/test_config_hash.py`. The hash test is the hard gate.
+- **Downstream parquet readers:** if any reader bypasses `load_feature_frame_sorted` (e.g. a direct `pl.scan_parquet`), the schema-version guard is silently skipped. Phase-15 Units that touch the reader side must go through the helper.
+- **Bench schema (`bench_schema_version: 1`):** bump if per-stage timings become non-flat (e.g. stage-level phases).
+- **Pre/post-Phase-15 boundary:** the new Sign in `docs/GUARDRAILS.md` is now the contract. Any pipeline code that pools `*_result.json` from different `config_hash` values must either force-recompute or explicitly filter to one hash.
+- **Smoke command for the bench (no real DB present):** `uv run python scripts/bench_phase15.py --output /tmp/phase15_pre_bench.json` runs end-to-end against the stub DB in ~8 ms and produces a valid schema-v1 JSON with `error="no AnalysisResult emitted"` per author. Re-run against a real corpus DB to get a meaningful baseline.

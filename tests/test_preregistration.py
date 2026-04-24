@@ -52,8 +52,18 @@ def test_lock_content_has_thresholds(forensics_config_path: Path, tmp_path: Path
         "convergence_perplexity_drop_ratio",
         "convergence_burstiness_drop_ratio",
         "pelt_penalty",
+        "pelt_cost_model",
         "bocpd_hazard_rate",
-        "bocpd_threshold",
+        # Phase 15 Unit 1 — ``bocpd_threshold`` removed; detection semantics
+        # now parameterised by these knobs.
+        "bocpd_detection_mode",
+        "bocpd_map_drop_ratio",
+        "bocpd_min_run_length",
+        "bocpd_student_t",
+        "convergence_cp_source",
+        "fdr_grouping",
+        "pipeline_b_mode",
+        "section_residualize_features",
     }
     assert expected_keys.issubset(analysis.keys())
     assert analysis["significance_threshold"] == settings.analysis.significance_threshold

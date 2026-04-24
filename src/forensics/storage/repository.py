@@ -15,6 +15,7 @@ from uuid import uuid4
 from forensics.models.article import Article
 from forensics.models.author import Author
 from forensics.storage.json_io import ensure_parent
+from forensics.storage.migrations import apply_migrations as _apply_sqlite_migrations
 from forensics.utils.datetime import parse_datetime
 
 __all__ = [
@@ -383,6 +384,9 @@ class Repository(RepositoryReader):
         self._conn.executescript(_SCHEMA)
         _migrate_articles_columns(self._conn)
         self._conn.commit()
+        # Phase 15 Step 0.2 — forward-only numbered migrations (schema_version
+        # bookkeeping). Safe to run on every open; each migration is idempotent.
+        _apply_sqlite_migrations(self._conn)
         return self
 
     def __exit__(
@@ -410,6 +414,17 @@ class Repository(RepositoryReader):
         conn = self._require_conn()
         conn.executescript(_SCHEMA)
         _migrate_articles_columns(conn)
+
+    def apply_migrations(self) -> list[int]:
+        """Run pending forward-only numbered migrations (Phase 15 Step 0.2).
+
+        Returns the versions newly applied (empty list when the DB is already
+        up-to-date). Intended for CLI use (``forensics migrate``); the
+        ``Repository`` context manager also calls this on every open, so
+        application code rarely needs to invoke it directly.
+        """
+        conn = self._require_conn()
+        return _apply_sqlite_migrations(conn)
 
     def upsert_author(self, author: Author) -> None:
         conn = self._require_conn()

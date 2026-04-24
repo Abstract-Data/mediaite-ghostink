@@ -49,6 +49,9 @@ data/features/*
 # Embedding batches (per-author *.npz) and manifest — large generated artifacts
 data/embeddings/
 data/analysis/*
+# Phase 15 — keep provenance artifacts committed (profile preservation, etc)
+!data/analysis/provenance/
+!data/analysis/provenance/*
 data/reports/*
 data/pipeline/*
 # Probability-model outputs (per-author Parquet + sidecars)
@@ -56,9 +59,14 @@ data/probability/
 # Phase 10 synthetic baseline tree (JSON + per-article npy/embeddings)
 data/ai_baseline/
 # Runtime data subdirs produced by pre-registration, calibration, and survey runs.
-data/preregistration/
+data/preregistration/*
+# Phase 15 — keep pre-registration amendments committed
+!data/preregistration/amendment_*.md
 data/calibration/
 data/survey/
+# Phase 15 — bench baselines are committed provenance artifacts
+!data/bench/
+!data/bench/*.json
 !data/.gitkeep
 # JSONL exports and scrape/discovery logs at repo data root
 data/articles.jsonl
@@ -94,4 +102,5 @@ Thumbs.db
 
 # Hook / agent local artifacts
 .claude/hooks/logs/
+.claude/worktrees/
 .cursor/hooks/state/
