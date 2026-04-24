@@ -276,6 +276,72 @@ uv run forensics features migrate --dry-run    # preview only, no writes
 - Both commands tolerate missing target dirs (``data/``, ``data/features/``)
   with a friendly stderr message and exit code ``0``.
 
+### Phase 15 CLI surface (analyze + survey)
+
+New flags and subcommands shipped during Phase 15. All are additive;
+prior invocations remain valid. See `docs/ARCHITECTURE.md` for the
+behavioural rationale.
+
+```bash
+# G1 — author-level parallelism (PR #60). Default 1 = serial.
+uv run forensics analyze --max-workers 8
+
+# D — survey shared-byline filter (PR #71). Default excludes group bylines
+# (mediaite, mediaite-staff, ...). Pass to include them for transparency.
+uv run forensics survey --include-shared-bylines
+
+# J2 — advertorial / syndicated section exclusion (PR #76). Default
+# excludes sponsored, partner-content, crosspost, etc. Both stages take
+# the same flag so a single override flips the corresponding stage.
+uv run forensics survey --include-advertorial
+uv run forensics analyze --include-advertorial
+
+# J3 — newsroom-wide section descriptive diagnostic (PR #75). Writes
+# data/analysis/section_centroids.json, section_distance_matrix.json
+# (+ .csv mirror), section_feature_ranking.json, and
+# section_profile_report.md (J5 gate verdict embedded).
+uv run forensics analyze section-profile
+uv run forensics analyze section-profile --output /tmp/section_profile_test.md
+
+# J6 — per-author section-contrast tests (Wave 3.3). Document forward-
+# compatibly; flag may merge in parallel with this runbook entry.
+uv run forensics analyze section-contrast
+uv run forensics analyze section-contrast --author <slug>
+
+# J5 — optional section residualization before BOCPD (Wave 3.3, gated
+# on J3 verdict against real corpus data). Off by default.
+uv run forensics analyze all --residualize-sections
+```
+
+### Phase 15 debug + parity recipes
+
+```bash
+# E1 — Pipeline B per-window component DEBUG logs. Useful when
+# investigating drift / centroid-velocity regressions.
+FORENSICS_LOG_LEVEL=DEBUG uv run forensics analyze --drift --author <slug>
+
+# H2 — serial vs parallel JSON artifact parity check. Confirms
+# author-level parallelism is byte-identical to a serial run. The
+# integration test lives at tests/integration/test_parallel_parity.py
+# (added by Wave 3.4).
+uv run forensics analyze                    # serial baseline
+mv data/analysis data/analysis_serial
+uv run forensics analyze --max-workers 4    # parallel run
+diff -r data/analysis_serial data/analysis  # expected: no output
+```
+
+### Phase 15 schema migration + benchmarks
+
+```bash
+# Storage migrations (covered above):
+uv run forensics migrate                    # SQLite (Phase D1, etc.)
+uv run forensics features migrate           # parquet section column
+uv run forensics features migrate --dry-run # preview only
+
+# L1 — pre-Phase-15 wall-clock baseline + phase-by-phase benchmark.
+uv run python scripts/bench_phase15.py --author mediaite-staff
+```
+
 ### Typer subcommand registration pattern (Phase 15 L6)
 
 New CLI subcommands follow this pattern so the dispatch table in
