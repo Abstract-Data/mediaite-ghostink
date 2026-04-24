@@ -421,6 +421,45 @@ def _load_cached_velocities(
     return [(f"m{i}", v) for i, v in enumerate(scores.monthly_centroid_velocities)]
 
 
+def _author_has_embeddings_on_disk(slug: str, paths: AnalysisArtifactPaths) -> bool:
+    """True iff ``data/embeddings/<slug>/`` exists and contains at least one file.
+
+    Used by :func:`load_drift_summary` to decide whether a missing drift
+    artifact warrants a WARNING (embeddings present → silent write failure)
+    or stays at the default DEBUG-quiet path (no embeddings → no analysis).
+    """
+    slug_dir = paths.embeddings_dir / slug
+    if not slug_dir.is_dir():
+        return False
+    return any(slug_dir.iterdir())
+
+
+# Phase 15 E2 — stable WARNING template. Log-grep dashboards key on this exact
+# prefix; do not change without updating the regression-pin test.
+_DRIFT_ARTIFACT_MISSING_WARNING: str = (
+    "drift summary: missing artifact %s for slug=%s but embeddings exist on disk"
+)
+
+
+def _warn_missing_drift_artifacts(slug: str, paths: AnalysisArtifactPaths) -> None:
+    """Phase 15 E2: emit one WARNING per missing artifact when embeddings exist.
+
+    Default behaviour of :func:`load_drift_summary` (return empty fields) is
+    preserved — this is a logging-only diagnostic that surfaces silent
+    artifact-write failures for authors who do have embeddings on disk.
+    """
+    if not _author_has_embeddings_on_disk(slug, paths):
+        return
+    artifacts = (
+        ("drift.json", paths.drift_json(slug)),
+        ("baseline_curve.json", paths.baseline_curve_json(slug)),
+        ("centroids.npz", paths.centroids_npz(slug)),
+    )
+    for label, path in artifacts:
+        if not path.is_file():
+            logger.warning(_DRIFT_ARTIFACT_MISSING_WARNING, label, slug)
+
+
 def load_drift_summary(
     slug: str,
     paths: AnalysisArtifactPaths,
@@ -433,7 +472,13 @@ def load_drift_summary(
     written by :func:`run_drift_analysis`. Falls back to recomputing from raw embeddings
     when cached velocities are missing. Missing embeddings produce empty fields rather than
     raising.
+
+    Phase 15 E2: when one of the cached artifacts is missing but the author
+    has embeddings on disk, emit a WARNING per missing artifact so silent
+    write failures become visible. Authors with no embeddings stay quiet to
+    avoid log noise.
     """
+    _warn_missing_drift_artifacts(slug, paths)
     baseline_curve = _load_cached_baseline_curve(paths.baseline_curve_json(slug))
     velocities = _load_cached_velocities(
         paths.drift_json(slug),
