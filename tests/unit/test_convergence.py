@@ -21,6 +21,7 @@ import pytest
 
 from forensics.analysis.convergence import (
     FAMILY_COUNT,
+    PIPELINE_SCORE_PASS_THRESHOLD,
     ConvergenceInput,
     compute_convergence_scores,
 )
@@ -70,12 +71,13 @@ def test_no_changepoints_returns_empty() -> None:
 
 
 def test_single_changepoint_single_feature_emits_window() -> None:
-    """A lone strong CP still emits a window via the Pipeline-A >0.5 / B threshold path."""
+    """A lone strong CP still emits a window via the Pipeline-A >0.3 / B threshold path."""
     # Under Phase 15 B2 (post-issue-#5 regroup, FAMILY_COUNT == 6) the ratio
     # is len(families)/FAMILY_COUNT == 1/6 so the ratio gate fails; the
-    # window survives only because the A-score (0.9*0.8) clears 0.5 AND
-    # pipeline_b_score clears 0.5 via strong velocity+similarity signals.
-    # That drives the regression fixture below.
+    # window survives only because the A-score (0.9*0.8) clears the AB
+    # threshold (Fix-F lowered it to 0.3) AND pipeline_b_score also clears
+    # it via strong velocity+similarity signals. That drives the regression
+    # fixture below.
     cp_time = datetime(2024, 3, 15, tzinfo=UTC)
     cps = [_cp("ttr", cp_time)]
 
@@ -356,3 +358,50 @@ def test_percentile_pipeline_b_mode_lifts_peak_signal() -> None:
     assert percentile_score > legacy_score, (
         f"percentile={percentile_score} should exceed legacy={legacy_score}"
     )
+
+
+def test_ab_threshold_persists_pb_positive_windows() -> None:
+    """Fix-F: the AB-pass threshold (lowered 0.5 → 0.3) lets pb-positive windows survive.
+
+    Constructs a single-family CP whose Pipeline-A score is ~0.42 (= 0.7 * 0.6)
+    and a velocity ramp whose peak_signal alone yields ``pipeline_b_score`` ≈ 0.5
+    in percentile mode (peak_signal=1.0, sim_signal=0, ai_signal=0 → mean = 0.5
+    over [peak, sim]; ai-curve contribution makes it 0.4-0.5). The ratio gate
+    fails (1 family / FAMILY_COUNT < 0.5), so the window can only persist via
+    the AB threshold path. At the legacy 0.5 cutoff both pa and pb would be
+    too low; at the Fix-F 0.3 cutoff both clear.
+    """
+    # Sanity-pin the constant so a future "raise the threshold back to 0.5"
+    # change without context fails this test loudly.
+    assert PIPELINE_SCORE_PASS_THRESHOLD == 0.3, (
+        "Fix-F lowered the AB-pass threshold from 0.5 to 0.3; do not raise it "
+        "again without re-validating the per-author pipeline_b_max distribution."
+    )
+
+    cp_time = datetime(2024, 3, 15, tzinfo=UTC)
+    # confidence * effect_size = 0.7 * 0.6 = 0.42 → pa ~ 0.42 (above 0.3, below 0.5).
+    cps = [_cp("ttr", cp_time, confidence=0.7, effect_size=0.6)]
+    # Velocity ramp where the in-window months hit the historical max → percentile
+    # mode peak_signal == 1.0; combined with sim/ai zeros, pb ≈ 0.5 (mean of [1, 0]).
+    velocities = [(f"2024-{m:02d}", 0.1 * m) for m in range(1, 7)]
+
+    settings = _settings_with(pipeline_b_mode="percentile")
+    windows = compute_convergence_scores(
+        ConvergenceInput.build(
+            change_points=cps,
+            centroid_velocities=velocities,
+            baseline_similarity_curve=[],
+            window_days=90,
+            min_feature_ratio=0.99,  # ratio gate cannot save this single-family window
+            total_feature_count=1,
+            settings=settings,
+        )
+    )
+
+    assert windows, "Fix-F: pb-positive single-family window should persist via the AB path"
+    window = windows[0]
+    assert window.pipeline_a_score > PIPELINE_SCORE_PASS_THRESHOLD
+    assert window.pipeline_a_score < 0.5, (
+        "pa should be < 0.5 so this window would have been filtered pre-Fix-F"
+    )
+    assert window.pipeline_b_score > PIPELINE_SCORE_PASS_THRESHOLD
