@@ -1901,3 +1901,54 @@ uv run pytest tests/unit/test_config_hash.py -v
 - **Bench schema (`bench_schema_version: 1`):** bump if per-stage timings become non-flat (e.g. stage-level phases).
 - **Pre/post-Phase-15 boundary:** the new Sign in `docs/GUARDRAILS.md` is now the contract. Any pipeline code that pools `*_result.json` from different `config_hash` values must either force-recompute or explicitly filter to one hash.
 - **Smoke command for the bench (no real DB present):** `uv run python scripts/bench_phase15.py --output /tmp/phase15_pre_bench.json` runs end-to-end against the stub DB in ~8 ms and produces a valid schema-v1 JSON with `error="no AnalysisResult emitted"` per author. Re-run against a real corpus DB to get a meaningful baseline.
+
+---
+
+### Phase 15 C1 — Drop KS test from default hypothesis battery
+**Status:** Complete
+**Date:** 2026-04-24
+**Agent/Session:** wave2-parking subagent (worktree-agent-a9524a16)
+
+#### What Was Done
+- Removed the unconditional `stats.ks_2samp` branch from `run_hypothesis_tests`; gated it behind a new keyword argument `enable_ks_test: bool = False`.
+- Added `AnalysisConfig.enable_ks_test: bool = False` (hash-enumerated) so replication runs can re-enable shape-change detection without code changes.
+- Threaded `analysis_cfg.enable_ks_test` from the orchestrator's `_run_hypothesis_tests_for_changepoints` into `run_hypothesis_tests`.
+- KS prefix changed from `ks_test` → `ks_2samp` to match the scipy-canonical name (only observable when the opt-in flag is on).
+- Added `tests/unit/test_drop_ks.py` with 4 tests covering: default-off behaviour, opt-in flag re-introduces KS, default count + ordering pin (Welch then Mann–Whitney), and `AnalysisConfig` default.
+- Updated existing `test_run_hypothesis_tests_emits_welch_mw_ks` to assert KS is *absent* by default (renamed to `_emits_welch_and_mw_by_default`).
+- Updated `tests/unit/test_config_hash.py` enumeration set + flip values to include `enable_ks_test`.
+
+Net effect: per-CP test count drops 3 → 2 (Welch + Mann–Whitney). Removes a correlated test from the BH FDR denominator and reduces hypothesis-test wall-clock by ~33% per change-point.
+
+#### Files Modified
+- `src/forensics/analysis/statistics.py` — gate KS branch on `enable_ks_test`; expanded docstring with C1 rationale.
+- `src/forensics/analysis/orchestrator.py` — pass `analysis_cfg.enable_ks_test` through to `run_hypothesis_tests`.
+- `src/forensics/config/settings.py` — add `enable_ks_test: bool = False` (hash-enumerated).
+- `tests/unit/test_statistics.py` — flip the existing battery test to assert KS is absent by default.
+- `tests/unit/test_config_hash.py` — register `enable_ks_test` in expected hash-fields set + flip values.
+- `tests/unit/test_drop_ks.py` (new) — 4 tests: happy path, edge case (flag flip), regression-pin (count + order), settings default.
+
+#### Verification Evidence
+```
+uv run pytest tests/unit/test_drop_ks.py -v
+                                  → 4 passed in 22.13s
+uv run pytest tests/ -k "hypothesis or statistics" -v
+                                  → 39 passed, 538 deselected in 41.09s
+uv run ruff check . && uv run ruff format --check .
+                                  → All checks passed; 201 files already formatted
+uv run pytest tests/
+                                  → 575 passed, 3 deselected, 1 warning in 174.12s
+```
+
+#### Decisions Made
+- **Default OFF, settings-flag ON for replication:** matches the spec ("If a settings flag is wanted for replication runs… add `enable_ks_test: bool = False` to `AnalysisConfig` and gate the branch — but keep the default OFF").
+- **Hash-enumerate the flag:** `enable_ks_test` participates in the analysis config hash because flipping it changes the test count and therefore the BH-corrected p-values. Cached `*_result.json` produced under one value would be incorrect when re-read under the other.
+- **Prefix rename `ks_test` → `ks_2samp`:** brings the test name in line with the scipy function and makes the spec's `test_name == "ks_2samp"` assertion direct. Only observable under opt-in (which has no production users yet).
+- **Expanded function-level docstring instead of a separate config knob doc:** the rationale (correlation with Mann–Whitney, BH denominator inflation) lives where future readers will find it.
+
+#### Unresolved Questions
+- Should the changelog or a published release note flag the `ks_test_*` → `ks_2samp_*` prefix rename for any replication consumers? Out of scope here; coordinator can decide when bundling C1 + C2 into a v0.4.0 release.
+
+#### Risks & Next Steps
+- **Downstream JSON readers:** any consumer that grepped historical `hypothesis_tests_json(slug)` for `test_name.startswith("ks_test")` will now find nothing. New artifacts use `ks_2samp_<feature>` only when the opt-in is on. No production reader matched this pattern (verified via `Grep` across `src/` and `tests/`).
+- **Per-author test count drops by ~230** (23 features × ~10 CPs × 1 dropped test). BH denominator shrinks accordingly; expect more rejections at the same alpha. Spec considers this the desired effect — Phase 15 C2 (per-family BH) is the complementary fix and already merged.
