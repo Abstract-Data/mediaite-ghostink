@@ -14,7 +14,14 @@ class ChangePoint(BaseModel):
     author_id: str
     timestamp: datetime
     confidence: float = Field(ge=0.0, le=1.0)
-    method: Literal["pelt", "bocpd", "chow", "cusum"]
+    method: Literal[
+        "pelt",
+        "bocpd",
+        "pelt_section_adjusted",
+        "bocpd_section_adjusted",
+        "chow",
+        "cusum",
+    ]
     effect_size_cohens_d: float
     direction: Literal["increase", "decrease"]
 

@@ -321,15 +321,14 @@ def test_convergence_debug_logging_emits(caplog: pytest.LogCaptureFixture) -> No
 def test_convergence_cp_source_dispatch(caplog: pytest.LogCaptureFixture) -> None:
     """Phase 15 J5: ``raw`` keeps PELT/BOCPD only; ``section_adjusted`` prefers *_section_adjusted.
 
-    Unit 4 is what adds the ``pelt_section_adjusted`` / ``bocpd_section_adjusted``
-    literals to ``ChangePoint.method``; until then the adjusted method names
-    cannot be constructed via Pydantic. We exercise the dispatch filter
-    directly here (``_filter_change_points_by_source``) to avoid that
-    blocker, and pin two behaviours:
+    Pins:
 
     1. ``"raw"`` drops any non-PELT/BOCPD methods (e.g. ``chow``).
-    2. ``"section_adjusted"`` with no matching methods falls back to raw
-       and logs at INFO.
+    2. ``"section_adjusted"`` with no matching methods falls back to raw and
+       logs at INFO when residualization was on (real signal: none survived).
+    3. The same fallback logs at DEBUG when residualization is off (silent
+       expected path: the producer wasn't configured to emit them).
+    4. ``"section_adjusted"`` keeps the adjusted CPs untouched when present.
     """
     from forensics.analysis.convergence import _filter_change_points_by_source
 
@@ -342,14 +341,42 @@ def test_convergence_cp_source_dispatch(caplog: pytest.LogCaptureFixture) -> Non
     raw_only = _filter_change_points_by_source(mixed, "raw")
     assert {cp.method for cp in raw_only} == {"pelt", "bocpd"}
 
-    # Fallback: section_adjusted with no matches → raw and INFO log.
+    # Fallback when residualization was *expected* — INFO log surfaces the gap.
     caplog.clear()
-    caplog.set_level(logging.INFO, logger="forensics.analysis.convergence")
-    fallback = _filter_change_points_by_source(mixed, "section_adjusted")
-    assert {cp.method for cp in fallback} == {"pelt", "bocpd"}
-    assert any(
-        "falling back to raw" in r.message for r in caplog.records if r.levelno == logging.INFO
+    caplog.set_level(logging.DEBUG, logger="forensics.analysis.convergence")
+    fallback_expected = _filter_change_points_by_source(
+        mixed, "section_adjusted", residualization_enabled=True
     )
+    assert {cp.method for cp in fallback_expected} == {"pelt", "bocpd"}
+    assert any(
+        r.levelno == logging.INFO and "falling back to raw" in r.message for r in caplog.records
+    )
+
+    # Fallback when residualization was *off* — DEBUG only; default-config noise gone.
+    caplog.clear()
+    caplog.set_level(logging.DEBUG, logger="forensics.analysis.convergence")
+    fallback_off = _filter_change_points_by_source(
+        mixed, "section_adjusted", residualization_enabled=False
+    )
+    assert {cp.method for cp in fallback_off} == {"pelt", "bocpd"}
+    assert not any(
+        r.levelno >= logging.INFO and "falling back to raw" in r.message for r in caplog.records
+    )
+    assert any(
+        r.levelno == logging.DEBUG and "falling back to raw" in r.message for r in caplog.records
+    )
+
+    # When adjusted CPs are present, they are returned and no fallback log fires.
+    adjusted_mix = [
+        _cp("ttr", datetime(2024, 1, 4, tzinfo=UTC), method="pelt_section_adjusted"),
+        _cp("flesch_kincaid", datetime(2024, 1, 5, tzinfo=UTC), method="bocpd_section_adjusted"),
+        _cp("sent_length_mean", datetime(2024, 1, 6, tzinfo=UTC), method="pelt"),
+    ]
+    caplog.clear()
+    caplog.set_level(logging.DEBUG, logger="forensics.analysis.convergence")
+    kept = _filter_change_points_by_source(adjusted_mix, "section_adjusted")
+    assert {cp.method for cp in kept} == {"pelt_section_adjusted", "bocpd_section_adjusted"}
+    assert not any("falling back to raw" in r.message for r in caplog.records)
 
     # End-to-end: using settings.convergence_cp_source="raw" on a mixed list
     # produces the same windows as explicitly filtering ahead of time.

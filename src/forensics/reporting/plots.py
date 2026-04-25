@@ -23,9 +23,6 @@ from datetime import datetime
 from plotly.graph_objects import Figure, Scatter
 from plotly.subplots import make_subplots
 
-# Method labels (string-typed because ``ChangePoint.method`` Literal does not
-# yet enumerate the section-adjusted variants — the J5 writer will add them
-# alongside this consumer).
 RAW_METHODS: frozenset[str] = frozenset({"pelt", "bocpd"})
 SECTION_ADJUSTED_METHODS: frozenset[str] = frozenset(
     {"pelt_section_adjusted", "bocpd_section_adjusted"}

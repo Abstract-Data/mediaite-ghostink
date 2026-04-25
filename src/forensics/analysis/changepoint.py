@@ -628,7 +628,7 @@ def analyze_author_feature_changepoints(
         out: list[ChangePoint] = []
         for col in PELT_FEATURE_COLUMNS:
             out.extend(_run_one(col))
-        return out
+        return _retag_section_adjusted(out, settings)
 
     # Parallel path — dispatch one task per feature, walk in PELT order to
     # rebuild byte-identical output. ``ThreadPoolExecutor`` caps workers at
@@ -646,7 +646,31 @@ def analyze_author_feature_changepoints(
     out_parallel: list[ChangePoint] = []
     for col in PELT_FEATURE_COLUMNS:
         out_parallel.extend(results.get(col, []))
-    return out_parallel
+    return _retag_section_adjusted(out_parallel, settings)
+
+
+_SECTION_ADJUSTED_METHOD_MAP: dict[str, str] = {
+    "pelt": "pelt_section_adjusted",
+    "bocpd": "bocpd_section_adjusted",
+}
+
+
+def _retag_section_adjusted(
+    change_points: list[ChangePoint],
+    settings: ForensicsSettings,
+) -> list[ChangePoint]:
+    # Phase 15 J5 — when feature residualization is on, the CPs were detected
+    # against section-residualized signals. Tag them so downstream consumers
+    # (convergence dispatch, K4 twin-panel renderer) can distinguish them
+    # from raw PELT/BOCPD output.
+    if not settings.analysis.section_residualize_features:
+        return change_points
+    return [
+        cp.model_copy(update={"method": _SECTION_ADJUSTED_METHOD_MAP[cp.method]})
+        if cp.method in _SECTION_ADJUSTED_METHOD_MAP
+        else cp
+        for cp in change_points
+    ]
 
 
 def run_changepoint_analysis(

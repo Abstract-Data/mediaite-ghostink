@@ -613,12 +613,18 @@ _SECTION_ADJUSTED_CP_METHODS: frozenset[str] = frozenset(
 def _filter_change_points_by_source(
     change_points: list[ChangePoint],
     source: str,
+    *,
+    residualization_enabled: bool = True,
 ) -> list[ChangePoint]:
     """Phase 15 J5 dispatch: pick the CP stream the convergence stage consumes.
 
     - ``"raw"`` keeps only raw PELT/BOCPD change-points.
     - ``"section_adjusted"`` keeps only section-adjusted variants if any exist
-      for this author; otherwise falls back to raw and logs at INFO.
+      for this author; otherwise falls back to raw. The fallback logs at INFO
+      when residualization was supposed to produce them (real signal — none
+      survived) and at DEBUG when the producer is configured to skip
+      residualization (silent expected path; the consumer-side default still
+      asks for ``section_adjusted``).
     """
     if source == "raw":
         return [cp for cp in change_points if cp.method in _RAW_CP_METHODS]
@@ -626,7 +632,11 @@ def _filter_change_points_by_source(
         adjusted = [cp for cp in change_points if cp.method in _SECTION_ADJUSTED_CP_METHODS]
         if adjusted:
             return adjusted
-        logger.info("convergence: no section-adjusted change-points found; falling back to raw CPs")
+        msg = "convergence: no section-adjusted change-points found; falling back to raw CPs"
+        if residualization_enabled:
+            logger.info(msg)
+        else:
+            logger.debug(msg)
         return [cp for cp in change_points if cp.method in _RAW_CP_METHODS]
     # Unknown source: pass through untouched rather than silently drop data.
     return change_points
@@ -651,7 +661,16 @@ def compute_convergence_scores(input_: ConvergenceInput) -> list[ConvergenceWind
     cp_source = (
         input_.settings.analysis.convergence_cp_source if input_.settings is not None else "raw"
     )
-    filtered_cps = _filter_change_points_by_source(input_.change_points, cp_source)
+    residualization_enabled = (
+        input_.settings.analysis.section_residualize_features
+        if input_.settings is not None
+        else False
+    )
+    filtered_cps = _filter_change_points_by_source(
+        input_.change_points,
+        cp_source,
+        residualization_enabled=residualization_enabled,
+    )
     if filtered_cps is not input_.change_points:
         input_ = replace(input_, change_points=filtered_cps)
 
