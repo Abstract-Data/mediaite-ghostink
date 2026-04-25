@@ -357,8 +357,6 @@ def render_author_section(
         )
     )
     if section_contrast_path is not None:
-        parts.append(
-            render_section_contrast_table(section_contrast_path, author_slug=author_slug)
-        )
+        parts.append(render_section_contrast_table(section_contrast_path, author_slug=author_slug))
     parts.append("</section>")
     return "".join(parts)

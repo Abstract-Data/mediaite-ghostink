@@ -94,7 +94,12 @@ def _recent_peer_texts(
     return out
 
 
-def _archive_embeddings_if_mismatch(embed_root: Path, model_name: str, model_version: str) -> None:
+def _archive_embeddings_if_mismatch(
+    embed_root: Path,
+    model_name: str,
+    model_version: str,
+    model_revision: str,
+) -> None:
     manifest = embed_root / "manifest.jsonl"
     if not manifest.is_file():
         return
@@ -102,16 +107,23 @@ def _archive_embeddings_if_mismatch(embed_root: Path, model_name: str, model_ver
         first = json.loads(manifest.read_text(encoding="utf-8").splitlines()[0])
     except (json.JSONDecodeError, IndexError, OSError):
         return
-    if first.get("model_name") == model_name and first.get("model_version") == model_version:
+    manifest_rev = str(first.get("model_revision") or "")
+    if (
+        first.get("model_name") == model_name
+        and first.get("model_version") == model_version
+        and manifest_rev == model_revision
+    ):
         return
     ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     dest = embed_root.parent / f"embeddings_archive_{ts}"
     logger.warning(
-        "Embedding model mismatch (manifest=%s/%s, config=%s/%s). Archiving to %s",
+        "Embedding model mismatch (manifest=%s/%s@%s, config=%s/%s@%s). Archiving to %s",
         first.get("model_name"),
         first.get("model_version"),
+        manifest_rev or "(none)",
         model_name,
         model_version,
+        model_revision,
         dest,
     )
     if embed_root.exists():
@@ -209,6 +221,7 @@ def _write_author_embedding_artifacts(
     embed_batch: list[tuple[str, datetime, np.ndarray]],
     model_name: str,
     model_version: str,
+    model_revision: str,
 ) -> list[EmbeddingRecord]:
     """Persist the NPZ matrix for one author and build the manifest records."""
     abs_batch = paths.embeddings_dir / slug / AUTHOR_EMBEDDING_BATCH_BASENAME
@@ -227,6 +240,7 @@ def _write_author_embedding_artifacts(
             timestamp=ts,
             model_name=model_name,
             model_version=model_version,
+            model_revision=model_revision,
             embedding_path=str(rel_batch),
             embedding_dim=int(vec.shape[0]),
         )
@@ -256,6 +270,7 @@ def _process_author_batch(
     """
     model_name = settings.analysis.embedding_model
     model_version = settings.analysis.embedding_model_version
+    model_revision = settings.analysis.embedding_model_revision
     max_fail_ratio = settings.analysis.feature_extraction_max_failure_ratio
 
     result = _AuthorBatchResult()
@@ -287,7 +302,7 @@ def _process_author_batch(
             result.features.append(fv)
 
             if not skip_embeddings:
-                vec = embeddings.compute_embedding(article.clean_text, model_name)
+                vec = embeddings.compute_embedding(article.clean_text, model_name, model_revision)
                 embed_batch.append(
                     (
                         article.id,
@@ -324,6 +339,7 @@ def _process_author_batch(
             embed_batch=embed_batch,
             model_name=model_name,
             model_version=model_version,
+            model_revision=model_revision,
         )
 
     return result
@@ -457,6 +473,7 @@ def extract_all_features(
             paths.embeddings_dir,
             settings.analysis.embedding_model,
             settings.analysis.embedding_model_version,
+            settings.analysis.embedding_model_revision,
         )
 
     with Repository(db_path) as repo:

@@ -256,6 +256,22 @@ def test_chow_test_null() -> None:
     assert p_val > 0.01
 
 
+def test_chow_test_rejects_breakpoint_out_of_range() -> None:
+    y = np.arange(20, dtype=float).tolist()
+    with pytest.raises(ValueError, match="breakpoint_idx"):
+        chow_test(y, 0)
+    with pytest.raises(ValueError, match="breakpoint_idx"):
+        chow_test(y, 19)
+
+
+def test_stl_decompose_rejects_unsorted_timestamps() -> None:
+    base = datetime(2024, 1, 1, tzinfo=UTC)
+    ts = [base + timedelta(days=i) for i in [0, 2, 1]]
+    y = [1.0, 2.0, 3.0]
+    with pytest.raises(ValueError, match="sorted"):
+        stl_decompose(ts, y, period=3)
+
+
 def test_cusum_persistent_shift() -> None:
     y = np.concatenate([np.zeros(40), np.ones(40) * 5.0]).tolist()
     hits = cusum_test(y, threshold=2.0)

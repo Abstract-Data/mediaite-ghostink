@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from datetime import UTC, date, datetime
@@ -90,28 +91,23 @@ CREATE TABLE IF NOT EXISTS analysis_runs (
 def _connect(db_path: Path) -> sqlite3.Connection:
     """Open SQLite with DEFERRED transactions, WAL, and busy timeout (ADR-005).
 
-    Threading contract (P1-SEC-001):
+    Threading contract (Phase 16 E — supersedes P1-SEC-001 for ``Repository``):
 
-    - ``check_same_thread=False`` is set so asyncio worker threads
-      (``asyncio.to_thread``) can share one connection with the coroutine that
-      created it. SQLite itself serializes access at the C level, but Python's
-      cursor objects and transaction state are NOT safe for concurrent use.
-    - **Callers MUST serialize all reads and writes with an external lock.**
-      The scraper's ``db_lock = asyncio.Lock()`` is the canonical example (see
-      ``forensics.scraper.crawler._ingest_author_posts`` and
-      ``forensics.scraper.fetcher._handle_success``). Typical pattern::
-
-          async with db_lock:
-              await asyncio.to_thread(repo.upsert_article, article)
-
-    - Skipping the lock can corrupt the WAL journal (partial writes from one
-      thread seen by another mid-transaction) and will manifest as
-      ``database is locked`` stalls or, worse, silent data loss. If you aren't
-      writing the lock, you probably shouldn't be sharing the ``Repository``
-      across workers.
-    - The canonical single-threaded usage is the ``with Repository(db_path)
-      as repo:`` context manager; only fan-out via ``asyncio.to_thread``
-      needs the explicit lock.
+    - ``check_same_thread=False`` allows asyncio worker threads
+      (``asyncio.to_thread``) to share one connection with the thread that
+      opened the context manager.
+    - :class:`Repository` holds a ``threading.Lock`` and acquires it around
+      every mutating SQL path (schema setup, migrations, upserts, bulk duplicate
+      flags, path rewrites, analysis run inserts, and commit/rollback/close in
+      ``__exit__``). Multiple threads may call mutation APIs without an external
+      mutex; the connection is serialized for those operations.
+    - Read/query methods remain lock-free; WAL still provides database-level
+      consistency for committed pages. Callers that fan out heavy read traffic
+      across threads on one connection should still measure for contention.
+    - Higher-level orchestration (for example the scraper's ``asyncio.Lock``
+      around a whole ingest batch) remains valid for coordinating with non-SQL
+      work but is no longer required solely for SQLite safety on ``Repository``
+      mutation APIs.
     """
     conn = sqlite3.connect(
         db_path,
@@ -372,14 +368,16 @@ class Repository(RepositoryReader):
             repo.upsert_article(...)
 
     Read/query methods live on :class:`RepositoryReader` (P2-ARCH-001); this class
-    holds connection lifecycle, schema, and mutation APIs.
+    holds connection lifecycle, schema, and mutation APIs. Mutations are
+    serialized with an internal ``threading.Lock`` (Phase 16 E).
     """
 
-    __slots__ = ("_db_path", "_conn")
+    __slots__ = ("_db_path", "_conn", "_lock")
 
     def __init__(self, db_path: Path) -> None:
         self._db_path = Path(db_path)
         self._conn: sqlite3.Connection | None = None
+        self._lock = threading.Lock()
 
     @property
     def db_path(self) -> Path:
@@ -389,12 +387,13 @@ class Repository(RepositoryReader):
         ensure_parent(self._db_path)
         self._conn = _connect(self._db_path)
         self._conn.row_factory = sqlite3.Row
-        self._conn.executescript(_SCHEMA)
-        _migrate_articles_columns(self._conn)
-        self._conn.commit()
-        # Phase 15 Step 0.2 — forward-only numbered migrations (schema_version
-        # bookkeeping). Safe to run on every open; each migration is idempotent.
-        _apply_sqlite_migrations(self._conn)
+        with self._lock:
+            self._conn.executescript(_SCHEMA)
+            _migrate_articles_columns(self._conn)
+            self._conn.commit()
+            # Phase 15 Step 0.2 — forward-only numbered migrations (schema_version
+            # bookkeeping). Safe to run on every open; each migration is idempotent.
+            _apply_sqlite_migrations(self._conn)
         return self
 
     def __exit__(
@@ -404,11 +403,12 @@ class Repository(RepositoryReader):
         tb: TracebackType | None,
     ) -> None:
         if self._conn is not None:
-            if exc is not None:
-                self._conn.rollback()
-            else:
-                self._conn.commit()
-            self._conn.close()
+            with self._lock:
+                if exc is not None:
+                    self._conn.rollback()
+                else:
+                    self._conn.commit()
+                self._conn.close()
             self._conn = None
 
     def _require_conn(self) -> sqlite3.Connection:
@@ -420,8 +420,9 @@ class Repository(RepositoryReader):
     def ensure_schema(self) -> None:
         """Create tables if missing (requires active ``with`` session)."""
         conn = self._require_conn()
-        conn.executescript(_SCHEMA)
-        _migrate_articles_columns(conn)
+        with self._lock:
+            conn.executescript(_SCHEMA)
+            _migrate_articles_columns(conn)
 
     def apply_migrations(self) -> list[int]:
         """Run pending forward-only numbered migrations (Phase 15 Step 0.2).
@@ -432,12 +433,14 @@ class Repository(RepositoryReader):
         application code rarely needs to invoke it directly.
         """
         conn = self._require_conn()
-        return _apply_sqlite_migrations(conn)
+        with self._lock:
+            return _apply_sqlite_migrations(conn)
 
     def upsert_author(self, author: Author) -> None:
         conn = self._require_conn()
-        conn.execute(
-            """
+        with self._lock:
+            conn.execute(
+                """
             INSERT INTO authors (
                 id, name, slug, outlet, role, baseline_start, baseline_end,
                 archive_url, is_shared_byline
@@ -453,18 +456,18 @@ class Repository(RepositoryReader):
                 archive_url=excluded.archive_url,
                 is_shared_byline=excluded.is_shared_byline
             """,
-            (
-                author.id,
-                author.name,
-                author.slug,
-                author.outlet,
-                author.role,
-                author.baseline_start.isoformat(),
-                author.baseline_end.isoformat(),
-                author.archive_url,
-                int(author.is_shared_byline),
-            ),
-        )
+                (
+                    author.id,
+                    author.name,
+                    author.slug,
+                    author.outlet,
+                    author.role,
+                    author.baseline_start.isoformat(),
+                    author.baseline_end.isoformat(),
+                    author.archive_url,
+                    int(author.is_shared_byline),
+                ),
+            )
 
     def upsert_article(self, article: Article) -> None:
         payload = article.model_dump(mode="json")
@@ -472,8 +475,9 @@ class Repository(RepositoryReader):
         modified = article.modified_date.isoformat() if article.modified_date else None
         scraped = article.scraped_at.isoformat() if article.scraped_at else None
         conn = self._require_conn()
-        conn.execute(
-            """
+        with self._lock:
+            conn.execute(
+                """
             INSERT INTO articles (
                 id, author_id, url, title, published_date, raw_html_path,
                 clean_text, word_count, metadata, content_hash,
@@ -494,23 +498,23 @@ class Repository(RepositoryReader):
                 scraped_at=excluded.scraped_at,
                 is_duplicate=excluded.is_duplicate
             """,
-            (
-                article.id,
-                article.author_id,
-                str(article.url),
-                article.title,
-                article.published_date.isoformat(),
-                article.raw_html_path or None,
-                article.clean_text,
-                article.word_count,
-                metadata_json,
-                article.content_hash,
-                modified,
-                article.modifier_user_id,
-                scraped,
-                1 if article.is_duplicate else 0,
-            ),
-        )
+                (
+                    article.id,
+                    article.author_id,
+                    str(article.url),
+                    article.title,
+                    article.published_date.isoformat(),
+                    article.raw_html_path or None,
+                    article.clean_text,
+                    article.word_count,
+                    metadata_json,
+                    article.content_hash,
+                    modified,
+                    article.modifier_user_id,
+                    scraped,
+                    1 if article.is_duplicate else 0,
+                ),
+            )
 
     def clear_duplicate_flags(self, article_ids: Iterable[str], *, chunk_size: int = 500) -> int:
         """Set ``is_duplicate = 0`` for the given ids.
@@ -537,15 +541,16 @@ class Repository(RepositoryReader):
             raise ValueError(msg)
         conn = self._require_conn()
         total = 0
-        for i in range(0, len(ids), chunk_size):
-            chunk = ids[i : i + chunk_size]
-            placeholders = ",".join("?" * len(chunk))
-            cur = conn.execute(
-                f"UPDATE articles SET is_duplicate = ? WHERE id IN ({placeholders})",
-                (value, *chunk),
-            )
-            if cur.rowcount >= 0:
-                total += cur.rowcount
+        with self._lock:
+            for i in range(0, len(ids), chunk_size):
+                chunk = ids[i : i + chunk_size]
+                placeholders = ",".join("?" * len(chunk))
+                cur = conn.execute(
+                    f"UPDATE articles SET is_duplicate = ? WHERE id IN ({placeholders})",
+                    (value, *chunk),
+                )
+                if cur.rowcount >= 0:
+                    total += cur.rowcount
         return total
 
     def rewrite_raw_paths_after_archive(self, year: int) -> int:
@@ -561,34 +566,37 @@ class Repository(RepositoryReader):
         prefix = f"raw/{year}/"
         archive_ref = f"raw/{year}.tar.gz"
         conn = self._require_conn()
-        rows = conn.execute(
-            "SELECT id, raw_html_path FROM articles WHERE raw_html_path LIKE ?",
-            (f"{prefix}%",),
-        ).fetchall()
-        n = 0
-        for aid, old in rows:
-            if not old or not isinstance(old, str) or not old.startswith(prefix):
-                continue
-            tail = old[len(prefix) :]
-            if not tail or "/" in tail or "\\" in tail or tail.startswith(".."):
-                continue
-            new_path = f"{archive_ref}:{tail}"
-            conn.execute(
-                "UPDATE articles SET raw_html_path = ? WHERE id = ?",
-                (new_path, aid),
-            )
-            n += 1
-        return n
+        with self._lock:
+            rows = conn.execute(
+                "SELECT id, raw_html_path FROM articles WHERE raw_html_path LIKE ?",
+                (f"{prefix}%",),
+            ).fetchall()
+            n = 0
+            for aid, old in rows:
+                if not old or not isinstance(old, str) or not old.startswith(prefix):
+                    continue
+                tail = old[len(prefix) :]
+                if not tail or "/" in tail or "\\" in tail or tail.startswith(".."):
+                    continue
+                new_path = f"{archive_ref}:{tail}"
+                conn.execute(
+                    "UPDATE articles SET raw_html_path = ? WHERE id = ?",
+                    (new_path, aid),
+                )
+                n += 1
+            return n
 
     def insert_analysis_run_row(self, *, config_hash: str, description: str = "") -> str:
         """Insert one ``analysis_runs`` row; returns new run id."""
         rid = str(uuid4())
         ts = datetime.now(UTC).isoformat()
         conn = self._require_conn()
-        conn.execute(
-            "INSERT INTO analysis_runs (id, timestamp, config_hash, description) VALUES (?,?,?,?)",
-            (rid, ts, config_hash, description),
-        )
+        with self._lock:
+            conn.execute(
+                "INSERT INTO analysis_runs "
+                "(id, timestamp, config_hash, description) VALUES (?,?,?,?)",
+                (rid, ts, config_hash, description),
+            )
         return rid
 
 

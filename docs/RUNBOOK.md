@@ -10,6 +10,36 @@ Operational quick reference. Agents: append new sections here whenever you disco
 4. Run tests: `uv run pytest tests/ -v`
 5. Run with coverage: `uv run pytest tests/ -v --cov-report=term-missing` (coverage target `forensics` is configured in [`pyproject.toml`](../pyproject.toml) `addopts`)
 
+## Phase 16 hash-break migration
+
+Phase 16 intentionally changes the analysis-config hash, corpus fingerprint, and embedding revision contract. Treat any pre–Phase-16 `data/analysis/*_result.json` and preregistration locks as **stale** relative to a Phase-16 `config.toml` until you re-lock and re-run (see GUARDRAILS Sign: *Pre-Phase-16 locked artifacts must be re-locked*).
+
+### Pre-registration lock (template → confirmatory)
+
+1. **Write or refresh the lock** from the current `config.toml` thresholds: `uv run forensics lock-preregistration` → updates `data/preregistration/preregistration_lock.json` with `locked_at` (UTC ISO), `analysis` snapshot, and `content_hash`.
+2. **Template / exploratory state:** the committed repo default is an unfilled lock (`{"locked_at": null}` only). `verify_preregistration` reports `status="missing"` — confirmatory `analyze` exits non-zero until you run `lock-preregistration` or pass `--exploratory`.
+3. **Verify after a run:** read `data/analysis/run_metadata.json` → `preregistration_status` is `ok`, `missing`, or `mismatch`. A **mismatch** means the live settings no longer match the lock; confirmatory analyze **hard-fails** (exit code 1) after writing run metadata under `rid=preregistration-blocked`.
+
+### Embeddings (quarantine + re-extract)
+
+- **Default operator policy:** when `analysis.embedding_model` / `embedding_model_version` / `embedding_model_revision` no longer match the first row of `data/embeddings/manifest.jsonl`, feature extraction **archives** the entire `data/embeddings/` tree to `data/embeddings_archive_<UTC>/` and starts clean (quarantine + re-extract). Re-run `uv run forensics extract` after updating the HF revision pin in `config.toml`.
+- **SentenceTransformer revision:** vectors are produced with `SentenceTransformer(model, revision=…)` using `[analysis] embedding_model_revision` (commit SHA or branch). Each manifest row stores `model_revision` next to the legacy `model_version` label.
+- **Analyze without re-extracting:** there is no supported path to silently mix revisions in confirmatory mode. For **exploratory** runs only, `forensics analyze --exploratory --allow-pre-phase16-embeddings` loads batches whose manifest revision differs from config, emitting a **WARNING** per article instead of raising. Confirmatory runs (default) always hard-fail on mismatch so drift and downstream statistics cannot blend incompatible embedding spaces.
+
+### Corpus custody (`corpus_custody.json`) — one-cycle v1 / v2
+
+- **`schema_version: 2`:** `corpus_hash` fingerprints the **analyzable** corpus: non-duplicates only, ordered by `content_hash` (stable under insert order).
+- **`corpus_hash_v1`:** legacy fingerprint (`ORDER BY id`, all rows) kept for one transition cycle so older verification semantics can be compared; see GUARDRAILS for removal timing (Phase 17).
+- **`verify_corpus_hash`:** dispatches on `schema_version` (missing field → treat as v1).
+
+### Quick E2E spot-check (single author, exploratory)
+
+When `data/articles.db` already has rows for a slug (skip live scrape if you prefer): `uv run forensics extract --author <slug>` → `uv run forensics analyze --exploratory --author <slug> [--changepoint …]` → `uv run forensics report` (Quarto on `PATH`). Inspect under `data/analysis/`: `<slug>_result.json` (`config_hash`), `corpus_custody.json` (`schema_version`, `corpus_hash`, `corpus_hash_v1`), `<slug>_hypothesis_tests.json` (Phase 16 fields: `n_pre`, `n_post`, `n_nan_dropped`, `skipped_reason`, `degenerate`), `<slug>_convergence.json` (`n_rankable_per_family` when convergence ran). For HTML-only fetch without discover/metadata/dedup/archive: `uv run forensics scrape --fetch` (same flag set as *FETCH_ONLY* in `dispatch_scrape`).
+
+### Dedup performance cliff above `hamming_threshold = 3`
+
+Near-duplicate detection (`forensics.scraper.dedup`) compares 128-bit simhashes with Hamming distance. The default `scraping.simhash_threshold` is **3** (aligned with the four 32-bit LSH banding guarantee). Raising the threshold widens the “near duplicate” neighborhood: each increment increases pairwise comparisons and union-find work superlinearly on large corpora. If you need a looser dedup, prefer bounded batches or profiling first — do not raise the threshold on full-site runs without measuring wall time and duplicate-review cost.
+
 ## Pipeline Operations
 
 - Run full pipeline: `uv run forensics all` — implementation: `src/forensics/pipeline.py` (`run_all_pipeline`). It runs **full scrape** (same as bare `forensics scrape` when no scrape flags are set), then extract, then `run_analyze(timeseries=True, convergence=True)` (**not** changepoint/drift unless you change the pipeline), then Quarto report. See [`docs/ARCHITECTURE.md`](ARCHITECTURE.md#forensics-all-end-to-end).

@@ -82,6 +82,9 @@ markers = [
 line-length = 100
 target-version = "py313"
 src = ["src", "tests"]
+# Quarto/IPython notebooks are not `src`/`tests` Python; linting them as flat
+# modules trips I001/E402/E501 across cells. CI quality gate targets package code.
+extend-exclude = ["notebooks"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "C901"]

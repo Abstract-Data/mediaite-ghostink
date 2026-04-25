@@ -14,11 +14,7 @@ from pathlib import Path
 
 import pytest
 
-NB_PATH = (
-    Path(__file__).resolve().parents[2]
-    / "notebooks"
-    / "05_change_point_detection.ipynb"
-)
+NB_PATH = Path(__file__).resolve().parents[2] / "notebooks" / "05_change_point_detection.ipynb"
 
 
 def _load_notebook() -> dict:
@@ -39,7 +35,8 @@ def test_notebook_is_valid_nbformat() -> None:
 def test_notebook_has_parameters_cell() -> None:
     nb = _load_notebook()
     param_cells = [
-        c for c in nb["cells"]
+        c
+        for c in nb["cells"]
         if c.get("cell_type") == "code"
         and "parameters" in (c.get("metadata", {}).get("tags") or [])
     ]
@@ -94,10 +91,6 @@ def test_feature_family_registry_covers_notebook_palette() -> None:
 )
 def test_notebook_documents_methodology(needle: str) -> None:
     nb = _load_notebook()
-    body = "\n".join(
-        "".join(c["source"]) for c in nb["cells"] if c["cell_type"] == "markdown"
-    )
+    body = "\n".join("".join(c["source"]) for c in nb["cells"] if c["cell_type"] == "markdown")
     # Some needles use mixed case; do a case-insensitive contains.
-    assert needle.lower() in body.lower(), (
-        f"notebook must document methodology keyword: {needle!r}"
-    )
+    assert needle.lower() in body.lower(), f"notebook must document methodology keyword: {needle!r}"

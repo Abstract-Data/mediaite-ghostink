@@ -49,6 +49,8 @@ def test_lock_content_has_thresholds(forensics_config_path: Path, tmp_path: Path
         "multiple_comparison_method",
         "bootstrap_iterations",
         "min_articles_for_period",
+        "embedding_model_revision",
+        "enable_ks_test",
         "changepoint_methods",
         "rolling_windows",
         "convergence_window_days",

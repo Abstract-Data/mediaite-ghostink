@@ -100,10 +100,17 @@ def test_bootstrap_ci_contains_point_estimate() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_run_hypothesis_tests_short_series_returns_empty() -> None:
-    assert run_hypothesis_tests([1.0, 2.0, 3.0], 1, "f", "a") == []
-    assert run_hypothesis_tests([1.0] * 10, 0, "f", "a") == []
-    assert run_hypothesis_tests([1.0] * 10, 10, "f", "a") == []
+def test_run_hypothesis_tests_short_series_returns_skipped_battery() -> None:
+    # Phase 16 D2 — invalid split yields explicit skipped rows (NaN p), not [].
+    for out in (
+        run_hypothesis_tests([1.0, 2.0, 3.0], 1, "f", "a"),
+        run_hypothesis_tests([1.0] * 10, 0, "f", "a"),
+        run_hypothesis_tests([1.0] * 10, 10, "f", "a"),
+    ):
+        assert len(out) == 2
+        assert {t.test_name for t in out} == {"welch_t_f", "mann_whitney_f"}
+        assert all(t.skipped_reason == "invalid_breakpoint_or_short_series" for t in out)
+        assert all(not math.isfinite(t.raw_p_value) for t in out)
 
 
 def test_run_hypothesis_tests_emits_welch_and_mw_by_default() -> None:
@@ -123,9 +130,11 @@ def test_run_hypothesis_tests_emits_welch_and_mw_by_default() -> None:
         assert isinstance(t.confidence_interval_95, tuple) and len(t.confidence_interval_95) == 2
 
 
-def test_run_hypothesis_tests_tiny_segment_returns_empty() -> None:
-    # Pre has only one element, post has many — guard kicks in.
-    assert run_hypothesis_tests([1.0, 5.0, 5.0, 5.0], 1, "f", "a") == []
+def test_run_hypothesis_tests_tiny_segment_returns_skipped_battery() -> None:
+    # Pre has only one finite element after NaN strip — skipped placeholders.
+    out = run_hypothesis_tests([1.0, 5.0, 5.0, 5.0], 1, "f", "a")
+    assert len(out) == 2
+    assert all(t.skipped_reason == "insufficient_finite_values_per_segment" for t in out)
 
 
 # ---------------------------------------------------------------------------
@@ -143,6 +152,8 @@ def _make_test(raw_p: float, effect: float = 0.5) -> HypothesisTest:
         effect_size_cohens_d=effect,
         confidence_interval_95=(0.0, 1.0),
         significant=False,
+        n_pre=4,
+        n_post=4,
     )
 
 

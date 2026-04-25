@@ -129,7 +129,8 @@ def test_provenance_hash_deterministic(tmp_path: Path) -> None:
     db = tmp_path / "t.db"
     conn = sqlite3.connect(db)
     conn.execute(
-        "CREATE TABLE articles (id INTEGER PRIMARY KEY, content_hash TEXT NOT NULL)",
+        "CREATE TABLE articles (id INTEGER PRIMARY KEY, content_hash TEXT NOT NULL, "
+        "is_duplicate INTEGER NOT NULL DEFAULT 0)",
     )
     conn.execute("INSERT INTO articles(content_hash) VALUES ('a'), ('b')")
     conn.commit()
@@ -145,7 +146,8 @@ def test_provenance_hash_changes(tmp_path: Path) -> None:
     db = tmp_path / "t.db"
     conn = sqlite3.connect(db)
     conn.execute(
-        "CREATE TABLE articles (id INTEGER PRIMARY KEY, content_hash TEXT NOT NULL)",
+        "CREATE TABLE articles (id INTEGER PRIMARY KEY, content_hash TEXT NOT NULL, "
+        "is_duplicate INTEGER NOT NULL DEFAULT 0)",
     )
     conn.execute("INSERT INTO articles(content_hash) VALUES ('x')")
     conn.commit()
@@ -166,7 +168,8 @@ def test_corpus_custody_verify(tmp_path: Path) -> None:
     db = tmp_path / "c.db"
     conn = sqlite3.connect(db)
     conn.execute(
-        "CREATE TABLE articles (id INTEGER PRIMARY KEY, content_hash TEXT NOT NULL)",
+        "CREATE TABLE articles (id INTEGER PRIMARY KEY, content_hash TEXT NOT NULL, "
+        "is_duplicate INTEGER NOT NULL DEFAULT 0)",
     )
     conn.execute("INSERT INTO articles(content_hash) VALUES ('z')")
     conn.commit()

@@ -23,7 +23,12 @@ from forensics.config.settings import ForensicsSettings, ScrapingConfig, get_pro
 from forensics.models.article import Article
 from forensics.progress import FetchProgressThrottle, PipelineObserver
 from forensics.scraper.client import create_scraping_client
-from forensics.scraper.parser import extract_article_text, extract_metadata, looks_coauthored
+from forensics.scraper.parser import (
+    extract_article_text,
+    extract_metadata,
+    filter_insufficient_article_body,
+    looks_coauthored,
+)
 from forensics.storage.export import append_jsonl_async
 from forensics.storage.json_io import ensure_parent
 from forensics.storage.repository import Repository, UnfetchedArticle, ensure_repo
@@ -296,7 +301,11 @@ def _parse_article_html(article: Article, html: str) -> ParsedArticleFetch:
     critical section (after the resume-skip re-check) without orphaning
     raw files when a concurrent worker wins the race.
     """
-    clean = extract_article_text(html)
+    raw_clean = extract_article_text(html)
+    clean = filter_insufficient_article_body(
+        raw_clean,
+        log_label=f"_parse_article_html url={article.url}",
+    )
     meta_extra = extract_metadata(html)
     merged_meta = {**article.metadata, **meta_extra}
     author_line = str(merged_meta.get("page_author") or "")

@@ -21,10 +21,12 @@ from forensics.utils.provenance import (
 # Fields that MUST invalidate the cache when they change (authoritative list —
 # mirror of the ``json_schema_extra`` annotations in ``settings.py``).
 _EXPECTED_HASH_FIELDS_ANALYSIS: set[str] = {
+    "pelt_penalty",
     "pelt_cost_model",
     "bocpd_detection_mode",
     "bocpd_map_drop_ratio",
     "bocpd_min_run_length",
+    "bocpd_hazard_rate",
     "bocpd_student_t",
     "convergence_min_feature_ratio",
     "convergence_cp_source",
@@ -35,6 +37,8 @@ _EXPECTED_HASH_FIELDS_ANALYSIS: set[str] = {
     "section_residualize_features",
     "changepoint_methods",
     "bootstrap_iterations",
+    "min_articles_for_period",
+    "embedding_model_revision",
     "significance_threshold",
     "effect_size_threshold",
     "multiple_comparison_method",
@@ -50,9 +54,11 @@ _EXPECTED_NON_HASH_FIELDS_ANALYSIS: set[str] = {
 
 # Alternate values used when flipping each field.
 _FLIP_VALUES: dict[str, Any] = {
+    "pelt_penalty": 6.0,
     "pelt_cost_model": "rbf",
     "bocpd_detection_mode": "p_r0_legacy",
     "bocpd_map_drop_ratio": 0.75,
+    "bocpd_hazard_rate": 0.01,
     "bocpd_min_run_length": 9,
     "bocpd_student_t": False,
     "convergence_min_feature_ratio": 0.8,
@@ -63,6 +69,8 @@ _FLIP_VALUES: dict[str, Any] = {
     "pipeline_b_mode": "percentile",
     "section_residualize_features": True,
     "changepoint_methods": ["pelt"],
+    "min_articles_for_period": 12,
+    "embedding_model_revision": "0000000000000000000000000000000000000000",
     "bootstrap_iterations": 2500,
     "significance_threshold": 0.01,
     "effect_size_threshold": 0.25,

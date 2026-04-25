@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Iterable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta
 
 import numpy as np
@@ -193,15 +193,35 @@ def _cps_in_window(
     ]
 
 
+def _eligible_convergence_family_axes(
+    n_rankable_per_family: dict[str, int],
+    family_count: int,
+) -> int:
+    """Denominator for Pipeline A family coverage ratio (Phase 16 D5).
+
+    When ``n_rankable_per_family`` is empty (no hypothesis-test context), fall
+    back to ``family_count`` so unit tests and compare-only paths behave as
+    before Phase 16. Otherwise count how many registered families have at
+    least one BH-rankable feature in the hypothesis battery for this author.
+    """
+    if not n_rankable_per_family:
+        return family_count
+    eligible = sum(1 for c in n_rankable_per_family.values() if c > 0)
+    return eligible if eligible > 0 else family_count
+
+
 def _pipeline_a_from_stylometry(
     cps_in_window: list[ChangePoint],
+    n_rankable_per_family: dict[str, int],
 ) -> tuple[list[str], list[str], float, float]:
     """Pipeline A score under family grouping (Phase 15 B2).
 
     One vote per family: the representative CP for a family is the in-window
     CP that maximises ``confidence * |effect_size_cohens_d|``. The ratio is
-    computed over ``FAMILY_COUNT`` (independent axes), and the score is the
-    unweighted mean of per-family representative scores clipped to ``[0, 1]``.
+    computed over eligible stylometric axes (Phase 16 D5: families with at
+    least one rankable hypothesis-test feature when counts are supplied;
+    otherwise ``FAMILY_COUNT``), and the score is the unweighted mean of
+    per-family representative scores clipped to ``[0, 1]``.
 
     Returns ``(features_converging, families_converging, ratio, score)`` —
     ``features_converging`` lists one representative raw feature per family
@@ -223,7 +243,8 @@ def _pipeline_a_from_stylometry(
     if not family_reps:
         return [], [], 0.0, 0.0
 
-    ratio = len(family_reps) / FAMILY_COUNT
+    denom = float(_eligible_convergence_family_axes(n_rankable_per_family, FAMILY_COUNT))
+    ratio = len(family_reps) / denom
     pipeline_a_score = float(min(1.0, float(np.mean(list(family_reps.values())))))
     features_converging = sorted(family_feature.values())
     families_converging = sorted(family_reps.keys())
@@ -324,6 +345,7 @@ class ConvergenceInput:
     permutation_seed: int
     n_permutations: int
     drift_only_pb_threshold: float = DRIFT_ONLY_PB_THRESHOLD
+    n_rankable_per_family: dict[str, int] = field(default_factory=dict)
 
     @classmethod
     def build(
@@ -342,6 +364,7 @@ class ConvergenceInput:
         permutation_seed: int = 42,
         n_permutations: int = 1000,
         drift_only_pb_threshold: float | None = None,
+        n_rankable_per_family: dict[str, int] | None = None,
     ) -> ConvergenceInput:
         """Resolve defaults from ``settings`` and from ``PELT_FEATURE_COLUMNS``."""
         if settings is not None:
@@ -354,6 +377,7 @@ class ConvergenceInput:
         total = (
             total_feature_count if total_feature_count is not None else len(PELT_FEATURE_COLUMNS)
         )
+        rankable = dict(n_rankable_per_family) if n_rankable_per_family is not None else {}
         return cls(
             change_points=change_points,
             centroid_velocities=centroid_velocities,
@@ -368,6 +392,7 @@ class ConvergenceInput:
             permutation_seed=permutation_seed,
             n_permutations=n_permutations,
             drift_only_pb_threshold=drift_only_pb_threshold,
+            n_rankable_per_family=rankable,
         )
 
     @classmethod
@@ -381,6 +406,7 @@ class ConvergenceInput:
         ai_convergence_curve: list[tuple[str, float]] | None = None,
         probability_trajectory: ProbabilityTrajectory | None = None,
         total_feature_count: int | None = None,
+        n_rankable_per_family: dict[str, int] | None = None,
     ) -> ConvergenceInput:
         """Build a ``ConvergenceInput`` using permutation knobs drawn from settings.
 
@@ -402,6 +428,7 @@ class ConvergenceInput:
             use_permutation=ac.convergence_use_permutation,
             n_permutations=ac.convergence_permutation_iterations,
             permutation_seed=ac.convergence_permutation_seed,
+            n_rankable_per_family=n_rankable_per_family,
         )
 
 
@@ -453,7 +480,8 @@ def _score_single_window(
     """Score one candidate window; ``None`` means the window failed the cutoffs."""
     cps_in_window = _cps_in_window(input_.change_points, start_d, end_d)
     features_converging, families_converging, ratio, pipeline_a_score = _pipeline_a_from_stylometry(
-        cps_in_window
+        cps_in_window,
+        input_.n_rankable_per_family,
     )
 
     pipeline_b_mode = (
@@ -539,6 +567,7 @@ def _score_single_window(
             end_date=end_d,
             features_converging=features_converging,
             families_converging=families_converging,
+            n_rankable_per_family=dict(input_.n_rankable_per_family),
             convergence_ratio=ratio,
             pipeline_a_score=pipeline_a_score,
             pipeline_b_score=pipeline_b_score,
@@ -550,6 +579,7 @@ def _score_single_window(
             start_date=start_d,
             end_date=end_d,
             features_converging=features_converging,
+            n_rankable_per_family=dict(input_.n_rankable_per_family),
             convergence_ratio=ratio,
             pipeline_a_score=pipeline_a_score,
             pipeline_b_score=pipeline_b_score,

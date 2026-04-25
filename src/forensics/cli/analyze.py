@@ -50,6 +50,8 @@ class AnalyzeContext:
     author_slug: str | None
     max_workers: int | None = None
     compare_pair: tuple[str, str] | None = None
+    exploratory: bool = False
+    allow_pre_phase16_embeddings: bool = False
 
     @classmethod
     def build(
@@ -61,6 +63,8 @@ class AnalyzeContext:
         author: str | None,
         max_workers: int | None = None,
         compare_pair: tuple[str, str] | None = None,
+        exploratory: bool = False,
+        allow_pre_phase16_embeddings: bool = False,
     ) -> AnalyzeContext:
         """Construct a context from the ambient project layout."""
         return cls(
@@ -70,6 +74,8 @@ class AnalyzeContext:
             author_slug=author,
             max_workers=max_workers,
             compare_pair=compare_pair,
+            exploratory=exploratory,
+            allow_pre_phase16_embeddings=allow_pre_phase16_embeddings,
         )
 
     @property
@@ -167,7 +173,13 @@ def _run_timeseries_stage(ctx: AnalyzeContext) -> None:
 def _run_drift_stage(ctx: AnalyzeContext) -> None:
     from forensics.analysis.drift import run_drift_analysis
 
-    run_drift_analysis(ctx.settings, paths=ctx.paths, author_slug=ctx.author_slug)
+    run_drift_analysis(
+        ctx.settings,
+        paths=ctx.paths,
+        author_slug=ctx.author_slug,
+        exploratory=ctx.exploratory,
+        allow_pre_phase16_embeddings=ctx.allow_pre_phase16_embeddings,
+    )
 
 
 def _run_full_analysis_stage(ctx: AnalyzeContext) -> None:
@@ -179,6 +191,8 @@ def _run_full_analysis_stage(ctx: AnalyzeContext) -> None:
         author_slug=ctx.author_slug,
         max_workers=ctx.max_workers,
         compare_pair=ctx.compare_pair,
+        exploratory=ctx.exploratory,
+        allow_pre_phase16_embeddings=ctx.allow_pre_phase16_embeddings,
     )
 
 
@@ -190,6 +204,8 @@ def _run_parallel_author_refresh_stage(ctx: AnalyzeContext) -> None:
         ctx.settings,
         author_slug=ctx.author_slug,
         max_workers=ctx.max_workers,
+        exploratory=ctx.exploratory,
+        allow_pre_phase16_embeddings=ctx.allow_pre_phase16_embeddings,
     )
     logger.info(
         "analyze: parallel author refresh complete refreshed=%d author=%s",
@@ -346,6 +362,7 @@ def run_analyze(  # noqa: C901
     max_workers: int | None = None,
     compare_pair: tuple[str, str] | None = None,
     parallel_authors: bool = False,
+    allow_pre_phase16_embeddings: bool = False,
 ) -> None:
     """Execute the analyze stage as a plain Python function.
 
@@ -379,6 +396,8 @@ def run_analyze(  # noqa: C901
         author=author,
         max_workers=max_workers,
         compare_pair=compare_pair,
+        exploratory=exploratory,
+        allow_pre_phase16_embeddings=allow_pre_phase16_embeddings,
     )
     # analysis_dir is created by the first write helper that lands an artifact.
     analysis_dir = ctx.paths.analysis_dir
@@ -400,6 +419,7 @@ def run_analyze(  # noqa: C901
             "preregistration_status": preregistration.status,
             "preregistration_message": preregistration.message,
             "exploratory": False,
+            "allow_pre_phase16_embeddings": allow_pre_phase16_embeddings,
         }
         _write_run_metadata(analysis_dir, rid="preregistration-blocked", meta=meta)
         logger.error("pre-registration gate failed: %s", preregistration.message)
@@ -439,6 +459,7 @@ def run_analyze(  # noqa: C901
         "preregistration_status": preregistration.status,
         "preregistration_message": preregistration.message,
         "exploratory": exploratory,
+        "allow_pre_phase16_embeddings": allow_pre_phase16_embeddings,
     }
     _write_run_metadata(analysis_dir, rid=rid, meta=meta)
 
@@ -614,6 +635,18 @@ def analyze(
             ),
         ),
     ] = None,
+    allow_pre_phase16_embeddings: Annotated[
+        bool,
+        typer.Option(
+            "--allow-pre-phase16-embeddings",
+            help=(
+                "With --exploratory: load embedding batches whose manifest "
+                "model_revision does not match analysis.embedding_model_revision, "
+                "logging a WARNING instead of failing. Default OFF — confirmatory "
+                "runs always require a matching revision."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Run analysis pipeline (change-point, drift, convergence, comparison)."""
     # When a sub-command is invoked (e.g. ``analyze section-profile``),
@@ -640,6 +673,7 @@ def analyze(
         max_workers=max_workers,
         compare_pair=parsed_pair,
         parallel_authors=parallel_authors,
+        allow_pre_phase16_embeddings=allow_pre_phase16_embeddings,
     )
 
 

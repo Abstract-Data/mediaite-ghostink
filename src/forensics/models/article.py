@@ -31,7 +31,7 @@ class Article(BaseModel):
     published_date: datetime
     raw_html_path: str = ""
     clean_text: str = ""
-    word_count: int = 0
+    word_count: int = Field(default=0, ge=0)
     metadata: dict[str, Any] = Field(default_factory=dict)
     content_hash: str = ""
     modified_date: datetime | None = None

@@ -13,6 +13,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from forensics.config.settings import ForensicsSettings
+from forensics.models.analysis import CorpusCustody
 from forensics.storage.json_io import write_json_artifact
 from forensics.storage.repository import open_repository_connection
 
@@ -117,8 +118,19 @@ def validate_analysis_result_config_hashes(
     return True, "Analysis result config hashes match current analysis settings."
 
 
-def compute_corpus_hash(db_path: Path) -> str:
-    """Hash ordered ``content_hash`` values from the articles table."""
+def _digest_content_hash_sequence(hashes: list[str | None]) -> str:
+    """SHA-256 prefix of ``|``-joined non-empty ``content_hash`` values (order preserved)."""
+    combined = "|".join(h for h in hashes if h)
+    return hashlib.sha256(combined.encode()).hexdigest()[:12]
+
+
+def compute_corpus_hash_legacy(db_path: Path) -> str:
+    """Legacy corpus hash: all rows, ``ORDER BY id`` (insert / key order).
+
+    .. deprecated::
+        Prefer :func:`compute_corpus_hash` (analyzable corpus, content-hash order).
+        Retained for ``corpus_custody`` schema v1 verification and ``corpus_hash_v1``.
+    """
     if not db_path.is_file():
         return hashlib.sha256(b"").hexdigest()[:12]
     conn = open_repository_connection(db_path)
@@ -128,8 +140,25 @@ def compute_corpus_hash(db_path: Path) -> str:
         ).fetchall()
     finally:
         conn.close()
-    combined = "|".join(h[0] for h in hashes if h[0])
-    return hashlib.sha256(combined.encode()).hexdigest()[:12]
+    return _digest_content_hash_sequence([h[0] for h in hashes])
+
+
+def compute_corpus_hash(db_path: Path) -> str:
+    """Hash the analyzable corpus: non-duplicates only, ordered by ``content_hash``.
+
+    Rows with ``is_duplicate != 0`` are excluded so the fingerprint matches the
+    feature-extraction cohort rather than raw ingest order or surrogate key order.
+    """
+    if not db_path.is_file():
+        return hashlib.sha256(b"").hexdigest()[:12]
+    conn = open_repository_connection(db_path)
+    try:
+        hashes = conn.execute(
+            "SELECT content_hash FROM articles WHERE is_duplicate = 0 ORDER BY content_hash",
+        ).fetchall()
+    finally:
+        conn.close()
+    return _digest_content_hash_sequence([h[0] for h in hashes])
 
 
 def get_run_metadata(settings: ForensicsSettings) -> dict[str, str]:
@@ -145,13 +174,15 @@ def get_run_metadata(settings: ForensicsSettings) -> dict[str, str]:
 
 
 def write_corpus_custody(db_path: Path, analysis_dir: Path) -> Path:
-    """Record corpus hash at end of analysis for ``report --verify``."""
-    payload = {
-        "corpus_hash": compute_corpus_hash(db_path),
-        "recorded_at": datetime.now(UTC).isoformat(),
-    }
+    """Record corpus hashes at end of analysis for ``report --verify``."""
+    custody = CorpusCustody(
+        schema_version=2,
+        corpus_hash=compute_corpus_hash(db_path),
+        corpus_hash_v1=compute_corpus_hash_legacy(db_path),
+        recorded_at=datetime.now(UTC),
+    )
     path = analysis_dir / CUSTODY_FILENAME
-    write_json_artifact(path, payload)
+    write_json_artifact(path, custody)
     return path
 
 
@@ -167,18 +198,39 @@ def load_corpus_custody(analysis_dir: Path) -> dict[str, Any] | None:
 
 
 def verify_corpus_hash(db_path: Path, analysis_dir: Path) -> tuple[bool, str]:
-    """Return (ok, message) comparing live corpus hash to custody file."""
-    current = compute_corpus_hash(db_path)
+    """Return (ok, message) comparing live corpus hash to custody file.
+
+    Schema v1 (missing ``schema_version``): compare legacy id-ordered hash to
+    ``corpus_hash`` (pre–Phase-16 on-disk layout). Schema v2: compare analyzable
+    corpus hash from :func:`compute_corpus_hash` to ``corpus_hash``.
+    """
     rec = load_corpus_custody(analysis_dir)
     if rec is None:
         return False, f"No custody record at {analysis_dir / CUSTODY_FILENAME}"
+    raw_version = rec.get("schema_version")
+    if raw_version is None:
+        version = 1
+    elif isinstance(raw_version, int):
+        version = raw_version
+    elif isinstance(raw_version, str) and raw_version.isdigit():
+        version = int(raw_version)
+    else:
+        return False, f"Invalid corpus_custody schema_version: {raw_version!r}"
+
+    if version == 1:
+        current = compute_corpus_hash_legacy(db_path)
+    elif version == 2:
+        current = compute_corpus_hash(db_path)
+    else:
+        return False, f"Unknown corpus_custody schema_version: {version}"
+
     expected = rec.get("corpus_hash")
     if expected != current:
         return (
             False,
-            f"Corpus hash mismatch: stored={expected!r} current={current!r}",
+            f"Corpus hash mismatch: stored={expected!r} current={current!r} (schema v{version})",
         )
-    return True, "Corpus hash matches custody record."
+    return True, f"Corpus hash matches custody record (schema v{version})."
 
 
 def audit_scrape_timestamps(db_path: Path) -> dict[str, Any]:

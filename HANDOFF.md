@@ -4264,3 +4264,329 @@ data/preregistration/preregistration_lock.json
 
 #### Recommended Next Steps
 - Proceed with the next pipeline run using the current preregistration lock, or relock/use exploratory mode if thresholds change.
+
+---
+
+### Phase 16 — Phase A (pre-registration hash coverage)
+**Status:** Complete
+**Date:** 2026-04-25
+**Agent/Session:** Cursor Agent
+
+#### What Was Done
+- Extended `AnalysisConfig` with hash-inclusive, validated knobs: `pelt_penalty` (`gt=0`), `bocpd_hazard_rate` (`gt=0`, `le=1`), `min_articles_for_period` (`ge=1`), `bootstrap_iterations` (`ge=1`); added `embedding_model_revision` (HF commit pin, hash-included). Per-field comments distinguish operational vs signal-bearing where applicable.
+- Extended `_snapshot_thresholds` with `embedding_model_revision` and `enable_ks_test`.
+- Replaced `data/preregistration/preregistration_lock.json` with the unfilled operator template (`locked_at: null`, no `analysis` payload) per Phase 16 A.4.
+- Documented the hash-break Sign in `docs/GUARDRAILS.md` and logged implementation in `prompts/phase16-adversarial-review-remediation/CHANGELOG.md`.
+- Set `embedding_model_revision` in `config.toml` and `config.toml.example` to Hugging Face repo `sha` for `sentence-transformers/all-MiniLM-L6-v2` (verified via HF API, 2026-04-25).
+
+#### Files Changed
+- `src/forensics/config/settings.py`
+- `src/forensics/preregistration.py`
+- `data/preregistration/preregistration_lock.json`
+- `config.toml`, `config.toml.example`
+- `tests/unit/test_config_hash.py`, `tests/test_preregistration.py`
+- `docs/GUARDRAILS.md`
+- `prompts/phase16-adversarial-review-remediation/CHANGELOG.md`
+- `HANDOFF.md`
+
+#### Verification Evidence
+```
+uv run pytest tests/ -k "config or settings or hash or preregistration" -v --no-cov
+  -> 102 passed
+uv run ruff check src/forensics/config/settings.py src/forensics/preregistration.py
+  -> All checks passed
+```
+
+#### Decisions Made
+- `embedding_model_revision` class default remains `"main"`; the tracked `config.toml` pins the concrete HF commit so CI and local runs match the verified weights revision.
+- Operators who need confirmatory mode must run `uv run forensics lock-preregistration` after pulling Phase 16; until then `verify_preregistration` reports `missing` for the shipped template.
+
+#### Unresolved Questions
+- None for Phase A scope.
+
+#### Recommended Next Steps
+- Phase B: wire `embedding_model_revision` through the embedding loader and drift validation per the Phase 16 plan.
+
+---
+
+### Phase 16 — Phase C (corpus hash v2 + corpus custody schema)
+**Status:** Complete
+**Date:** 2026-04-25
+**Agent/Session:** Cursor Agent
+
+#### What Was Done
+- `compute_corpus_hash` now fingerprints the analyzable corpus: `WHERE is_duplicate = 0 ORDER BY content_hash`.
+- Added `compute_corpus_hash_legacy` (deprecated docstring) for id-ordered pre–Phase-16 verification.
+- Introduced `CorpusCustody` (Pydantic) in `src/forensics/models/analysis.py`; `write_corpus_custody` persists schema v2 with both `corpus_hash` and `corpus_hash_v1`.
+- `verify_corpus_hash` dispatches on `schema_version` (missing → v1 legacy compare; `2` → v2 analyzable compare).
+- Regression tests for insert-order independence and duplicate exclusion; schema/tamper tests in `tests/unit/test_corpus_custody_schema.py`.
+- `tests/test_report.py` minimal SQLite fixtures gained `is_duplicate`; CLI integration uses `write_corpus_custody` for the matching-custody fixture.
+
+#### Files Changed
+- `src/forensics/utils/provenance.py`
+- `src/forensics/models/analysis.py`, `src/forensics/models/__init__.py`
+- `tests/unit/test_provenance.py` (new)
+- `tests/unit/test_corpus_custody_schema.py` (new)
+- `tests/test_report.py`, `tests/integration/test_cli.py`
+- `docs/GUARDRAILS.md` — Sign tracking Phase 17 removal of `corpus_hash_v1` / legacy hash (Step C4).
+- `HANDOFF.md`
+
+#### Verification Evidence
+```
+uv run pytest tests/integration/test_cli.py::test_analyze_verify_corpus_passes_on_matching_custody tests/unit/test_provenance.py tests/unit/test_corpus_custody_schema.py --no-cov -v
+  -> 6 passed
+uv run pytest tests/unit/test_provenance.py tests/unit/test_corpus_custody_schema.py tests/test_report.py tests/test_baseline.py tests/integration/test_cli.py -k "corpus or provenance or custody or verify_corpus" -v --no-cov
+  -> 14 passed (subset; use --no-cov to avoid fail-under on partial runs)
+uv run ruff check … && uv run ruff format --check …
+  -> All checks passed; files already formatted
+```
+
+#### Decisions Made
+- Shipped the regression as a **passing** test (no `xfail`) because C.1 and C.2 landed in the same change set; strict xfail would fail on XPASS.
+- GitNexus MCP was unavailable (server errored); blast radius was assessed via ripgrep and targeted tests instead.
+
+#### Unresolved Questions
+- None for Phase C scope.
+
+#### Recommended Next Steps
+- Phase D onward per Phase 16 plan; re-run full `uv run pytest tests/ -v` before merge (coverage fail-under applies to full suite).
+
+---
+
+### Phase 16 — Phase D (statistical test integrity + convergence rankable map)
+**Status:** Complete
+**Date:** 2026-04-25
+**Agent/Session:** Cursor Agent
+
+#### What Was Done
+- Extended `HypothesisTest` with `n_pre`, `n_post`, `n_nan_dropped`, `skipped_reason`, `degenerate` plus `from_legacy()` for legacy JSON.
+- `run_hypothesis_tests`: per-segment non-finite drop with INFO logging; skipped battery (NaN *p*) for invalid split / insufficient finite mass; `_cohens_d_meta` for variance-degeneracy; Welch/MW/KS rows tagged for degeneracy independently where applicable.
+- `apply_correction` / `apply_correction_grouped`: BH/Bonferroni denominator = count of rankable rows only; non-rankable rows get `corrected_p_value=NaN`, `significant=False`.
+- `compute_n_rankable_features_per_family` + `hypothesis_test_is_bh_rankable`; convergence ratio denominator uses eligible family axes when `n_rankable_per_family` is supplied; `ConvergenceWindow.n_rankable_per_family` populated on each window.
+- Orchestrator runs hypothesis tests before convergence and threads `n_rankable_per_family` into `ConvergenceInput.from_settings`.
+- Tests: `tests/unit/test_statistics_nan_propagation.py`; adjusted `test_statistics` + two `test_convergence` expectations for family-based ratios (`FAMILY_COUNT`).
+
+#### Files Modified
+- `src/forensics/models/analysis.py` — `HypothesisTest`, `ConvergenceWindow`, `from_legacy`.
+- `src/forensics/analysis/statistics.py` — NaN/skipped/degenerate/BH partition helpers; lazy import inside `compute_n_rankable_features_per_family` to avoid import cycle.
+- `src/forensics/analysis/convergence.py`, `src/forensics/analysis/orchestrator.py`
+- `tests/unit/test_statistics_nan_propagation.py` (new), `tests/unit/test_statistics.py`, `tests/unit/test_convergence.py`
+
+#### Verification Evidence
+```
+uv run pytest tests/unit/test_statistics.py tests/unit/test_statistics_nan_propagation.py tests/unit/test_per_family_fdr.py tests/unit/test_convergence.py tests/unit/test_orchestrator_feature_cache.py tests/unit/test_pipeline_a_family_score.py tests/unit/test_drop_ks.py tests/test_analysis.py tests/unit/test_section_contrast.py tests/unit/test_reporting_section.py --no-cov -q
+  -> all passed
+uv run ruff check … (touched Python) && uv run ruff format --check …
+  -> All checks passed; files already formatted
+uv run pytest tests/ --no-cov -q
+  -> 1 failed: tests/test_preregistration.py::test_committed_template_lock_does_not_violate (local config vs committed lock — Phase A / workspace drift, not Phase D)
+```
+
+#### Decisions Made
+- Skipped hypothesis placeholders emit two rows (Welch + MW; +KS when enabled) so downstream list shapes stay predictable.
+- `family_for` imported lazily inside `compute_n_rankable_features_per_family` to break `statistics ↔ feature_families ↔ changepoint ↔ statistics`.
+
+#### Unresolved Questions
+- None for Phase D scope.
+
+#### Recommended Next Steps
+- Align `config.toml` / preregistration lock with CI expectations or refresh the committed lock so `test_committed_template_lock_does_not_violate` passes under default `pytest` (with project `addopts` coverage).
+
+---
+
+### Phase 16 — Phase E (Repository internal mutation lock)
+**Status:** Complete
+**Date:** 2026-04-25
+**Agent/Session:** Cursor Agent
+
+#### What Was Done
+- Added `threading.Lock` to `Repository` (`__slots__` + `__init__`), acquired for all mutating SQL paths: `__enter__` schema/migrations, `__exit__` commit/rollback/close, `ensure_schema`, `apply_migrations`, `upsert_author`, `upsert_article`, `_bulk_set_is_duplicate` (covers `mark_duplicates` / `clear_duplicate_flags`), `rewrite_raw_paths_after_archive`, `insert_analysis_run_row`.
+- Replaced `_connect` / class doc threading narrative: internal lock supersedes P1-SEC-001 external-lock requirement for `Repository` mutations; reads remain lock-free per plan.
+- New integration test: eight `asyncio.to_thread` writers × 100 `upsert_article` calls plus concurrent reader snapshots (unique ids, row sanity).
+
+#### Files Modified
+- `src/forensics/storage/repository.py` — lock + docstring updates.
+- `tests/integration/test_repository_concurrency.py` — new.
+- `HANDOFF.md` — this block.
+
+#### Verification Evidence
+```
+uv run pytest tests/integration/test_repository_concurrency.py -v --no-cov
+  -> 1 passed (~2.9s)
+uv run pytest tests/test_scraper.py::test_article_url_exists_and_duplicate_skip tests/unit/test_repository_streaming.py -v --no-cov -q
+  -> 5 passed
+uv run ruff check src/forensics/storage/repository.py tests/integration/test_repository_concurrency.py
+  -> All checks passed
+```
+
+#### Decisions Made
+- GitNexus `impact` MCP tool descriptors were not present under `mcps/user-gitnexus/` (metadata only); blast radius noted manually: public `Repository` API unchanged; scraper `db_lock` remains optional for higher-level coordination.
+
+#### Unresolved Questions
+- None for Phase E scope.
+
+#### Risks & Next Steps
+- Reads without the lock on a shared `sqlite3.Connection` still rely on SQLite C-level behavior; if flaky reader tests appear under load, consider read-side locking as a follow-up (not in Phase E spec).
+
+---
+
+### Phase 16 — Phase F (dedup default, validators, migration 003, changepoint typing, hash smoke)
+**Status:** Complete
+**Date:** 2026-04-25
+**Agent/Session:** Cursor Agent
+
+#### What Was Done
+- `deduplicate_articles`: removed hardcoded Hamming default; `hamming_threshold=None` resolves via `get_settings().scraping.simhash_threshold`. Dedup tests pass `hamming_threshold=3` explicitly for isolation from repo `config.toml`.
+- `Article.word_count`: `Field(..., ge=0)`; `AnalysisConfig.changepoint_methods` typed as `list[ChangepointMethod]` with `ChangepointMethod = Literal["pelt", "bocpd", "chow", "cusum"]`; unit test rejects `"typo"`.
+- SQLite migration `003_articles_word_count_check`: rebuild `articles` with `CHECK (word_count >= 0)`, idempotent via `sqlite_master` introspection.
+- `tests/unit/test_settings.py`: `compute_analysis_config_hash` smoke tests for listed hash knobs; `tests/integration/test_repository_migrations.py` for discover, schema, and negative insert.
+
+#### Files Modified
+- `src/forensics/scraper/dedup.py`, `src/forensics/config/settings.py`, `src/forensics/models/article.py`
+- `src/forensics/storage/migrations/003_articles_word_count_check.py` (new)
+- `tests/unit/test_settings.py`, `tests/integration/test_repository_migrations.py` (new)
+- `tests/test_dedup_streaming_export.py`, `tests/test_scraper.py`, `HANDOFF.md`
+
+#### Verification Evidence
+```
+uv run pytest tests/integration/test_repository_migrations.py tests/unit/test_settings.py -v --no-cov
+  -> 11 passed
+uv run ruff check src/forensics/scraper/dedup.py src/forensics/config/settings.py src/forensics/models/article.py src/forensics/storage/migrations/003_articles_word_count_check.py tests/integration/test_repository_migrations.py tests/unit/test_settings.py
+  -> All checks passed
+```
+
+#### Decisions Made
+- GitNexus MCP server not available in this Cursor workspace; impact assessed manually (dedup call graph: `cli/scrape.py`, tests).
+- `pelt_penalty`, `bocpd_hazard_rate`, `min_articles_for_period` already had strict `Field` bounds from Phase A; no duplicate tightening required.
+
+#### Unresolved Questions
+- None for Phase F scope.
+
+#### Risks & Next Steps
+- Full `pytest tests/` with project coverage `addopts` still recommended before release; unrelated preregistration drift may fail one test per prior HANDOFF note.
+
+---
+
+### Phase 16 — Phase H (defensive FeatureVector dict JSON decode)
+**Status:** Complete
+**Date:** 2026-04-25
+**Agent/Session:** Cursor Agent
+
+#### What Was Done
+- `_maybe_decode_dict_field`: optional `strict`; `None` defers to `STRICT_DECODE_CTX`. Lenient path logs WARNING with payload preview and returns `{}`; strict raises `ValueError` on bad JSON or non-object JSON.
+- `STRICT_DECODE_CTX` + `strict_feature_decode_confirmatory(exploratory)` on `forensics.models.features`; `_run_per_author_analysis` wraps its body so confirmatory runs (`exploratory=False`, i.e. post–pre-registration CLI path) enable strict decode in-process and in worker processes.
+
+#### Files Modified
+- `src/forensics/models/features.py`, `src/forensics/analysis/orchestrator.py`
+- `tests/unit/test_features_strict.py` (new)
+- `HANDOFF.md` — this block.
+
+#### Verification Evidence
+```
+uv run pytest tests/unit/test_features_strict.py tests/test_features.py::test_feature_vector_parquet_dict_field_roundtrip -v --no-cov
+  -> 7 passed
+uv run ruff check src/forensics/models/features.py src/forensics/analysis/orchestrator.py tests/unit/test_features_strict.py
+  -> All checks passed
+```
+
+#### Decisions Made
+- GitNexus MCP tool descriptors not available in workspace; impact scoped manually to `FeatureVector` construction paths and `_run_per_author_analysis` callers.
+
+#### Unresolved Questions
+- None for Phase H scope.
+
+#### Risks & Next Steps
+- Analyze still consumes Polars frames for most work; strict decode activates whenever `FeatureVector` is validated under the orchestrator scope (e.g. future row-wise paths or tests).
+
+---
+
+### Phase 16 — Phase J (rolling stats, RUNBOOK dedup cliff, chow/stl guards, empty body filter)
+**Status:** Complete
+**Date:** 2026-04-25
+**Agent/Session:** Cursor Agent
+
+#### What Was Done
+- `compute_rolling_stats`: one Polars `with_columns` pass for all active rolling windows (mean/std aliases per window), preserving prior numeric outputs.
+- `chow_test`: explicit `ValueError` for `breakpoint_idx` outside `1 <= b < n-1` and for insufficient split (`n`, `k`, segment lengths); removed silent `(0.0, 1.0)` early exits for those cases.
+- `stl_decompose`: require `len(timestamps)==len(values)`; `_assert_sorted_timestamps` on entry.
+- `filter_insufficient_article_body` in `parser.py`: logs and clears whitespace-only / zero-word bodies; wired from `crawler._wp_post_to_article` and `fetcher._parse_article_html`.
+- `docs/RUNBOOK.md`: subsection on dedup performance vs `hamming_threshold > 3`.
+
+#### Files Modified
+- `src/forensics/analysis/timeseries.py`
+- `src/forensics/scraper/parser.py`, `crawler.py`, `fetcher.py`
+- `docs/RUNBOOK.md`
+- `tests/test_analysis.py`, `tests/test_scraper.py`, `HANDOFF.md`
+
+#### Verification Evidence
+```
+uv run pytest tests/test_analysis.py tests/test_scraper.py tests/unit/test_crawler_ingest_single_post.py tests/unit/test_fetcher_handlers.py tests/unit/test_fetcher_mutations.py -v --tb=short --no-cov
+  -> 91 passed, 1 deselected
+uv run ruff check src/forensics/analysis/timeseries.py src/forensics/scraper/parser.py src/forensics/scraper/crawler.py src/forensics/scraper/fetcher.py tests/test_analysis.py tests/test_scraper.py
+  -> All checks passed
+```
+
+#### Decisions Made
+- GitNexus MCP tool descriptors not present in workspace; impact noted manually: `chow_test` public API now raises on previously silent-invalid inputs (callers: tests + any future changepoint wiring); `stl_decompose` enforces timestamp/value alignment and sort order.
+
+#### Unresolved Questions
+- None for Phase J scope.
+
+#### Risks & Next Steps
+- External code calling `chow_test` with edge breakpoints must catch `ValueError` instead of interpreting `(0.0, 1.0)`.
+
+---
+
+### Phase 16 — Phase I (docs) + Phase K (verification)
+**Status:** Complete
+**Date:** 2026-04-25
+**Agent/Session:** Cursor Agent
+
+#### What Was Done
+- Expanded **Phase 16 hash-break migration** in `docs/RUNBOOK.md` (preregistration template → lock, embedding policy, corpus custody v1/v2, single-author exploratory E2E recipe).
+- **Prompt family** `phase16-adversarial-review-remediation`: `CHANGELOG.md` `[0.2.0]` with DOCS / VERIFY / PATCH buckets (four integrity claims tied to code); new `v0.2.0.md`; `current.md` synced; `versions.json` → `0.2.0` (v0.1.0 `deprecated`).
+- **GUARDRAILS:** Confirmed Agent-Learned Signs present — *Pre-Phase-16 locked artifacts must be re-locked* and *corpus_hash_v1* transition (no edit).
+- **Committed preregistration lock** reset to unfilled template so `tests/test_preregistration.py::test_committed_template_lock_does_not_violate` stays green under pytest’s temp `config.toml`.
+- **`pyproject.toml`:** `extend-exclude = ["notebooks"]` for Ruff so `ruff check .` targets package code (notebook cells fail I001/E402 as flat modules).
+- **Ruff:** `ruff format` on `html_report.py` and `test_notebook_05_change_point_detection.py` (prior format drift).
+- **Phase K spot-checks:** `forensics extract --author alex-griffing`; deleted stale `alex-griffing_*` artifacts and re-ran `forensics analyze --exploratory --author alex-griffing` — refreshed `corpus_custody.json` (`schema_version=2`, `corpus_hash`, `corpus_hash_v1`), `alex-griffing_result.json` (`config_hash`), `alex-griffing_hypothesis_tests.json` (`n_pre`, `n_post`, `n_nan_dropped`, `skipped_reason`, `degenerate`). `alex-griffing_convergence.json` remained `[]` (zero convergence windows for this author/run).
+- **Confirmatory regression:** `lock-preregistration` → mutate `pelt_penalty` in lock → `forensics analyze --author alex-griffing` logged pre-registration VIOLATION and exited **1**; restored template lock afterward.
+- **GitNexus:** `npx gitnexus analyze --embeddings` — index rebuilt; `.gitnexus/meta.json` `stats.embeddings` = **2332** (> 0).
+
+#### Files Modified
+- `docs/RUNBOOK.md`, `HANDOFF.md`, `pyproject.toml`, `data/preregistration/preregistration_lock.json`
+- `src/forensics/reporting/html_report.py`, `tests/unit/test_notebook_05_change_point_detection.py` (ruff format)
+- `prompts/phase16-adversarial-review-remediation/CHANGELOG.md`, `versions.json`, `current.md`, `v0.2.0.md`
+
+#### Verification Evidence
+```
+uv run ruff check .
+uv run ruff format --check .
+  -> All checks passed; 232 files already formatted
+
+uv run pytest tests/ -q --cov-report=term-missing
+  -> 848 passed, 3 deselected, 1 xfailed; coverage TOTAL 77.78% (fail_under 75)
+
+uv run forensics --no-progress extract --author alex-griffing
+  -> exit 0 (~2.6m, sentence-transformers revision pin load)
+
+uv run forensics --no-progress analyze --exploratory --author alex-griffing
+  -> exit 0 (~4.2m after deleting stale per-author JSON to force rewrite)
+
+# Confirmatory hard-fail (then restore template lock):
+uv run forensics lock-preregistration && python mutate pelt_penalty -> uv run forensics --no-progress analyze --author alex-griffing
+  -> ERROR pre-registration gate failed; process exit 1
+
+npx gitnexus analyze --embeddings
+  -> Repository indexed successfully; embeddings count 2332 in meta.json
+```
+
+#### Decisions Made
+- Ruff scope: exclude `notebooks/` from the root lint path (CI `ci-quality.yml` uses `ruff check .` — notebooks remain valid Quarto sources without being Ruff-clean as stitched cells).
+- Ship **unfilled** `preregistration_lock.json` in git so CI’s isolated `config.toml` never hits `mismatch` against a lock generated from the developer’s real `config.toml`.
+
+#### Unresolved Questions
+- `forensics report` not re-run in this pass (Quarto); E2E spot-check stopped at analyze artifacts.
+
+#### Risks & Next Steps
+- Operators doing confirmatory work must run `forensics lock-preregistration` after editing analysis thresholds; do not commit the filled lock unless the team explicitly wants a pinned cohort lock in-repo.

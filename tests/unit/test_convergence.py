@@ -173,8 +173,22 @@ def test_changepoints_outside_window_no_convergence() -> None:
 
 
 def test_ratio_pass_does_not_require_pipeline_b_signal() -> None:
+    """Ratio gate can admit a window with ``pipeline_b_score == 0``.
+
+    Phase 15 B2 uses *family* coverage (``len(families_hit) / FAMILY_COUNT``), so
+    three lexical features (one family) cannot reach ``min_feature_ratio=0.75``.
+    Use five distinct families so ``5 / FAMILY_COUNT >= 0.75`` while keeping
+    velocity and baseline empty so Pipeline B stays zeroed.
+    """
     base = datetime(2024, 1, 1, tzinfo=UTC)
-    cps = [_cp(name, base) for name in ["ttr", "mattr", "hapax_ratio"]]
+    feature_names = [
+        "ttr",  # lexical_richness
+        "flesch_kincaid",  # readability
+        "sent_length_mean",  # sentence_structure
+        "bigram_entropy",  # entropy
+        "self_similarity_30d",  # self_similarity
+    ]
+    cps = [_cp(name, base) for name in feature_names]
 
     result = compute_convergence_scores(
         ConvergenceInput.build(
@@ -183,12 +197,12 @@ def test_ratio_pass_does_not_require_pipeline_b_signal() -> None:
             baseline_similarity_curve=[],
             window_days=30,
             min_feature_ratio=0.75,
-            total_feature_count=4,
+            total_feature_count=len(feature_names),
         )
     )
 
     assert len(result) == 1
-    assert result[0].convergence_ratio == pytest.approx(0.75)
+    assert result[0].convergence_ratio == pytest.approx(5.0 / float(FAMILY_COUNT))
     assert result[0].pipeline_b_score == pytest.approx(0.0)
 
 
@@ -210,7 +224,7 @@ def test_ab_pass_can_emit_when_ratio_fails() -> None:
     )
 
     assert len(result) == 1
-    assert result[0].convergence_ratio == pytest.approx(0.25)
+    assert result[0].convergence_ratio == pytest.approx(1.0 / float(FAMILY_COUNT))
     assert result[0].pipeline_a_score > 0.5
     assert result[0].pipeline_b_score > 0.5
 

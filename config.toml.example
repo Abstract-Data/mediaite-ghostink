@@ -60,6 +60,8 @@ bootstrap_iterations = 200
 min_articles_for_period = 5
 embedding_model = "sentence-transformers/all-MiniLM-L6-v2"
 embedding_model_version = "v2.0"
+# Phase 16 A — Hugging Face repo commit for ``all-MiniLM-L6-v2`` (see HF API ``sha``).
+embedding_model_revision = "c9745ed1d9f207416be6d2e6f8de32d1f16199bf"
 changepoint_methods = ["pelt", "bocpd"]
 # Convergence permutation null (Phase 12 §5b) — logs empirical p-values; off by default (CPU).
 # convergence_use_permutation = false

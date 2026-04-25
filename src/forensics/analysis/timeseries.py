@@ -23,6 +23,26 @@ from forensics.utils.datetime import parse_datetime, timestamps_from_frame
 logger = logging.getLogger(__name__)
 
 
+def _assert_sorted_timestamps(timestamps: list[datetime], fn_name: str) -> None:
+    """Require timestamps in non-decreasing order (defense at STL / rolling entry)."""
+    if len(timestamps) < 2:
+        return
+    prev = timestamps[0]
+    if not isinstance(prev, datetime):
+        prev = parse_datetime(prev)
+    for i in range(1, len(timestamps)):
+        cur = timestamps[i]
+        if not isinstance(cur, datetime):
+            cur = parse_datetime(cur)
+        if cur < prev:
+            msg = (
+                f"{fn_name} requires sorted non-decreasing timestamps "
+                f"(violation at index {i - 1} -> {i})"
+            )
+            raise ValueError(msg)
+        prev = cur
+
+
 def compute_rolling_stats(
     timestamps: list[datetime],
     values: list[float],
@@ -33,18 +53,24 @@ def compute_rolling_stats(
     if not timestamps or not values:
         return {w: {"mean": [], "std": [], "low95": [], "high95": []} for w in wdef}
     df = pl.DataFrame({"timestamp": timestamps, "value": values}).sort("timestamp")
+    active = [w for w in wdef if w >= 2]
     out: dict[int, dict[str, Any]] = {}
+    if not active:
+        return out
+    roll_exprs: list[pl.Expr] = []
+    for w in active:
+        roll_exprs.append(
+            pl.col("value").rolling_mean(window_size=w, min_samples=1).alias(f"__mean_{w}")
+        )
+        roll_exprs.append(
+            pl.col("value").rolling_std(window_size=w, min_samples=1).alias(f"__std_{w}")
+        )
+    rolled = df.with_columns(roll_exprs)
     for w in wdef:
         if w < 2:
             continue
-        rolled = df.with_columns(
-            [
-                pl.col("value").rolling_mean(window_size=w, min_samples=1).alias("mean"),
-                pl.col("value").rolling_std(window_size=w, min_samples=1).alias("std"),
-            ]
-        )
-        mean = rolled["mean"].to_list()
-        std = [float(s) if s is not None else 0.0 for s in rolled["std"].to_list()]
+        mean = rolled[f"__mean_{w}"].to_list()
+        std = [float(s) if s is not None else 0.0 for s in rolled[f"__std_{w}"].to_list()]
         low = [float(m - 1.96 * s) for m, s in zip(mean, std, strict=False)]
         high = [float(m + 1.96 * s) for m, s in zip(mean, std, strict=False)]
         out[w] = {
@@ -66,6 +92,10 @@ def stl_decompose(
     n = len(y)
     if n == 0:
         return {"trend": [], "seasonal": [], "residual": []}
+    if len(timestamps) != n:
+        msg = f"stl_decompose: len(timestamps)={len(timestamps)} must equal len(values)={n}"
+        raise ValueError(msg)
+    _assert_sorted_timestamps(timestamps, "stl_decompose")
     p = max(3, min(period, max(3, n // 2)))
     kernel = np.ones(p) / p
     pad = p // 2
@@ -94,11 +124,24 @@ def chow_test(values: list[float], breakpoint_idx: int) -> tuple[float, float]:
     from scipy.stats import f as f_dist
 
     y = np.asarray(values, dtype=float).ravel()
-    n = y.size
+    n = int(y.size)
     k = 2
     b = int(breakpoint_idx)
+    if n < 2:
+        msg = f"chow_test requires at least two observations, got n={n}"
+        raise ValueError(msg)
+    if not 1 <= b < n - 1:
+        msg = (
+            f"chow_test breakpoint_idx={b} out of range for n={n} "
+            f"(require 1 <= breakpoint_idx < n - 1)"
+        )
+        raise ValueError(msg)
     if n < 2 * k + 2 or b < k or n - b < k:
-        return 0.0, 1.0
+        msg = (
+            f"chow_test insufficient split for k={k}: need n>={2 * k + 2}, "
+            f"k<=breakpoint_idx<=n-k; got n={n}, breakpoint_idx={b}"
+        )
+        raise ValueError(msg)
     t = np.arange(n, dtype=float)
     x_design = np.column_stack([np.ones(n), t])
 

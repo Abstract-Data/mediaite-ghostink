@@ -6,12 +6,12 @@ import logging
 from collections import defaultdict
 from pathlib import Path
 
+from forensics.config.settings import get_settings
 from forensics.storage.repository import Repository
 from forensics.utils.hashing import simhash, simhash_hamming
 
 logger = logging.getLogger(__name__)
 
-_NEAR_DUP_HAMMING = 3
 # For 128-bit simhash and Hamming distance <= 3, four 32-bit bands guarantee a shared band
 # between any two fingerprints within threshold (pigeonhole on bit positions).
 _BAND_BITS = 32
@@ -133,13 +133,18 @@ def _partition_roots(
     return tuple(_find(parent, i) for i in range(n))
 
 
-def deduplicate_articles(db_path: Path, *, hamming_threshold: int = _NEAR_DUP_HAMMING) -> list[str]:
+def deduplicate_articles(db_path: Path, *, hamming_threshold: int | None = None) -> list[str]:
     """
     Mark near-duplicate articles (simhash Hamming distance <= threshold).
 
     Uses union-find over the similarity graph, then keeps the earliest ``published_date``
     per component. Returns IDs that are marked duplicate (excluding canonical rows).
+
+    When ``hamming_threshold`` is omitted, uses :attr:`ScrapingConfig.simhash_threshold`
+    from :func:`get_settings` so CLI and library paths share one configured default.
     """
+    if hamming_threshold is None:
+        hamming_threshold = get_settings().scraping.simhash_threshold
     with Repository(db_path) as repo:
         pool_ids, pool_dates, pool_titles, fingerprints = _load_dedup_pool(repo)
         if not pool_ids:

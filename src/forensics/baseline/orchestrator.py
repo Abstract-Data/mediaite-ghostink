@@ -38,9 +38,9 @@ def _cell_dir(
     return base / author_slug / sanitize_model_tag(model) / f"{mode.split('_')[0]}_t{temperature}"
 
 
-def _embed_article(payload: dict, model_name: str, emb_dir: Path) -> None:
+def _embed_article(payload: dict, model_name: str, model_revision: str, emb_dir: Path) -> None:
     # Parent dir mkdir handled inside save_numpy_atomic (RF-DRY-004).
-    vec = embed_mod.compute_embedding(payload.get("text", ""), model_name)
+    vec = embed_mod.compute_embedding(payload.get("text", ""), model_name, model_revision)
     save_numpy_atomic(emb_dir / f"{payload['article_id']}.npy", vec)
 
 
@@ -193,7 +193,12 @@ async def run_generation_matrix(
                         cell_dir / f"{article_id}.json",
                         json.dumps(record, indent=2),
                     )
-                    _embed_article(record, settings.analysis.embedding_model, emb_dir)
+                    _embed_article(
+                        record,
+                        settings.analysis.embedding_model,
+                        settings.analysis.embedding_model_revision,
+                        emb_dir,
+                    )
                     articles.append(record)
 
                 logger.info(
@@ -231,6 +236,7 @@ def reembed_existing_baseline(
     if not base.is_dir():
         raise ValueError(f"No existing baseline at {base}")
     model_name = settings.analysis.embedding_model
+    model_revision = settings.analysis.embedding_model_revision
     n = 0
     for json_path in base.rglob("*.json"):
         if json_path.name == "generation_manifest.json":
@@ -239,7 +245,7 @@ def reembed_existing_baseline(
         if "text" not in payload or "article_id" not in payload:
             continue
         emb_dir = json_path.parent / "embeddings"
-        _embed_article(payload, model_name, emb_dir)
+        _embed_article(payload, model_name, model_revision, emb_dir)
         n += 1
     logger.info("baseline: re-embedded %d articles for %s", n, author_slug)
     return n

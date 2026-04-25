@@ -3,11 +3,38 @@
 from __future__ import annotations
 
 import json
+import logging
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime
 from typing import Any
 from uuid import uuid4
 
 from pydantic import BaseModel, Field, model_validator
+
+logger = logging.getLogger(__name__)
+
+# When True (confirmatory analyze via :func:`strict_feature_decode_confirmatory`),
+# invalid JSON or non-dict payloads for flat dict columns raise instead of logging
+# and coercing to ``{}``.
+STRICT_DECODE_CTX: ContextVar[bool] = ContextVar("STRICT_DECODE_CTX", default=False)
+
+
+@contextmanager
+def strict_feature_decode_confirmatory(exploratory: bool) -> Iterator[None]:
+    """Turn on strict dict-field JSON decoding for nested feature payloads.
+
+    Mirrors the CLI pre-registration gate: confirmatory runs use
+    ``exploratory=False`` after ``verify_preregistration`` has returned
+    ``status="ok"``. Process-pool workers call this with the same flag so each
+    child process gets the correct ContextVar value.
+    """
+    token = STRICT_DECODE_CTX.set(not exploratory)
+    try:
+        yield
+    finally:
+        STRICT_DECODE_CTX.reset(token)
 
 
 class LexicalFeatures(BaseModel):
@@ -148,15 +175,43 @@ def count_scalar_features() -> int:
     return total
 
 
-def _maybe_decode_dict_field(value: Any) -> Any:
-    """Round-trip compat: Parquet stores dict fields as JSON strings; decode on read."""
-    if isinstance(value, str):
-        try:
-            decoded = json.loads(value)
-        except (json.JSONDecodeError, ValueError):
-            return {}
-        return decoded if isinstance(decoded, dict) else {}
-    return value
+def _maybe_decode_dict_field(value: Any, *, strict: bool | None = None) -> Any:
+    """Round-trip compat: Parquet stores dict fields as JSON strings; decode on read.
+
+    When ``strict`` is ``None``, it follows :data:`STRICT_DECODE_CTX` (set by
+    :func:`strict_feature_decode_confirmatory` during confirmatory analyze).
+
+    Lenient mode (``strict=False``): malformed JSON or a non-dict decoded value
+    logs a WARNING (with a short payload preview) and returns ``{}``.
+    Strict mode (``strict=True``): raises ``ValueError``.
+    """
+    if not isinstance(value, str):
+        return value
+    use_strict = STRICT_DECODE_CTX.get() if strict is None else strict
+    preview = value if len(value) <= 120 else f"{value[:120]}..."
+    try:
+        decoded = json.loads(value)
+    except (json.JSONDecodeError, ValueError) as exc:
+        if use_strict:
+            msg = "invalid JSON for dict-typed feature field"
+            raise ValueError(msg) from exc
+        logger.warning(
+            "feature dict field JSON decode failed; returning empty dict. payload_preview=%r",
+            preview,
+        )
+        return {}
+    if isinstance(decoded, dict):
+        return decoded
+    if use_strict:
+        msg = f"decoded JSON must be an object, got {type(decoded).__name__}"
+        raise ValueError(msg)
+    logger.warning(
+        "feature dict field JSON decoded to non-dict; returning empty dict. "
+        "payload_preview=%r type=%s",
+        preview,
+        type(decoded).__name__,
+    )
+    return {}
 
 
 class FeatureVector(BaseModel):
@@ -229,5 +284,8 @@ class EmbeddingRecord(BaseModel):
     timestamp: datetime
     model_name: str
     model_version: str
+    # Hugging Face revision (SHA/branch) used when the vector was produced; empty
+    # string denotes pre–Phase-16 manifests that only recorded model_version.
+    model_revision: str = ""
     embedding_path: str
     embedding_dim: int

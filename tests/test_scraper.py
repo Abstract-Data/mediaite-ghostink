@@ -33,7 +33,12 @@ from forensics.scraper.fetcher import (
     _write_raw_html_file,
     request_with_retry,
 )
-from forensics.scraper.parser import extract_article_text, extract_metadata, looks_coauthored
+from forensics.scraper.parser import (
+    extract_article_text,
+    extract_metadata,
+    filter_insufficient_article_body,
+    looks_coauthored,
+)
 from forensics.storage.repository import Repository
 from forensics.utils.datetime import parse_wp_datetime
 from forensics.utils.hashing import simhash, simhash_hamming
@@ -91,6 +96,12 @@ def test_iter_manifests_from_users_json() -> None:
     rows = list(_iter_manifests_from_users_json(users, total_posts_by_id=counts))
     assert {r.slug for r in rows} == {"a", "b"}
     assert next(r for r in rows if r.slug == "a").total_posts == 10
+
+
+def test_filter_insufficient_article_body_empty_content(caplog: pytest.LogCaptureFixture) -> None:
+    with caplog.at_level("WARNING"):
+        assert filter_insufficient_article_body("  \n\t  ", log_label="unit") == ""
+    assert "whitespace-only" in caplog.text
 
 
 def test_wp_post_to_article(sample_author) -> None:
@@ -328,7 +339,7 @@ def test_deduplicate_articles_marks_second(tmp_db, sample_author) -> None:
         repo.upsert_author(sample_author)
         repo.upsert_article(a1)
         repo.upsert_article(a2)
-    dup_ids = deduplicate_articles(tmp_db)
+    dup_ids = deduplicate_articles(tmp_db, hamming_threshold=3)
     assert len(dup_ids) == 1
     with Repository(tmp_db) as repo:
         arts = {a.id: a for a in repo.get_all_articles()}

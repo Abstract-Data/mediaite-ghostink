@@ -479,6 +479,7 @@ See `prompts/README.md` for the full versioning contract, bump rules, and releas
 - For Typer/Rich CLI help tests that assert literal `--flag` substrings, disable color on `CliRunner.invoke` and strip ANSI escape sequences so Rich markup does not break contiguous flag text.
 - Prefer refactoring long functions and shared helpers over adding new McCabe C901 suppressions; if a suppression is unavoidable, pair it with a short decomposition plan or tracking comment rather than silent noqa growth.
 - When expanding README or onboarding docs for this repo, document which models and measurements the pipeline uses, how to run it locally, and chain-of-custody style forensic expectations; add diagrams or flow figures when they materially clarify stages or data flow.
+- For this investigation's `config.toml` roster, keep exactly one `role = "target"` (Colby Hall, `slug = "colby-hall"`) and every other configured writer as `role = "control"`; never include `placeholder-target` / `placeholder-control` slugs (they trip preflight/scrape guards) and never add `mediaite` or `mediaite-staff` to `[[authors]]` — leave `[survey] exclude_shared_bylines = true` so shared-byline accounts stay out of the cohort.
 
 ## Learned Workspace Facts
 
@@ -489,7 +490,7 @@ See `prompts/README.md` for the full versioning contract, bump rules, and releas
 - GitButler (`but`): follow the repo-local skill at `.claude/skills/gitbutler/SKILL.md` (mirrored at `.cursor/skills/gitbutler/SKILL.md`). For the Notion playbook add-on (parallel agents, JSON workflow), see `.claude/skills/gitbutler-workflow/SKILL.md` (mirrored under `.cursor/skills/gitbutler-workflow/`). From this repo: authenticate the forge once (`but config forge auth`); for GitHub PRs ensure the integration target is **`origin/main`** (not `gb-local/main`). If `but config target` refuses while virtual branches are applied, `but unapply` the stack first, set the target, then `but apply` again before `but push` / `but pr new`.
 - The `forensics` console script imports the **`forensics.cli` package** (`src/forensics/cli/` Typer app); the old monolithic `src/forensics/cli.py` was removed after the Typer migration—treat package modules as the CLI source of truth when updating docs or tracing dispatch.
 - `forensics scrape --all-authors` walks **every** author in `data/authors_manifest.jsonl` for metadata (and skips the placeholder guard on scrape-like invocations); `extract` / `analyze` / reporting still resolve study authors from `config.toml` via `resolve_author_rows` unless narrowed with `--author`. Survey scrape paths accept **`--post-year-min`** and **`--post-year-max`** (inclusive calendar years) to bound WordPress article pulls without ingesting full site history.
-- **`forensics dashboard`** runs the Textual full-screen pipeline view (install the **`tui`** extra); it conflicts with **`--no-progress`**. For non-TUI runs, root **`--no-progress`** turns off Rich live progress (including on `forensics all`, `forensics survey`, scrape, and extract); only one live UI mode should be active at a time. **`forensics analyze --parallel-authors --max-workers N`** stages author outputs under private **`data/analysis/parallel/<run>/<author>/`** directories, validates config hashes and companion artifacts, promotes per-author outputs, then rebuilds shared artifacts once to avoid parallel overwrites.
+- **`forensics dashboard`** runs the Textual full-screen pipeline view (install the **`tui`** extra); it conflicts with **`--no-progress`**. For non-TUI runs, root **`--no-progress`** turns off Rich live progress (including on `forensics all`, `forensics survey`, scrape, and extract); only one live UI mode should be active at a time. **`forensics analyze --parallel-authors`** defaults to **`min(3, os.cpu_count() - 1)`** workers (override with `--max-workers N` or `settings.analysis.max_workers`); it stages author outputs under private **`data/analysis/parallel/<run>/<author>/`** directories, validates **all** isolated artifacts (config hashes + companions) before promoting any to canonical `data/analysis/` (all-or-nothing), then rebuilds shared artifacts once to avoid parallel overwrites. **`compare_target_to_controls`** in `analysis/comparison.py` runs the target vs **pooled** controls (per-control change-points/drift live in the analysis payload as supporting structure only — there is no per-control comparison report page).
 - README-aligned local modeling and reporting expect **`uv run python -m spacy download en_core_web_md`** for extraction and **Quarto on `PATH`** when running **`forensics report`** or **`forensics all`** (plus non-placeholder `config.toml` authors for guarded scrape paths).
 - In `collect_article_metadata`, author ingestion runs **concurrently** up to **`scraping.max_concurrent`**, all tasks share one **`RateLimiter`**, SQLite writes go through a per-run **`asyncio.Lock`**, and per-author failures append to **`data/scrape_errors.jsonl`** without stopping the whole batch.
 - Each **`forensics analyze`** run invokes **`verify_preregistration(settings)`** before downstream stages; **`data/analysis/run_metadata.json`** records **`preregistration_status`** (`ok`, `missing`, or `mismatch`). Preregistration is a hard gate unless **`--exploratory`** is used; evidence change-points are filtered by **`confidence >= 0.9`** and **`abs(effect_size_cohens_d) >= 0.2`**, with global multiple-comparison correction applied across authors. Optional convergence permutation nulls are configured on **`AnalysisConfig`** and passed into **`compute_convergence_scores`**; empirical p-values are logged only and do not change detected windows.
@@ -498,7 +499,7 @@ See `prompts/README.md` for the full versioning contract, bump rules, and releas
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **mediaite-ghostink** (5337 symbols, 11211 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **mediaite-ghostink** (6893 symbols, 14488 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
@@ -594,25 +595,5 @@ To check whether embeddings exist, inspect `.gitnexus/meta.json` — the `stats.
 | Rename / extract / split / refactor | `.claude/skills/gitnexus/gitnexus-refactoring/SKILL.md` |
 | Tools, resources, schema reference | `.claude/skills/gitnexus/gitnexus-guide/SKILL.md` |
 | Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
-| Work in the Tests area (487 symbols) | `.claude/skills/generated/tests/SKILL.md` |
-| Work in the Unit area (225 symbols) | `.claude/skills/generated/unit/SKILL.md` |
-| Work in the Features area (80 symbols) | `.claude/skills/generated/features/SKILL.md` |
-| Work in the Analysis area (70 symbols) | `.claude/skills/generated/analysis/SKILL.md` |
-| Work in the Scraper area (66 symbols) | `.claude/skills/generated/scraper/SKILL.md` |
-| Work in the Survey area (48 symbols) | `.claude/skills/generated/survey/SKILL.md` |
-| Work in the Cli area (40 symbols) | `.claude/skills/generated/cli/SKILL.md` |
-| Work in the Integration area (35 symbols) | `.claude/skills/generated/integration/SKILL.md` |
-| Work in the Screens area (33 symbols) | `.claude/skills/generated/screens/SKILL.md` |
-| Work in the Scripts area (31 symbols) | `.claude/skills/generated/scripts/SKILL.md` |
-| Work in the Tui area (29 symbols) | `.claude/skills/generated/tui/SKILL.md` |
-| Work in the Storage area (28 symbols) | `.claude/skills/generated/storage/SKILL.md` |
-| Work in the Baseline area (27 symbols) | `.claude/skills/generated/baseline/SKILL.md` |
-| Work in the Progress area (22 symbols) | `.claude/skills/generated/progress/SKILL.md` |
-| Work in the Reporting area (21 symbols) | `.claude/skills/generated/reporting/SKILL.md` |
-| Work in the Forensics area (21 symbols) | `.claude/skills/generated/forensics/SKILL.md` |
-| Work in the Calibration area (15 symbols) | `.claude/skills/generated/calibration/SKILL.md` |
-| Work in the Evals area (14 symbols) | `.claude/skills/generated/evals/SKILL.md` |
-| Work in the Migrations area (8 symbols) | `.claude/skills/generated/migrations/SKILL.md` |
-| Work in the Config area (4 symbols) | `.claude/skills/generated/config/SKILL.md` |
 
 <!-- gitnexus:end -->

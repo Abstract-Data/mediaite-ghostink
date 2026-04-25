@@ -249,8 +249,8 @@ def test_embedding_shape(monkeypatch: pytest.MonkeyPatch) -> None:
             return np.zeros(384, dtype=np.float32)
 
     emb.clear_model_cache()
-    monkeypatch.setattr(emb, "_get_model", lambda name: _FakeModel())
-    vec = emb.compute_embedding("hello", "fake-model")
+    monkeypatch.setattr(emb, "_get_model", lambda name, rev: _FakeModel())
+    vec = emb.compute_embedding("hello", "fake-model", "main")
     assert vec.shape == (384,)
 
 
@@ -468,7 +468,7 @@ def test_extract_all_features_writes_embedding_batch_not_per_article_npy(
     get_settings.cache_clear()
     emb_mod.clear_model_cache()
 
-    def _fake_vec(text: str, model_name: str) -> np.ndarray:
+    def _fake_vec(text: str, model_name: str, _revision: str) -> np.ndarray:
         return np.linspace(0, 1, 8, dtype=np.float32)
 
     monkeypatch.setattr(emb_mod, "compute_embedding", _fake_vec)

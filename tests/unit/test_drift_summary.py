@@ -111,6 +111,7 @@ def test_load_drift_summary_recomputes_from_embeddings(tmp_path: Path, sample_au
                 timestamp=base + timedelta(days=i * 20),
                 model_name="m",
                 model_version="v",
+                model_revision="main",
                 embedding_path=f"data/embeddings/{sample_author.slug}/art-{i}.npy",
                 embedding_dim=4,
             )

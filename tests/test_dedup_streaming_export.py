@@ -136,7 +136,7 @@ def test_deduplicate_articles_matches_reference_assignment(tmp_db, sample_author
         pool_ref, hamming_threshold=3
     )
 
-    got_dups = deduplicate_articles(tmp_db)
+    got_dups = deduplicate_articles(tmp_db, hamming_threshold=3)
     assert sorted(got_dups) == sorted(expected_dups)
 
     with Repository(tmp_db) as repo:

@@ -312,6 +312,8 @@ def test_per_author_worker_returns_assembled_and_timings(
         paths,
         settings,
         {},
+        False,
+        False,
     )
     assert slug == "tgt1"
     assert assembled is not None
@@ -338,6 +340,8 @@ def test_per_author_worker_handles_unknown_slug(
         paths,
         settings,
         {},
+        False,
+        False,
     )
     assert slug == "ghost-author"
     assert assembled is None
@@ -352,7 +356,7 @@ def test_isolated_author_worker_does_not_write_canonical_artifacts(
 
     paths, _cfg = pair_project
     settings = get_settings()
-    isolated = _isolated_author_worker("tgt1", paths, settings, {}, "run-1")
+    isolated = _isolated_author_worker("tgt1", paths, settings, {}, "run-1", False, False)
 
     assert isolated is not None
     assert isolated.analysis_dir == paths.analysis_dir / "parallel" / "run-1" / "tgt1"
@@ -386,8 +390,12 @@ def test_validate_and_promote_isolated_outputs_is_all_or_nothing(
     """A bad isolated author output must not partially promote earlier valid outputs."""
     paths, _cfg = pair_project
     settings = get_settings()
-    valid = orch_mod._isolated_author_worker("tgt1", paths, settings, {}, "run-validation")
-    invalid = orch_mod._isolated_author_worker("ctrl1", paths, settings, {}, "run-validation")
+    valid = orch_mod._isolated_author_worker(
+        "tgt1", paths, settings, {}, "run-validation", False, False
+    )
+    invalid = orch_mod._isolated_author_worker(
+        "ctrl1", paths, settings, {}, "run-validation", False, False
+    )
     assert valid is not None
     assert invalid is not None
 
@@ -406,8 +414,10 @@ def test_validate_and_promote_isolated_outputs_rejects_stale_config_hash(
     """A stale isolated result hash is rejected before any canonical promotion."""
     paths, _cfg = pair_project
     settings = get_settings()
-    valid = orch_mod._isolated_author_worker("tgt1", paths, settings, {}, "run-stale")
-    stale = orch_mod._isolated_author_worker("ctrl1", paths, settings, {}, "run-stale")
+    valid = orch_mod._isolated_author_worker("tgt1", paths, settings, {}, "run-stale", False, False)
+    stale = orch_mod._isolated_author_worker(
+        "ctrl1", paths, settings, {}, "run-stale", False, False
+    )
     assert valid is not None
     assert stale is not None
 

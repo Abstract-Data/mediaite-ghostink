@@ -77,6 +77,8 @@ def _snapshot_thresholds(settings: ForensicsSettings) -> dict[str, Any]:
         "multiple_comparison_method": analysis.multiple_comparison_method,
         "bootstrap_iterations": analysis.bootstrap_iterations,
         "min_articles_for_period": analysis.min_articles_for_period,
+        "embedding_model_revision": analysis.embedding_model_revision,
+        "enable_ks_test": analysis.enable_ks_test,
         "changepoint_methods": list(analysis.changepoint_methods),
         "rolling_windows": list(analysis.rolling_windows),
         "convergence_window_days": analysis.convergence_window_days,

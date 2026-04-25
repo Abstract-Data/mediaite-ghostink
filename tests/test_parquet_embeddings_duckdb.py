@@ -237,7 +237,7 @@ def test_load_article_embeddings_legacy_npy_and_batch_npz(
     )
     write_embeddings_manifest([rec_npy], emb_root / "manifest.jsonl")
     paths = AnalysisArtifactPaths.from_layout(root, db_path, root / "data" / "features", emb_root)
-    pairs = load_article_embeddings(sample_author.slug, paths)
+    pairs = load_article_embeddings(sample_author.slug, paths, expected_revision="")
     assert len(pairs) == 1
     assert np.allclose(pairs[0].embedding, v1)
 
@@ -272,7 +272,7 @@ def test_load_article_embeddings_legacy_npy_and_batch_npz(
     ]
     # Second author article rows in DB are not required for load_article_embeddings
     write_embeddings_manifest(rec_batch, emb_root / "manifest.jsonl")
-    pairs_b = load_article_embeddings(sample_author.slug, paths)
+    pairs_b = load_article_embeddings(sample_author.slug, paths, expected_revision="")
     assert len(pairs_b) == 2
     pairs_b.sort(key=lambda x: x.published_at)
     assert np.allclose(pairs_b[0].embedding, v2)
@@ -315,7 +315,7 @@ def test_load_article_embeddings_rejects_legacy_object_npz_batch(
     ]
     write_embeddings_manifest(rec_batch, emb_root / "manifest.jsonl")
     paths = AnalysisArtifactPaths.from_layout(root, db_path, root / "data" / "features", emb_root)
-    pairs = load_article_embeddings(sample_author.slug, paths)
+    pairs = load_article_embeddings(sample_author.slug, paths, expected_revision="")
     assert pairs == []
 
 
@@ -349,7 +349,7 @@ def test_load_article_embeddings_skips_batch_missing_required_keys(
     )
     write_embeddings_manifest([rec], emb_root / "manifest.jsonl")
     paths = AnalysisArtifactPaths.from_layout(root, db_path, root / "data" / "features", emb_root)
-    pairs = load_article_embeddings(sample_author.slug, paths)
+    pairs = load_article_embeddings(sample_author.slug, paths, expected_revision="")
     assert pairs == []
 
 
@@ -388,7 +388,7 @@ def test_load_article_embeddings_skips_batch_vector_row_mismatch(
     )
     write_embeddings_manifest([rec], emb_root / "manifest.jsonl")
     paths = AnalysisArtifactPaths.from_layout(root, db_path, root / "data" / "features", emb_root)
-    pairs = load_article_embeddings(sample_author.slug, paths)
+    pairs = load_article_embeddings(sample_author.slug, paths, expected_revision="")
     assert pairs == []
 
 
@@ -426,7 +426,7 @@ def test_load_article_embeddings_skips_article_missing_from_batch(
     )
     write_embeddings_manifest([rec], emb_root / "manifest.jsonl")
     paths = AnalysisArtifactPaths.from_layout(root, db_path, root / "data" / "features", emb_root)
-    pairs = load_article_embeddings(sample_author.slug, paths)
+    pairs = load_article_embeddings(sample_author.slug, paths, expected_revision="")
     assert pairs == []
 
 
@@ -460,5 +460,5 @@ def test_load_article_embeddings_skips_corrupt_npy_file(
     )
     write_embeddings_manifest([rec], emb_root / "manifest.jsonl")
     paths = AnalysisArtifactPaths.from_layout(root, db_path, root / "data" / "features", emb_root)
-    pairs = load_article_embeddings(sample_author.slug, paths)
+    pairs = load_article_embeddings(sample_author.slug, paths, expected_revision="")
     assert pairs == []

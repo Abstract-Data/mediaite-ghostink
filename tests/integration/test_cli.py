@@ -114,23 +114,19 @@ def test_analyze_verify_corpus_passes_on_matching_custody(
 ) -> None:
     """Matching corpus_custody.json should let `--verify-corpus` proceed past the check."""
     import importlib
-    import json
 
     from forensics.analysis import orchestrator as orch_mod
 
     analyze_mod = importlib.import_module("forensics.cli.analyze")
     from forensics.storage.repository import init_db
-    from forensics.utils.provenance import compute_corpus_hash
+    from forensics.utils.provenance import write_corpus_custody
 
     db_path = tmp_path / "data" / "articles.db"
     db_path.parent.mkdir(parents=True, exist_ok=True)
     init_db(db_path)
     analysis_dir = tmp_path / "data" / "analysis"
     analysis_dir.mkdir(parents=True, exist_ok=True)
-    (analysis_dir / "corpus_custody.json").write_text(
-        json.dumps({"corpus_hash": compute_corpus_hash(db_path)}),
-        encoding="utf-8",
-    )
+    write_corpus_custody(db_path, analysis_dir)
     monkeypatch.setattr(analyze_mod, "get_project_root", lambda: tmp_path)
     monkeypatch.setattr(
         "forensics.pipeline_context.insert_analysis_run",

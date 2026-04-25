@@ -1,7 +1,87 @@
-"""Configuration loading."""
+"""Configuration loading and Phase 16 F analysis-hash smoke checks."""
+
+from __future__ import annotations
+
+from datetime import date
+from typing import Any
+
+import pytest
+from pydantic import ValidationError
+
+from forensics.config.settings import (
+    AnalysisConfig,
+    AuthorConfig,
+    FeaturesConfig,
+    ForensicsSettings,
+    SurveyConfig,
+)
+from forensics.utils.provenance import compute_analysis_config_hash
+
+
+def _minimal_author() -> AuthorConfig:
+    return AuthorConfig(
+        name="Fixture Author",
+        slug="fixture-author",
+        outlet="mediaite.com",
+        role="target",
+        archive_url="https://www.mediaite.com/author/fixture-author/",
+        baseline_start=date(2020, 1, 1),
+        baseline_end=date(2023, 12, 31),
+    )
+
+
+_HASH_SMOKE_FIELDS: list[tuple[str, Any]] = [
+    ("pelt_penalty", 99.0),
+    ("bocpd_hazard_rate", 0.05),
+    ("min_articles_for_period", 99),
+    ("embedding_model_revision", "0000000000000000000000000000000000000000"),
+    ("changepoint_methods", ["cusum"]),
+    ("enable_ks_test", True),
+]
 
 
 def test_get_settings_from_fixture(settings) -> None:
     assert len(settings.authors) == 1
     assert settings.authors[0].slug == "fixture-author"
     assert settings.scraping.max_retries == 3
+
+
+@pytest.mark.parametrize(("field", "alt"), _HASH_SMOKE_FIELDS)
+def test_compute_analysis_config_hash_changes_for_hash_knob(
+    settings,
+    field: str,
+    alt: Any,
+) -> None:
+    """Each listed analysis field must invalidate :func:`compute_analysis_config_hash`."""
+    base_hash = compute_analysis_config_hash(settings)
+    new_analysis = settings.analysis.model_copy(update={field: alt})
+    tweaked = settings.model_copy(update={"analysis": new_analysis})
+    assert compute_analysis_config_hash(tweaked) != base_hash
+
+
+def test_changepoint_methods_rejects_typo() -> None:
+    with pytest.raises(ValidationError):
+        AnalysisConfig(changepoint_methods=["typo"])
+
+
+def test_excluded_sections_coherence_defaults(settings) -> None:
+    """Default survey/features excluded_sections stay in sync (fixture uses TOML defaults)."""
+    assert settings.features.excluded_sections == settings.survey.excluded_sections
+
+
+def test_excluded_sections_coherence_explicit_match() -> None:
+    sections = frozenset({"sponsored", "partner-content"})
+    ForensicsSettings(
+        authors=[_minimal_author()],
+        survey=SurveyConfig(excluded_sections=sections),
+        features=FeaturesConfig(excluded_sections=sections),
+    )
+
+
+def test_excluded_sections_coherence_mismatch_raises() -> None:
+    with pytest.raises(ValidationError, match="features.excluded_sections must equal"):
+        ForensicsSettings(
+            authors=[_minimal_author()],
+            survey=SurveyConfig(excluded_sections=frozenset({"sponsored"})),
+            features=FeaturesConfig(excluded_sections=frozenset({"crosspost"})),
+        )

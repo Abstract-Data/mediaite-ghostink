@@ -425,7 +425,7 @@ baseline_end = 2023-12-31
     (cell_dir / f"{payload['article_id']}.json").write_text(json.dumps(payload), encoding="utf-8")
 
     # Bypass the real embedding model.
-    def _stub_embed(text: str, _model_name: str):
+    def _stub_embed(text: str, _model_name: str, _revision: str):
         import numpy as np
 
         return np.zeros(4, dtype=np.float32)

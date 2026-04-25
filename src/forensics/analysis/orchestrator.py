@@ -30,17 +30,23 @@ from forensics.analysis.convergence import (
     ProbabilityTrajectory,
     compute_convergence_scores,
 )
-from forensics.analysis.drift import compute_author_drift_pipeline, load_article_embeddings
+from forensics.analysis.drift import (
+    EmbeddingRevisionGateError,
+    compute_author_drift_pipeline,
+    load_article_embeddings,
+)
 from forensics.analysis.era import classify_ai_marker_era
 from forensics.analysis.evidence import filter_evidence_change_points
 from forensics.analysis.statistics import (
     apply_correction,
+    compute_n_rankable_features_per_family,
     filter_by_effect_size,
     run_hypothesis_tests,
 )
 from forensics.analysis.utils import pair_months_with_velocities
 from forensics.config.settings import AnalysisConfig, ForensicsSettings
 from forensics.models.analysis import AnalysisResult, ChangePoint, DriftScores
+from forensics.models.features import strict_feature_decode_confirmatory
 from forensics.preregistration import (
     PREREGISTERED_FEATURES,
     PREREGISTERED_SPLIT_DATE,
@@ -276,6 +282,8 @@ def _run_per_author_analysis(
     *,
     probability_trajectory_by_slug: dict[str, ProbabilityTrajectory],
     stage_timings: dict[str, float] | None = None,
+    exploratory: bool = False,
+    allow_pre_phase16_embeddings: bool = False,
 ) -> tuple[AnalysisResult, list[ChangePoint], list, list] | None:
     """Changepoint, drift, convergence, and hypothesis testing for one author slug.
 
@@ -284,74 +292,84 @@ def _run_per_author_analysis(
     ``convergence``, ``hypothesis_tests``) so the bench script can emit
     non-zero per-stage measurements instead of only the grand ``total``.
     """
-    author = repo.get_author_by_slug(slug)
-    if author is None:
-        logger.warning("analysis: unknown slug=%s", slug)
-        return None
-    feat_path = paths.features_parquet(slug)
-    if not feat_path.is_file():
-        logger.warning("analysis: skip %s (missing %s)", slug, feat_path)
-        return None
+    with strict_feature_decode_confirmatory(exploratory):
+        author = repo.get_author_by_slug(slug)
+        if author is None:
+            logger.warning("analysis: unknown slug=%s", slug)
+            return None
+        feat_path = paths.features_parquet(slug)
+        if not feat_path.is_file():
+            logger.warning("analysis: skip %s (missing %s)", slug, feat_path)
+            return None
 
-    timer = _StageTimer(stage_timings)
-    lf_all = load_feature_frame_sorted(feat_path)
-    lf_author = lf_all.filter(pl.col("author_id") == author.id)
-    df_author = lf_author.collect()
-    if df_author.is_empty():
-        df_author = lf_all.collect()
-    timer.record("extract")
+        timer = _StageTimer(stage_timings)
+        lf_all = load_feature_frame_sorted(feat_path)
+        lf_author = lf_all.filter(pl.col("author_id") == author.id)
+        df_author = lf_author.collect()
+        if df_author.is_empty():
+            df_author = lf_all.collect()
+        timer.record("extract")
 
-    raw_change_points = analyze_author_feature_changepoints(
-        df_author,
-        author_id=author.id,
-        settings=config,
-    )
-    change_points = filter_evidence_change_points(raw_change_points, config.analysis)
-    timer.record("changepoint")
-
-    drift, baseline_curve, vel_tuples, ai_conv = _load_drift_signals(slug, author.id, paths, config)
-    timer.record("drift")
-
-    prob = probability_trajectory_by_slug.get(slug)
-    convergence_windows = compute_convergence_scores(
-        ConvergenceInput.from_settings(
-            change_points,
-            vel_tuples,
-            baseline_curve,
-            config,
-            ai_convergence_curve=ai_conv,
-            probability_trajectory=prob,
+        raw_change_points = analyze_author_feature_changepoints(
+            df_author,
+            author_id=author.id,
+            settings=config,
         )
-    )
-    timer.record("convergence")
+        change_points = filter_evidence_change_points(raw_change_points, config.analysis)
+        timer.record("changepoint")
 
-    timestamps = timestamps_from_frame(df_author)
-    all_tests = _run_hypothesis_tests_for_changepoints(
-        df_author,
-        timestamps,
-        change_points,
-        author.id,
-        config.analysis,
-    )
-    all_tests.extend(
-        _run_preregistered_split_tests(
+        drift, baseline_curve, vel_tuples, ai_conv = _load_drift_signals(
+            slug,
+            author.id,
+            paths,
+            config,
+            exploratory=exploratory,
+            allow_pre_phase16_embeddings=allow_pre_phase16_embeddings,
+        )
+        timer.record("drift")
+
+        timestamps = timestamps_from_frame(df_author)
+        all_tests = _run_hypothesis_tests_for_changepoints(
             df_author,
             timestamps,
+            change_points,
             author.id,
             config.analysis,
         )
-    )
-    timer.record("hypothesis_tests")
+        all_tests.extend(
+            _run_preregistered_split_tests(
+                df_author,
+                timestamps,
+                author.id,
+                config.analysis,
+            )
+        )
+        timer.record("hypothesis_tests")
 
-    assembled = assemble_analysis_result(
-        author.id,
-        change_points,
-        convergence_windows,
-        drift,
-        all_tests,
-        config.analysis,
-    )
-    return assembled, change_points, convergence_windows, all_tests
+        prob = probability_trajectory_by_slug.get(slug)
+        n_rankable = compute_n_rankable_features_per_family(all_tests)
+        convergence_windows = compute_convergence_scores(
+            ConvergenceInput.from_settings(
+                change_points,
+                vel_tuples,
+                baseline_curve,
+                config,
+                ai_convergence_curve=ai_conv,
+                probability_trajectory=prob,
+                n_rankable_per_family=n_rankable,
+            )
+        )
+        timer.record("convergence")
+
+        assembled = assemble_analysis_result(
+            author.id,
+            change_points,
+            convergence_windows,
+            drift,
+            all_tests,
+            config.analysis,
+        )
+        return assembled, change_points, convergence_windows, all_tests
 
 
 def _load_drift_signals(
@@ -359,6 +377,9 @@ def _load_drift_signals(
     author_id: str,
     paths: AnalysisArtifactPaths,
     config: ForensicsSettings,
+    *,
+    exploratory: bool = False,
+    allow_pre_phase16_embeddings: bool = False,
 ) -> tuple[
     DriftScores | None,
     list[tuple[datetime, float]],
@@ -380,7 +401,15 @@ def _load_drift_signals(
     drift: DriftScores | None = None
 
     try:
-        pairs = load_article_embeddings(slug, paths)
+        pairs = load_article_embeddings(
+            slug,
+            paths,
+            expected_revision=config.analysis.embedding_model_revision,
+            exploratory=exploratory,
+            allow_pre_phase16_embeddings=allow_pre_phase16_embeddings,
+        )
+    except EmbeddingRevisionGateError:
+        raise
     except (ValueError, OSError) as exc:
         logger.info("analysis: no embeddings for %s (%s)", slug, exc)
         pairs = []
@@ -498,6 +527,8 @@ def _run_section_residualized_sensitivity(
     primary_results: dict[str, AnalysisResult],
     *,
     probability_trajectory_by_slug: dict[str, ProbabilityTrajectory],
+    exploratory: bool = False,
+    allow_pre_phase16_embeddings: bool = False,
 ) -> dict[str, Any]:
     if config.analysis.section_residualize_features:
         return {}
@@ -521,6 +552,8 @@ def _run_section_residualized_sensitivity(
                 sensitivity_paths,
                 sensitivity_config,
                 probability_trajectory_by_slug=probability_trajectory_by_slug,
+                exploratory=exploratory,
+                allow_pre_phase16_embeddings=allow_pre_phase16_embeddings,
             )
             if per_author is None:
                 continue
@@ -576,6 +609,8 @@ def _per_author_worker(
     paths: AnalysisArtifactPaths,
     config: ForensicsSettings,
     prob_map: dict[str, ProbabilityTrajectory],
+    exploratory: bool,
+    allow_pre_phase16_embeddings: bool,
 ) -> tuple[str, AnalysisResult | None, dict[str, float]]:
     """ProcessPool worker: opens its own ``Repository`` (SQLite is not fork-safe).
 
@@ -597,6 +632,8 @@ def _per_author_worker(
             config,
             probability_trajectory_by_slug=prob_map,
             stage_timings=stage_timings,
+            exploratory=exploratory,
+            allow_pre_phase16_embeddings=allow_pre_phase16_embeddings,
         )
     if per_author is None:
         logger.info("analysis: slug=%s skipped (missing author or features)", slug)
@@ -634,6 +671,8 @@ def _isolated_author_worker(
     config: ForensicsSettings,
     prob_map: dict[str, ProbabilityTrajectory],
     run_id: str,
+    exploratory: bool,
+    allow_pre_phase16_embeddings: bool,
 ) -> IsolatedAuthorAnalysis | None:
     """Run one author into ``data/analysis/parallel/<run_id>/<slug>/``."""
     isolated_paths = _isolated_author_paths(paths, run_id, slug)
@@ -646,6 +685,8 @@ def _isolated_author_worker(
             config,
             probability_trajectory_by_slug=prob_map,
             stage_timings=stage_timings,
+            exploratory=exploratory,
+            allow_pre_phase16_embeddings=allow_pre_phase16_embeddings,
         )
     if per_author is None:
         logger.info("analysis-refresh: slug=%s skipped (missing author or features)", slug)
@@ -697,6 +738,9 @@ def _run_full_analysis_per_authors(
     prob_map: dict[str, ProbabilityTrajectory],
     workers: int,
     mp_context: str | None,
+    *,
+    exploratory: bool,
+    allow_pre_phase16_embeddings: bool,
 ) -> tuple[dict[str, AnalysisResult], dict[str, dict[str, float]]]:
     """Serial or parallel per-author analysis, global test gating, artifact writes."""
     results: dict[str, AnalysisResult] = {}
@@ -714,6 +758,8 @@ def _run_full_analysis_per_authors(
                     config,
                     probability_trajectory_by_slug=prob_map,
                     stage_timings=stage_timings,
+                    exploratory=exploratory,
+                    allow_pre_phase16_embeddings=allow_pre_phase16_embeddings,
                 )
                 per_author_timings[slug] = stage_timings
                 if per_author is None:
@@ -760,6 +806,8 @@ def _run_full_analysis_per_authors(
                     paths,
                     config,
                     prob_map,
+                    exploratory,
+                    allow_pre_phase16_embeddings,
                 ): slug
                 for slug in slugs
             }
@@ -888,6 +936,8 @@ def _run_isolated_author_jobs(
     run_id: str,
     max_workers: int,
     probability_trajectory_by_slug: dict[str, ProbabilityTrajectory],
+    exploratory: bool,
+    allow_pre_phase16_embeddings: bool,
 ) -> list[IsolatedAuthorAnalysis]:
     if not slugs:
         return []
@@ -901,6 +951,8 @@ def _run_isolated_author_jobs(
                 config,
                 probability_trajectory_by_slug,
                 run_id,
+                exploratory,
+                allow_pre_phase16_embeddings,
             )
             if isolated is not None:
                 isolated_outputs.append(isolated)
@@ -915,6 +967,8 @@ def _run_isolated_author_jobs(
                 config,
                 probability_trajectory_by_slug,
                 run_id,
+                exploratory,
+                allow_pre_phase16_embeddings,
             ): slug
             for slug in slugs
         }
@@ -935,6 +989,8 @@ def run_parallel_author_refresh(
     author_slug: str | None = None,
     max_workers: int | None = None,
     probability_trajectory_by_slug: dict[str, ProbabilityTrajectory] | None = None,
+    exploratory: bool = False,
+    allow_pre_phase16_embeddings: bool = False,
 ) -> dict[str, AnalysisResult]:
     """Refresh stale configured authors through isolated parallel author directories."""
     run_id = str(uuid4())
@@ -953,6 +1009,8 @@ def run_parallel_author_refresh(
         run_id=run_id,
         max_workers=workers,
         probability_trajectory_by_slug=prob_map,
+        exploratory=exploratory,
+        allow_pre_phase16_embeddings=allow_pre_phase16_embeddings,
     )
     if not isolated_outputs:
         logger.info("analysis-refresh: no stale author artifacts to refresh")
@@ -1020,6 +1078,8 @@ def run_full_analysis(
     compare_pair: tuple[str, str] | None = None,
     timings_out: AnalysisTimings | None = None,
     mp_context: str | None = None,
+    exploratory: bool = False,
+    allow_pre_phase16_embeddings: bool = False,
 ) -> dict[str, AnalysisResult]:
     """Run changepoint + drift + convergence + hypothesis tests; write JSON artifacts.
 
@@ -1074,6 +1134,8 @@ def run_full_analysis(
         prob_map,
         workers,
         mp_context,
+        exploratory=exploratory,
+        allow_pre_phase16_embeddings=allow_pre_phase16_embeddings,
     )
 
     sensitivity_summary = _run_section_residualized_sensitivity(
@@ -1082,6 +1144,8 @@ def run_full_analysis(
         slugs,
         results,
         probability_trajectory_by_slug=prob_map,
+        exploratory=exploratory,
+        allow_pre_phase16_embeddings=allow_pre_phase16_embeddings,
     )
 
     t_compare = time.perf_counter()

@@ -18,6 +18,7 @@ from forensics.analysis.artifact_paths import AnalysisArtifactPaths
 from forensics.analysis.utils import pair_months_with_velocities
 from forensics.config.settings import ForensicsSettings
 from forensics.models.analysis import DriftScores
+from forensics.models.features import EmbeddingRecord
 from forensics.paths import resolve_author_rows
 from forensics.storage.json_io import write_json_artifact
 from forensics.storage.parquet import (
@@ -34,6 +35,10 @@ from forensics.utils.datetime import parse_datetime
 logger = logging.getLogger(__name__)
 
 AI_BASELINE_EMBEDDING_DIM = 384
+
+
+class EmbeddingRevisionGateError(ValueError):
+    """Raised when stored ``model_revision`` disagrees with the configured HF pin."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -147,6 +152,48 @@ def _load_embedding_row(
         logger.warning("Article %s not in embedding batch %s", article_id, abs_path)
         return None
     return np.asarray(mat[row], dtype=np.float32)
+
+
+def validate_embedding_record(
+    record: EmbeddingRecord,
+    vec: np.ndarray,
+    expected_revision: str,
+    *,
+    exploratory: bool,
+    allow_pre_phase16_embeddings: bool,
+) -> None:
+    """Ensure ``vec`` matches ``record`` metadata before drift consumes it.
+
+    Dimension mismatches always raise :class:`ValueError` (correctness /
+    integrity). When ``expected_revision`` is non-empty, the manifest revision
+    must match unless the operator is in exploratory mode **and** passed
+    ``--allow-pre-phase16-embeddings`` (legacy vectors or mismatched HF pins),
+    in which case a WARNING is logged and execution continues.
+    """
+    got_dim = int(vec.shape[-1])
+    if got_dim != int(record.embedding_dim):
+        msg = (
+            f"Embedding dimension mismatch for article {record.article_id}: "
+            f"vector shape {vec.shape}, record.embedding_dim={record.embedding_dim}."
+        )
+        raise ValueError(msg)
+    if not (expected_revision or "").strip():
+        return
+    stored = (record.model_revision or "").strip()
+    expected = expected_revision.strip()
+    if stored == expected:
+        return
+    msg = (
+        f"Embedding model revision mismatch for article {record.article_id}: "
+        f"manifest has {stored!r}, analysis expects {expected!r}."
+    )
+    if exploratory and allow_pre_phase16_embeddings:
+        logger.warning(
+            "%s Continuing due to --exploratory and --allow-pre-phase16-embeddings.",
+            msg,
+        )
+        return
+    raise EmbeddingRevisionGateError(msg)
 
 
 def _cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
@@ -368,6 +415,10 @@ def _classify_embedding_path(abs_path: Path) -> str:
 def load_article_embeddings(
     author_slug: str,
     paths: AnalysisArtifactPaths,
+    *,
+    expected_revision: str = "",
+    exploratory: bool = False,
+    allow_pre_phase16_embeddings: bool = False,
 ) -> list[ArticleEmbedding]:
     """Load article embeddings from manifest + ``.npy`` or ``batch.npz``.
 
@@ -376,6 +427,12 @@ def load_article_embeddings(
     ``batch.npz`` (see :func:`forensics.storage.parquet.write_author_embedding_batch`);
     a non-zero ``.npy`` count indicates legacy artifacts that predate the
     packed-batch migration and is informational only — readers handle both.
+
+    Pass ``expected_revision=settings.analysis.embedding_model_revision`` in
+    production so vectors from a different HF commit fail fast. Use
+    ``expected_revision=\"\"`` only in tests that intentionally omit revision
+    metadata. Mismatches respect ``exploratory`` and
+    ``allow_pre_phase16_embeddings`` (see :func:`validate_embedding_record`).
     """
     root = paths.project_root
     batch_cache: dict[Path, tuple[np.ndarray, dict[str, int]]] = {}
@@ -400,6 +457,13 @@ def load_article_embeddings(
                     "Missing or unreadable embedding for article %s: %s", rec.article_id, abs_path
                 )
                 continue
+            validate_embedding_record(
+                rec,
+                vec,
+                expected_revision,
+                exploratory=exploratory,
+                allow_pre_phase16_embeddings=allow_pre_phase16_embeddings,
+            )
             pairs.append(ArticleEmbedding(published_at=rec.timestamp, embedding=vec))
         if format_counts["npz"] or format_counts["npy"]:
             logger.debug(
@@ -526,6 +590,8 @@ def load_drift_summary(
     paths: AnalysisArtifactPaths,
     *,
     settings: ForensicsSettings,
+    exploratory: bool = False,
+    allow_pre_phase16_embeddings: bool = False,
 ) -> DriftSummary:
     """Drift velocities and baseline curve for ``slug``.
 
@@ -549,7 +615,15 @@ def load_drift_summary(
         return DriftSummary(velocities=velocities, baseline_curve=baseline_curve)
 
     try:
-        pairs = load_article_embeddings(slug, paths)
+        pairs = load_article_embeddings(
+            slug,
+            paths,
+            expected_revision=settings.analysis.embedding_model_revision,
+            exploratory=exploratory,
+            allow_pre_phase16_embeddings=allow_pre_phase16_embeddings,
+        )
+    except EmbeddingRevisionGateError:
+        raise
     except (ValueError, OSError) as exc:
         logger.debug("drift summary: no embeddings for %s (%s)", slug, exc)
         return DriftSummary(velocities=velocities, baseline_curve=baseline_curve)
@@ -660,6 +734,8 @@ def run_drift_analysis(
     *,
     paths: AnalysisArtifactPaths,
     author_slug: str | None = None,
+    exploratory: bool = False,
+    allow_pre_phase16_embeddings: bool = False,
 ) -> None:
     """Compute drift metrics for configured authors and write ``data/analysis/*`` outputs."""
     centroids_by_author: dict[str, list[tuple[str, np.ndarray]]] = {}
@@ -668,7 +744,15 @@ def run_drift_analysis(
         author_rows = resolve_author_rows(repo, settings, author_slug=author_slug)
         for author in author_rows:
             try:
-                article_embs = load_article_embeddings(author.slug, paths)
+                article_embs = load_article_embeddings(
+                    author.slug,
+                    paths,
+                    expected_revision=settings.analysis.embedding_model_revision,
+                    exploratory=exploratory,
+                    allow_pre_phase16_embeddings=allow_pre_phase16_embeddings,
+                )
+            except EmbeddingRevisionGateError:
+                raise
             except ValueError as exc:
                 logger.warning("drift: skip slug=%s (%s)", author.slug, exc)
                 continue

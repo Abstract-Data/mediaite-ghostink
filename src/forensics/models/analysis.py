@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime
-from typing import Literal
+from collections.abc import Mapping
+from datetime import UTC, date, datetime
+from typing import Any, Literal, Self
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -31,6 +32,9 @@ class ConvergenceWindow(BaseModel):
     end_date: date
     features_converging: list[str]
     families_converging: list[str] = Field(default_factory=list)
+    # Phase 16 D5 — per-family count of distinct features with BH-rankable
+    # hypothesis-test rows for this author run (Welch/MW/KS battery).
+    n_rankable_per_family: dict[str, int] = Field(default_factory=dict)
     convergence_ratio: float
     pipeline_a_score: float
     pipeline_b_score: float
@@ -67,6 +71,10 @@ class HypothesisTest(BaseModel):
 
     ``apply_correction`` and ``filter_by_effect_size`` now return new instances
     via ``model_copy`` rather than mutating shared objects (P2-MAINT-002).
+
+    Phase 16 D1: ``n_pre`` / ``n_post`` default to ``-1`` for legacy JSON rows
+    that predate finite-sample bookkeeping; use :meth:`from_legacy` when loading
+    untyped payloads for the report stage.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -79,6 +87,27 @@ class HypothesisTest(BaseModel):
     effect_size_cohens_d: float
     confidence_interval_95: tuple[float, float]
     significant: bool
+    # Sample bookkeeping (confirmatory runs); -1 = unknown / legacy artifact.
+    n_pre: int = Field(default=-1, ge=-1)
+    n_post: int = Field(default=-1, ge=-1)
+    n_nan_dropped: int = Field(default=0, ge=0)
+    skipped_reason: str | None = None
+    degenerate: bool = False
+
+    @classmethod
+    def from_legacy(cls, data: Any) -> Self:
+        """Validate ``data`` and default missing Phase-16 sample fields for legacy JSON."""
+        if isinstance(data, HypothesisTest):
+            return data
+        if not isinstance(data, Mapping):
+            return cls.model_validate(data)
+        payload = dict(data)
+        payload.setdefault("n_pre", -1)
+        payload.setdefault("n_post", -1)
+        payload.setdefault("n_nan_dropped", 0)
+        payload.setdefault("skipped_reason", None)
+        payload.setdefault("degenerate", False)
+        return cls.model_validate(payload)
 
 
 class EraClassification(BaseModel):
@@ -105,3 +134,18 @@ class AnalysisResult(BaseModel):
     drift_scores: DriftScores | None = None
     hypothesis_tests: list[HypothesisTest] = Field(default_factory=list)
     era_classification: EraClassification = Field(default_factory=EraClassification)
+
+
+class CorpusCustody(BaseModel):
+    """Chain-of-custody record persisted as ``corpus_custody.json`` (Phase 16 schema v2).
+
+    ``corpus_hash`` fingerprints the *analyzable* corpus: rows with ``is_duplicate = 0``,
+    ordered by ``content_hash`` (stable under insert / primary-key order).
+    ``corpus_hash_v1`` stores the legacy id-ordered hash (including duplicates) for one
+    transition cycle of audit tooling; remove after Phase 17 (see GUARDRAILS).
+    """
+
+    schema_version: int = Field(2, ge=1, le=2)
+    corpus_hash: str
+    corpus_hash_v1: str | None = None
+    recorded_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

@@ -16,6 +16,9 @@ from pydantic_settings import (
     TomlConfigSettingsSource,
 )
 
+# Supported change-point backends (hash-participating; typos must fail validation).
+ChangepointMethod = Literal["pelt", "bocpd", "chow", "cusum"]
+
 # Canonical relative location of the SQLite corpus under the project root.
 # Single source of truth for all modules that resolve the DB path.
 DEFAULT_DB_RELATIVE = Path("data") / "articles.db"
@@ -91,21 +94,53 @@ class AnalysisConfig(BaseModel):
         "benjamini_hochberg",
         json_schema_extra={"include_in_config_hash": True},
     )
-    bootstrap_iterations: int = Field(1000, json_schema_extra={"include_in_config_hash": True})
-    min_articles_for_period: int = 5
+    # Operational: bootstrap resampling count for uncertainty; affects runtime only
+    # insofar as larger N tightens Monte Carlo error — still preregistered for
+    # confirmatory reproducibility.
+    bootstrap_iterations: int = Field(
+        1000,
+        ge=1,
+        json_schema_extra={"include_in_config_hash": True},
+    )
+    # Signal-bearing: minimum articles required to label a pre/post segment around
+    # a change-point credible for hypothesis tests.
+    min_articles_for_period: int = Field(
+        5,
+        ge=1,
+        json_schema_extra={"include_in_config_hash": True},
+    )
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
+    # Operational: human-readable bundle label (not HF revision).
     embedding_model_version: str = "v2.0"
-    changepoint_methods: list[str] = Field(
+    # Signal-bearing: Hugging Face model revision (commit SHA or branch) passed to
+    # ``SentenceTransformer(..., revision=...)`` — must match locked embeddings.
+    embedding_model_revision: str = Field(
+        "main",
+        json_schema_extra={"include_in_config_hash": True},
+    )
+    changepoint_methods: list[ChangepointMethod] = Field(
         default_factory=lambda: ["pelt", "bocpd"],
         json_schema_extra={"include_in_config_hash": True},
     )
     effect_size_threshold: float = Field(0.2, json_schema_extra={"include_in_config_hash": True})
-    pelt_penalty: float = 3.0
+    # Signal-bearing: PELT penalty λ scales segmentation density.
+    pelt_penalty: float = Field(
+        3.0,
+        gt=0.0,
+        json_schema_extra={"include_in_config_hash": True},
+    )
     # Phase 15 F0 — swap RBF (O(n²)) for L2 mean-shift cost (default ``l2``).
     pelt_cost_model: Literal["l2", "l1", "rbf"] = Field(
         "l2", json_schema_extra={"include_in_config_hash": True}
     )
-    bocpd_hazard_rate: float = 1 / 250.0
+    # Signal-bearing: BOCPD constant hazard h ∈ (0, 1]; prior expected run length
+    # scales as 1/h.
+    bocpd_hazard_rate: float = Field(
+        1 / 250.0,
+        gt=0.0,
+        le=1.0,
+        json_schema_extra={"include_in_config_hash": True},
+    )
     # Phase 15 A — MAP-run-length reset replaces ``P(r=0)`` thresholding as
     # the default. ``bocpd_threshold`` was removed (algebraically pinned to
     # the hazard rate; see docs/GUARDRAILS.md). Set ``bocpd_detection_mode``
@@ -319,6 +354,19 @@ class ForensicsSettings(BaseSettings):
     baseline: BaselineConfig = Field(default_factory=BaselineConfig)
     chain_of_custody: ChainOfCustodyConfig = Field(default_factory=ChainOfCustodyConfig)
     report: ReportConfig = Field(default_factory=ReportConfig)
+
+    @model_validator(mode="after")
+    def _excluded_sections_match_survey(self) -> ForensicsSettings:
+        """Survey qualification and feature extraction must agree on section drops."""
+        if self.features.excluded_sections != self.survey.excluded_sections:
+            msg = (
+                "features.excluded_sections must equal survey.excluded_sections "
+                f"(features={sorted(self.features.excluded_sections)!r}, "
+                f"survey={sorted(self.survey.excluded_sections)!r}). "
+                "Align both [features] and [survey] tables in config.toml."
+            )
+            raise ValueError(msg)
+        return self
 
     @computed_field  # type: ignore[prop-decorator]
     @property

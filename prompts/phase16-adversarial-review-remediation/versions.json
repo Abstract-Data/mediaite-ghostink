@@ -1,0 +1,22 @@
+{
+  "family": "phase16-adversarial-review-remediation",
+  "current_version": "0.2.0",
+  "versions": [
+    {
+      "version": "0.2.0",
+      "date": "2026-04-25",
+      "status": "active",
+      "model": "gpt-5.2-codex",
+      "file": "v0.2.0.md",
+      "changelog_entry": "Phase I (reduced) operator docs in RUNBOOK; HANDOFF I+K closure; CHANGELOG VERIFY bucket tying four integrity-report claims to enforced code paths (encoder revision, config/preregistration hash, corpus hash v2+v1 bridge, hypothesis/BH/convergence integrity); versions bump; full test+coverage + fixture analyze spot-check + confirmatory preregistration gate + gitnexus analyze --embeddings."
+    },
+    {
+      "version": "0.1.0",
+      "date": "2026-04-25",
+      "status": "deprecated",
+      "model": "claude-opus-4-7",
+      "file": "v0.1.0.md",
+      "changelog_entry": "11-phase (A-K) implementation plan covering all 17 accepted findings from the 2026-04-25 adversarial architecture review (Phase A Full-Stack pass + Phase B Builder pass). Closes specific gaps in mediaite-ghostink-integrity-report.docx claims around (1) sentence-transformers revision pinning, (2) analysis-config hash coverage for pelt_penalty / bocpd_hazard_rate / bocpd_min_run_length / min_articles_for_period, (3) corpus_hash determinism via ORDER BY content_hash with corpus_custody schema_version=2 and one-cycle v1/v2 dual-persist, (4) statistical-test integrity via HypothesisTest extension (n_pre, n_post, n_nan_dropped, skipped_reason, degenerate) with NaN drop at run_hypothesis_tests entry and BH denominator excluding skipped+degenerate. Adds: Repository internal threading.Lock with concurrency integration test (Phase E), Field validators and CHECK migration on word_count (Phase F), excluded_sections cross-config invariant (Phase G), confirmatory-mode strict JSON decode (Phase H), integrity-report scoping amendments (Phase I), and five low-priority defensive items (Phase J). Records 9 Builder rebuttals as explicit Out-of-Scope so future agents do not re-litigate (R6, R7, R12, R14, R16, R17, R24, R25, R26)."
+    }
+  ]
+}

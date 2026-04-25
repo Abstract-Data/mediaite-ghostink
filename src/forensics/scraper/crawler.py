@@ -26,7 +26,10 @@ from forensics.models.author import Author, AuthorManifest
 from forensics.progress import PipelineObserver
 from forensics.scraper.client import create_scraping_client
 from forensics.scraper.fetcher import RateLimiter, log_scrape_error, request_with_retry
-from forensics.scraper.parser import extract_article_text_from_rest
+from forensics.scraper.parser import (
+    extract_article_text_from_rest,
+    filter_insufficient_article_body,
+)
 from forensics.storage.repository import Repository, ensure_repo
 from forensics.survey.shared_byline import is_shared_byline
 from forensics.utils.datetime import parse_wp_datetime
@@ -140,9 +143,13 @@ def _wp_post_to_article(post: dict[str, object], author_id: str) -> Article:
     if isinstance(content_block, dict):
         rendered = content_block.get("rendered")
         if isinstance(rendered, str) and rendered:
-            clean = extract_article_text_from_rest(rendered)
-            wc = word_count(clean)
-            chash = compute_content_hash(clean)
+            raw_clean = extract_article_text_from_rest(rendered)
+            clean = filter_insufficient_article_body(
+                raw_clean,
+                log_label=f"_wp_post_to_article url={link}",
+            )
+            wc = word_count(clean) if clean else 0
+            chash = compute_content_hash(clean) if clean else ""
             scraped_at = datetime.now(UTC)
     return Article(
         id=stable_article_id(link),

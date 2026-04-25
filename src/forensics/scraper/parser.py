@@ -10,8 +10,26 @@ from typing import Any
 from bs4 import BeautifulSoup, Tag
 
 from forensics.utils.text import clean_text as normalize_article_text
+from forensics.utils.text import word_count
 
 logger = logging.getLogger(__name__)
+
+
+def filter_insufficient_article_body(clean_text: str, *, log_label: str) -> str:
+    """Return body text for persistence, or empty string with a logged audit trail.
+
+    Whitespace-only and zero-word bodies are cleared so downstream simhash dedup
+    does not collapse unrelated empties onto identical fingerprints.
+    """
+    if not clean_text.strip():
+        logger.warning("%s: empty article body after extract (whitespace-only)", log_label)
+        return ""
+    wc = word_count(clean_text)
+    if wc == 0:
+        logger.warning("%s: zero word count after extract", log_label)
+        return ""
+    return clean_text
+
 
 _REMOVE_CLASS_SUBSTRINGS = (
     "related-posts",

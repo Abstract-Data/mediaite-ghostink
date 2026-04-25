@@ -136,6 +136,18 @@ Each Sign has:
 - Reason: Pooling pre- and post-Phase-15 artifacts mixes detections produced by incompatible detection rules, giving false confidence intervals and wrong FDR counts. The hash boundary exists to make the failure loud.
 - Provenance: Agent-learned — 2026-04-24 Phase-15 provenance pre-registration (Unit 1 L5).
 
+**Sign: Pre-Phase-16 locked artifacts must be re-locked**
+- Trigger: A `preregistration_lock.json` was produced before Phase 16, or `data/analysis/*_result.json` predates Phase 16 while the active `config.toml` already includes Phase-16 hash fields (`embedding_model_revision`, `pelt_penalty`, `bocpd_hazard_rate`, `bocpd_min_run_length`, `min_articles_for_period`, etc.).
+- Instruction: Regenerate the pre-registration lock (`uv run forensics lock-preregistration`) after upgrading to Phase-16 settings so confirmatory thresholds match the expanded snapshot. Do not mix Phase-15 and Phase-16 `*_result.json` artifacts in one report — `validate_analysis_result_config_hashes()` is designed to hard-fail on `config_hash` mismatch.
+- Reason: Phase 16 widened the analysis-config hash and the preregistration snapshot; an old lock silently approves the wrong threshold set relative to new embeddings and segmentation defaults.
+- Provenance: Phase 16 adversarial remediation — `prompts/phase16-adversarial-review-remediation/current.md` Step A5 (2026-04-25).
+
+**Sign: `corpus_hash_v1` and `compute_corpus_hash_legacy` are one-cycle transition artifacts**
+- Trigger: Phase 17+ maintenance where `corpus_custody.json` consumers still depend on legacy id-ordered hashing, or the dual-field payload is treated as permanent API.
+- Instruction: After operators have regenerated custody files under schema v2 and downstream audit paths no longer need id-ordered replay, remove `corpus_hash_v1` from `CorpusCustody` in `src/forensics/models/analysis.py`, delete `compute_corpus_hash_legacy` in `src/forensics/utils/provenance.py`, and drop schema v1 handling from `verify_corpus_hash` per the Phase 16 plan closure checklist.
+- Reason: `corpus_hash_v1` exists only to bridge pre–Phase-16 verification semantics (`ORDER BY id`, all rows) against the new analyzable-corpus fingerprint (`WHERE is_duplicate = 0 ORDER BY content_hash`).
+- Provenance: Phase 16 adversarial remediation — Step C4 (2026-04-25).
+
 ## Agent and Change Management
 
 - Follow `AGENTS.md` in dev mode and `AGENTS.staging.md` in staging mode.
