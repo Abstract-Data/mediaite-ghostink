@@ -4103,3 +4103,54 @@ uv run ruff format --check src/forensics/analysis/orchestrator.py tests/unit/tes
 
 #### Recommended Next Steps
 - Run the real refresh with `uv run forensics analyze --parallel-authors --max-workers 3` when ready to regenerate corpus artifacts.
+
+---
+
+### Parallel Refresh Focused Validation Coverage
+**Status:** Complete
+**Date:** 2026-04-24
+**Agent/Session:** Cursor Agent
+
+#### What Was Done
+- Added focused regression coverage for isolated parallel refresh validation.
+- Confirmed stale isolated result config hashes are rejected before any canonical per-author artifact is promoted.
+- Confirmed shared artifacts (`comparison_report.json`, `run_metadata.json`) are still absent during validation/promotion and are rebuilt only after promotion succeeds.
+- Left `.cursor/plans/parallel_evidence_refresh_a5384993.plan.md` untouched per instruction.
+
+#### Files Changed
+- `tests/unit/test_analyze_compare.py`
+- `HANDOFF.md`
+
+#### Verification Evidence
+```
+uv run pytest tests/unit/test_analyze_compare.py -v --no-cov
+  -> 16 passed
+uv run ruff check tests/unit/test_analyze_compare.py
+  -> All checks passed!
+uv run ruff format --check tests/unit/test_analyze_compare.py
+  -> 1 file already formatted
+uv run ruff check .
+  -> Failed on pre-existing notebook lint issues in notebooks/05_change_point_detection.ipynb,
+     notebooks/06_embedding_drift.ipynb, notebooks/07_statistical_evidence.ipynb,
+     notebooks/08_control_comparison.ipynb, and notebooks/09_full_report.ipynb.
+uv run ruff format --check .
+  -> Failed: 7 files would be reformatted, all outside the touched test file.
+uv run pytest tests/ -v
+  -> 800 passed, 2 failed, 3 deselected, 1 xfailed; failures were
+     tests/unit/test_convergence.py::test_ratio_pass_does_not_require_pipeline_b_signal
+     and tests/unit/test_convergence.py::test_ab_pass_can_emit_when_ratio_fails.
+```
+
+#### Decisions Made
+- Tests use the existing isolated worker and validation/promote helpers instead of changing provider, stage, or artifact architecture.
+- No new operational procedure was discovered, so `docs/RUNBOOK.md` was not updated.
+- Snyk Code MCP schema was inspected, but the available `CallMcpTool` interface in this session did not expose an arguments field needed to pass the required absolute scan path.
+- GitNexus MCP descriptors remained unavailable for `user-gitnexus`; no production symbols were modified in this focused test-only pass.
+
+#### Unresolved Questions
+- Repo-wide Ruff/format failures remain in existing notebook/report artifacts outside this task.
+- Full test suite currently has two convergence-test failures unrelated to the new parallel refresh tests.
+
+#### Recommended Next Steps
+- Fix or quarantine the existing notebook formatting/lint drift before relying on repo-wide Ruff as a merge gate.
+- Investigate the two existing convergence test expectation failures separately from the parallel refresh validation flow.
