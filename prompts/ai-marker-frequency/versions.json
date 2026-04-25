@@ -1,0 +1,14 @@
+{
+  "family": "ai-marker-frequency",
+  "current_version": "0.1.0",
+  "versions": [
+    {
+      "version": "0.1.0",
+      "date": "2026-04-24",
+      "status": "active",
+      "model": "gpt-5-3-codex",
+      "file": "v0.1.0.md",
+      "changelog_entry": "Initial immutable marker-list contract for ai_marker_frequency."
+    }
+  ]
+}

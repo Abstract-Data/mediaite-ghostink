@@ -1,11 +1,11 @@
 ---
 name: survey
-description: "Skill for the Survey area of mediaite-ghostink. 45 symbols across 7 files."
+description: "Skill for the Survey area of mediaite-ghostink. 48 symbols across 8 files."
 ---
 
 # Survey
 
-45 symbols | 7 files | Cohesion: 73%
+48 symbols | 8 files | Cohesion: 74%
 
 ## When to Use
 
@@ -19,7 +19,8 @@ description: "Skill for the Survey area of mediaite-ghostink. 45 symbols across 
 |------|---------|
 | `src/forensics/survey/orchestrator.py` | SurveyResult, _run_dir_for, _checkpoint_path, _load_checkpoint, _write_checkpoint (+13) |
 | `tests/test_survey.py` | _seed_qualified_corpus, _patch_orchestrator_side_effects, test_survey_dry_run_no_analysis, test_survey_orchestrator_checkpoints_after_each_author, test_survey_orchestrator_resume_skips_completed (+6) |
-| `src/forensics/survey/scoring.py` | SurveyScore, ControlValidation, identify_natural_controls, validate_against_controls, _pipeline_a_score (+6) |
+| `src/forensics/survey/scoring.py` | _pipeline_a_score, _pipeline_b_score, _pipeline_c_score, _convergence_score, classify_signal (+6) |
+| `src/forensics/calibration/runner.py` | _TrialOutcome, _earliest_changepoint_date, _outcome_from_analysis |
 | `src/forensics/tui/pipeline_app.py` | _thread_pipeline, _go |
 | `src/forensics/progress/observer.py` | NoOpPipelineObserver |
 | `tests/test_calibration.py` | fake_compute_composite_score |
@@ -51,13 +52,13 @@ Start here when exploring this area:
 | `test_survey_observer_hooks_fire_per_author` | Function | `tests/test_survey.py` | 616 |
 | `test_survey_report_is_instance_of_SurveyReport` | Function | `tests/test_survey.py` | 654 |
 | `run_survey` | Function | `src/forensics/survey/orchestrator.py` | 426 |
+| `test_signal_strength_classification_thresholds` | Function | `tests/test_survey.py` | 326 |
+| `classify_signal` | Function | `src/forensics/survey/scoring.py` | 94 |
+| `compute_composite_score` | Function | `src/forensics/survey/scoring.py` | 153 |
 | `test_natural_controls_identified_from_mixed_results` | Function | `tests/test_survey.py` | 335 |
 | `fake_compute_composite_score` | Function | `tests/test_calibration.py` | 286 |
 | `identify_natural_controls` | Function | `src/forensics/survey/scoring.py` | 219 |
 | `validate_against_controls` | Function | `src/forensics/survey/scoring.py` | 239 |
-| `test_signal_strength_classification_thresholds` | Function | `tests/test_survey.py` | 326 |
-| `classify_signal` | Function | `src/forensics/survey/scoring.py` | 94 |
-| `compute_composite_score` | Function | `src/forensics/survey/scoring.py` | 153 |
 | `test_survey_completion_exit_code` | Function | `tests/test_pipeline_progress.py` | 123 |
 
 ## Execution Flows
@@ -80,11 +81,11 @@ Start here when exploring this area:
 | Area | Connections |
 |------|-------------|
 | Tests | 17 calls |
-| Unit | 2 calls |
-| Forensics | 2 calls |
-| Analysis | 1 calls |
+| Unit | 3 calls |
+| Scripts | 1 calls |
 | Integration | 1 calls |
 | Cli | 1 calls |
+| Forensics | 1 calls |
 
 ## How to Explore
 

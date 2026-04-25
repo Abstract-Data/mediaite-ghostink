@@ -2018,3 +2018,87 @@ uv run pytest tests/ -v
 #### Risks & Next Steps
 - Re-run `uv run forensics analyze` before `uv run forensics report` on the real corpus so all per-author `*_result.json` files carry the current analysis config hash.
 - If AI baseline generation is requested after drift artifacts already exist, verify generated nested baseline embeddings are present before trusting `ai_baseline_similarity`.
+
+---
+
+### Forensic Reliability Plan — Methodology Gates
+**Status:** Complete
+**Date:** 2026-04-24
+**Agent/Session:** Cursor Agent methodology-gates
+
+#### What Was Done
+- Added an evidence gate for change-points: confidence >= 0.9 and `abs(effect_size_cohens_d) >= analysis.effect_size_threshold`.
+- Applied gated change-points before convergence scoring, hypothesis-test generation, result assembly, changepoint JSON writes, and compare-only fallback scoring.
+- Lowered the default `analysis.effect_size_threshold` to `0.2`.
+- Added preregistered methodology fields to the lock snapshot: Nov. 1, 2022 split, six confirmatory features, Welch/Mann-Whitney tests, and global across-author correction scope.
+- Made `forensics analyze` hard-fail on missing or mismatched preregistration unless `--exploratory` is passed and recorded.
+- Added global multiple-comparison correction across all tests generated in a full analysis run.
+- Added immutable `prompts/ai-marker-frequency/v0.1.0.md`, advanced `current.md`, registered `versions.json`, and added a changelog.
+- Added deterministic marker discrimination scoring and pinned `AI_MARKER_LIST_VERSION`.
+- Generated and unignored `data/preregistration/preregistration_lock.json` for the finalized methodology defaults.
+
+#### Files Modified
+- `.gitignore`
+- `src/forensics/analysis/evidence.py`
+- `src/forensics/analysis/changepoint.py`
+- `src/forensics/analysis/comparison.py`
+- `src/forensics/analysis/orchestrator.py`
+- `src/forensics/calibration/__init__.py`
+- `src/forensics/calibration/markers.py`
+- `src/forensics/cli/analyze.py`
+- `src/forensics/config/settings.py`
+- `src/forensics/features/lexical.py`
+- `src/forensics/preregistration.py`
+- `tests/integration/test_cli.py`
+- `tests/test_analysis.py`
+- `tests/test_calibration.py`
+- `tests/test_features.py`
+- `tests/test_preregistration.py`
+- `docs/ARCHITECTURE.md`
+- `prompts/ai-marker-frequency/CHANGELOG.md`
+- `prompts/ai-marker-frequency/current.md`
+- `prompts/ai-marker-frequency/v0.1.0.md`
+- `prompts/ai-marker-frequency/versions.json`
+- `data/preregistration/preregistration_lock.json`
+- `HANDOFF.md`
+
+#### Verification Evidence
+```
+npx gitnexus impact AnalysisConfig --repo mediaite-ghostink --direction upstream --depth 2
+  -> HIGH; 57 impacted symbols, primarily settings importers and feature processes.
+npx gitnexus impact run_analyze --repo mediaite-ghostink --direction upstream --depth 2
+  -> HIGH; direct callers are CLI analyze and pipeline _run.
+npx gitnexus impact run_full_analysis --repo mediaite-ghostink --direction upstream --depth 2
+  -> CRITICAL; direct callers include analyze, survey, calibration, and bench paths.
+npx gitnexus impact run_changepoint_analysis --repo mediaite-ghostink --direction upstream --depth 2
+  -> LOW; direct caller is _run_changepoint_stage.
+npx gitnexus impact _snapshot_thresholds --repo mediaite-ghostink --direction upstream --depth 2
+  -> HIGH; affects lock and verify preregistration flows.
+npx gitnexus impact _load_or_compute_changepoints --repo mediaite-ghostink --direction upstream --depth 2
+  -> LOW; affects comparison control summarization.
+npx gitnexus status
+  -> Index up-to-date at commit ba0da17.
+uv run ruff check .
+  -> All checks passed.
+uv run ruff format --check .
+  -> 197 files already formatted.
+uv run pytest tests/test_analysis.py tests/test_preregistration.py tests/test_features.py tests/test_calibration.py -v --no-cov
+  -> 82 passed, 1 deselected, 1 warning.
+uv run pytest tests/ -v
+  -> 561 passed, 3 deselected, 1 warning in 173.27s.
+  -> Total coverage: 73.46% (gate 72% — PASS).
+```
+
+#### Decisions Made
+- Kept the methodology gate additive and centralized in `analysis.evidence` so existing detectors still emit raw candidates, while evidence outputs consume only gated candidates.
+- Used `--exploratory` as the explicit override for non-confirmatory analysis rather than preserving silent exploratory behavior.
+- Preserved the current marker phrase list as v0.1.0 and added deterministic scorer coverage instead of introducing live LLM-dependent calibration tests.
+- Unignored only `data/preregistration/preregistration_lock.json`, leaving other generated preregistration runtime files ignored.
+
+#### Unresolved Questions
+- Snyk SAST could not run because the Snyk MCP reported the user was unauthenticated and `snyk_auth` returned `Authentication failed`.
+- GitNexus exposes `impact` via CLI, but this local CLI does not expose the `detect_changes` command documented for the MCP; no MCP tool descriptors were available for GitNexus beyond server metadata.
+
+#### Risks & Next Steps
+- Re-run `uv run forensics analyze` on the real corpus so analysis artifacts are regenerated under the new preregistration/effect-size gates.
+- Treat existing ungated `data/analysis/*_changepoints.json` artifacts as stale until regenerated.

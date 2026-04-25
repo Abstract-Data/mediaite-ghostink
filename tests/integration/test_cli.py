@@ -74,6 +74,7 @@ def test_analyze_help_lists_flags() -> None:
         "--skip-generation",
         "--verify-corpus",
         "--author",
+        "--exploratory",
     ):
         assert flag in text, f"missing {flag} in analyze help"
 
@@ -137,7 +138,15 @@ def test_analyze_verify_corpus_passes_on_matching_custody(
     monkeypatch.setattr(orch_mod, "run_compare_only", lambda *a, **kw: None)
 
     result = runner.invoke(
-        app, ["analyze", "--verify-corpus", "--compare", "--author", "fixture-author"]
+        app,
+        [
+            "analyze",
+            "--verify-corpus",
+            "--compare",
+            "--author",
+            "fixture-author",
+            "--exploratory",
+        ],
     )
     assert result.exit_code == 0, result.output
 

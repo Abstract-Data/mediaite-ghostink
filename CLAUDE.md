@@ -62,7 +62,7 @@ If you hit the same error 3+ times, encounter a circular tool loop, or discover 
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **mediaite-ghostink** (5304 symbols, 11108 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **mediaite-ghostink** (5337 symbols, 11211 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
@@ -158,25 +158,25 @@ To check whether embeddings exist, inspect `.gitnexus/meta.json` — the `stats.
 | Rename / extract / split / refactor | `.claude/skills/gitnexus/gitnexus-refactoring/SKILL.md` |
 | Tools, resources, schema reference | `.claude/skills/gitnexus/gitnexus-guide/SKILL.md` |
 | Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
-| Work in the Tests area (467 symbols) | `.claude/skills/generated/tests/SKILL.md` |
-| Work in the Unit area (222 symbols) | `.claude/skills/generated/unit/SKILL.md` |
-| Work in the Features area (83 symbols) | `.claude/skills/generated/features/SKILL.md` |
-| Work in the Analysis area (66 symbols) | `.claude/skills/generated/analysis/SKILL.md` |
-| Work in the Scraper area (53 symbols) | `.claude/skills/generated/scraper/SKILL.md` |
-| Work in the Cli area (49 symbols) | `.claude/skills/generated/cli/SKILL.md` |
-| Work in the Survey area (45 symbols) | `.claude/skills/generated/survey/SKILL.md` |
-| Work in the Forensics area (44 symbols) | `.claude/skills/generated/forensics/SKILL.md` |
+| Work in the Tests area (487 symbols) | `.claude/skills/generated/tests/SKILL.md` |
+| Work in the Unit area (225 symbols) | `.claude/skills/generated/unit/SKILL.md` |
+| Work in the Features area (80 symbols) | `.claude/skills/generated/features/SKILL.md` |
+| Work in the Analysis area (70 symbols) | `.claude/skills/generated/analysis/SKILL.md` |
+| Work in the Scraper area (66 symbols) | `.claude/skills/generated/scraper/SKILL.md` |
+| Work in the Survey area (48 symbols) | `.claude/skills/generated/survey/SKILL.md` |
+| Work in the Cli area (40 symbols) | `.claude/skills/generated/cli/SKILL.md` |
 | Work in the Integration area (35 symbols) | `.claude/skills/generated/integration/SKILL.md` |
 | Work in the Screens area (33 symbols) | `.claude/skills/generated/screens/SKILL.md` |
-| Work in the Storage area (32 symbols) | `.claude/skills/generated/storage/SKILL.md` |
-| Work in the Baseline area (30 symbols) | `.claude/skills/generated/baseline/SKILL.md` |
+| Work in the Scripts area (31 symbols) | `.claude/skills/generated/scripts/SKILL.md` |
 | Work in the Tui area (29 symbols) | `.claude/skills/generated/tui/SKILL.md` |
-| Work in the Scripts area (21 symbols) | `.claude/skills/generated/scripts/SKILL.md` |
-| Work in the Progress area (20 symbols) | `.claude/skills/generated/progress/SKILL.md` |
-| Work in the Calibration area (19 symbols) | `.claude/skills/generated/calibration/SKILL.md` |
-| Work in the Reporting area (14 symbols) | `.claude/skills/generated/reporting/SKILL.md` |
+| Work in the Storage area (28 symbols) | `.claude/skills/generated/storage/SKILL.md` |
+| Work in the Baseline area (27 symbols) | `.claude/skills/generated/baseline/SKILL.md` |
+| Work in the Progress area (22 symbols) | `.claude/skills/generated/progress/SKILL.md` |
+| Work in the Reporting area (21 symbols) | `.claude/skills/generated/reporting/SKILL.md` |
+| Work in the Forensics area (21 symbols) | `.claude/skills/generated/forensics/SKILL.md` |
+| Work in the Calibration area (15 symbols) | `.claude/skills/generated/calibration/SKILL.md` |
 | Work in the Evals area (14 symbols) | `.claude/skills/generated/evals/SKILL.md` |
-| Work in the Migrations area (6 symbols) | `.claude/skills/generated/migrations/SKILL.md` |
+| Work in the Migrations area (8 symbols) | `.claude/skills/generated/migrations/SKILL.md` |
 | Work in the Config area (4 symbols) | `.claude/skills/generated/config/SKILL.md` |
 
 <!-- gitnexus:end -->

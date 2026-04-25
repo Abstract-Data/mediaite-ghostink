@@ -99,7 +99,7 @@ class AnalysisConfig(BaseModel):
         default_factory=lambda: ["pelt", "bocpd"],
         json_schema_extra={"include_in_config_hash": True},
     )
-    effect_size_threshold: float = Field(0.5, json_schema_extra={"include_in_config_hash": True})
+    effect_size_threshold: float = Field(0.2, json_schema_extra={"include_in_config_hash": True})
     pelt_penalty: float = 3.0
     # Phase 15 F0 — swap RBF (O(n²)) for L2 mean-shift cost (default ``l2``).
     pelt_cost_model: Literal["l2", "l1", "rbf"] = Field(

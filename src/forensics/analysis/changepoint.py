@@ -15,6 +15,7 @@ import ruptures as rpt
 from scipy.special import logsumexp
 
 from forensics.analysis.artifact_paths import AnalysisArtifactPaths
+from forensics.analysis.evidence import filter_evidence_change_points
 from forensics.analysis.statistics import cohens_d
 from forensics.config.settings import ForensicsSettings
 from forensics.models.analysis import ChangePoint
@@ -329,7 +330,12 @@ def run_changepoint_analysis(
         # depends on ``PELT_FEATURE_COLUMNS`` from this module).
         from forensics.analysis.convergence import ConvergenceInput, compute_convergence_scores
 
-        cps = analyze_author_feature_changepoints(df_author, author_id=author.id, settings=settings)
+        raw_cps = analyze_author_feature_changepoints(
+            df_author,
+            author_id=author.id,
+            settings=settings,
+        )
+        cps = filter_evidence_change_points(raw_cps, settings.analysis)
         conv = compute_convergence_scores(
             ConvergenceInput.from_settings(
                 cps,

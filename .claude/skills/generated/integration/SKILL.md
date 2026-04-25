@@ -78,10 +78,10 @@ Start here when exploring this area:
 
 | Area | Connections |
 |------|-------------|
-| Tests | 7 calls |
-| Cli | 4 calls |
+| Tests | 10 calls |
 | Unit | 2 calls |
-| Storage | 1 calls |
+| Scraper | 1 calls |
+| Cli | 1 calls |
 
 ## How to Explore
 

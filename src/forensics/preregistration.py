@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any, Literal
 
@@ -28,6 +28,17 @@ logger = logging.getLogger(__name__)
 
 
 VerificationStatus = Literal["ok", "missing", "mismatch"]
+
+PREREGISTERED_SPLIT_DATE = date(2022, 11, 1)
+PREREGISTERED_FEATURES: tuple[str, ...] = (
+    "ai_marker_frequency",
+    "ttr",
+    "mattr",
+    "sent_length_mean",
+    "paragraph_length_variance",
+    "hedging_frequency",
+)
+PREREGISTERED_TEST_PREFIXES: tuple[str, ...] = ("welch_t", "mann_whitney")
 
 
 @dataclass(frozen=True)
@@ -57,6 +68,10 @@ def _snapshot_thresholds(settings: ForensicsSettings) -> dict[str, Any]:
     """Return the canonical dict of locked analysis thresholds."""
     analysis = settings.analysis
     return {
+        "confirmatory_split_date": PREREGISTERED_SPLIT_DATE.isoformat(),
+        "confirmatory_features": list(PREREGISTERED_FEATURES),
+        "confirmatory_test_prefixes": list(PREREGISTERED_TEST_PREFIXES),
+        "multiple_comparison_scope": "global_across_authors",
         "significance_threshold": analysis.significance_threshold,
         "effect_size_threshold": analysis.effect_size_threshold,
         "multiple_comparison_method": analysis.multiple_comparison_method,
@@ -173,6 +188,9 @@ def verify_preregistration(
 __all__ = [
     "VerificationResult",
     "VerificationStatus",
+    "PREREGISTERED_FEATURES",
+    "PREREGISTERED_SPLIT_DATE",
+    "PREREGISTERED_TEST_PREFIXES",
     "lock_preregistration",
     "verify_preregistration",
 ]

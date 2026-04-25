@@ -62,6 +62,7 @@ data/ai_baseline/
 data/preregistration/*
 # Phase 15 — keep pre-registration amendments committed
 !data/preregistration/amendment_*.md
+!data/preregistration/preregistration_lock.json
 data/calibration/
 data/survey/
 # Phase 15 — bench baselines are committed provenance artifacts

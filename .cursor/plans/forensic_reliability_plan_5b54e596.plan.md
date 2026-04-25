@@ -10,7 +10,7 @@ todos:
     status: completed
   - id: methodology-gates
     content: Calibrate AI markers, preregister minimal tests, and gate change-points by effect size.
-    status: pending
+    status: completed
   - id: sensitivity-design
     content: Add section-residualized sensitivity outputs, shared-byline handling, era classification, and AB-pass documentation/tests.
     status: pending

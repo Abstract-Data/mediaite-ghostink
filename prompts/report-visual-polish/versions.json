@@ -1,0 +1,14 @@
+{
+  "family": "report-visual-polish",
+  "current_version": "0.1.0",
+  "versions": [
+    {
+      "version": "0.1.0",
+      "date": "2026-04-24",
+      "status": "active",
+      "model": "claude-opus-4-7",
+      "file": "v0.1.0.md",
+      "changelog_entry": "Initial release. Quarto PDF production pass covering typography (xelatex + Pagella/Inter/JetBrains Mono), document class swap (book -> scrartcl) with continuous page numbering and running headers/footers, cover page via before-body.tex with metadata table and CONFIDENTIAL banner, Polars print() -> Markdown/great_tables table rendering across notebooks, full Plotly removal from PDF render path with shared matplotlib style file (notebooks/_styles.py) and Abstract Data palette, per-chart fixes for heatmap p6 / line chart p11 / histogram p12 / bar chart p17, figure/table numbering with @fig- cross references, seqsplit path breaks and tcolorbox inline-code backgrounds. Seven required fixes, 10 acceptance criteria, verification commands for schema-row leak and Plotly residue. Stage boundaries and analysis-code untouched."
+    }
+  ]
+}

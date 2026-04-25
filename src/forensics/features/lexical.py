@@ -8,6 +8,8 @@ from typing import Any
 
 from spacy.tokens import Doc
 
+AI_MARKER_LIST_VERSION = "0.1.0"
+
 # Top-50 function words (order stable for reproducible dict keys).
 FUNCTION_WORDS: tuple[str, ...] = (
     "the",

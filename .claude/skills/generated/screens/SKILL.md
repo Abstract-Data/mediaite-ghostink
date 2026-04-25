@@ -79,9 +79,8 @@ Start here when exploring this area:
 
 | Area | Connections |
 |------|-------------|
-| Tests | 3 calls |
+| Tests | 4 calls |
 | Features | 1 calls |
-| Forensics | 1 calls |
 
 ## How to Explore
 

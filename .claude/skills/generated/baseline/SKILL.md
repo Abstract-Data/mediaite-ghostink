@@ -1,11 +1,11 @@
 ---
 name: baseline
-description: "Skill for the Baseline area of mediaite-ghostink. 30 symbols across 9 files."
+description: "Skill for the Baseline area of mediaite-ghostink. 27 symbols across 7 files."
 ---
 
 # Baseline
 
-30 symbols | 9 files | Cohesion: 75%
+27 symbols | 7 files | Cohesion: 74%
 
 ## When to Use
 
@@ -22,10 +22,8 @@ description: "Skill for the Baseline area of mediaite-ghostink. 30 symbols acros
 | `src/forensics/baseline/utils.py` | sanitize_model_tag, get_model_digest, hash_prompt_text, dump_manifest |
 | `src/forensics/baseline/orchestrator.py` | _cell_dir, _article_record, run_generation_matrix |
 | `src/forensics/baseline/agent.py` | GeneratedArticle, with_auto_word_count, BaselineDeps |
-| `src/forensics/cli/baseline.py` | run_ai_baseline_command, _run |
 | `evals/baseline_quality.py` | BaselineOutput, generate |
 | `src/forensics/baseline/topics.py` | cycle_keywords |
-| `src/forensics/cli/analyze.py` | _run_ai_baseline_stage |
 
 ## Entry Points
 
@@ -58,9 +56,9 @@ Start here when exploring this area:
 | `cycle_keywords` | Function | `src/forensics/baseline/topics.py` | 111 |
 | `run_generation_matrix` | Function | `src/forensics/baseline/orchestrator.py` | 76 |
 | `with_auto_word_count` | Function | `src/forensics/baseline/agent.py` | 41 |
-| `run_ai_baseline_command` | Function | `src/forensics/cli/baseline.py` | 17 |
 | `test_build_prompt_renders_keywords_and_word_count` | Function | `tests/test_baseline.py` | 38 |
 | `test_build_prompt_missing_template` | Function | `tests/test_baseline.py` | 58 |
+| `generate` | Function | `evals/baseline_quality.py` | 157 |
 
 ## Execution Flows
 
@@ -70,20 +68,21 @@ Start here when exploring this area:
 | `Main → Config_fingerprint` | cross_community | 7 |
 | `Main → Author` | cross_community | 7 |
 | `Main → _validate_batch_size` | cross_community | 7 |
-| `Run_ai_baseline_command → Factory` | cross_community | 7 |
 | `Run_ai_baseline_command → Config_fingerprint` | cross_community | 7 |
 | `Run_ai_baseline_command → Author` | cross_community | 7 |
 | `Main → ForensicsSettings` | cross_community | 6 |
 | `Main → _require_conn` | cross_community | 6 |
 | `Run_ai_baseline_command → ForensicsSettings` | cross_community | 6 |
+| `Run_ai_baseline_command → _require_conn` | cross_community | 6 |
 
 ## Connected Areas
 
 | Area | Connections |
 |------|-------------|
-| Tests | 8 calls |
+| Tests | 6 calls |
 | Scraper | 1 calls |
 | Evals | 1 calls |
+| Features | 1 calls |
 
 ## How to Explore
 

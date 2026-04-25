@@ -237,6 +237,21 @@ def test_calibration_metrics_handle_empty_groups() -> None:
     assert m["median_date_error_days"] is None
 
 
+def test_marker_discrimination_scorer_filters_non_finite_values() -> None:
+    from forensics.calibration.markers import score_marker_discrimination
+
+    score = score_marker_discrimination(
+        human_frequencies=[0.0, 0.01, float("nan")],
+        ai_frequencies=[0.12, 0.18, float("inf")],
+        minimum_separation=0.05,
+    )
+
+    assert score.human_mean == pytest.approx(0.005)
+    assert score.ai_mean == pytest.approx(0.15)
+    assert score.separation == pytest.approx(0.145)
+    assert score.passes_threshold is True
+
+
 # ---------------------------------------------------------------------------
 # runner — perfect + blind detector (mocked analysis)
 # ---------------------------------------------------------------------------

@@ -1,16 +1,16 @@
 ---
 name: scripts
-description: "Skill for the Scripts area of mediaite-ghostink. 21 symbols across 2 files."
+description: "Skill for the Scripts area of mediaite-ghostink. 31 symbols across 8 files."
 ---
 
 # Scripts
 
-21 symbols | 2 files | Cohesion: 36%
+31 symbols | 8 files | Cohesion: 47%
 
 ## When to Use
 
 - Working with code in `scripts/`
-- Understanding how code, nb02, nb06 work
+- Understanding how test_run_author_batches_skips_rich_when_disabled, from_project, build work
 - Modifying scripts-related functionality
 
 ## Key Files
@@ -19,16 +19,22 @@ description: "Skill for the Scripts area of mediaite-ghostink. 21 symbols across
 |------|---------|
 | `scripts/generate_phase8_notebooks.py` | _lines, code, nb02, nb06, md (+11) |
 | `scripts/bench_phase15.py` | PerAuthorStageTimings, PerAuthorBench, _get_git_sha, _bench_one_author, _main |
+| `scripts/generate_baseline.py` | _parser, _amain, main |
+| `tests/test_baseline.py` | _patch_mock_transport, test_preflight_with_all_models, test_preflight_reports_missing_model |
+| `tests/test_pipeline_progress.py` | test_run_author_batches_skips_rich_when_disabled |
+| `src/forensics/paths.py` | from_project |
+| `src/forensics/cli/analyze.py` | build |
+| `src/forensics/baseline/preflight.py` | preflight_check |
 
 ## Entry Points
 
 Start here when exploring this area:
 
-- **`code`** (Function) — `scripts/generate_phase8_notebooks.py:33`
-- **`nb02`** (Function) — `scripts/generate_phase8_notebooks.py:239`
-- **`nb06`** (Function) — `scripts/generate_phase8_notebooks.py:407`
-- **`md`** (Function) — `scripts/generate_phase8_notebooks.py:29`
-- **`nb04`** (Function) — `scripts/generate_phase8_notebooks.py:321`
+- **`test_run_author_batches_skips_rich_when_disabled`** (Function) — `tests/test_pipeline_progress.py:132`
+- **`from_project`** (Function) — `src/forensics/paths.py:85`
+- **`build`** (Function) — `src/forensics/cli/analyze.py:36`
+- **`main`** (Function) — `scripts/generate_baseline.py:91`
+- **`test_preflight_with_all_models`** (Function) — `tests/test_baseline.py:165`
 
 ## Key Symbols
 
@@ -36,6 +42,13 @@ Start here when exploring this area:
 |--------|------|------|------|
 | `PerAuthorStageTimings` | Class | `scripts/bench_phase15.py` | 36 |
 | `PerAuthorBench` | Class | `scripts/bench_phase15.py` | 49 |
+| `test_run_author_batches_skips_rich_when_disabled` | Function | `tests/test_pipeline_progress.py` | 132 |
+| `from_project` | Function | `src/forensics/paths.py` | 85 |
+| `build` | Function | `src/forensics/cli/analyze.py` | 36 |
+| `main` | Function | `scripts/generate_baseline.py` | 91 |
+| `test_preflight_with_all_models` | Function | `tests/test_baseline.py` | 165 |
+| `test_preflight_reports_missing_model` | Function | `tests/test_baseline.py` | 176 |
+| `preflight_check` | Function | `src/forensics/baseline/preflight.py` | 11 |
 | `code` | Function | `scripts/generate_phase8_notebooks.py` | 33 |
 | `nb02` | Function | `scripts/generate_phase8_notebooks.py` | 239 |
 | `nb06` | Function | `scripts/generate_phase8_notebooks.py` | 407 |
@@ -47,39 +60,33 @@ Start here when exploring this area:
 | `nb01` | Function | `scripts/generate_phase8_notebooks.py` | 171 |
 | `nb05` | Function | `scripts/generate_phase8_notebooks.py` | 363 |
 | `nb00` | Function | `scripts/generate_phase8_notebooks.py` | 82 |
-| `nb03` | Function | `scripts/generate_phase8_notebooks.py` | 282 |
-| `nb07` | Function | `scripts/generate_phase8_notebooks.py` | 440 |
-| `main` | Function | `scripts/generate_phase8_notebooks.py` | 557 |
-| `_get_git_sha` | Function | `scripts/bench_phase15.py` | 65 |
-| `_bench_one_author` | Function | `scripts/bench_phase15.py` | 81 |
-| `_main` | Function | `scripts/bench_phase15.py` | 119 |
-| `_lines` | Function | `scripts/generate_phase8_notebooks.py` | 23 |
 
 ## Execution Flows
 
 | Flow | Type | Steps |
 |------|------|-------|
+| `Main → Config_fingerprint` | cross_community | 7 |
+| `Main → Author` | cross_community | 7 |
+| `Main → _validate_batch_size` | cross_community | 7 |
+| `Main → ForensicsSettings` | cross_community | 6 |
+| `Main → _require_conn` | cross_community | 6 |
+| `Main → Repository` | cross_community | 5 |
+| `Analyze → From_layout` | cross_community | 5 |
 | `_main → Config_fingerprint` | cross_community | 5 |
 | `Main → _lines` | cross_community | 4 |
 | `Main → _nb` | cross_community | 4 |
-| `Nb04 → _lines` | cross_community | 3 |
-| `Nb04 → _nb` | cross_community | 3 |
-| `Nb05 → _lines` | cross_community | 3 |
-| `Nb05 → _nb` | intra_community | 3 |
-| `Nb06 → _lines` | cross_community | 3 |
-| `Nb06 → _nb` | cross_community | 3 |
-| `Nb07 → _lines` | cross_community | 3 |
 
 ## Connected Areas
 
 | Area | Connections |
 |------|-------------|
-| Tests | 3 calls |
-| Analysis | 1 calls |
-| Forensics | 1 calls |
+| Tests | 6 calls |
+| Baseline | 1 calls |
+| Unit | 1 calls |
+| Progress | 1 calls |
 
 ## How to Explore
 
-1. `gitnexus_context({name: "code"})` — see callers and callees
+1. `gitnexus_context({name: "test_run_author_batches_skips_rich_when_disabled"})` — see callers and callees
 2. `gitnexus_query({query: "scripts"})` — find related execution flows
 3. Read key files listed above for implementation details

@@ -72,6 +72,12 @@ def test_ai_marker_detection(nlp) -> None:
     assert out["ai_marker_frequency"] > 0
 
 
+def test_ai_marker_list_version_is_pinned() -> None:
+    from forensics.features import lexical
+
+    assert lexical.AI_MARKER_LIST_VERSION == "0.1.0"
+
+
 def test_pos_bigram_extraction(nlp) -> None:
     from forensics.features import pos_patterns
 

@@ -54,7 +54,7 @@ Start here when exploring this area:
 
 | Area | Connections |
 |------|-------------|
-| Cli | 2 calls |
+| Tests | 2 calls |
 
 ## How to Explore
 

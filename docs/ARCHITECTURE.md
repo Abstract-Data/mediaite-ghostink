@@ -139,6 +139,21 @@ Report rendering and compare-only analysis require every configured author resul
 - Bootstrapped 95% confidence intervals (1000 resamples)
 - Benjamini-Hochberg multiple comparison correction
 
+### Confirmatory Methodology Gates
+
+Confirmatory `forensics analyze` runs require a matching lock at
+`data/preregistration/preregistration_lock.json`. Missing or mismatched locks
+hard-fail unless the operator passes `--exploratory`, which is recorded in
+`data/analysis/run_metadata.json`.
+
+The locked minimal test battery is fixed at a Nov. 1, 2022 split across six
+features: `ai_marker_frequency`, `ttr`, `mattr`, `sent_length_mean`,
+`paragraph_length_variance`, and `hedging_frequency`. Confirmatory tests use
+Welch's t-test and Mann-Whitney U per feature, with multiple-comparison
+correction applied globally across all authors in the run. Change-points that
+feed evidence outputs must satisfy confidence >= 0.9 and
+`abs(effect_size_cohens_d) >= analysis.effect_size_threshold` (default 0.2).
+
 ## Design Pattern Guidance for Phases 4–7
 
 The implemented codebase (Phases 1–3) follows a deliberate pattern: Pydantic models for data contracts, classes for stateful services (`Repository`, `RateLimiter`), and pure functions for everything else. Phases 4–7 should preserve this balance but will likely need more classes due to the nature of the work.

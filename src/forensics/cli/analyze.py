@@ -185,6 +185,7 @@ def run_analyze(
     baseline_model: str | None = None,
     articles_per_cell: int | None = None,
     author: str | None = None,
+    exploratory: bool = False,
 ) -> None:
     """Execute the analyze stage as a plain Python function.
 
@@ -208,6 +209,17 @@ def run_analyze(
         logger.info("corpus hash verified (%s)", message)
 
     preregistration = verify_preregistration(settings)
+    if preregistration.status != "ok" and not exploratory:
+        meta = {
+            "run_timestamp": datetime.now(UTC).isoformat(),
+            "author": author,
+            "preregistration_status": preregistration.status,
+            "preregistration_message": preregistration.message,
+            "exploratory": False,
+        }
+        _write_run_metadata(analysis_dir, rid="preregistration-blocked", meta=meta)
+        logger.error("pre-registration gate failed: %s", preregistration.message)
+        raise typer.Exit(code=1)
 
     if compare and not (changepoint or timeseries or drift or ai_baseline or convergence):
         _run_compare_only_flow(ctx)
@@ -235,6 +247,8 @@ def run_analyze(
         "convergence_full": do_full_analysis,
         "author": author,
         "preregistration_status": preregistration.status,
+        "preregistration_message": preregistration.message,
+        "exploratory": exploratory,
     }
     _write_run_metadata(analysis_dir, rid=rid, meta=meta)
 
@@ -328,6 +342,16 @@ def analyze(
         str | None,
         typer.Option("--author", metavar="SLUG", help="Limit to one author slug"),
     ] = None,
+    exploratory: Annotated[
+        bool,
+        typer.Option(
+            "--exploratory",
+            help=(
+                "Allow analysis without a matching pre-registration lock "
+                "and record exploratory mode."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Run analysis pipeline (change-point, drift, convergence, comparison)."""
     run_analyze(
@@ -342,4 +366,5 @@ def analyze(
         baseline_model=baseline_model,
         articles_per_cell=articles_per_cell,
         author=author,
+        exploratory=exploratory,
     )

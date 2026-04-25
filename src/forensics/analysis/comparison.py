@@ -14,6 +14,7 @@ from forensics.analysis.artifact_paths import AnalysisArtifactPaths
 from forensics.analysis.changepoint import PELT_FEATURE_COLUMNS, analyze_author_feature_changepoints
 from forensics.analysis.convergence import ConvergenceInput, compute_convergence_scores
 from forensics.analysis.drift import load_drift_summary
+from forensics.analysis.evidence import filter_evidence_change_points
 from forensics.config.settings import ForensicsSettings
 from forensics.models.analysis import ChangePoint, ConvergenceWindow, DriftScores
 from forensics.models.author import Author
@@ -92,11 +93,14 @@ def _load_or_compute_changepoints(
     changepoints_memory: dict[str, list[ChangePoint]] | None = None,
 ) -> list[ChangePoint]:
     if changepoints_memory is not None and slug in changepoints_memory:
-        return list(changepoints_memory[slug])
+        return filter_evidence_change_points(changepoints_memory[slug], settings.analysis)
     cp_json = paths.changepoints_json(slug)
     if cp_json.is_file():
         raw = json.loads(cp_json.read_text(encoding="utf-8"))
-        return [ChangePoint.model_validate(x) for x in raw]
+        return filter_evidence_change_points(
+            [ChangePoint.model_validate(x) for x in raw],
+            settings.analysis,
+        )
     au = repo.get_author_by_slug(slug)
     p = paths.features_dir / f"{slug}.parquet"
     if au is None or not p.is_file():
@@ -106,7 +110,10 @@ def _load_or_compute_changepoints(
         dfc = load_feature_frame_for_author(paths.features_dir, slug, au.id)
     if dfc is None:
         return []
-    return analyze_author_feature_changepoints(dfc, author_id=au.id, settings=settings)
+    return filter_evidence_change_points(
+        analyze_author_feature_changepoints(dfc, author_id=au.id, settings=settings),
+        settings.analysis,
+    )
 
 
 def _load_target_author_and_frame(
@@ -252,10 +259,19 @@ def _editorial_signal_for_target(
     changepoints_memory: dict[str, list[ChangePoint]] | None = None,
 ) -> float:
     if changepoints_memory is not None and target_id in changepoints_memory:
-        target_cps = list(changepoints_memory[target_id])
+        target_cps = filter_evidence_change_points(
+            changepoints_memory[target_id], settings.analysis
+        )
     else:
-        target_cps = _editorial_target_changepoints_disk_or_compute(
-            target_id, target_author, df_t, paths, settings
+        target_cps = filter_evidence_change_points(
+            _editorial_target_changepoints_disk_or_compute(
+                target_id,
+                target_author,
+                df_t,
+                paths,
+                settings,
+            ),
+            settings.analysis,
         )
     summary = load_drift_summary(target_id, paths, settings=settings)
 

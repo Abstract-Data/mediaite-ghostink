@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from bisect import bisect_left
-from datetime import UTC, datetime
+from datetime import UTC, datetime, time
 from typing import Any
 from uuid import uuid4
 
@@ -23,6 +23,7 @@ from forensics.analysis.convergence import (
     compute_convergence_scores,
 )
 from forensics.analysis.drift import compute_author_drift_pipeline, load_article_embeddings
+from forensics.analysis.evidence import filter_evidence_change_points
 from forensics.analysis.statistics import (
     apply_correction,
     filter_by_effect_size,
@@ -31,6 +32,11 @@ from forensics.analysis.statistics import (
 from forensics.analysis.utils import pair_months_with_velocities
 from forensics.config.settings import AnalysisConfig, ForensicsSettings
 from forensics.models.analysis import AnalysisResult, ChangePoint, DriftScores
+from forensics.preregistration import (
+    PREREGISTERED_FEATURES,
+    PREREGISTERED_SPLIT_DATE,
+    PREREGISTERED_TEST_PREFIXES,
+)
 from forensics.storage.json_io import write_json_artifact
 from forensics.storage.parquet import load_feature_frame_sorted
 from forensics.storage.repository import Repository
@@ -104,17 +110,62 @@ def _run_hypothesis_tests_for_changepoints(
                 n_bootstrap=analysis_cfg.bootstrap_iterations,
             )
         )
-    all_tests = apply_correction(
-        all_tests,
+    return all_tests
+
+
+def _run_preregistered_split_tests(
+    df_author: pl.DataFrame,
+    timestamps: list[datetime],
+    author_id: str,
+    analysis_cfg: AnalysisConfig,
+) -> list:
+    if not timestamps:
+        return []
+    split_dt = datetime.combine(PREREGISTERED_SPLIT_DATE, time.min, tzinfo=UTC)
+    split_idx = bisect_left([_ts_key(t) for t in timestamps], _ts_key(split_dt))
+    all_tests: list = []
+    allowed_prefixes = tuple(f"{prefix}_" for prefix in PREREGISTERED_TEST_PREFIXES)
+    for feature in PREREGISTERED_FEATURES:
+        if feature not in df_author.columns:
+            continue
+        raw = df_author[feature].cast(pl.Float64, strict=False).to_numpy()
+        finite = raw[np.isfinite(raw)]
+        if finite.size == 0:
+            continue
+        fill = float(np.nanmedian(finite))
+        series = [float(x) for x in np.nan_to_num(raw, nan=fill)]
+        tests = run_hypothesis_tests(
+            series,
+            split_idx,
+            feature,
+            author_id,
+            n_bootstrap=analysis_cfg.bootstrap_iterations,
+        )
+        all_tests.extend(test for test in tests if test.test_name.startswith(allowed_prefixes))
+    return all_tests
+
+
+def _apply_global_test_gates(
+    tests_by_slug: dict[str, list],
+    analysis_cfg: AnalysisConfig,
+) -> dict[str, list]:
+    labeled = [(slug, test) for slug, tests in tests_by_slug.items() for test in tests]
+    if not labeled:
+        return {slug: [] for slug in tests_by_slug}
+    corrected = apply_correction(
+        [test for _slug, test in labeled],
         method=analysis_cfg.multiple_comparison_method,
         alpha=analysis_cfg.significance_threshold,
     )
-    all_tests = filter_by_effect_size(
-        all_tests,
+    gated = filter_by_effect_size(
+        corrected,
         analysis_cfg.effect_size_threshold,
         alpha=analysis_cfg.significance_threshold,
     )
-    return all_tests
+    grouped: dict[str, list] = {slug: [] for slug in tests_by_slug}
+    for (slug, _test), gated_test in zip(labeled, gated, strict=True):
+        grouped[slug].append(gated_test)
+    return grouped
 
 
 def _run_per_author_analysis(
@@ -141,11 +192,12 @@ def _run_per_author_analysis(
     if df_author.is_empty():
         df_author = lf_all.collect()
 
-    change_points = analyze_author_feature_changepoints(
+    raw_change_points = analyze_author_feature_changepoints(
         df_author,
         author_id=author.id,
         settings=config,
     )
+    change_points = filter_evidence_change_points(raw_change_points, config.analysis)
 
     baseline_curve: list[tuple[datetime, float]] = []
     vel_tuples: list[tuple[str, float]] = []
@@ -191,6 +243,14 @@ def _run_per_author_analysis(
         change_points,
         author.id,
         config.analysis,
+    )
+    all_tests.extend(
+        _run_preregistered_split_tests(
+            df_author,
+            timestamps,
+            author.id,
+            config.analysis,
+        )
     )
 
     assembled = assemble_analysis_result(
@@ -321,6 +381,7 @@ def run_full_analysis(
     prob_map = probability_trajectory_by_slug or {}
 
     results: dict[str, AnalysisResult] = {}
+    pending: dict[str, tuple[AnalysisResult, list[ChangePoint], list, list]] = {}
 
     with Repository(paths.db_path) as repo:
         for slug in slugs:
@@ -333,23 +394,31 @@ def run_full_analysis(
             )
             if per_author is None:
                 continue
-            assembled, change_points, convergence_windows, all_tests = per_author
-            results[slug] = assembled
-            _write_per_author_json_artifacts(
-                slug,
-                paths,
-                change_points,
-                convergence_windows,
-                assembled,
-                all_tests,
-            )
-            logger.info(
-                "analysis: author=%s change_points=%d windows=%d tests=%d",
-                slug,
-                len(change_points),
-                len(convergence_windows),
-                len(all_tests),
-            )
+            pending[slug] = per_author
+
+    gated_tests_by_slug = _apply_global_test_gates(
+        {slug: raw_tests for slug, (_assembled, _cps, _windows, raw_tests) in pending.items()},
+        config.analysis,
+    )
+    for slug, (assembled, change_points, convergence_windows, _raw_tests) in pending.items():
+        all_tests = gated_tests_by_slug.get(slug, [])
+        assembled = assembled.model_copy(update={"hypothesis_tests": all_tests})
+        results[slug] = assembled
+        _write_per_author_json_artifacts(
+            slug,
+            paths,
+            change_points,
+            convergence_windows,
+            assembled,
+            all_tests,
+        )
+        logger.info(
+            "analysis: author=%s change_points=%d windows=%d tests=%d",
+            slug,
+            len(change_points),
+            len(convergence_windows),
+            len(all_tests),
+        )
 
     targets, controls = _resolve_targets_and_controls(config, author_slug)
     comparison_payload = _run_target_control_comparisons(

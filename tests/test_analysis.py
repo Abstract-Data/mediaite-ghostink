@@ -18,6 +18,7 @@ from forensics.analysis.changepoint import (
     detect_pelt,
 )
 from forensics.analysis.convergence import ConvergenceInput, compute_convergence_scores
+from forensics.analysis.evidence import filter_evidence_change_points
 from forensics.analysis.timeseries import (
     chow_test,
     compute_rolling_stats,
@@ -179,6 +180,26 @@ def test_convergence_window() -> None:
     )
     assert wins
     assert len(wins[0].features_converging) == 5
+
+
+def test_evidence_gate_requires_confidence_and_effect_size() -> None:
+    base = datetime(2024, 1, 1, tzinfo=UTC)
+    cfg = AnalysisConfig(effect_size_threshold=0.2)
+    strong = ChangePoint(
+        feature_name="ai_marker_frequency",
+        author_id="a1",
+        timestamp=base,
+        confidence=0.95,
+        method="pelt",
+        effect_size_cohens_d=0.3,
+        direction="increase",
+    )
+    tiny_effect = strong.model_copy(update={"effect_size_cohens_d": 0.05})
+    low_confidence = strong.model_copy(update={"confidence": 0.89})
+
+    out = filter_evidence_change_points([strong, tiny_effect, low_confidence], cfg)
+
+    assert out == [strong]
 
 
 def test_chow_test_significant() -> None:

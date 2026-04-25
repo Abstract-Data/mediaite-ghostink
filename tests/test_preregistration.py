@@ -40,6 +40,10 @@ def test_lock_content_has_thresholds(forensics_config_path: Path, tmp_path: Path
     assert len(raw["content_hash"]) == 64  # SHA256 hex digest
     analysis = raw["analysis"]
     expected_keys = {
+        "confirmatory_split_date",
+        "confirmatory_features",
+        "confirmatory_test_prefixes",
+        "multiple_comparison_scope",
         "significance_threshold",
         "effect_size_threshold",
         "multiple_comparison_method",
@@ -68,6 +72,8 @@ def test_lock_content_has_thresholds(forensics_config_path: Path, tmp_path: Path
     assert expected_keys.issubset(analysis.keys())
     assert analysis["significance_threshold"] == settings.analysis.significance_threshold
     assert analysis["effect_size_threshold"] == settings.analysis.effect_size_threshold
+    assert analysis["confirmatory_split_date"] == "2022-11-01"
+    assert analysis["multiple_comparison_scope"] == "global_across_authors"
 
 
 def test_verify_matches_when_unchanged(forensics_config_path: Path, tmp_path: Path) -> None:
@@ -144,10 +150,49 @@ def test_lock_is_idempotent(forensics_config_path: Path, tmp_path: Path) -> None
     assert verify_preregistration(settings, lock_path=out).status == "ok"
 
 
-def test_run_analyze_invokes_verify_preregistration(
+def test_run_analyze_blocks_missing_preregistration(
     forensics_config_path: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """``run_analyze`` always calls ``verify_preregistration`` before stages."""
+    """``run_analyze`` hard-fails when no lock exists and exploratory is not set."""
+    import importlib
+
+    analyze_mod = importlib.import_module("forensics.cli.analyze")
+    from forensics.storage.repository import init_db
+
+    data = tmp_path / "data"
+    data.mkdir(parents=True, exist_ok=True)
+    init_db(data / "articles.db")
+
+    calls: list[object] = []
+
+    def fake_verify(settings_arg: object) -> VerificationResult:
+        calls.append(settings_arg)
+        return VerificationResult(
+            status="missing",
+            message="no lock",
+            lock_path=tmp_path / "preregistration" / "preregistration_lock.json",
+        )
+
+    monkeypatch.setattr(analyze_mod, "verify_preregistration", fake_verify)
+    monkeypatch.setattr(analyze_mod, "get_project_root", lambda: tmp_path)
+
+    with pytest.raises(analyze_mod.typer.Exit):
+        analyze_mod.run_analyze()
+
+    assert len(calls) == 1
+    assert calls[0] is get_settings()
+
+    meta_path = tmp_path / "data" / "analysis" / "run_metadata.json"
+    assert meta_path.is_file()
+    raw = json.loads(meta_path.read_text(encoding="utf-8"))
+    assert raw.get("preregistration_status") == "missing"
+    assert raw.get("exploratory") is False
+
+
+def test_run_analyze_records_exploratory_override(
+    forensics_config_path: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``--exploratory`` records the override and continues into selected stages."""
     import importlib
 
     analyze_mod = importlib.import_module("forensics.cli.analyze")
@@ -172,12 +217,10 @@ def test_run_analyze_invokes_verify_preregistration(
     monkeypatch.setattr(analyze_mod, "_run_timeseries_stage", lambda *a, **k: None)
     monkeypatch.setattr(analyze_mod, "_run_full_analysis_stage", lambda *a, **k: None)
 
-    analyze_mod.run_analyze()
+    analyze_mod.run_analyze(exploratory=True)
 
     assert len(calls) == 1
-    assert calls[0] is get_settings()
-
     meta_path = tmp_path / "data" / "analysis" / "run_metadata.json"
-    assert meta_path.is_file()
     raw = json.loads(meta_path.read_text(encoding="utf-8"))
     assert raw.get("preregistration_status") == "missing"
+    assert raw.get("exploratory") is True
