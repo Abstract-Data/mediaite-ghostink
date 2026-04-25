@@ -54,11 +54,23 @@ def test_pelt_no_change() -> None:
 
 
 def test_bocpd_gradual_shift() -> None:
+    """Phase 15 A: legacy ``p_r0_legacy`` mode preserved for replication.
+
+    The MAP-reset rule is exercised in ``tests/unit/test_bocpd_semantics.py``;
+    this test pins the historical low-threshold-on-``P(r=0)`` behavior so the
+    rollback flag remains a true byte-for-byte fallback.
+    """
     n = 250
     ramp = np.linspace(0.0, 2.0, n)
     noise = np.random.default_rng(0).normal(0.0, 0.05, n)
     signal = ramp + noise
-    raw = detect_bocpd(signal, hazard_rate=1 / 40.0, threshold=0.02)
+    raw = detect_bocpd(
+        signal,
+        hazard_rate=1 / 40.0,
+        mode="p_r0_legacy",
+        threshold=0.02,
+        student_t=False,
+    )
     probs_second = [p for t, p in raw if t > n // 2]
     probs_first = [p for t, p in raw if t <= n // 2]
     assert probs_second, f"expected BOCPD detections in second half, got {raw[:10]}"
@@ -122,12 +134,25 @@ def _detect_bocpd_scalar_reference(
 
 @pytest.mark.parametrize("seed", [0, 1, 2, 42])
 def test_bocpd_vectorized_matches_reference(seed: int) -> None:
+    """Vectorized BOCPD parity vs. the O(n²) scalar reference.
+
+    Pinned to ``mode="p_r0_legacy"`` and ``student_t=False`` because the
+    reference implements exactly the Normal-known-σ² + ``P(r=0)`` threshold
+    path. The new MAP-reset / Student-t paths are covered by the dedicated
+    semantics suite under ``tests/unit/test_bocpd_semantics.py``.
+    """
     rng = np.random.default_rng(seed)
     for n in (24, 48, 80):
         signal = rng.normal(0.0, 1.0, n).astype(float)
         for hazard in (1 / 80.0, 1 / 250.0):
             for th in (0.15, 0.5):
-                got = detect_bocpd(signal, hazard_rate=hazard, threshold=th)
+                got = detect_bocpd(
+                    signal,
+                    hazard_rate=hazard,
+                    mode="p_r0_legacy",
+                    threshold=th,
+                    student_t=False,
+                )
                 ref = _detect_bocpd_scalar_reference(signal, hazard_rate=hazard, threshold=th)
                 assert got == ref, f"mismatch seed={seed} n={n} h={hazard} th={th}"
 
@@ -139,7 +164,13 @@ def test_bocpd_long_signal_runs_quickly() -> None:
     n = 4000
     signal = rng.normal(0.0, 0.5, n)
     t0 = time.perf_counter()
-    out = detect_bocpd(signal, hazard_rate=1 / 500.0, threshold=0.55)
+    out = detect_bocpd(
+        signal,
+        hazard_rate=1 / 500.0,
+        mode="p_r0_legacy",
+        threshold=0.55,
+        student_t=False,
+    )
     elapsed = time.perf_counter() - t0
     assert elapsed < 5.0, f"BOCPD too slow: {elapsed:.2f}s for n={n}"
     assert isinstance(out, list)
@@ -155,7 +186,15 @@ def test_cohens_d_calculation() -> None:
 
 def test_convergence_window() -> None:
     base = datetime(2024, 1, 1, tzinfo=UTC)
-    names = [f"f{i}" for i in range(5)]
+    # Phase 15 B2: feature names must belong to the FEATURE_FAMILIES registry.
+    # Pick one feature per distinct family so ratio = 5/8 clears min_feature_ratio=0.6.
+    names = [
+        "ttr",  # lexical_richness
+        "flesch_kincaid",  # readability
+        "sent_length_mean",  # sentence_structure
+        "bigram_entropy",  # entropy
+        "self_similarity_30d",  # self_similarity
+    ]
     cps = [
         ChangePoint(
             feature_name=names[i],

@@ -134,6 +134,67 @@ def test_no_lock_file_returns_missing(forensics_config_path: Path, tmp_path: Pat
     assert result.lock_path == out
 
 
+def test_unfilled_template_returns_missing(forensics_config_path: Path, tmp_path: Path) -> None:
+    """An operator-template lock (locked_at=null, no analysis) → ``missing``.
+
+    Committing the bare template before filling it must NOT trip a false
+    ``mismatch`` warning — every analysis-threshold key would otherwise be
+    flagged as drift on every run. ``verify_preregistration`` short-circuits
+    the template state to ``missing`` (still exploratory) so the operator
+    sees the same exploratory log line they would see without any file.
+    """
+    settings = get_settings()
+    out = tmp_path / "preregistration_lock.json"
+    template = {
+        "preregistration_id": "phase15-rollout-2026-04-24",
+        "locked_at": None,
+        "locked_by": None,
+        "config_hash": None,
+        "amended_from": "data/preregistration/amendment_phase15.md",
+        "amendments": ["data/preregistration/amendment_phase15.md"],
+        "hypotheses": ["<author> shows family-level convergence"],
+        "expected_directions": {"ai_marker_frequency": "increase"},
+        "notes": "Operator MUST fill in this file.",
+    }
+    out.write_text(json.dumps(template, indent=2), encoding="utf-8")
+
+    result = verify_preregistration(settings, lock_path=out)
+
+    assert result.status == "missing"
+    assert result.diffs == []
+    assert "template" in result.message.lower()
+
+
+def test_committed_template_lock_does_not_violate(
+    forensics_config_path: Path,
+) -> None:
+    """The repo-committed template at ``data/preregistration/preregistration_lock.json``.
+
+    Pinned smoke-test for the J3/J6 follow-up: shipping the template into
+    the repo must not flip every analyze run to ``mismatch``. If a future
+    edit to the template removes ``locked_at`` or hard-codes ``analysis``
+    fields that drift from current settings, this test catches it before
+    the next CI run logs a false violation.
+    """
+    settings = get_settings()
+    repo_lock = (
+        Path(__file__).resolve().parent.parent
+        / "data"
+        / "preregistration"
+        / "preregistration_lock.json"
+    )
+    if not repo_lock.is_file():
+        pytest.skip("template lock not present in this checkout")
+
+    result = verify_preregistration(settings, lock_path=repo_lock)
+
+    # ``ok`` is acceptable too (operator may have filled it locally), but
+    # a freshly-committed template must read as ``missing``, never ``mismatch``.
+    assert result.status in {"missing", "ok"}, (
+        f"committed template should not read as mismatch: {result.message}"
+    )
+
+
 def test_lock_is_idempotent(forensics_config_path: Path, tmp_path: Path) -> None:
     """Second lock overwrites the first and verification still succeeds."""
     settings = get_settings()

@@ -106,15 +106,16 @@ def test_run_hypothesis_tests_short_series_returns_empty() -> None:
     assert run_hypothesis_tests([1.0] * 10, 10, "f", "a") == []
 
 
-def test_run_hypothesis_tests_emits_welch_mw_ks() -> None:
+def test_run_hypothesis_tests_emits_welch_and_mw_by_default() -> None:
+    # Phase 15 C1: KS dropped from default battery. Welch + Mann–Whitney
+    # already cover the location shifts the forensic analysis cares about.
     pre = [1.0, 1.1, 0.9, 1.2, 0.95, 1.05, 1.1, 0.9]
     post = [5.0, 5.1, 4.9, 5.2, 4.95, 5.05, 5.1, 4.9]
     tests = run_hypothesis_tests(pre + post, len(pre), "ttr", "author-x", n_bootstrap=50)
-    # Must emit all three statistical tests (names are feature-scoped).
     names = {t.test_name for t in tests}
     assert any(n.startswith("welch_t") for n in names)
     assert any(n.startswith("mann_whitney") for n in names)
-    assert any(n.startswith("ks") for n in names)
+    assert not any(n.startswith("ks_2samp") for n in names)
     for t in tests:
         assert t.feature_name == "ttr"
         assert t.author_id == "author-x"

@@ -1,0 +1,15 @@
+# Pre-registration directory — what is committed and what is local-only.
+#
+# COMMITTED (no leading bang needed; tracked by git):
+#   - amendment_phase15.md           — phase-amendment narrative
+#   - preregistration_lock.json      — operator-filled confirmatory lock
+#                                      (template lives in this repo as well;
+#                                      operator overwrites it locally before a
+#                                      confirmatory run)
+#
+# IGNORED (operator-private notes that must NOT travel into a published lock):
+*.private.md
+*.private.json
+*.draft.md
+*.draft.json
+notes_*.md

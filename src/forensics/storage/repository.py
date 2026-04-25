@@ -153,7 +153,12 @@ def _migrate_articles_columns(conn: sqlite3.Connection) -> None:
 
 def _author_row_to_model(row: sqlite3.Row) -> Author:
     """Map an ``authors`` table row to :class:`Author`."""
-    is_shared_byline = bool(row["is_shared_byline"]) if "is_shared_byline" in row.keys() else False
+    # ``is_shared_byline`` was added in migration 001 (Phase 15 D); older
+    # databases may already have rows without it but the migration is applied
+    # on Repository entry. Defensive ``in row.keys()`` keeps us safe in tests
+    # that build rows by hand.
+    keys = set(row.keys())
+    shared = bool(row["is_shared_byline"]) if "is_shared_byline" in keys else False
     return Author(
         id=row["id"],
         name=row["name"],
@@ -163,7 +168,7 @@ def _author_row_to_model(row: sqlite3.Row) -> Author:
         baseline_start=date.fromisoformat(str(row["baseline_start"])),
         baseline_end=date.fromisoformat(str(row["baseline_end"])),
         archive_url=row["archive_url"],
-        is_shared_byline=is_shared_byline,
+        is_shared_byline=shared,
     )
 
 
@@ -434,8 +439,8 @@ class Repository(RepositoryReader):
         conn.execute(
             """
             INSERT INTO authors (
-                id, name, slug, outlet, role, baseline_start, baseline_end, archive_url,
-                is_shared_byline
+                id, name, slug, outlet, role, baseline_start, baseline_end,
+                archive_url, is_shared_byline
             )
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET

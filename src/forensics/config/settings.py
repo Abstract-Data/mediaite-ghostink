@@ -106,9 +106,11 @@ class AnalysisConfig(BaseModel):
         "l2", json_schema_extra={"include_in_config_hash": True}
     )
     bocpd_hazard_rate: float = 1 / 250.0
-    # Phase 15 A — MAP-run-length reset replaces ``P(r=0)`` thresholding.
-    # ``bocpd_threshold`` is removed (it was algebraically pinned to the
-    # hazard rate and could never fire; see docs/GUARDRAILS.md).
+    # Phase 15 A — MAP-run-length reset replaces ``P(r=0)`` thresholding as
+    # the default. ``bocpd_threshold`` was removed (algebraically pinned to
+    # the hazard rate; see docs/GUARDRAILS.md). Set ``bocpd_detection_mode``
+    # to ``"p_r0_legacy"`` to restore the pre-Phase-A behavior byte-for-byte
+    # for replication / ablation runs.
     bocpd_detection_mode: Literal["p_r0_legacy", "map_reset"] = Field(
         "map_reset", json_schema_extra={"include_in_config_hash": True}
     )
@@ -142,6 +144,17 @@ class AnalysisConfig(BaseModel):
         "section_adjusted",
         json_schema_extra={"include_in_config_hash": True},
     )
+    # Phase 15 Fix-G — windows pass via drift-only when pipeline_b >= this threshold.
+    # Lets high embedding-drift signals surface independently of the stylometric
+    # ratio gate or the AB intersection gate (both of which require non-trivial
+    # pipeline_a). Setting this to ``1.0`` (or any value above the maximum
+    # achievable pipeline_b) disables the drift-only channel.
+    convergence_drift_only_pb_threshold: float = Field(
+        0.3,
+        ge=0.0,
+        le=1.0,
+        json_schema_extra={"include_in_config_hash": True},
+    )
     convergence_perplexity_drop_ratio: float = 0.92
     convergence_burstiness_drop_ratio: float = 0.94
     # Empirical null for convergence windows (logged only; does not change windows).
@@ -164,6 +177,12 @@ class AnalysisConfig(BaseModel):
     fdr_grouping: Literal["author", "family"] = Field(
         "family", json_schema_extra={"include_in_config_hash": True}
     )
+    # Phase 15 C1 — Kolmogorov–Smirnov is highly correlated with Mann–Whitney
+    # for the location shifts this analysis cares about. Default OFF drops the
+    # per-CP test count from 3 → 2 and removes a redundant inflator from the
+    # BH denominator. Re-enable for replication runs that want shape-change
+    # detection on top of location shift.
+    enable_ks_test: bool = Field(False, json_schema_extra={"include_in_config_hash": True})
     # Phase 15 E — Pipeline B scoring mode; legacy preserves the v0.14 formulas.
     pipeline_b_mode: Literal["legacy", "percentile"] = Field(
         "legacy", json_schema_extra={"include_in_config_hash": True}
@@ -210,6 +229,14 @@ class FeaturesConfig(BaseModel):
     # a migration (see ``src/forensics/storage/migrations/002_*``).
     feature_parquet_schema_version: int = Field(
         2, ge=1, json_schema_extra={"include_in_config_hash": True}
+    )
+    # Phase 15 J2 — drop advertorial / syndicated articles from feature
+    # extraction so the per-author parquet stays free of off-style
+    # contamination. Mirrors :class:`SurveyConfig.excluded_sections`; both
+    # default to the same set so a single ``--include-advertorial`` flag at the
+    # CLI layer can flip both behaviours together.
+    excluded_sections: frozenset[str] = Field(
+        default_factory=lambda: frozenset({"sponsored", "partner-content", "crosspost"})
     )
 
 

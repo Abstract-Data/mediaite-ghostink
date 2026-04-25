@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 
 import numpy as np
@@ -17,9 +17,66 @@ from forensics.paths import closed_interval_contains
 
 logger = logging.getLogger(__name__)
 
+# Phase 15 B1/B2 — feature-family grouping. The canonical registry lives in
+# ``forensics.analysis.feature_families`` (Unit 4). Until that lands we carry a
+# local fallback with the exact same content so convergence scoring can ship
+# family semantics ahead of the registry module.
+try:
+    from forensics.analysis.feature_families import FAMILY_COUNT, FEATURE_FAMILIES
+except ImportError:  # pragma: no cover - fallback exercised only pre-Unit-4
+    FEATURE_FAMILIES: dict[str, str] = {
+        # Lexical richness
+        "ttr": "lexical_richness",
+        "mattr": "lexical_richness",
+        "hapax_ratio": "lexical_richness",
+        "yules_k": "lexical_richness",
+        "simpsons_d": "lexical_richness",
+        # Readability
+        "flesch_kincaid": "readability",
+        "coleman_liau": "readability",
+        "gunning_fog": "readability",
+        # Sentence structure (incl. paragraph_length_variance)
+        "sent_length_mean": "sentence_structure",
+        "sent_length_std": "sentence_structure",
+        "sent_length_skewness": "sentence_structure",
+        "subordinate_clause_depth": "sentence_structure",
+        "conjunction_freq": "sentence_structure",
+        "passive_voice_ratio": "sentence_structure",
+        "paragraph_length_variance": "sentence_structure",
+        # Entropy
+        "bigram_entropy": "entropy",
+        "trigram_entropy": "entropy",
+        # Self-similarity
+        "self_similarity_30d": "self_similarity",
+        "self_similarity_90d": "self_similarity",
+        # AI / formula / voice register markers
+        "ai_marker_frequency": "ai_markers",
+        "formula_opening_score": "ai_markers",
+        "hedging_frequency": "ai_markers",
+        "first_person_ratio": "ai_markers",
+    }
+    FAMILY_COUNT: int = len(set(FEATURE_FAMILIES.values()))
+
 # Named convergence-scoring constants (RF-SMELL-003 / audit for pre-registration lock).
-PIPELINE_SCORE_PASS_THRESHOLD: float = 0.5
-"""Both pipeline A and pipeline B scores must exceed this for the window to pass on A/B alone."""
+PIPELINE_SCORE_PASS_THRESHOLD: float = 0.3
+"""Both pipeline A and pipeline B scores must exceed this for the window to pass on A/B alone.
+
+Lowered from 0.5 → 0.3 in Fix-F (post-Phase-15-Fix-E) so pipeline_b-positive
+windows from percentile mode actually persist into the AB intersection. The
+strict 0.5 threshold filtered all percentile-mode-lifted windows because
+peak_signal alone tops at 0.5 when sim_signal=ai_signal=0.
+"""
+
+DRIFT_ONLY_PB_THRESHOLD: float = 0.3
+"""Phase 15 Fix-G third persistence channel — fallback when no settings supply one.
+
+A window survives whenever ``pipeline_b_score >= DRIFT_ONLY_PB_THRESHOLD``
+regardless of the ratio / AB-intersection gates. Pre-Fix-G, 13 of 14 authors
+persisted *zero* windows with positive pipeline_b because their pa fell below
+0.3, hiding the drift signal from the report. The runtime value lives on
+``AnalysisConfig.convergence_drift_only_pb_threshold`` and is propagated via
+:class:`ConvergenceInput`.
+"""
 
 EMBEDDING_DROP_EPSILON: float = 0.05
 """Denominator epsilon for the head-vs-tail embedding similarity drop ratio."""
@@ -125,35 +182,52 @@ def _window_start_candidates(
     return starts
 
 
-def _stylometry_weights_in_window(
+def _cps_in_window(
     change_points: list[ChangePoint],
     start_d: date,
     end_d: date,
-) -> dict[str, tuple[float, float]]:
-    feats_weights: dict[str, tuple[float, float]] = {}
-    for cp in change_points:
-        d = cp.timestamp.date()
-        if closed_interval_contains(d, start_d, end_d):
-            w = max(float(cp.confidence), 1e-6)
-            prev = feats_weights.get(cp.feature_name)
-            if prev is None or w * abs(cp.effect_size_cohens_d) > prev[0] * abs(prev[1]):
-                feats_weights[cp.feature_name] = (w, float(cp.effect_size_cohens_d))
-    return feats_weights
+) -> list[ChangePoint]:
+    """Change-points whose timestamp falls in ``[start_d, end_d]``."""
+    return [
+        cp for cp in change_points if closed_interval_contains(cp.timestamp.date(), start_d, end_d)
+    ]
 
 
 def _pipeline_a_from_stylometry(
-    feats_weights: dict[str, tuple[float, float]],
-    total: int,
-) -> tuple[list[str], float, float]:
-    features_converging = sorted(feats_weights.keys())
-    ratio = len(features_converging) / float(total) if total else 0.0
-    if features_converging:
-        num = sum(w * d for w, d in feats_weights.values())
-        den = sum(w for w, _ in feats_weights.values())
-        pipeline_a_score = float(min(1.0, max(0.0, abs(num / den)))) if den > 0 else 0.0
-    else:
-        pipeline_a_score = 0.0
-    return features_converging, ratio, pipeline_a_score
+    cps_in_window: list[ChangePoint],
+) -> tuple[list[str], list[str], float, float]:
+    """Pipeline A score under family grouping (Phase 15 B2).
+
+    One vote per family: the representative CP for a family is the in-window
+    CP that maximises ``confidence * |effect_size_cohens_d|``. The ratio is
+    computed over ``FAMILY_COUNT`` (independent axes), and the score is the
+    unweighted mean of per-family representative scores clipped to ``[0, 1]``.
+
+    Returns ``(features_converging, families_converging, ratio, score)`` —
+    ``features_converging`` lists one representative raw feature per family
+    sorted alphabetically; ``families_converging`` mirrors it at the family
+    level so callers can populate ``ConvergenceWindow.families_converging``.
+    """
+    family_reps: dict[str, float] = {}
+    family_feature: dict[str, str] = {}
+    for cp in cps_in_window:
+        fam = FEATURE_FAMILIES.get(cp.feature_name)
+        if fam is None:
+            continue
+        score = float(cp.confidence) * abs(float(cp.effect_size_cohens_d))
+        prev = family_reps.get(fam, -1.0)
+        if score > prev:
+            family_reps[fam] = score
+            family_feature[fam] = cp.feature_name
+
+    if not family_reps:
+        return [], [], 0.0, 0.0
+
+    ratio = len(family_reps) / FAMILY_COUNT
+    pipeline_a_score = float(min(1.0, float(np.mean(list(family_reps.values())))))
+    features_converging = sorted(family_feature.values())
+    families_converging = sorted(family_reps.keys())
+    return features_converging, families_converging, ratio, pipeline_a_score
 
 
 def _velocity_peak_and_months(
@@ -163,15 +237,33 @@ def _velocity_peak_and_months(
     v_mean: float,
     v_std: float,
     v_thr: float,
+    *,
+    mode: str = "legacy",
+    author_velocities_all: list[float] | None = None,
 ) -> tuple[float, list[str]]:
+    """Velocity peak signal + the months covered by the window.
+
+    Phase 15 E3: when ``mode == "percentile"`` the peak signal becomes the
+    per-author percentile rank of the window's max velocity against the
+    author's full history (``author_velocities_all``), not a z-score against
+    the (potentially tiny) newsroom-wide mean/std.
+    """
     months_in = [key for key, _, _ in iter_months_in_window(start_d, end_d, vel_by_month)]
     vel_window = [vel_by_month[m] for m in months_in]
+    if not vel_window:
+        return 0.0, months_in
+
+    if mode == "percentile" and author_velocities_all:
+        hist = np.asarray(author_velocities_all, dtype=float)
+        peak_signal = float((hist <= max(vel_window)).mean())
+        return peak_signal, months_in
+
     peak_signal = 0.0
-    if vel_window and v_std > 1e-12:
+    if v_std > 1e-12:
         numer = max(vel_window) - v_mean
         denom = 2.0 * v_std + 1e-12
         peak_signal = float(min(1.0, max(0.0, numer / denom)))
-    elif vel_window and max(vel_window) > v_thr:
+    elif max(vel_window) > v_thr:
         peak_signal = 1.0
     return peak_signal, months_in
 
@@ -180,14 +272,23 @@ def _embedding_similarity_signal(
     sim_by_date: list[tuple[date, float]],
     start_d: date,
     end_d: date,
+    *,
+    mode: str = "legacy",
+    sim_std_author: float = 0.0,
 ) -> float:
+    """Head-vs-tail similarity drop; Phase 15 E3 uses a per-author epsilon floor."""
     sim_window = [s for d, s in sim_by_date if closed_interval_contains(d, start_d, end_d)]
     if len(sim_window) < 2:
         return 0.0
     head = float(np.mean(sim_window[: max(1, len(sim_window) // 3)]))
     tail = float(np.mean(sim_window[-max(1, len(sim_window) // 3) :]))
     drop = head - tail
-    return float(min(1.0, max(0.0, drop / (abs(head) + EMBEDDING_DROP_EPSILON))))
+    epsilon = (
+        max(EMBEDDING_DROP_EPSILON, 0.1 * sim_std_author)
+        if mode == "percentile"
+        else EMBEDDING_DROP_EPSILON
+    )
+    return float(min(1.0, max(0.0, drop / (abs(head) + epsilon))))
 
 
 def _ai_curve_signal(ai_by_month: dict[str, float], months_in: list[str]) -> float:
@@ -222,6 +323,7 @@ class ConvergenceInput:
     use_permutation: bool
     permutation_seed: int
     n_permutations: int
+    drift_only_pb_threshold: float = DRIFT_ONLY_PB_THRESHOLD
 
     @classmethod
     def build(
@@ -239,11 +341,16 @@ class ConvergenceInput:
         use_permutation: bool = False,
         permutation_seed: int = 42,
         n_permutations: int = 1000,
+        drift_only_pb_threshold: float | None = None,
     ) -> ConvergenceInput:
         """Resolve defaults from ``settings`` and from ``PELT_FEATURE_COLUMNS``."""
         if settings is not None:
             window_days = settings.analysis.convergence_window_days
             min_feature_ratio = settings.analysis.convergence_min_feature_ratio
+            if drift_only_pb_threshold is None:
+                drift_only_pb_threshold = settings.analysis.convergence_drift_only_pb_threshold
+        if drift_only_pb_threshold is None:
+            drift_only_pb_threshold = DRIFT_ONLY_PB_THRESHOLD
         total = (
             total_feature_count if total_feature_count is not None else len(PELT_FEATURE_COLUMNS)
         )
@@ -260,6 +367,7 @@ class ConvergenceInput:
             use_permutation=use_permutation,
             permutation_seed=permutation_seed,
             n_permutations=n_permutations,
+            drift_only_pb_threshold=drift_only_pb_threshold,
         )
 
     @classmethod
@@ -305,13 +413,15 @@ class _VelocityStats:
     mean: float
     std: float
     threshold: float
+    all_values: list[float]
 
 
 def _precompute_velocity_stats(
     centroid_velocities: list[tuple[str, float]],
 ) -> _VelocityStats:
     vel_by_month = dict(centroid_velocities)
-    vel_vals = np.asarray([v for _, v in centroid_velocities], dtype=float)
+    all_values = [v for _, v in centroid_velocities]
+    vel_vals = np.asarray(all_values, dtype=float)
     v_mean = float(np.mean(vel_vals)) if vel_vals.size else 0.0
     v_std = float(np.std(vel_vals, ddof=1)) if vel_vals.size > 1 else 0.0
     return _VelocityStats(
@@ -319,7 +429,15 @@ def _precompute_velocity_stats(
         mean=v_mean,
         std=v_std,
         threshold=v_mean + 2.0 * v_std,
+        all_values=all_values,
     )
+
+
+def _sim_std_author(sim_by_date: list[tuple[date, float]]) -> float:
+    """Author-level std of the baseline-similarity curve (Phase 15 E3 anchor)."""
+    if len(sim_by_date) <= 1:
+        return 0.0
+    return float(np.std(np.fromiter((s for _, s in sim_by_date), dtype=float), ddof=1))
 
 
 def _score_single_window(
@@ -329,12 +447,17 @@ def _score_single_window(
     input_: ConvergenceInput,
     velocity_stats: _VelocityStats,
     sim_by_date: list[tuple[date, float]],
+    sim_std_author: float,
     ai_by_month: dict[str, float],
 ) -> ConvergenceWindow | None:
     """Score one candidate window; ``None`` means the window failed the cutoffs."""
-    feats_weights = _stylometry_weights_in_window(input_.change_points, start_d, end_d)
-    features_converging, ratio, pipeline_a_score = _pipeline_a_from_stylometry(
-        feats_weights, input_.total_feature_count
+    cps_in_window = _cps_in_window(input_.change_points, start_d, end_d)
+    features_converging, families_converging, ratio, pipeline_a_score = _pipeline_a_from_stylometry(
+        cps_in_window
+    )
+
+    pipeline_b_mode = (
+        input_.settings.analysis.pipeline_b_mode if input_.settings is not None else "legacy"
     )
 
     peak_signal, months_in = _velocity_peak_and_months(
@@ -344,8 +467,16 @@ def _score_single_window(
         velocity_stats.mean,
         velocity_stats.std,
         velocity_stats.threshold,
+        mode=pipeline_b_mode,
+        author_velocities_all=velocity_stats.all_values,
     )
-    sim_signal = _embedding_similarity_signal(sim_by_date, start_d, end_d)
+    sim_signal = _embedding_similarity_signal(
+        sim_by_date,
+        start_d,
+        end_d,
+        mode=pipeline_b_mode,
+        sim_std_author=sim_std_author,
+    )
     ai_signal = _ai_curve_signal(ai_by_month, months_in) if input_.ai_convergence_curve else 0.0
 
     b_parts = [peak_signal, sim_signal]
@@ -362,23 +493,68 @@ def _score_single_window(
             settings=input_.settings,
         )
 
+    # Phase 15 E1 — emit per-window component signals at DEBUG so the seven
+    # authors whose Pipeline B floors to 0.0 are diagnosable from logs alone.
+    author_label = getattr(input_, "author_id", None) or (
+        cps_in_window[0].author_id if cps_in_window else "?"
+    )
+    logger.debug(
+        "convergence: author=%s window=%s-%s peak_signal=%.4f sim_signal=%.4f "
+        "ai_signal=%.4f pipeline_b=%.4f",
+        author_label,
+        start_d,
+        end_d,
+        peak_signal,
+        sim_signal,
+        ai_signal,
+        pipeline_b_score,
+    )
+
     passes_ratio = ratio >= input_.min_feature_ratio
     passes_ab = (
         pipeline_a_score > PIPELINE_SCORE_PASS_THRESHOLD
         and pipeline_b_score > PIPELINE_SCORE_PASS_THRESHOLD
     )
-    if not (passes_ratio or passes_ab):
+    # Phase 15 Fix-G — drift-only channel: persist windows where the embedding
+    # / velocity signal is strong enough on its own, even if pipeline_a is too
+    # weak to clear the AB intersection and the family ratio gate misses.
+    passes_drift_only = pipeline_b_score >= input_.drift_only_pb_threshold
+    if not (passes_ratio or passes_ab or passes_drift_only):
         return None
 
-    return ConvergenceWindow(
-        start_date=start_d,
-        end_date=end_d,
-        features_converging=features_converging,
-        convergence_ratio=ratio,
-        pipeline_a_score=pipeline_a_score,
-        pipeline_b_score=pipeline_b_score,
-        pipeline_c_score=pipeline_c,
-    )
+    passes_via: list[str] = []
+    if passes_ratio:
+        passes_via.append("ratio")
+    if passes_ab:
+        passes_via.append("ab")
+    if passes_drift_only:
+        passes_via.append("drift_only")
+
+    # Phase 15 B4 — ``families_converging`` is added to ``ConvergenceWindow``
+    # by Unit 4. Fall through to the legacy constructor if the field isn't
+    # present yet so behaviour is unchanged pre-Unit-4.
+    try:
+        return ConvergenceWindow(
+            start_date=start_d,
+            end_date=end_d,
+            features_converging=features_converging,
+            families_converging=families_converging,
+            convergence_ratio=ratio,
+            pipeline_a_score=pipeline_a_score,
+            pipeline_b_score=pipeline_b_score,
+            pipeline_c_score=pipeline_c,
+            passes_via=passes_via,
+        )
+    except (TypeError, ValueError):  # pragma: no cover - exercised pre-Unit-4 only
+        return ConvergenceWindow(
+            start_date=start_d,
+            end_date=end_d,
+            features_converging=features_converging,
+            convergence_ratio=ratio,
+            pipeline_a_score=pipeline_a_score,
+            pipeline_b_score=pipeline_b_score,
+            pipeline_c_score=pipeline_c,
+        )
 
 
 def _run_permutation_test(
@@ -428,6 +604,34 @@ def _run_permutation_test(
     )
 
 
+_RAW_CP_METHODS: frozenset[str] = frozenset({"pelt", "bocpd"})
+_SECTION_ADJUSTED_CP_METHODS: frozenset[str] = frozenset(
+    {"pelt_section_adjusted", "bocpd_section_adjusted"}
+)
+
+
+def _filter_change_points_by_source(
+    change_points: list[ChangePoint],
+    source: str,
+) -> list[ChangePoint]:
+    """Phase 15 J5 dispatch: pick the CP stream the convergence stage consumes.
+
+    - ``"raw"`` keeps only raw PELT/BOCPD change-points.
+    - ``"section_adjusted"`` keeps only section-adjusted variants if any exist
+      for this author; otherwise falls back to raw and logs at INFO.
+    """
+    if source == "raw":
+        return [cp for cp in change_points if cp.method in _RAW_CP_METHODS]
+    if source == "section_adjusted":
+        adjusted = [cp for cp in change_points if cp.method in _SECTION_ADJUSTED_CP_METHODS]
+        if adjusted:
+            return adjusted
+        logger.info("convergence: no section-adjusted change-points found; falling back to raw CPs")
+        return [cp for cp in change_points if cp.method in _RAW_CP_METHODS]
+    # Unknown source: pass through untouched rather than silently drop data.
+    return change_points
+
+
 def compute_convergence_scores(input_: ConvergenceInput) -> list[ConvergenceWindow]:
     """Quantify agreement between Pipeline A (stylometry), Pipeline B (embeddings), and C.
 
@@ -443,8 +647,17 @@ def compute_convergence_scores(input_: ConvergenceInput) -> list[ConvergenceWind
     if input_.total_feature_count <= 0:
         return []
 
+    # Phase 15 J5 — choose raw vs section-adjusted CPs before any scoring runs.
+    cp_source = (
+        input_.settings.analysis.convergence_cp_source if input_.settings is not None else "raw"
+    )
+    filtered_cps = _filter_change_points_by_source(input_.change_points, cp_source)
+    if filtered_cps is not input_.change_points:
+        input_ = replace(input_, change_points=filtered_cps)
+
     velocity_stats = _precompute_velocity_stats(input_.centroid_velocities)
     sim_by_date = _baseline_curve_as_dates(input_.baseline_similarity_curve)
+    sim_std = _sim_std_author(sim_by_date)
     ai_by_month = dict(input_.ai_convergence_curve) if input_.ai_convergence_curve else {}
     starts = _window_start_candidates(input_.change_points, sim_by_date, input_.centroid_velocities)
     if not starts:
@@ -465,6 +678,7 @@ def compute_convergence_scores(input_: ConvergenceInput) -> list[ConvergenceWind
             input_=input_,
             velocity_stats=velocity_stats,
             sim_by_date=sim_by_date,
+            sim_std_author=sim_std,
             ai_by_month=ai_by_month,
         )
         if window is not None:

@@ -37,10 +37,19 @@ or a detection ≥ ±3 steps from the true break is a calibration failure.
 ### H2 — Feature-family convergence threshold (Phase B)
 
 **Claim:** With `convergence_min_feature_ratio = 0.50` interpreted against
-the 8-family registry (`forensics.analysis.feature_families.FAMILY_COUNT`),
+the 6-family registry (`forensics.analysis.feature_families.FAMILY_COUNT`),
 the four known-interesting reference windows listed in the plan
 (david-gilmour 2025-12, jennifer-bowers-bahney 2026-03, isaac-schorr
 2025-10, sarah-rumpf 2025-11) all clear the family-level ratio.
+
+**Note (issue #5, 2026-04-24):** the registry was reduced from 8 → 6
+families to remove the structural 6/8 = 0.75 ceiling that affected
+89.8 % of windows in the post-Phase-15 full-analysis run. Two
+single-member families (`voice` and `paragraph_shape`) were folded into
+the related multi-member families `ai_markers` and `sentence_structure`
+respectively. The threshold (0.50) is unchanged, but the denominator
+moved from 8 → 6, so the new requirement is "≥ 3 of 6 families" instead
+of "≥ 4 of 8 families".
 
 **Test:** `tests/unit/test_convergence.py::test_reference_windows_pass_family_threshold`
 (landed in Phase B).

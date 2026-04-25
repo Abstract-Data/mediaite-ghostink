@@ -23,10 +23,17 @@ class ConvergenceWindow(BaseModel):
     start_date: date
     end_date: date
     features_converging: list[str]
+    families_converging: list[str] = Field(default_factory=list)
     convergence_ratio: float
     pipeline_a_score: float
     pipeline_b_score: float
     pipeline_c_score: float | None = None
+    # Phase 15 Fix-G — which gate(s) admitted this window. Allowed entries:
+    # ``"ratio"``, ``"ab"``, ``"drift_only"``. The list preserves insertion
+    # order from ``_score_single_window`` so consumers can render
+    # multi-channel admission cleanly. Default empty for backward compatibility
+    # with pre-Fix-G persisted artifacts.
+    passes_via: list[str] = Field(default_factory=list)
 
 
 class DriftScores(BaseModel):

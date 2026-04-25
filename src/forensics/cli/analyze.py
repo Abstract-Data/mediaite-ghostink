@@ -1,4 +1,11 @@
-"""Analyze subcommand — change-point, time-series, drift, convergence, comparison."""
+"""Analyze subcommand — change-point, time-series, drift, convergence, comparison.
+
+The default invocation (``forensics analyze [flags]``) preserves the legacy
+behaviour from before Phase 15 J3. New diagnostics ride on nested
+sub-commands (``forensics analyze section-profile``); the surrounding
+``analyze_app`` is registered with ``invoke_without_command=True`` so
+existing flag-only invocations continue to work unchanged.
+"""
 
 from __future__ import annotations
 
@@ -16,8 +23,17 @@ from forensics.config.settings import ForensicsSettings
 from forensics.pipeline_context import PipelineContext
 from forensics.preregistration import verify_preregistration
 from forensics.storage.json_io import write_json_artifact
+from forensics.storage.repository import Repository
+from forensics.survey.shared_byline import is_shared_byline as _is_shared_byline_heuristic
 
 logger = logging.getLogger(__name__)
+
+analyze_app = typer.Typer(
+    name="analyze",
+    help="Run analysis pipeline (change-point, drift, convergence, comparison).",
+    no_args_is_help=False,
+    invoke_without_command=True,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,6 +48,8 @@ class AnalyzeContext:
     settings: ForensicsSettings
     paths: AnalysisArtifactPaths
     author_slug: str | None
+    max_workers: int | None = None
+    compare_pair: tuple[str, str] | None = None
 
     @classmethod
     def build(
@@ -41,6 +59,8 @@ class AnalyzeContext:
         *,
         root: Path,
         author: str | None,
+        max_workers: int | None = None,
+        compare_pair: tuple[str, str] | None = None,
     ) -> AnalyzeContext:
         """Construct a context from the ambient project layout."""
         return cls(
@@ -48,12 +68,34 @@ class AnalyzeContext:
             settings=settings,
             paths=AnalysisArtifactPaths.from_project(root, db_path),
             author_slug=author,
+            max_workers=max_workers,
+            compare_pair=compare_pair,
         )
 
     @property
     def root(self) -> Path:
         """Project root backing the artifact layout."""
         return self.paths.project_root
+
+
+def _parse_compare_pair(raw: str | None) -> tuple[str, str] | None:
+    """Parse ``--compare TARGET,CONTROL`` into a typed pair.
+
+    Returns ``None`` when ``raw`` is ``None`` (the legacy ``--compare`` boolean
+    path). Raises :class:`typer.BadParameter` when the value is malformed so
+    operators get a clear error instead of a silent fall-through to the
+    config-driven target/control resolution.
+    """
+    if raw is None:
+        return None
+    parts = [p.strip() for p in raw.split(",")]
+    if len(parts) != 2 or not all(parts):
+        msg = (
+            f"--compare expected 'TARGET,CONTROL' (got {raw!r}); "
+            "both slugs must be non-empty and separated by a single comma."
+        )
+        raise typer.BadParameter(msg)
+    return parts[0], parts[1]
 
 
 def _write_run_metadata(
@@ -79,9 +121,15 @@ def _run_compare_only_flow(ctx: AnalyzeContext) -> None:
         "config_hash": pipeline_ctx.config_hash,
         "compare_only": True,
         "author": ctx.author_slug,
+        "compare_pair": list(ctx.compare_pair) if ctx.compare_pair else None,
     }
     _write_run_metadata(analysis_dir, rid=rid, meta=meta)
-    run_compare_only(ctx.settings, paths=ctx.paths, author_slug=ctx.author_slug)
+    run_compare_only(
+        ctx.settings,
+        paths=ctx.paths,
+        author_slug=ctx.author_slug,
+        compare_pair=ctx.compare_pair,
+    )
     logger.info("analyze: compare-only complete author=%s", ctx.author_slug or "all")
 
 
@@ -125,7 +173,13 @@ def _run_drift_stage(ctx: AnalyzeContext) -> None:
 def _run_full_analysis_stage(ctx: AnalyzeContext) -> None:
     from forensics.analysis.orchestrator import run_full_analysis
 
-    run_full_analysis(ctx.paths, ctx.settings, author_slug=ctx.author_slug)
+    run_full_analysis(
+        ctx.paths,
+        ctx.settings,
+        author_slug=ctx.author_slug,
+        max_workers=ctx.max_workers,
+        compare_pair=ctx.compare_pair,
+    )
 
 
 def _run_ai_baseline_stage(
@@ -172,7 +226,91 @@ def _verify_requested_ai_baseline_vectors(ctx: AnalyzeContext) -> None:
         raise typer.Exit(code=1)
 
 
-def run_analyze(
+def _enforce_shared_byline_gate(
+    db_path: Path,
+    settings: ForensicsSettings,
+    *,
+    author_slug: str,
+    include_shared_bylines: bool,
+) -> None:
+    """Refuse to analyze a shared-byline author unless the operator opts in.
+
+    Mirrors the Phase 15 D survey-stage gate (``forensics survey``): the
+    accounts ``mediaite`` and ``mediaite-staff`` aggregate output from many
+    contributors, so single-author stylometry on them is meaningless. We
+    consult both the persisted ``Author.is_shared_byline`` flag (set at
+    ingest) AND the slug heuristic so older databases that pre-date the
+    flag still trip the gate.
+    """
+    if include_shared_bylines:
+        return
+    flagged = False
+    matched_name: str | None = None
+    matched_outlet: str | None = None
+    with Repository(db_path) as repo:
+        author = repo.get_author_by_slug(author_slug)
+    if author is not None:
+        flagged = bool(author.is_shared_byline)
+        matched_name = author.name
+        matched_outlet = author.outlet
+    # Fall back to the configured outlet/name when the slug isn't in the DB
+    # yet — analyze CLI may run before scrape on a fresh checkout.
+    if not flagged:
+        configured = next((a for a in settings.authors if a.slug == author_slug), None)
+        if configured is not None:
+            matched_name = matched_name or configured.name
+            matched_outlet = matched_outlet or configured.outlet
+        flagged = _is_shared_byline_heuristic(
+            author_slug,
+            matched_name or author_slug,
+            matched_outlet or "",
+        )
+    if not flagged:
+        return
+    msg = (
+        f"author '{author_slug}' is a shared byline (group account) and is "
+        "disqualified by the Phase 15 D survey gate. Pass "
+        "--include-shared-bylines to override."
+    )
+    logger.error(msg)
+    raise typer.BadParameter(msg, param_hint="--author")
+
+
+def _apply_per_run_overrides(
+    settings: ForensicsSettings,
+    *,
+    include_advertorial: bool,
+    residualize_sections: bool,
+) -> ForensicsSettings:
+    """Return ``settings`` with per-run CLI escape hatches applied.
+
+    - ``include_advertorial`` (Phase 15 J2): re-enable advertorial / syndicated
+      sections in features + survey config for this run only.
+    - ``residualize_sections`` (Phase 15 J7): flip the J5 toggle without
+      touching the persisted ``config.toml``.
+
+    Both escapes copy nested config models so the global ``get_settings()``
+    cache is never mutated.
+    """
+    if include_advertorial:
+        settings = settings.model_copy(
+            update={
+                "features": settings.features.model_copy(update={"excluded_sections": frozenset()}),
+                "survey": settings.survey.model_copy(update={"excluded_sections": frozenset()}),
+            }
+        )
+    if residualize_sections:
+        settings = settings.model_copy(
+            update={
+                "analysis": settings.analysis.model_copy(
+                    update={"section_residualize_features": True}
+                ),
+            }
+        )
+    return settings
+
+
+def run_analyze(  # noqa: C901
     *,
     changepoint: bool = False,
     timeseries: bool = False,
@@ -186,16 +324,45 @@ def run_analyze(
     articles_per_cell: int | None = None,
     author: str | None = None,
     exploratory: bool = False,
+    include_advertorial: bool = False,
+    residualize_sections: bool = False,
+    include_shared_bylines: bool = False,
+    max_workers: int | None = None,
+    compare_pair: tuple[str, str] | None = None,
 ) -> None:
     """Execute the analyze stage as a plain Python function.
 
     Kept separate from the Typer ``analyze`` callback so the `forensics all`
     orchestrator can call this without fighting Typer's option defaults.
+
+    ``max_workers`` overrides ``settings.analysis.max_workers`` for this run
+    only — useful when the operator wants to pin the worker count from the
+    command line without editing ``config.toml``. ``compare_pair`` flips on a
+    one-off ``(target, control)`` comparison that bypasses the configured
+    target/control role assignment for this run only.
     """
-    settings = get_settings()
+    settings = _apply_per_run_overrides(
+        get_settings(),
+        include_advertorial=include_advertorial,
+        residualize_sections=residualize_sections,
+    )
     root = get_project_root()
     db_path = root / "data" / "articles.db"
-    ctx = AnalyzeContext.build(db_path, settings, root=root, author=author)
+    if author is not None:
+        _enforce_shared_byline_gate(
+            db_path,
+            settings,
+            author_slug=author,
+            include_shared_bylines=include_shared_bylines,
+        )
+    ctx = AnalyzeContext.build(
+        db_path,
+        settings,
+        root=root,
+        author=author,
+        max_workers=max_workers,
+        compare_pair=compare_pair,
+    )
     # analysis_dir is created by the first write helper that lands an artifact.
     analysis_dir = ctx.paths.analysis_dir
 
@@ -280,7 +447,9 @@ def run_analyze(
     )
 
 
+@analyze_app.callback(invoke_without_command=True)
 def analyze(
+    ctx: typer.Context,
     changepoint: Annotated[
         bool,
         typer.Option("--changepoint", help="Run change-point detection (PELT/BOCPD)"),
@@ -352,8 +521,73 @@ def analyze(
             ),
         ),
     ] = False,
+    include_advertorial: Annotated[
+        bool,
+        typer.Option(
+            "--include-advertorial",
+            help=(
+                "Re-include advertorial / syndicated sections (sponsored, "
+                "partner-content, crosspost) in feature extraction and survey "
+                "qualification for this run; default OFF (Phase 15 J2)."
+            ),
+        ),
+    ] = False,
+    residualize_sections: Annotated[
+        bool,
+        typer.Option(
+            "--residualize-sections",
+            help=(
+                "Toggle J5 section-residualized changepoints for this run "
+                "(flips analysis.section_residualize_features). Default OFF "
+                "matches the persisted config (Phase 15 J7)."
+            ),
+        ),
+    ] = False,
+    include_shared_bylines: Annotated[
+        bool,
+        typer.Option(
+            "--include-shared-bylines",
+            help=(
+                "Re-enable analysis of shared-byline accounts (e.g. "
+                "mediaite-staff, mediaite). Default OFF — matches the Phase "
+                "15 D survey gate, which disqualifies group bylines because "
+                "single-author stylometry on aggregate accounts is "
+                "meaningless. Mirrors ``forensics survey "
+                "--include-shared-bylines``."
+            ),
+        ),
+    ] = False,
+    max_workers: Annotated[
+        int | None,
+        typer.Option(
+            "--max-workers",
+            metavar="N",
+            help=(
+                "Override analysis.max_workers for this run only. N=1 forces "
+                "the legacy serial dispatch; N>1 fans the per-author loop out "
+                "across a ProcessPoolExecutor (Phase 15 G1)."
+            ),
+        ),
+    ] = None,
+    compare_pair: Annotated[
+        str | None,
+        typer.Option(
+            "--compare-pair",
+            metavar="TARGET,CONTROL",
+            help=(
+                "Run a one-off target↔control comparison for the named slugs, "
+                "bypassing the configured author roles. Example: "
+                "'--compare-pair isaac-schorr,john-doe'."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Run analysis pipeline (change-point, drift, convergence, comparison)."""
+    # When a sub-command is invoked (e.g. ``analyze section-profile``),
+    # Typer still runs the callback first; let the sub-command own the flow.
+    if ctx.invoked_subcommand is not None:
+        return
+    parsed_pair = _parse_compare_pair(compare_pair)
     run_analyze(
         changepoint=changepoint,
         timeseries=timeseries,
@@ -367,4 +601,128 @@ def analyze(
         articles_per_cell=articles_per_cell,
         author=author,
         exploratory=exploratory,
+        include_advertorial=include_advertorial,
+        residualize_sections=residualize_sections,
+        include_shared_bylines=include_shared_bylines,
+        max_workers=max_workers,
+        compare_pair=parsed_pair,
     )
+
+
+@analyze_app.command(name="section-profile")
+def section_profile_cmd(
+    output: Annotated[
+        Path | None,
+        typer.Option(
+            "--output",
+            metavar="PATH",
+            help=(
+                "Override the human-readable report path. JSON/CSV side artifacts "
+                "still land in data/analysis/."
+            ),
+        ),
+    ] = None,
+    features_dir: Annotated[
+        Path | None,
+        typer.Option(
+            "--features-dir",
+            metavar="PATH",
+            help="Override the features parquet directory (default: data/features).",
+        ),
+    ] = None,
+) -> None:
+    """Phase 15 J3: newsroom-wide section descriptive report and J5 gate verdict."""
+    from forensics.analysis.section_profile import GATE_OMNIBUS_ALPHA, run_section_profile
+
+    settings = get_settings()
+    root = get_project_root()
+    db_path = root / "data" / "articles.db"
+    paths = AnalysisArtifactPaths.from_project(root, db_path)
+    feat_dir = features_dir if features_dir is not None else paths.features_dir
+    analysis_dir = paths.analysis_dir
+    analysis_dir.mkdir(parents=True, exist_ok=True)
+
+    result = run_section_profile(
+        settings,
+        features_dir=feat_dir,
+        analysis_dir=analysis_dir,
+        report_path=output,
+    )
+    typer.echo(f"section-profile: retained {len(result.sections)} sections")
+    typer.echo(
+        f"  significant families (p<{GATE_OMNIBUS_ALPHA}): "
+        f"{len(result.significant_families)} "
+        f"({', '.join(result.significant_families) or 'none'})"
+    )
+    typer.echo(f"  max off-diagonal cosine distance: {result.max_off_diagonal_distance:.4f}")
+    typer.echo(f"  J5 gate verdict: {result.gate_verdict}")
+    if result.artifacts is not None:
+        typer.echo(f"  report: {result.artifacts.report_md}")
+
+
+@analyze_app.command(name="section-contrast")
+def section_contrast_cmd(
+    author: Annotated[
+        str | None,
+        typer.Option(
+            "--author",
+            metavar="SLUG",
+            help=(
+                "Limit to one author slug. Default: every configured author "
+                "with a feature parquet under data/features/."
+            ),
+        ),
+    ] = None,
+    features_dir: Annotated[
+        Path | None,
+        typer.Option(
+            "--features-dir",
+            metavar="PATH",
+            help="Override the features parquet directory (default: data/features).",
+        ),
+    ] = None,
+) -> None:
+    """Phase 15 J6: per-author section-contrast tests (Welch + MW + per-family BH)."""
+    from forensics.analysis.section_contrast import compute_and_write_section_contrast
+    from forensics.paths import load_feature_frame_for_author, resolve_author_rows
+    from forensics.storage.repository import Repository
+
+    settings = get_settings()
+    root = get_project_root()
+    db_path = root / "data" / "articles.db"
+    paths = AnalysisArtifactPaths.from_project(root, db_path)
+    feat_dir = features_dir if features_dir is not None else paths.features_dir
+    analysis_dir = paths.analysis_dir
+    analysis_dir.mkdir(parents=True, exist_ok=True)
+
+    with Repository(db_path) as repo:
+        author_rows = resolve_author_rows(repo, settings, author_slug=author)
+
+    if not author_rows:
+        typer.echo("section-contrast: no authors resolved (check --author / config.toml)")
+        raise typer.Exit(code=1)
+
+    written = 0
+    for author_row in author_rows:
+        df = load_feature_frame_for_author(feat_dir, author_row.slug, author_row.id)
+        if df is None or df.is_empty():
+            typer.echo(f"section-contrast: skipped {author_row.slug} (no feature rows)")
+            continue
+        result, path = compute_and_write_section_contrast(
+            df,
+            author_id=author_row.id,
+            author_slug=author_row.slug,
+            analysis_dir=analysis_dir,
+            alpha=settings.analysis.significance_threshold,
+            bh_method=settings.analysis.multiple_comparison_method,
+        )
+        written += 1
+        if result.disposition == "insufficient_section_volume":
+            typer.echo(
+                f"section-contrast: {author_row.slug} → insufficient_section_volume → {path}"
+            )
+        else:
+            typer.echo(
+                f"section-contrast: {author_row.slug} → {len(result.pairs)} pair(s) → {path}"
+            )
+    typer.echo(f"section-contrast: wrote {written} artifact(s)")

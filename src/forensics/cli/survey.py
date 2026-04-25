@@ -147,7 +147,21 @@ def survey(
         bool,
         typer.Option(
             "--include-shared-bylines",
-            help="Include pooled/shared newsroom bylines in survey qualification.",
+            help=(
+                "Include newsroom-shared accounts (e.g. mediaite-staff) in the "
+                "survey; default OFF — shared bylines are disqualified."
+            ),
+        ),
+    ] = False,
+    include_advertorial: Annotated[
+        bool,
+        typer.Option(
+            "--include-advertorial",
+            help=(
+                "Re-include sponsored / partner-content / crosspost articles in "
+                "qualification volume / recency / frequency stats; default OFF "
+                "— advertorial sections are excluded per Phase 15 J2."
+            ),
         ),
     ] = False,
 ) -> None:
@@ -156,14 +170,16 @@ def survey(
     root = get_project_root()
     db_path = root / "data" / "articles.db"
 
-    overrides: dict[str, int] = {}
+    overrides: dict[str, object] = {}
     if min_articles is not None:
         overrides["min_articles"] = min_articles
     if min_span_days is not None:
         overrides["min_span_days"] = min_span_days
-    criteria = replace(QualificationCriteria.from_settings(settings.survey), **overrides)
     if include_shared_bylines:
-        criteria = replace(criteria, exclude_shared_bylines=False)
+        overrides["exclude_shared_bylines"] = False
+    if include_advertorial:
+        overrides["excluded_sections"] = frozenset()
+    criteria = replace(QualificationCriteria.from_settings(settings.survey), **overrides)
 
     if dry_run:
         _survey_dry_run_echo(db_path, criteria)

@@ -44,6 +44,7 @@ from forensics.storage.parquet import (
 )
 from forensics.storage.repository import Repository
 from forensics.utils.model_cache import KeyedModelCache
+from forensics.utils.url import section_from_url
 
 logger = logging.getLogger(__name__)
 
@@ -338,6 +339,42 @@ def _group_articles_by_author(articles: list[Article]) -> dict[str, list[Article
     return by_author
 
 
+def _filter_excluded_sections(
+    articles: list[Article],
+    excluded: frozenset[str],
+) -> list[Article]:
+    """Drop articles whose URL-derived section is in ``excluded`` (Phase 15 J2).
+
+    A DEBUG line is emitted per dropped article so reviewers can audit
+    contamination after the fact via log capture; the canonical artifact for
+    end-users is the ``excluded_articles.csv`` written by the survey
+    qualification step.
+    """
+    if not excluded:
+        return articles
+    kept: list[Article] = []
+    dropped = 0
+    for art in articles:
+        section = section_from_url(str(art.url))
+        if section in excluded:
+            dropped += 1
+            logger.debug(
+                "feature extraction skipping article id=%s section=%s url=%s",
+                art.id,
+                section,
+                art.url,
+            )
+            continue
+        kept.append(art)
+    if dropped:
+        logger.info(
+            "feature extraction: skipped %d article(s) in excluded sections (%s)",
+            dropped,
+            ",".join(sorted(excluded)),
+        )
+    return kept
+
+
 def _make_progress() -> Progress:
     return Progress(
         SpinnerColumn(),
@@ -428,6 +465,11 @@ def extract_all_features(
         articles = repo.list_articles_for_extraction(author_id=author_id_filter)
         if not articles:
             logger.info("No articles eligible for feature extraction.")
+            return 0
+
+        articles = _filter_excluded_sections(articles, settings.features.excluded_sections)
+        if not articles:
+            logger.info("No articles eligible for feature extraction after section exclusion.")
             return 0
 
         by_author = _group_articles_by_author(articles)

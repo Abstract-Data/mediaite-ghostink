@@ -210,6 +210,113 @@ uv run pytest tests/ -v --cov=src --cov-report=term-missing
 uv run pytest tests/ -v --hypothesis-show-statistics
 ```
 
+## Section diagnostics (Phase 15 J3 / J6 / J7)
+
+URL-derived `section` tags (Phase 15 J1) unlock three diagnostic surfaces on
+the `analyze` sub-app. All commands write deterministic JSON / CSV / Markdown
+under `data/analysis/`; legacy `forensics analyze --changepoint` etc. still
+work unchanged.
+
+```bash
+# J3 — newsroom-wide section descriptive report + J5 gate verdict.
+# Persists section_centroids.json, section_distance_matrix.{json,csv},
+# section_feature_ranking.json, and section_profile_report.md.
+uv run forensics analyze section-profile
+uv run forensics analyze section-profile --output /tmp/profile.md
+uv run forensics analyze section-profile --features-dir path/to/features
+
+# J6 — per-author section-contrast tests (Welch + Mann-Whitney + per-family
+# BH; Phase 15 C2 helper). Output: data/analysis/<slug>_section_contrast.json.
+uv run forensics analyze section-contrast                    # every author
+uv run forensics analyze section-contrast --author jane-doe  # one author
+
+# J7 — residualize-sections per-run override. Flips
+# analysis.section_residualize_features for the current process only;
+# config.toml is NOT modified. Use this for A/B comparisons against the
+# unadjusted CP run without touching the persisted config.
+uv run forensics analyze --residualize-sections --changepoint
+uv run forensics analyze all --residualize-sections          # via run_analyze()
+```
+
+Operational notes:
+
+- `section-contrast` requires authors to have ≥ 2 sections each with ≥ 30
+  articles (`MIN_SECTION_ARTICLES`). Authors below the bar emit
+  `{"pairs": [], "disposition": "insufficient_section_volume"}` rather than
+  raising — downstream consumers must render "N/A".
+- A WARNING is emitted when **every** PELT feature passes BH for a single
+  pair — wholly different registers across the entire feature set is
+  suspicious and warrants a spot-check.
+- `--residualize-sections` is a hot-fix knob. Persistent toggling lives in
+  `config.toml` under `[analysis] section_residualize_features = true` so
+  the change is captured by the config hash + preregistration lock.
+
+## Pre-registration lock workflow (confirmatory vs exploratory)
+
+Every `analyze` run records `preregistration_status` in
+`data/analysis/run_metadata.json`. The status comes from
+`verify_preregistration(settings)` against
+`data/preregistration/preregistration_lock.json` and is one of:
+
+- `ok` — a filled lock file matches the current analysis thresholds. The
+  run is **confirmatory**.
+- `missing` — no lock file (or the committed template, see below). The
+  run is **exploratory** and any p-values are descriptive only.
+- `mismatch` — a filled lock file exists but one or more analysis
+  thresholds drifted since the lock. Logged at WARNING with a
+  per-key diff; the run continues so an operator can inspect.
+
+### Files in this directory
+
+- `data/preregistration/preregistration_lock.json` — the operator-fillable
+  lock template lives in the repo so a fresh checkout has a non-mismatching
+  exploratory state out of the box. The template carries:
+  - `preregistration_id` — opaque identifier for the run plan
+  - `locked_at` / `locked_by` — null until the operator fills them
+  - `config_hash` — null until the operator fills it
+  - `amended_from` / `amendments` — pointers to the narrative docs
+    (`amendment_phase15.md` etc.) that justify the locked hypotheses
+  - `hypotheses` — H1..Hn list operator must populate before claiming
+    a confirmatory result
+  - `expected_directions` — per-feature pre-declared direction of effect
+- `data/preregistration/amendment_phase15.md` — phase-amendment narrative
+  (committed). Reference any new hypothesis here before locking.
+
+### How the analyze CLI reads the file
+
+`verify_preregistration` short-circuits the unfilled template (where
+`locked_at is null` AND `analysis` block is absent) to `missing` so the
+committed template never trips a false `mismatch`. The first fully-filled
+lock — written by `uv run forensics lock-preregistration` — populates the
+canonical `analysis` snapshot + SHA256 `content_hash` and converts the
+next run from exploratory to confirmatory.
+
+### Locking workflow
+
+```bash
+# 1. Edit the template and commit it (preregistration_id + hypotheses +
+#    expected_directions are the operator-authored fields). Do NOT fill
+#    locked_at / locked_by / config_hash by hand — those are written by
+#    the lock-preregistration command in step 2.
+$EDITOR data/preregistration/preregistration_lock.json
+git add data/preregistration/preregistration_lock.json
+git commit -m "Pre-register analysis plan for <author> / <window>"
+
+# 2. Snapshot the current thresholds + content hash. This OVERWRITES the
+#    file with the canonical confirmatory lock — keep your template-edit
+#    commit so the hypothesis history stays in git.
+uv run forensics lock-preregistration
+
+# 3. Run the analysis. ``run_metadata.json::preregistration_status`` lands
+#    as ``ok`` and the narrative report renders as confirmatory.
+uv run forensics analyze
+cat data/analysis/run_metadata.json | jq .preregistration_status   # → "ok"
+```
+
+Re-running step 2 after every config change keeps the lock current. If you
+change a threshold without re-locking, the next analyze run logs WARNING
++ records `preregistration_status: "mismatch"` — fix it before publishing.
+
 ## Migrations (Phase 15)
 
 Storage-layer migrations now land through the Typer CLI rather than the old
@@ -234,6 +341,72 @@ uv run forensics features migrate --dry-run    # preview only, no writes
   a straight ``mv`` of the backup copy.
 - Both commands tolerate missing target dirs (``data/``, ``data/features/``)
   with a friendly stderr message and exit code ``0``.
+
+### Phase 15 CLI surface (analyze + survey)
+
+New flags and subcommands shipped during Phase 15. All are additive;
+prior invocations remain valid. See `docs/ARCHITECTURE.md` for the
+behavioural rationale.
+
+```bash
+# G1 — author-level parallelism (PR #60). Default 1 = serial.
+uv run forensics analyze --max-workers 8
+
+# D — survey shared-byline filter (PR #71). Default excludes group bylines
+# (mediaite, mediaite-staff, ...). Pass to include them for transparency.
+uv run forensics survey --include-shared-bylines
+
+# J2 — advertorial / syndicated section exclusion (PR #76). Default
+# excludes sponsored, partner-content, crosspost, etc. Both stages take
+# the same flag so a single override flips the corresponding stage.
+uv run forensics survey --include-advertorial
+uv run forensics analyze --include-advertorial
+
+# J3 — newsroom-wide section descriptive diagnostic (PR #75). Writes
+# data/analysis/section_centroids.json, section_distance_matrix.json
+# (+ .csv mirror), section_feature_ranking.json, and
+# section_profile_report.md (J5 gate verdict embedded).
+uv run forensics analyze section-profile
+uv run forensics analyze section-profile --output /tmp/section_profile_test.md
+
+# J6 — per-author section-contrast tests (Wave 3.3). Document forward-
+# compatibly; flag may merge in parallel with this runbook entry.
+uv run forensics analyze section-contrast
+uv run forensics analyze section-contrast --author <slug>
+
+# J5 — optional section residualization before BOCPD (Wave 3.3, gated
+# on J3 verdict against real corpus data). Off by default.
+uv run forensics analyze all --residualize-sections
+```
+
+### Phase 15 debug + parity recipes
+
+```bash
+# E1 — Pipeline B per-window component DEBUG logs. Useful when
+# investigating drift / centroid-velocity regressions.
+FORENSICS_LOG_LEVEL=DEBUG uv run forensics analyze --drift --author <slug>
+
+# H2 — serial vs parallel JSON artifact parity check. Confirms
+# author-level parallelism is byte-identical to a serial run. The
+# integration test lives at tests/integration/test_parallel_parity.py
+# (added by Wave 3.4).
+uv run forensics analyze                    # serial baseline
+mv data/analysis data/analysis_serial
+uv run forensics analyze --max-workers 4    # parallel run
+diff -r data/analysis_serial data/analysis  # expected: no output
+```
+
+### Phase 15 schema migration + benchmarks
+
+```bash
+# Storage migrations (covered above):
+uv run forensics migrate                    # SQLite (Phase D1, etc.)
+uv run forensics features migrate           # parquet section column
+uv run forensics features migrate --dry-run # preview only
+
+# L1 — pre-Phase-15 wall-clock baseline + phase-by-phase benchmark.
+uv run python scripts/bench_phase15.py --author mediaite-staff
+```
 
 ### Typer subcommand registration pattern (Phase 15 L6)
 

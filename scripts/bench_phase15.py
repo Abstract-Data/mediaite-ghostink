@@ -35,7 +35,14 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class PerAuthorStageTimings:
-    """Wall-clock (seconds) for each analysis stage, per author."""
+    """Wall-clock (seconds) for each analysis stage, per author.
+
+    ``compare`` is reported per-author as a convenience even though the
+    comparison stage runs once per ``run_full_analysis`` invocation
+    (newsroom-wide). When the bench script invokes ``run_full_analysis``
+    once per slug (the default) the per-author and newsroom-wide buckets
+    are the same value.
+    """
 
     extract: float = 0.0
     changepoint: float = 0.0
@@ -84,20 +91,43 @@ def _bench_one_author(
     paths,  # type: ignore[no-untyped-def]
     settings,  # type: ignore[no-untyped-def]
 ) -> PerAuthorBench:
-    """Run full analysis for one author and capture timings + signal counts."""
-    from forensics.analysis.orchestrator import run_full_analysis
+    """Run full analysis for one author and capture timings + signal counts.
+
+    Phase 15 G3: per-stage timings come from ``orchestrator.AnalysisTimings``
+    (populated in-place by ``run_full_analysis(timings_out=...)``), so the
+    bench emits non-zero ``extract`` / ``changepoint`` / ``drift`` /
+    ``convergence`` / ``hypothesis_tests`` / ``compare`` measurements
+    instead of the legacy zero-init dict where only ``total`` was populated.
+    """
+    from forensics.analysis.orchestrator import AnalysisTimings, run_full_analysis
 
     timings = PerAuthorStageTimings()
     bench = PerAuthorBench(author_slug=slug, timings=timings)
+    out_timings = AnalysisTimings()
 
     t0 = time.perf_counter()
     try:
-        results = run_full_analysis(paths, settings, author_slug=slug)
+        results = run_full_analysis(
+            paths,
+            settings,
+            author_slug=slug,
+            timings_out=out_timings,
+        )
     except (OSError, ValueError, RuntimeError) as exc:
         bench.error = f"{type(exc).__name__}: {exc}"
         bench.timings.total = time.perf_counter() - t0
         return bench
-    bench.timings.total = time.perf_counter() - t0
+    # Prefer the orchestrator's instrumented total; fall back to the wall-
+    # clock bracket here if the orchestrator chose not to populate timings.
+    bench.timings.total = out_timings.total or (time.perf_counter() - t0)
+    bench.timings.compare = out_timings.compare
+
+    per_author_stages = out_timings.per_author.get(slug, {})
+    bench.timings.extract = float(per_author_stages.get("extract", 0.0))
+    bench.timings.changepoint = float(per_author_stages.get("changepoint", 0.0))
+    bench.timings.drift = float(per_author_stages.get("drift", 0.0))
+    bench.timings.convergence = float(per_author_stages.get("convergence", 0.0))
+    bench.timings.hypothesis_tests = float(per_author_stages.get("hypothesis_tests", 0.0))
 
     result = results.get(slug)
     if result is None:
