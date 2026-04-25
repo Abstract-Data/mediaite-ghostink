@@ -11,3 +11,5 @@ class ReportArgs(BaseModel):
     notebook: str | None = None
     report_format: str = Field(default="both", description="html, pdf, or both")
     verify: bool = False
+    per_author: bool = False
+    author_slug: str | None = None

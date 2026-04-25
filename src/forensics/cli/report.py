@@ -37,6 +37,20 @@ def report(
             help="Require corpus hash to match data/analysis/corpus_custody.json",
         ),
     ] = False,
+    per_author: Annotated[
+        bool,
+        typer.Option(
+            "--per-author",
+            help="Generate and render one evidence page per configured author.",
+        ),
+    ] = False,
+    author: Annotated[
+        str | None,
+        typer.Option(
+            "--author",
+            help="When used with --per-author, render only this author slug.",
+        ),
+    ] = None,
 ) -> None:
     """Render Quarto forensic book."""
     from forensics.reporting import run_report
@@ -51,11 +65,15 @@ def report(
 
     if format not in {"html", "pdf", "both"}:
         raise typer.BadParameter(f"--format must be one of html, pdf, both (got {format!r})")
+    if author and not per_author:
+        raise typer.BadParameter("--author can only be used with --per-author")
 
     args = ReportArgs(
         notebook=notebook,
         report_format=format,
         verify=verify,
+        per_author=per_author,
+        author_slug=author,
     )
     try:
         rc = run_report(args)

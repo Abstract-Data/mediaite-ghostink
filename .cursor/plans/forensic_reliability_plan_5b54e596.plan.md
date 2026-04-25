@@ -16,7 +16,7 @@ todos:
     status: completed
   - id: reporting-verification
     content: Generate per-author evidence pages, rerun the pipeline, validate, and update handoff documentation.
-    status: pending
+    status: in_progress
 isProject: false
 ---
 

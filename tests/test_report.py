@@ -7,17 +7,21 @@ import importlib
 import json
 import re
 import sqlite3
-from datetime import date
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import plotly.graph_objects as go
 import pytest
 
+from forensics.analysis.artifact_paths import AnalysisArtifactPaths
 from forensics.config import get_project_root
 from forensics.config.settings import AuthorConfig, ForensicsSettings, ReportConfig, ScrapingConfig
+from forensics.models.analysis import AnalysisResult
 from forensics.reporting import (
     _analysis_artifacts_ok,
+    _per_author_slugs,
     _quarto_bin,
+    generate_author_evidence_pages,
     resolve_notebook_path,
 )
 from forensics.utils import charts as charts_mod
@@ -274,6 +278,37 @@ def test_analysis_artifacts_ok_multiple_authors(tmp_path: Path) -> None:
     assert "b_result.json" in msg
 
 
+def test_analysis_artifacts_ok_can_scope_to_author(tmp_path: Path) -> None:
+    authors = [
+        AuthorConfig(
+            name="A",
+            slug="a",
+            outlet="mediaite.com",
+            role="target",
+            archive_url="https://example.com/a/",
+            baseline_start=date(2020, 1, 1),
+            baseline_end=date(2021, 1, 1),
+        ),
+        AuthorConfig(
+            name="B",
+            slug="b",
+            outlet="mediaite.com",
+            role="control",
+            archive_url="https://example.com/b/",
+            baseline_start=date(2020, 1, 1),
+            baseline_end=date(2021, 1, 1),
+        ),
+    ]
+    settings = ForensicsSettings(authors=authors)
+    analysis = tmp_path / "analysis"
+    _write_result_json(analysis, "a", settings)
+
+    ok, msg = _analysis_artifacts_ok(settings, analysis, ["a"])
+
+    assert ok is True
+    assert "match" in msg
+
+
 def test_analysis_artifacts_ok_rejects_stale_config_hash(tmp_path: Path) -> None:
     settings = _minimal_forensics_settings()
     analysis = tmp_path / "analysis"
@@ -285,6 +320,46 @@ def test_analysis_artifacts_ok_rejects_stale_config_hash(tmp_path: Path) -> None
     ok, msg = _analysis_artifacts_ok(settings, analysis)
     assert ok is False
     assert "stale or mixed analysis config hashes" in msg
+
+
+def test_generate_author_evidence_pages_writes_qmd(tmp_path: Path) -> None:
+    settings = _minimal_forensics_settings()
+    paths = AnalysisArtifactPaths.from_layout(
+        tmp_path,
+        tmp_path / "missing.db",
+        tmp_path / "features",
+        tmp_path / "embeddings",
+        analysis_dir=tmp_path / "analysis",
+    )
+    result = AnalysisResult(
+        author_id="a",
+        run_timestamp=datetime(2026, 1, 1, tzinfo=UTC),
+        config_hash=compute_analysis_config_hash(settings),
+    )
+    paths.analysis_dir.mkdir(parents=True)
+    paths.result_json("a").write_text(result.model_dump_json(), encoding="utf-8")
+
+    pages = generate_author_evidence_pages(
+        settings,
+        paths,
+        tmp_path / "reports",
+        author_slug="a",
+    )
+
+    assert [page.name for page in pages] == ["a.qmd"]
+    text = pages[0].read_text(encoding="utf-8")
+    assert 'title: "Evidence Page: A"' in text
+    assert "## Change-Point Timeline" in text
+    assert "_No article links available._" in text
+
+
+def test_per_author_slugs_fall_back_to_result_artifacts(tmp_path: Path) -> None:
+    settings = _minimal_forensics_settings()
+    analysis = tmp_path / "analysis"
+    analysis.mkdir()
+    (analysis / "real-author_result.json").write_text("{}", encoding="utf-8")
+
+    assert _per_author_slugs(settings, analysis, None) == ["real-author"]
 
 
 def test_quarto_bin_delegates_to_which(monkeypatch: pytest.MonkeyPatch) -> None:
