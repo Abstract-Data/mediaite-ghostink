@@ -55,7 +55,8 @@ CREATE TABLE IF NOT EXISTS authors (
     role TEXT NOT NULL CHECK (role IN ('target', 'control')),
     baseline_start DATE,
     baseline_end DATE,
-    archive_url TEXT NOT NULL
+    archive_url TEXT NOT NULL,
+    is_shared_byline INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS articles (
@@ -152,6 +153,7 @@ def _migrate_articles_columns(conn: sqlite3.Connection) -> None:
 
 def _author_row_to_model(row: sqlite3.Row) -> Author:
     """Map an ``authors`` table row to :class:`Author`."""
+    is_shared_byline = bool(row["is_shared_byline"]) if "is_shared_byline" in row.keys() else False
     return Author(
         id=row["id"],
         name=row["name"],
@@ -161,6 +163,7 @@ def _author_row_to_model(row: sqlite3.Row) -> Author:
         baseline_start=date.fromisoformat(str(row["baseline_start"])),
         baseline_end=date.fromisoformat(str(row["baseline_end"])),
         archive_url=row["archive_url"],
+        is_shared_byline=is_shared_byline,
     )
 
 
@@ -431,9 +434,10 @@ class Repository(RepositoryReader):
         conn.execute(
             """
             INSERT INTO authors (
-                id, name, slug, outlet, role, baseline_start, baseline_end, archive_url
+                id, name, slug, outlet, role, baseline_start, baseline_end, archive_url,
+                is_shared_byline
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 name=excluded.name,
                 slug=excluded.slug,
@@ -441,7 +445,8 @@ class Repository(RepositoryReader):
                 role=excluded.role,
                 baseline_start=excluded.baseline_start,
                 baseline_end=excluded.baseline_end,
-                archive_url=excluded.archive_url
+                archive_url=excluded.archive_url,
+                is_shared_byline=excluded.is_shared_byline
             """,
             (
                 author.id,
@@ -452,6 +457,7 @@ class Repository(RepositoryReader):
                 author.baseline_start.isoformat(),
                 author.baseline_end.isoformat(),
                 author.archive_url,
+                int(author.is_shared_byline),
             ),
         )
 

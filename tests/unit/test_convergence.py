@@ -123,6 +123,66 @@ def test_changepoints_outside_window_no_convergence() -> None:
     assert result == []
 
 
+def test_ratio_pass_does_not_require_pipeline_b_signal() -> None:
+    base = datetime(2024, 1, 1, tzinfo=UTC)
+    cps = [_cp(name, base) for name in ["ttr", "mattr", "hapax_ratio"]]
+
+    result = compute_convergence_scores(
+        ConvergenceInput.build(
+            change_points=cps,
+            centroid_velocities=[],
+            baseline_similarity_curve=[],
+            window_days=30,
+            min_feature_ratio=0.75,
+            total_feature_count=4,
+        )
+    )
+
+    assert len(result) == 1
+    assert result[0].convergence_ratio == pytest.approx(0.75)
+    assert result[0].pipeline_b_score == pytest.approx(0.0)
+
+
+def test_ab_pass_can_emit_when_ratio_fails() -> None:
+    base = datetime(2024, 1, 1, tzinfo=UTC)
+
+    result = compute_convergence_scores(
+        ConvergenceInput.build(
+            change_points=[_cp("ttr", base, effect_size=0.8)],
+            centroid_velocities=[("2024-01", 0.0), ("2024-02", 1.0), ("2024-03", 1.0)],
+            baseline_similarity_curve=[
+                (base, 0.9),
+                (base + timedelta(days=60), 0.1),
+            ],
+            window_days=90,
+            min_feature_ratio=0.75,
+            total_feature_count=4,
+        )
+    )
+
+    assert len(result) == 1
+    assert result[0].convergence_ratio == pytest.approx(0.25)
+    assert result[0].pipeline_a_score > 0.5
+    assert result[0].pipeline_b_score > 0.5
+
+
+def test_low_ratio_without_ab_pass_fails() -> None:
+    base = datetime(2024, 1, 1, tzinfo=UTC)
+
+    result = compute_convergence_scores(
+        ConvergenceInput.build(
+            change_points=[_cp("ttr", base, effect_size=0.8)],
+            centroid_velocities=[],
+            baseline_similarity_curve=[],
+            window_days=90,
+            min_feature_ratio=0.75,
+            total_feature_count=4,
+        )
+    )
+
+    assert result == []
+
+
 def test_empty_feature_total_returns_empty() -> None:
     """``total_feature_count=0`` must short-circuit without a ZeroDivisionError."""
     cp_time = datetime(2024, 2, 1, tzinfo=UTC)

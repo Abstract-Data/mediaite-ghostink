@@ -67,6 +67,20 @@ class HypothesisTest(BaseModel):
     significant: bool
 
 
+class EraClassification(BaseModel):
+    ai_marker_change_points_by_era: dict[str, int] = Field(default_factory=dict)
+    dominant_era: (
+        Literal[
+            "pre_nov_2022",
+            "nov_2022_to_mar_2023",
+            "mar_2023_to_dec_2023",
+            "post_dec_2023",
+        ]
+        | None
+    ) = None
+    total_ai_marker_change_points: int = 0
+
+
 class AnalysisResult(BaseModel):
     author_id: str
     run_id: str = Field(default_factory=lambda: str(uuid4()))
@@ -76,3 +90,4 @@ class AnalysisResult(BaseModel):
     convergence_windows: list[ConvergenceWindow] = Field(default_factory=list)
     drift_scores: DriftScores | None = None
     hypothesis_tests: list[HypothesisTest] = Field(default_factory=list)
+    era_classification: EraClassification = Field(default_factory=EraClassification)

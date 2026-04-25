@@ -131,6 +131,19 @@ def _change_point_sentences(analysis: AnalysisResult) -> list[str]:
     ]
 
 
+def _era_sentences(analysis: AnalysisResult) -> list[str]:
+    era = analysis.era_classification
+    if era.total_ai_marker_change_points == 0 or era.dominant_era is None:
+        return []
+    label = era.dominant_era.replace("_", " ")
+    return [
+        (
+            f"AI-marker change-points were concentrated in the {label} era "
+            f"({era.total_ai_marker_change_points} gated marker event(s))."
+        )
+    ]
+
+
 def _control_sentences(control_count: int) -> list[str]:
     if control_count <= 0:
         return []
@@ -225,6 +238,7 @@ def generate_evidence_narrative(
         sentences.extend(_effect_size_sentences(analysis_result))
         sentences.extend(_drift_sentences(analysis_result))
         sentences.extend(_change_point_sentences(analysis_result))
+        sentences.extend(_era_sentences(analysis_result))
         sentences.extend(_control_sentences(control_count))
 
     prereg_clause = _preregistration_clause(preregistration)

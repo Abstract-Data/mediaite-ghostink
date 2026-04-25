@@ -208,6 +208,46 @@ def test_qualification_no_articles_disqualified(tmp_db: Path) -> None:
     assert disqualified[0].disqualification_reason == "no_articles"
 
 
+def test_qualification_excludes_shared_bylines_by_default(tmp_db: Path) -> None:
+    author = _make_author("mediaite-staff", "Mediaite Staff")
+    start = datetime(2021, 1, 1, tzinfo=UTC)
+    articles = [
+        _make_article(author, published=start + timedelta(days=i * 9), words=600)
+        for i in range(120)
+    ]
+    _seed(tmp_db, author, articles)
+
+    qualified, disqualified = qualify_authors(
+        tmp_db,
+        QualificationCriteria(min_span_days=365),
+        today=articles[-1].published_date.date() + timedelta(days=30),
+    )
+
+    assert qualified == []
+    assert len(disqualified) == 1
+    assert "shared_byline" in (disqualified[0].disqualification_reason or "")
+
+
+def test_qualification_include_shared_bylines_escape_hatch(tmp_db: Path) -> None:
+    author = _make_author("mediaite-staff", "Mediaite Staff")
+    start = datetime(2021, 1, 1, tzinfo=UTC)
+    articles = [
+        _make_article(author, published=start + timedelta(days=i * 9), words=600)
+        for i in range(120)
+    ]
+    _seed(tmp_db, author, articles)
+
+    qualified, disqualified = qualify_authors(
+        tmp_db,
+        QualificationCriteria(min_span_days=365, exclude_shared_bylines=False),
+        today=articles[-1].published_date.date() + timedelta(days=30),
+    )
+
+    assert disqualified == []
+    assert len(qualified) == 1
+    assert qualified[0].author.slug == "mediaite-staff"
+
+
 # ---------------------------------------------------------------------------
 # scoring
 # ---------------------------------------------------------------------------

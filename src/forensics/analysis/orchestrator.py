@@ -23,6 +23,7 @@ from forensics.analysis.convergence import (
     compute_convergence_scores,
 )
 from forensics.analysis.drift import compute_author_drift_pipeline, load_article_embeddings
+from forensics.analysis.era import classify_ai_marker_era
 from forensics.analysis.evidence import filter_evidence_change_points
 from forensics.analysis.statistics import (
     apply_correction,
@@ -338,6 +339,67 @@ def _merge_run_metadata(
     write_json_artifact(meta_path, prev)
 
 
+def _section_residualized_settings(config: ForensicsSettings) -> ForensicsSettings:
+    analysis = config.analysis.model_copy(update={"section_residualize_features": True})
+    return config.model_copy(update={"analysis": analysis})
+
+
+def _run_section_residualized_sensitivity(
+    paths: AnalysisArtifactPaths,
+    config: ForensicsSettings,
+    slugs: list[str],
+    primary_results: dict[str, AnalysisResult],
+    *,
+    probability_trajectory_by_slug: dict[str, ProbabilityTrajectory],
+) -> dict[str, Any]:
+    if config.analysis.section_residualize_features:
+        return {}
+    flagged = [
+        slug
+        for slug in slugs
+        if slug in primary_results
+        and (primary_results[slug].change_points or primary_results[slug].convergence_windows)
+    ]
+    if not flagged:
+        return {}
+
+    sensitivity_paths = paths.with_analysis_dir(paths.sensitivity_dir("section_residualized"))
+    sensitivity_config = _section_residualized_settings(config)
+    summary: dict[str, Any] = {"authors": {}, "analysis_dir": str(sensitivity_paths.analysis_dir)}
+    with Repository(paths.db_path) as repo:
+        for slug in flagged:
+            per_author = _run_per_author_analysis(
+                slug,
+                repo,
+                sensitivity_paths,
+                sensitivity_config,
+                probability_trajectory_by_slug=probability_trajectory_by_slug,
+            )
+            if per_author is None:
+                continue
+            assembled, change_points, convergence_windows, all_tests = per_author
+            _write_per_author_json_artifacts(
+                slug,
+                sensitivity_paths,
+                change_points,
+                convergence_windows,
+                assembled,
+                all_tests,
+            )
+            primary_count = len(primary_results[slug].change_points)
+            residualized_count = len(change_points)
+            summary["authors"][slug] = {
+                "primary_change_points": primary_count,
+                "section_residualized_change_points": residualized_count,
+                "primary_convergence_windows": len(primary_results[slug].convergence_windows),
+                "section_residualized_convergence_windows": len(convergence_windows),
+                "downgrade_recommended": residualized_count < primary_count,
+            }
+
+    write_json_artifact(sensitivity_paths.analysis_dir / "sensitivity_summary.json", summary)
+    return summary
+
+
 def assemble_analysis_result(
     author_id: str,
     change_points: list[ChangePoint],
@@ -357,6 +419,7 @@ def assemble_analysis_result(
         convergence_windows=convergence_windows,
         drift_scores=drift_scores,
         hypothesis_tests=hypothesis_tests,
+        era_classification=classify_ai_marker_era(change_points),
     )
 
 
@@ -421,6 +484,13 @@ def run_full_analysis(
         )
 
     targets, controls = _resolve_targets_and_controls(config, author_slug)
+    sensitivity_summary = _run_section_residualized_sensitivity(
+        paths,
+        config,
+        slugs,
+        results,
+        probability_trajectory_by_slug=prob_map,
+    )
     comparison_payload = _run_target_control_comparisons(
         targets,
         controls,
@@ -432,6 +502,11 @@ def run_full_analysis(
     write_json_artifact(paths.comparison_report_json(), comparison_payload)
 
     _merge_run_metadata(paths, results, comparison_payload)
+    if sensitivity_summary:
+        meta_path = paths.run_metadata_json()
+        meta = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.is_file() else {}
+        meta["section_residualized_sensitivity"] = sensitivity_summary
+        write_json_artifact(meta_path, meta)
 
     write_corpus_custody(paths.db_path, paths.analysis_dir)
 

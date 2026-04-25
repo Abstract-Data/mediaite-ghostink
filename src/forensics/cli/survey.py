@@ -143,6 +143,13 @@ def survey(
             ),
         ),
     ] = None,
+    include_shared_bylines: Annotated[
+        bool,
+        typer.Option(
+            "--include-shared-bylines",
+            help="Include pooled/shared newsroom bylines in survey qualification.",
+        ),
+    ] = False,
 ) -> None:
     """Run a blind newsroom survey — analyze all qualified authors."""
     settings = get_settings()
@@ -155,6 +162,8 @@ def survey(
     if min_span_days is not None:
         overrides["min_span_days"] = min_span_days
     criteria = replace(QualificationCriteria.from_settings(settings.survey), **overrides)
+    if include_shared_bylines:
+        criteria = replace(criteria, exclude_shared_bylines=False)
 
     if dry_run:
         _survey_dry_run_echo(db_path, criteria)

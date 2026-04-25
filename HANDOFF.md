@@ -2102,3 +2102,82 @@ uv run pytest tests/ -v
 #### Risks & Next Steps
 - Re-run `uv run forensics analyze` on the real corpus so analysis artifacts are regenerated under the new preregistration/effect-size gates.
 - Treat existing ungated `data/analysis/*_changepoints.json` artifacts as stale until regenerated.
+
+---
+
+### Forensic Reliability Plan — Sensitivity Design
+**Status:** Complete
+**Date:** 2026-04-24
+**Agent/Session:** Cursor Agent sensitivity-design
+
+#### What Was Done
+- Added conservative shared-byline detection and persisted `Author.is_shared_byline` through scrape ingest and SQLite author rows.
+- Excluded shared bylines from survey qualification by default, added the `--include-shared-bylines` CLI escape hatch, and labeled survey rankings as `pooled_content_stream` or `individual_author`.
+- Added section-residualized sensitivity analysis using URL-derived sections and wrote outputs under `data/analysis/sensitivity/section_residualized/` without overwriting primary artifacts.
+- Added additive `AnalysisResult.era_classification` output for gated `ai_marker_frequency` change-points and surfaced it in evidence narratives.
+- Documented the convergence AB-pass rule and pinned ratio-pass, AB-pass, and failure behavior with unit tests.
+
+#### Files Modified
+- `docs/ARCHITECTURE.md`
+- `src/forensics/analysis/changepoint.py`
+- `src/forensics/analysis/era.py`
+- `src/forensics/analysis/orchestrator.py`
+- `src/forensics/analysis/section_residualization.py`
+- `src/forensics/cli/survey.py`
+- `src/forensics/models/__init__.py`
+- `src/forensics/models/analysis.py`
+- `src/forensics/models/author.py`
+- `src/forensics/paths.py`
+- `src/forensics/reporting/narrative.py`
+- `src/forensics/scraper/crawler.py`
+- `src/forensics/storage/repository.py`
+- `src/forensics/survey/orchestrator.py`
+- `src/forensics/survey/qualification.py`
+- `src/forensics/utils/byline.py`
+- `tests/integration/test_cli.py`
+- `tests/test_narrative.py`
+- `tests/test_survey.py`
+- `tests/unit/test_convergence.py`
+- `tests/unit/test_era.py`
+- `tests/unit/test_section_residualization.py`
+- `tests/unit/test_sensitivity_outputs.py`
+- `tests/unit/test_shared_byline.py`
+- `HANDOFF.md`
+
+#### Verification Evidence
+```
+npx gitnexus impact AnalysisResult --repo mediaite-ghostink --direction upstream --depth 2
+  -> MEDIUM; direct callers include assemble_analysis_result and model consumers.
+npx gitnexus impact Author --repo mediaite-ghostink --direction upstream --depth 2
+  -> CRITICAL; affected processes include run_full_analysis and survey paths.
+npx gitnexus impact QualificationCriteria --repo mediaite-ghostink --direction upstream --depth 2
+  -> HIGH; direct impact includes qualify_authors.
+npx gitnexus impact run_full_analysis --repo mediaite-ghostink --direction upstream --depth 2
+  -> CRITICAL; direct callers include analyze, survey, calibration, and bench paths.
+npx gitnexus impact analyze_author_feature_changepoints --repo mediaite-ghostink --direction upstream --depth 2
+  -> HIGH; direct callers include per-author analysis, comparison fallback, and changepoint analysis.
+uv run pytest tests/unit/test_shared_byline.py tests/unit/test_era.py tests/unit/test_section_residualization.py tests/unit/test_sensitivity_outputs.py tests/unit/test_convergence.py tests/test_survey.py::test_qualification_excludes_shared_bylines_by_default tests/test_survey.py::test_qualification_include_shared_bylines_escape_hatch tests/test_narrative.py::test_narrative_surfaces_era_classification tests/integration/test_cli.py::test_survey_help_lists_flags -v --no-cov
+  -> 23 passed
+uv run ruff check .
+  -> All checks passed.
+uv run ruff format --check .
+  -> 204 files already formatted.
+uv run pytest tests/ -v
+  -> 577 passed, 3 deselected, 1 warning in 169.78s.
+  -> Total coverage: 74.00% (gate 72% — PASS).
+```
+
+#### Decisions Made
+- Kept section residualization as a sensitivity output only; primary preregistered artifacts remain unchanged.
+- Used URL-derived sections via `section_from_url` and did not depend on sparse article metadata.
+- Reused existing `AnalysisArtifactPaths` by adding a scoped `with_analysis_dir()` helper for alternate analysis roots.
+- Treated shared bylines as pooled content streams, not individual authors, while preserving an explicit survey CLI escape hatch.
+
+#### Unresolved Questions
+- `npx gitnexus detect_changes --scope all` is still unavailable in this local CLI (`unknown command 'detect_changes'`), so impact checks and test validation were used instead.
+- Snyk SAST was authenticated but then skipped per user instruction after the scan ran too long.
+- `.cursor/plans/forensic_reliability_plan_5b54e596.plan.md` and `prompts/mintlify-component-docs/` appeared in the working tree but were not edited for this task.
+
+#### Risks & Next Steps
+- Re-run `uv run forensics analyze` on the real corpus to generate primary outputs and the separate section-residualized sensitivity artifacts for flagged authors.
+- Review sensitivity summaries before final reporting; authors whose change-point counts collapse after residualization should be described as section-sensitive.

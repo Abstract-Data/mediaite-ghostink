@@ -254,7 +254,14 @@ def test_survey_help_lists_flags() -> None:
     result = runner.invoke(app, ["survey", "--help"])
     assert result.exit_code == 0
     text = _plain_help(result.output)
-    for flag in ("--dry-run", "--resume", "--skip-scrape", "--author", "--min-articles"):
+    for flag in (
+        "--dry-run",
+        "--resume",
+        "--skip-scrape",
+        "--author",
+        "--min-articles",
+        "--include-shared-bylines",
+    ):
         assert flag in text, f"missing {flag} in survey help"
 
 

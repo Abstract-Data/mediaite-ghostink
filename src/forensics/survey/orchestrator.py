@@ -127,6 +127,11 @@ def _write_survey_results(report: SurveyReport) -> None:
                 "rank": rank,
                 "author_slug": result.author_slug,
                 "author_name": result.author_name,
+                "byline_type": (
+                    "pooled_content_stream"
+                    if result.qualification.author.is_shared_byline
+                    else "individual_author"
+                ),
                 "composite_score": result.score.composite if result.score else None,
                 "signal_strength": (result.score.strength.value if result.score else "error"),
                 "total_articles": result.qualification.total_articles,

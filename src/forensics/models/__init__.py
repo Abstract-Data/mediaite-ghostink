@@ -9,6 +9,7 @@ from forensics.models.analysis import (
     ChangePoint,
     ConvergenceWindow,
     DriftScores,
+    EraClassification,
     HypothesisTest,
 )
 from forensics.models.article import Article
@@ -25,6 +26,7 @@ __all__ = [
     "ConvergenceWindow",
     "DriftScores",
     "EmbeddingRecord",
+    "EraClassification",
     "FeatureVector",
     "FindingStrength",
     "HypothesisTest",

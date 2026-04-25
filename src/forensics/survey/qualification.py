@@ -11,6 +11,7 @@ from forensics.config.settings import SurveyConfig
 from forensics.models.article import Article
 from forensics.models.author import Author
 from forensics.storage.repository import Repository
+from forensics.utils.byline import shared_byline_reason
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,7 @@ class QualificationCriteria:
     min_articles_per_year: float = 12.0
     require_recent_activity: bool = True
     recent_activity_days: int = 180
+    exclude_shared_bylines: bool = True
 
     @classmethod
     def from_settings(cls, survey: SurveyConfig) -> QualificationCriteria:
@@ -39,6 +41,7 @@ class QualificationCriteria:
             min_articles_per_year=survey.min_articles_per_year,
             require_recent_activity=survey.require_recent_activity,
             recent_activity_days=survey.recent_activity_days,
+            exclude_shared_bylines=survey.exclude_shared_bylines,
         )
 
 
@@ -67,6 +70,17 @@ def _build_empty_dq(author: Author, reason: str) -> QualifiedAuthor:
         articles_per_year=0.0,
         disqualification_reason=reason,
     )
+
+
+def _shared_byline_disqualification(author: Author, criteria: QualificationCriteria) -> str | None:
+    if not criteria.exclude_shared_bylines:
+        return None
+    reason = shared_byline_reason(author.slug, author.name, author.outlet)
+    if author.is_shared_byline and reason is None:
+        reason = "persisted_flag"
+    if reason is None:
+        return None
+    return f"shared_byline ({reason})"
 
 
 def _summarize_author(author: Author, articles: list[Article]) -> QualifiedAuthor | None:
@@ -146,6 +160,11 @@ def qualify_authors(
     with Repository(db_path) as repo:
         authors = repo.all_authors()
         for author in authors:
+            shared_reason = _shared_byline_disqualification(author, criteria)
+            if shared_reason is not None:
+                disqualified.append(_build_empty_dq(author, shared_reason))
+                continue
+
             articles = repo.get_articles_by_author(author.id)
             if not articles:
                 disqualified.append(_build_empty_dq(author, "no_articles"))

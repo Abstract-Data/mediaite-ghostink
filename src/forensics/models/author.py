@@ -30,3 +30,4 @@ class Author(BaseModel):
     baseline_start: date
     baseline_end: date
     archive_url: str
+    is_shared_byline: bool = False

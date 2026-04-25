@@ -16,6 +16,7 @@ from scipy.special import logsumexp
 
 from forensics.analysis.artifact_paths import AnalysisArtifactPaths
 from forensics.analysis.evidence import filter_evidence_change_points
+from forensics.analysis.section_residualization import residualize_features_by_section
 from forensics.analysis.statistics import cohens_d
 from forensics.config.settings import ForensicsSettings
 from forensics.models.analysis import ChangePoint
@@ -263,6 +264,12 @@ def analyze_author_feature_changepoints(
     settings: ForensicsSettings,
 ) -> list[ChangePoint]:
     """Run configured changepoint methods on each numeric feature column."""
+    if settings.analysis.section_residualize_features:
+        df = residualize_features_by_section(
+            df,
+            feature_columns=list(PELT_FEATURE_COLUMNS),
+            min_articles_per_section=settings.analysis.min_articles_per_section_for_residualize,
+        )
     methods = {m.lower() for m in settings.analysis.changepoint_methods}
     pen = settings.analysis.pelt_penalty
     hazard = settings.analysis.bocpd_hazard_rate

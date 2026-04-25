@@ -1,0 +1,14 @@
+{
+  "family": "mintlify-component-docs",
+  "current_version": "0.1.0",
+  "versions": [
+    {
+      "version": "0.1.0",
+      "date": "2026-04-24",
+      "status": "active",
+      "model": "claude-opus-4-7",
+      "file": "v0.1.0.md",
+      "changelog_entry": "Initial release. Mintlify setup for developer / component documentation only — explicitly NOT a replacement for the Quarto-rendered bound forensic report. Scope boundary stated up front and reinforced throughout the prompt: quarto.yml, index.qmd, notebooks/, data/reports/, and .github/workflows/deploy.yml are out of scope and must be byte-identical pre/post task. Nine steps covering: create mintlify/ at repo root with full docs.json navigation tree (tabs for Get Started, Components, Operations, Decision Records, Prompts), build scripts/build_mintlify_content.py that derives MDX from docs/ and prompts/ (single source of truth preserved), hand-author introduction/quickstart/architecture pages with cross-link Note to Quarto report, follow a consistent component-page template (CardGroup source-and-test links, ParamField inputs/outputs, CodeGroup config examples, AccordionGroup methods), local dev via mint dev, deploy via Mintlify hosted with content directory set to mintlify/, add .github/workflows/mintlify-lint.yml separate from deploy.yml. 10 acceptance criteria including a Quarto-invariants check via git diff --stat. Verification commands enforce reproducibility and broken-link cleanliness. Rollback leaves Quarto deploy as safety net."
+    }
+  ]
+}

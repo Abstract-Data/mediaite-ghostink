@@ -11,6 +11,7 @@ from forensics.models.analysis import (
     ChangePoint,
     ConvergenceWindow,
     DriftScores,
+    EraClassification,
     HypothesisTest,
 )
 from forensics.reporting.narrative import generate_evidence_narrative
@@ -164,6 +165,27 @@ def test_narrative_strong_signal() -> None:
     assert "ttr" in text  # largest |d| = 1.2
     # Convergence window appears.
     assert "convergence window" in text.lower()
+
+
+def test_narrative_surfaces_era_classification() -> None:
+    analysis = _strong_result().model_copy(
+        update={
+            "era_classification": EraClassification(
+                ai_marker_change_points_by_era={
+                    "pre_nov_2022": 0,
+                    "nov_2022_to_mar_2023": 0,
+                    "mar_2023_to_dec_2023": 2,
+                    "post_dec_2023": 0,
+                },
+                dominant_era="mar_2023_to_dec_2023",
+                total_ai_marker_change_points=2,
+            )
+        }
+    )
+
+    text = generate_evidence_narrative(analysis, "jane-doe")
+
+    assert "mar 2023 to dec 2023 era" in text.lower()
 
 
 def test_narrative_contains_slug() -> None:

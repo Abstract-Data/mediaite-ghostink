@@ -139,6 +139,21 @@ Report rendering and compare-only analysis require every configured author resul
 - Bootstrapped 95% confidence intervals (1000 resamples)
 - Benjamini-Hochberg multiple comparison correction
 
+Convergence windows pass by either ratio or A/B agreement. The ratio path
+requires the configured fraction of feature families to shift within the
+window. The AB-pass path is deliberately narrower: Pipeline A score must be
+greater than 0.5 and Pipeline B score must be greater than 0.5, which lets a
+strong stylometric signal plus independent embedding-drift signal pass even
+when the feature-family ratio alone is below threshold. The constants are
+named in `forensics.analysis.convergence` and keep the rule auditable.
+
+Section-residualized sensitivity runs are written separately under
+`data/analysis/sensitivity/section_residualized/`. They use URL-derived section
+tags, not sparse article metadata, and never overwrite the primary
+pre-registered artifacts. If section residualization materially reduces
+change-point counts, downstream reporting should treat that author’s evidence
+as more section-sensitive.
+
 ### Confirmatory Methodology Gates
 
 Confirmatory `forensics analyze` runs require a matching lock at

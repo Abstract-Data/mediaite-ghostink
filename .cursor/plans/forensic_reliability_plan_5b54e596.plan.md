@@ -13,7 +13,7 @@ todos:
     status: completed
   - id: sensitivity-design
     content: Add section-residualized sensitivity outputs, shared-byline handling, era classification, and AB-pass documentation/tests.
-    status: pending
+    status: completed
   - id: reporting-verification
     content: Generate per-author evidence pages, rerun the pipeline, validate, and update handoff documentation.
     status: pending
