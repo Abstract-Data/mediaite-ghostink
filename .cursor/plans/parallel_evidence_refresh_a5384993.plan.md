@@ -13,7 +13,7 @@ todos:
     status: completed
   - id: validate-refresh-flow
     content: Add focused tests and run targeted/full validation commands.
-    status: in_progress
+    status: completed
 isProject: false
 ---
 

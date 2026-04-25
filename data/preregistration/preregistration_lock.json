@@ -1,24 +1,49 @@
 {
-  "preregistration_id": "phase15-rollout-2026-04-24",
-  "locked_at": null,
-  "locked_by": null,
-  "config_hash": null,
-  "amended_from": "data/preregistration/amendment_phase15.md",
-  "amendments": [
-    "data/preregistration/amendment_phase15.md"
-  ],
-  "hypotheses": [
-    "<author-of-interest> shows family-level convergence in window <YYYY-MM> across families <list>",
-    "Per-family BH FDR yields >= 1 significant test for at least 5 of the 10 corpus authors",
-    "Section-conditioned drift removes the change-point under the section-adjusted pipeline"
-  ],
-  "expected_directions": {
-    "ai_marker_frequency": "increase",
-    "first_person_ratio": "decrease",
-    "hedging_frequency": "decrease",
-    "ttr": "decrease",
-    "self_similarity_30d": "increase",
-    "formula_opening_score": "increase"
+  "analysis": {
+    "bocpd_detection_mode": "map_reset",
+    "bocpd_hazard_rate": 0.004,
+    "bocpd_map_drop_ratio": 0.5,
+    "bocpd_min_run_length": 5,
+    "bocpd_student_t": true,
+    "bootstrap_iterations": 200,
+    "changepoint_methods": [
+      "pelt",
+      "bocpd"
+    ],
+    "confirmatory_features": [
+      "ai_marker_frequency",
+      "ttr",
+      "mattr",
+      "sent_length_mean",
+      "paragraph_length_variance",
+      "hedging_frequency"
+    ],
+    "confirmatory_split_date": "2022-11-01",
+    "confirmatory_test_prefixes": [
+      "welch_t",
+      "mann_whitney"
+    ],
+    "convergence_burstiness_drop_ratio": 0.94,
+    "convergence_cp_source": "section_adjusted",
+    "convergence_drift_only_pb_threshold": 0.3,
+    "convergence_min_feature_ratio": 0.5,
+    "convergence_perplexity_drop_ratio": 0.92,
+    "convergence_window_days": 90,
+    "effect_size_threshold": 0.2,
+    "fdr_grouping": "family",
+    "min_articles_for_period": 5,
+    "multiple_comparison_method": "benjamini_hochberg",
+    "multiple_comparison_scope": "global_across_authors",
+    "pelt_cost_model": "l2",
+    "pelt_penalty": 3.0,
+    "pipeline_b_mode": "percentile",
+    "rolling_windows": [
+      30,
+      90
+    ],
+    "section_residualize_features": false,
+    "significance_threshold": 0.05
   },
-  "notes": "Operator MUST fill in this file and commit BEFORE running a confirmatory analysis. Set locked_at + locked_by + config_hash + hypotheses to non-null before run. The analyze CLI inspects data/preregistration/preregistration_lock.json via verify_preregistration() — a missing or null-fielded lock causes the run to be logged as exploratory, not confirmatory. After editing, run `uv run forensics lock-preregistration` to populate the canonical analysis-threshold snapshot + content_hash and overwrite this template; the resulting file becomes the immutable confirmatory contract for the run that follows."
+  "content_hash": "efa64bc4ea06f9c37c404ac59973f1f663de12004eaa390da92433c7ee9bb8e5",
+  "locked_at": "2026-04-25T04:49:16.862663+00:00"
 }

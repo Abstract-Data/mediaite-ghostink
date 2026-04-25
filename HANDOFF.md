@@ -4154,3 +4154,113 @@ uv run pytest tests/ -v
 #### Recommended Next Steps
 - Fix or quarantine the existing notebook formatting/lint drift before relying on repo-wide Ruff as a merge gate.
 - Investigate the two existing convergence test expectation failures separately from the parallel refresh validation flow.
+
+---
+
+### Config Author Roster Normalization
+**Status:** Complete
+**Date:** 2026-04-24
+**Agent/Session:** Cursor Agent
+
+#### What Was Done
+- Normalized `config.toml` so Colby Hall is the only configured target author.
+- Changed the other named Mediaite writers to control authors.
+- Removed the `Placeholder Target` author block.
+- Corrected Zachary Leeman's archive URL to the real Mediaite author archive.
+- Left `.cursor/plans/config_full_run_ab0c7a48.plan.md` untouched per instruction.
+
+#### Files Changed
+- `config.toml`
+- `HANDOFF.md`
+
+#### Verification Evidence
+```
+rg 'role = "target"|placeholder-target|placeholder-control|zachary-leeman|exclude_shared_bylines' config.toml
+  -> Only one target role remains; no placeholder slug remains; Zachary Leeman URL and exclude_shared_bylines are present.
+uv run forensics validate
+  -> Config parsed: 11 author(s); all validation checks passed.
+```
+
+#### Decisions Made
+- Treated the roster fix as a config-only change; no Python symbols, stage contracts, storage schemas, or provider-level architecture were modified.
+- Kept all baseline windows unchanged at `2020-01-01` through `2023-12-31`.
+- Kept `[survey].exclude_shared_bylines = true` unchanged.
+- `docs/RUNBOOK.md` was not updated because no new operational procedure or recurring environment fix was discovered.
+
+#### Unresolved Questions
+- None for the assigned roster normalization.
+
+#### Recommended Next Steps
+- Continue with preregistration locking only after the separate validation/preflight plan steps are intentionally run.
+
+---
+
+### Preregistration Lock Generation
+**Status:** Complete
+**Date:** 2026-04-24
+**Agent/Session:** Cursor Agent
+
+#### What Was Done
+- Ran `uv run forensics lock-preregistration`.
+- Confirmed `data/preregistration/preregistration_lock.json` was generated with concrete analysis thresholds, a content hash, and a UTC `locked_at` timestamp.
+- Left `.cursor/plans/config_full_run_ab0c7a48.plan.md` untouched per instruction.
+
+#### Files Changed
+- `data/preregistration/preregistration_lock.json`
+- `HANDOFF.md`
+
+#### Verification Evidence
+```
+uv run forensics lock-preregistration
+  -> Pre-registration locked: /Users/johneakin/PyCharmProjects/mediaite-ghostink/data/preregistration/preregistration_lock.json
+```
+
+#### Decisions Made
+- Treated this as a CLI-generated data lock; no Python symbols, stage contracts, storage schemas, or provider-level architecture were modified.
+- `docs/RUNBOOK.md` was not updated because no new operational procedure or recurring environment fix was discovered.
+
+#### Unresolved Questions
+- Validation and preflight were not rerun in this assigned to-do; this task only covered preregistration locking.
+
+#### Recommended Next Steps
+- Run analysis after this lock point, or relock/use exploratory mode if analysis thresholds change.
+
+---
+
+### Config Full Run Handoff
+**Status:** Complete
+**Date:** 2026-04-24
+**Agent/Session:** Cursor Agent
+
+#### What Was Done
+- Appended the final completion handoff for the config full run plan.
+- Verified the current config has exactly one target author, no placeholder author slugs, Zachary Leeman's real archive URL, and shared bylines excluded for survey selection.
+- Confirmed the preregistration lock is populated with concrete thresholds, a content hash, and a UTC `locked_at` timestamp.
+- Left `.cursor/plans/config_full_run_ab0c7a48.plan.md` untouched per instruction.
+
+#### Files Changed
+- `HANDOFF.md`
+
+#### Verification Evidence
+```
+rg 'role = "target"|placeholder-target|placeholder-control|exclude_shared_bylines|zachary-leeman' config.toml
+  -> One target role remains; no placeholder slugs matched; Zachary Leeman URL and exclude_shared_bylines are present.
+uv run forensics validate
+  -> Config parsed: 11 author(s); all validation checks passed.
+uv run forensics preflight
+  -> All preflight checks passed.
+data/preregistration/preregistration_lock.json
+  -> locked_at=2026-04-25T04:49:16.862663+00:00; content_hash present.
+```
+
+#### Decisions Made
+- Treated this assigned work as documentation-only; no source symbols, stage contracts, storage schemas, or provider-level architecture were modified.
+- Did not run `uv run forensics lock-preregistration` again during this handoff-only step to avoid unnecessarily rewriting the existing lock timestamp.
+- `docs/RUNBOOK.md` was not updated because no new operational procedure or recurring environment fix was discovered.
+
+#### Unresolved Questions
+- Hugging Face emitted unauthenticated-request warnings during model checks; this did not fail validation or preflight.
+- `sentence_transformers` emitted a `get_sentence_embedding_dimension` deprecation warning from `src/forensics/preflight.py`; this did not fail validation or preflight.
+
+#### Recommended Next Steps
+- Proceed with the next pipeline run using the current preregistration lock, or relock/use exploratory mode if thresholds change.
