@@ -182,6 +182,22 @@ def _run_full_analysis_stage(ctx: AnalyzeContext) -> None:
     )
 
 
+def _run_parallel_author_refresh_stage(ctx: AnalyzeContext) -> None:
+    from forensics.analysis.orchestrator import run_parallel_author_refresh
+
+    results = run_parallel_author_refresh(
+        ctx.paths,
+        ctx.settings,
+        author_slug=ctx.author_slug,
+        max_workers=ctx.max_workers,
+    )
+    logger.info(
+        "analyze: parallel author refresh complete refreshed=%d author=%s",
+        len(results),
+        ctx.author_slug or "all",
+    )
+
+
 def _run_ai_baseline_stage(
     ctx: AnalyzeContext,
     *,
@@ -329,6 +345,7 @@ def run_analyze(  # noqa: C901
     include_shared_bylines: bool = False,
     max_workers: int | None = None,
     compare_pair: tuple[str, str] | None = None,
+    parallel_authors: bool = False,
 ) -> None:
     """Execute the analyze stage as a plain Python function.
 
@@ -388,8 +405,14 @@ def run_analyze(  # noqa: C901
         logger.error("pre-registration gate failed: %s", preregistration.message)
         raise typer.Exit(code=1)
 
-    if compare and not (changepoint or timeseries or drift or ai_baseline or convergence):
+    if compare and not (
+        parallel_authors or changepoint or timeseries or drift or ai_baseline or convergence
+    ):
         _run_compare_only_flow(ctx)
+        return
+
+    if parallel_authors:
+        _run_parallel_author_refresh_stage(ctx)
         return
 
     do_changepoint, do_timeseries, do_drift, do_full_analysis = _resolve_mode_flags(
@@ -569,6 +592,16 @@ def analyze(
             ),
         ),
     ] = None,
+    parallel_authors: Annotated[
+        bool,
+        typer.Option(
+            "--parallel-authors",
+            help=(
+                "Refresh configured author analysis artifacts via isolated per-author "
+                "directories, then promote validated outputs and rebuild shared artifacts once."
+            ),
+        ),
+    ] = False,
     compare_pair: Annotated[
         str | None,
         typer.Option(
@@ -606,6 +639,7 @@ def analyze(
         include_shared_bylines=include_shared_bylines,
         max_workers=max_workers,
         compare_pair=parsed_pair,
+        parallel_authors=parallel_authors,
     )
 
 

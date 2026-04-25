@@ -3915,3 +3915,108 @@ uv run pytest tests/test_preregistration.py::test_committed_template_lock_does_n
 
 #### Unresolved Questions
 - Full `uv run ruff check .` still reports notebook cells under `notebooks/` (pre-existing); scoped ruff to touched `src/`/`tests/` paths for this session.
+
+---
+
+### Parallel Evidence Refresh
+**Status:** Complete
+**Date:** 2026-04-24
+**Agent/Session:** Cursor Agent
+
+#### What Was Done
+- Replaced the slow manual per-author refresh loop with an opt-in isolated refresh path: `uv run forensics analyze --parallel-authors --max-workers 3`.
+- Added private per-author staging under `data/analysis/parallel/<run_id>/<slug>/`; workers write there first, the parent process applies global hypothesis-test gates, validates required artifacts and config hashes, then promotes per-author files to `data/analysis/`.
+- Rebuilt shared artifacts (`comparison_report.json`, `run_metadata.json`, `corpus_custody.json`) once after promotion instead of letting each worker write shared files.
+- Added per-author evidence-page rendering support via `forensics report --per-author`, with deterministic `data/reports/per_author/*.qmd` sources and capped evidence tables.
+- Replaced placeholder authors in `config.toml` with the 14 DB-backed Mediaite author rows from `data/articles.db`.
+- Stopped the previous sequential refresh jobs that were running under the placeholder/corrected configs before implementing the isolated path.
+
+#### Files Modified
+- `config.toml`
+- `docs/RUNBOOK.md`
+- `src/forensics/analysis/orchestrator.py`
+- `src/forensics/cli/analyze.py`
+- `src/forensics/cli/report.py`
+- `src/forensics/models/report_args.py`
+- `src/forensics/reporting/__init__.py`
+- `tests/test_report.py`
+- `tests/unit/test_analyze_compare.py`
+- `HANDOFF.md`
+
+#### Verification Evidence
+```
+npx gitnexus impact run_full_analysis --repo mediaite-ghostink --direction upstream --depth 2
+  -> CRITICAL; direct callers include CLI analyze, survey, calibration, and bench paths.
+npx gitnexus impact run_analyze --repo mediaite-ghostink --direction upstream --depth 2
+  -> HIGH; direct callers include CLI analyze and pipeline flows.
+uv run pytest tests/unit/test_analyze_compare.py::test_isolated_author_worker_does_not_write_canonical_artifacts tests/unit/test_analyze_compare.py::test_run_parallel_author_refresh_promotes_after_validation tests/unit/test_analyze_compare.py::test_run_full_analysis_parallel_dispatch_returns_results -v --no-cov
+  -> 3 passed
+uv run forensics analyze --help
+  -> `--parallel-authors` is listed with isolated refresh help text.
+uv run pytest tests/unit/test_analyze_compare.py -v --no-cov
+  -> 12 passed
+uv run pytest tests/integration/test_parallel_parity.py -v --no-cov
+  -> 3 passed
+uv run ruff format ...touched paths...
+  -> 1 file reformatted, 6 files left unchanged
+uv run ruff format --check ...touched paths...
+  -> 7 files already formatted
+uv run ruff check ...touched paths...
+  -> All checks passed
+uv run pytest tests/test_report.py -v --no-cov
+  -> 25 passed
+uv run ruff check .
+  -> Failed on pre-existing notebook lint issues in notebooks/05-09.
+```
+
+#### Decisions Made
+- Kept the existing `run_full_analysis` default path intact because GitNexus marked it CRITICAL impact; the new safe flow is opt-in through `--parallel-authors`.
+- Capped isolated refresh workers at 3 even when `--max-workers` or config allows more, to avoid multiple UMAP/embedding jobs overwhelming the machine.
+- If any configured author result is stale, the isolated refresh reruns the configured cohort together rather than only stale files; this preserves global FDR correction semantics across authors.
+- Promotion copies only validated slug-prefixed artifacts from private directories to canonical `data/analysis/`.
+
+#### Unresolved Questions
+- The real 14-author isolated refresh was not launched after implementation because it remains computationally heavy; the new command is ready for the operator to run with `--max-workers 3`.
+- Full-repo ruff remains blocked by existing notebook lint issues unrelated to the touched Python files.
+
+#### Risks & Next Steps
+- Run `uv run forensics analyze --parallel-authors --max-workers 3` on the real corpus, then `uv run forensics report --per-author --format html --verify`.
+- Consider a future progress log or heartbeat per author stage; long authors like `alex-griffing` can still run quietly for a long time even when CPU-active.
+
+---
+
+### Isolated Per-Author Analysis Runner Validation
+**Status:** Complete
+**Date:** 2026-04-24
+**Agent/Session:** Cursor Agent
+
+#### What Was Done
+- Confirmed isolated per-author analysis support stages author outputs under `data/analysis/parallel/<run_id>/<slug>/` using `AnalysisArtifactPaths.with_analysis_dir(...)`.
+- Confirmed isolated workers do not write canonical per-author artifacts or shared metadata before validation/promotion.
+- Confirmed the opt-in refresh path applies global hypothesis-test gating, validates config hashes and companion artifacts, then promotes per-author files and rebuilds shared artifacts once.
+
+#### Files Reviewed / Validated
+- `src/forensics/analysis/orchestrator.py`
+- `src/forensics/cli/analyze.py`
+- `tests/unit/test_analyze_compare.py`
+- `HANDOFF.md`
+
+#### Verification Evidence
+```
+uv run pytest tests/unit/test_analyze_compare.py::test_isolated_author_worker_does_not_write_canonical_artifacts tests/unit/test_analyze_compare.py::test_run_parallel_author_refresh_promotes_after_validation -q --no-cov
+  -> 2 passed
+uv run pytest tests/unit/test_analyze_compare.py -q --no-cov
+  -> 12 passed
+uv run ruff check src/forensics/analysis/orchestrator.py src/forensics/cli/analyze.py tests/unit/test_analyze_compare.py
+  -> All checks passed!
+uv run ruff format --check src/forensics/analysis/orchestrator.py src/forensics/cli/analyze.py tests/unit/test_analyze_compare.py
+  -> 3 files already formatted
+```
+
+#### Decisions Made
+- No detector logic or stage contracts were changed.
+- No new operational knowledge was added to `docs/RUNBOOK.md`; existing usage guidance for `--parallel-authors` remains sufficient.
+- GitNexus MCP impact descriptors were unavailable in the registered MCP folder; the existing handoff records prior CLI impact checks for this feature area, and this pass only validated the already-scoped isolated-runner implementation.
+
+#### Unresolved Questions
+- Full `uv run pytest tests/ -v` was not rerun during this focused validation pass because multiple long-running project commands were already active in user terminals.

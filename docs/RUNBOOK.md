@@ -394,6 +394,13 @@ uv run forensics analyze                    # serial baseline
 mv data/analysis data/analysis_serial
 uv run forensics analyze --max-workers 4    # parallel run
 diff -r data/analysis_serial data/analysis  # expected: no output
+
+# Evidence refresh — isolate each author under
+# data/analysis/parallel/<run_id>/<slug>/, validate per-author artifacts,
+# promote them to data/analysis/, then rebuild comparison metadata once.
+# Use this when canonical per-author result hashes are stale and the serial
+# refresh loop is too slow.
+uv run forensics analyze --parallel-authors --max-workers 3
 ```
 
 ### Phase 15 schema migration + benchmarks

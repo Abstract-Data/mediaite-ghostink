@@ -32,6 +32,7 @@ from forensics.config import get_settings
 from forensics.models import Author
 from forensics.storage.parquet import write_parquet_atomic
 from forensics.storage.repository import Repository, init_db
+from forensics.utils.provenance import compute_analysis_config_hash
 
 _PAIR_CONFIG_TOML = """
 [[authors]]
@@ -97,6 +98,13 @@ def _feature_frame(author_id: str, *, ttr_base: float, n: int = 6) -> pl.DataFra
             }
         )
     return pl.DataFrame(rows)
+
+
+def _write_current_result(paths: AnalysisArtifactPaths, slug: str, settings) -> None:
+    paths.result_json(slug).write_text(
+        json.dumps({"config_hash": compute_analysis_config_hash(settings)}),
+        encoding="utf-8",
+    )
 
 
 @pytest.fixture
@@ -186,6 +194,7 @@ def test_run_compare_only_with_pair_writes_report(
     # Pre-seed empty changepoints so compare_target_to_controls has data to load.
     for slug in ("tgt1", "ctrl1", "spare"):
         paths.changepoints_json(slug).write_text("[]", encoding="utf-8")
+        _write_current_result(paths, slug, settings)
 
     out = run_compare_only(
         settings,
@@ -235,6 +244,8 @@ def test_run_full_analysis_timings_out_populates_per_stage_buckets(
 
     paths, _cfg = pair_project
     settings = get_settings()
+    for slug in ("ctrl1", "spare"):
+        _write_current_result(paths, slug, settings)
     timings = AnalysisTimings()
     run_full_analysis(
         paths,
@@ -314,3 +325,39 @@ def test_per_author_worker_handles_unknown_slug(
     assert slug == "ghost-author"
     assert assembled is None
     assert stage_timings == {}
+
+
+def test_isolated_author_worker_does_not_write_canonical_artifacts(
+    pair_project: tuple[AnalysisArtifactPaths, Path],
+) -> None:
+    """The isolated worker writes under ``parallel/<run>/<slug>`` only."""
+    from forensics.analysis.orchestrator import _isolated_author_worker
+
+    paths, _cfg = pair_project
+    settings = get_settings()
+    isolated = _isolated_author_worker("tgt1", paths, settings, {}, "run-1")
+
+    assert isolated is not None
+    assert isolated.analysis_dir == paths.analysis_dir / "parallel" / "run-1" / "tgt1"
+    assert (isolated.analysis_dir / "tgt1_result.json").is_file()
+    assert not paths.result_json("tgt1").exists()
+    assert not paths.run_metadata_json().exists()
+
+
+def test_run_parallel_author_refresh_promotes_after_validation(
+    pair_project: tuple[AnalysisArtifactPaths, Path],
+) -> None:
+    """Parallel refresh stages privately, then promotes per-author artifacts once valid."""
+    from forensics.analysis.orchestrator import run_parallel_author_refresh
+
+    paths, _cfg = pair_project
+    settings = get_settings()
+
+    results = run_parallel_author_refresh(paths, settings, max_workers=1)
+
+    assert set(results) == {"tgt1", "ctrl1", "spare"}
+    for slug in results:
+        assert paths.result_json(slug).is_file()
+        assert (paths.analysis_dir / "parallel").is_dir()
+    assert paths.comparison_report_json().is_file()
+    assert paths.run_metadata_json().is_file()

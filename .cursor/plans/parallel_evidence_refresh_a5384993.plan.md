@@ -4,7 +4,7 @@ overview: "Replace the slow sequential refresh with an isolated parallel refresh
 todos:
   - id: isolated-runner
     content: Add isolated per-author analysis output support without changing detector semantics.
-    status: pending
+    status: completed
   - id: parallel-entrypoint
     content: Add a conservative parallel refresh entry point with max-worker control.
     status: pending
