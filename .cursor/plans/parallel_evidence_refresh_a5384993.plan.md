@@ -7,13 +7,13 @@ todos:
     status: completed
   - id: parallel-entrypoint
     content: Add a conservative parallel refresh entry point with max-worker control.
-    status: pending
+    status: completed
   - id: promote-validated-artifacts
     content: Validate isolated outputs and promote per-author artifacts before rebuilding shared metadata once.
-    status: pending
+    status: completed
   - id: validate-refresh-flow
     content: Add focused tests and run targeted/full validation commands.
-    status: pending
+    status: in_progress
 isProject: false
 ---
 

@@ -4020,3 +4020,86 @@ uv run ruff format --check src/forensics/analysis/orchestrator.py src/forensics/
 
 #### Unresolved Questions
 - Full `uv run pytest tests/ -v` was not rerun during this focused validation pass because multiple long-running project commands were already active in user terminals.
+
+---
+
+### Parallel Refresh Entry Point Worker Control
+**Status:** Complete
+**Date:** 2026-04-24
+**Agent/Session:** Cursor Agent
+
+#### What Was Done
+- Added a refresh-specific worker resolver so `forensics analyze --parallel-authors` defaults to `min(3, os.cpu_count() - 1)` while still honoring explicit `--max-workers` and `settings.analysis.max_workers`.
+- Kept the existing `run_full_analysis` worker resolver unchanged to avoid altering the broader analysis path.
+- Confirmed the analyze help surface lists `--parallel-authors` and `--max-workers`.
+
+#### Files Changed
+- `src/forensics/analysis/orchestrator.py`
+- `tests/unit/test_analyze_compare.py`
+- `tests/integration/test_cli.py`
+- `docs/RUNBOOK.md`
+- `HANDOFF.md`
+
+#### Verification Evidence
+```
+uv run pytest tests/unit/test_analyze_compare.py::test_resolve_parallel_refresh_workers_is_conservative_by_default tests/unit/test_analyze_compare.py::test_run_parallel_author_refresh_promotes_after_validation tests/integration/test_cli.py::test_analyze_help_lists_flags -q
+  -> 3 passed, then failed repository coverage threshold because this was a narrow subset.
+uv run pytest --no-cov tests/unit/test_analyze_compare.py::test_resolve_parallel_refresh_workers_is_conservative_by_default tests/unit/test_analyze_compare.py::test_run_parallel_author_refresh_promotes_after_validation tests/integration/test_cli.py::test_analyze_help_lists_flags -q
+  -> 3 passed
+uv run ruff check src/forensics/analysis/orchestrator.py src/forensics/cli/analyze.py tests/unit/test_analyze_compare.py tests/integration/test_cli.py
+  -> All checks passed!
+uv run ruff format --check src/forensics/analysis/orchestrator.py tests/unit/test_analyze_compare.py tests/integration/test_cli.py
+  -> 3 files already formatted
+```
+
+#### Decisions Made
+- The conservative default applies only when neither CLI override nor config value is present; explicit operator/config choices are not capped.
+- `run_full_analysis` retains its existing `cpu_count - 1` fallback because changing it would widen the task beyond the assigned entry-point work.
+- GitNexus MCP impact descriptors were unavailable in the registered MCP folder; local reference search showed `run_parallel_author_refresh` is used only by the CLI wrapper and its unit test.
+
+#### Unresolved Questions
+- Full-suite validation was not rerun; this pass used targeted tests plus Ruff for the touched files.
+
+#### Recommended Next Steps
+- Run `uv run forensics analyze --parallel-authors --max-workers 3` on the real corpus when ready for the heavier refresh.
+
+---
+
+### Parallel Refresh Validated Promotion
+**Status:** Complete
+**Date:** 2026-04-24
+**Agent/Session:** Cursor Agent
+
+#### What Was Done
+- Changed the parallel author refresh flow so all gated isolated author outputs are validated before any per-author artifacts are promoted into canonical `data/analysis/`.
+- Added an all-or-nothing regression test proving a missing companion artifact prevents even earlier valid isolated outputs from being promoted.
+- Kept shared metadata rebuilds (`comparison_report.json`, `run_metadata.json`, corpus custody) after successful validation and promotion only.
+
+#### Files Changed
+- `src/forensics/analysis/orchestrator.py`
+- `tests/unit/test_analyze_compare.py`
+- `HANDOFF.md`
+
+#### Verification Evidence
+```
+uv run pytest --no-cov tests/unit/test_analyze_compare.py::test_run_parallel_author_refresh_promotes_after_validation tests/unit/test_analyze_compare.py::test_validate_and_promote_isolated_outputs_is_all_or_nothing -q
+  -> 2 passed
+uv run pytest --no-cov tests/unit/test_analyze_compare.py -q
+  -> 14 passed
+uv run ruff check src/forensics/analysis/orchestrator.py tests/unit/test_analyze_compare.py
+  -> All checks passed!
+uv run ruff format --check src/forensics/analysis/orchestrator.py tests/unit/test_analyze_compare.py
+  -> 2 files already formatted
+```
+
+#### Decisions Made
+- Validation now happens as a batch before promotion to avoid partial canonical updates if a later isolated output is stale or incomplete.
+- No detector logic, stage contracts, storage schemas, or provider-level architecture were changed.
+- `docs/RUNBOOK.md` was not updated because no new operational command or environment procedure was introduced.
+
+#### Unresolved Questions
+- GitNexus MCP descriptors were unavailable because the registered `user-gitnexus` server reports an MCP error; impact analysis could not be run through MCP.
+- Full-suite validation (`uv run pytest tests/ -v`) was not rerun during this focused task.
+
+#### Recommended Next Steps
+- Run the real refresh with `uv run forensics analyze --parallel-authors --max-workers 3` when ready to regenerate corpus artifacts.

@@ -682,6 +682,14 @@ def _resolve_max_workers(config: ForensicsSettings, override: int | None) -> int
     return max(1, cpu - 1)
 
 
+def _resolve_parallel_refresh_workers(config: ForensicsSettings, override: int | None) -> int:
+    """Resolve conservative worker count for isolated author refresh jobs."""
+    if override is not None or config.analysis.max_workers is not None:
+        return _resolve_max_workers(config, override)
+    cpu = os.cpu_count() or 1
+    return min(3, max(1, cpu - 1))
+
+
 def _run_full_analysis_per_authors(
     slugs: list[str],
     paths: AnalysisArtifactPaths,
@@ -860,6 +868,18 @@ def _promote_isolated_author_output(
         os.replace(tmp, dst)
 
 
+def _validate_and_promote_isolated_outputs(
+    isolated_outputs: list[IsolatedAuthorAnalysis],
+    paths: AnalysisArtifactPaths,
+    config: ForensicsSettings,
+) -> None:
+    """Validate every isolated author output before promoting any canonical artifact."""
+    for isolated in isolated_outputs:
+        _validate_isolated_author_output(isolated, config)
+    for isolated in isolated_outputs:
+        _promote_isolated_author_output(isolated, paths)
+
+
 def _run_isolated_author_jobs(
     paths: AnalysisArtifactPaths,
     config: ForensicsSettings,
@@ -919,7 +939,7 @@ def run_parallel_author_refresh(
     """Refresh stale configured authors through isolated parallel author directories."""
     run_id = str(uuid4())
     slugs = _stale_author_slugs(paths, config, author_slug)
-    workers = min(_resolve_max_workers(config, max_workers), 3)
+    workers = _resolve_parallel_refresh_workers(config, max_workers)
     logger.info(
         "analysis-refresh: refreshing %d stale author(s) with %d worker(s)",
         len(slugs),
@@ -943,6 +963,7 @@ def run_parallel_author_refresh(
         {slug: result.hypothesis_tests for slug, result in results.items()},
         config.analysis,
     )
+    refreshed_outputs: list[IsolatedAuthorAnalysis] = []
     for item in isolated_outputs:
         all_tests = gated_tests_by_slug.get(item.slug, [])
         assembled = item.result.model_copy(update={"hypothesis_tests": all_tests})
@@ -962,8 +983,9 @@ def run_parallel_author_refresh(
             result=assembled,
             stage_timings=item.stage_timings,
         )
-        _validate_isolated_author_output(refreshed, config)
-        _promote_isolated_author_output(refreshed, paths)
+        refreshed_outputs.append(refreshed)
+
+    _validate_and_promote_isolated_outputs(refreshed_outputs, paths, config)
 
     targets, controls = _resolve_targets_and_controls(config, author_slug)
     comparison_payload = _run_target_control_comparisons(

@@ -75,6 +75,8 @@ def test_analyze_help_lists_flags() -> None:
         "--verify-corpus",
         "--author",
         "--exploratory",
+        "--max-workers",
+        "--parallel-authors",
     ):
         assert flag in text, f"missing {flag} in analyze help"
 

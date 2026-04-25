@@ -169,6 +169,9 @@ uv run pytest -m "not slow" tests/ -v       # default behavior
   - `uv run pytest tests/unit -v`
   - `uv run pytest tests/integration -v`
 - Run specific test: `uv run pytest -k "test_name" -v`
+- For a narrow validation run that should not enforce the repository-wide
+  coverage threshold, add `--no-cov` (for example,
+  `uv run pytest --no-cov tests/unit/test_analyze_compare.py::test_name -q`).
 - Fix regressions before adding new feature behavior.
 
 ### Ollama connection refused

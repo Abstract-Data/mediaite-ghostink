@@ -14,6 +14,7 @@ Exercises three boundaries:
 from __future__ import annotations
 
 import json
+import os
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Literal
@@ -22,8 +23,11 @@ import polars as pl
 import pytest
 import typer
 
+from forensics.analysis import orchestrator as orch_mod
 from forensics.analysis.artifact_paths import AnalysisArtifactPaths
 from forensics.analysis.orchestrator import (
+    _resolve_max_workers,
+    _resolve_parallel_refresh_workers,
     _resolve_targets_and_controls,
     run_compare_only,
 )
@@ -215,10 +219,6 @@ def test_resolve_max_workers_precedence(
     pair_project: tuple[AnalysisArtifactPaths, Path],
 ) -> None:
     """Override > config > ``cpu_count - 1``; never returns < 1."""
-    import os
-
-    from forensics.analysis.orchestrator import _resolve_max_workers
-
     settings = get_settings()
     # Explicit override wins regardless of config.
     assert _resolve_max_workers(settings, 4) == 4
@@ -234,6 +234,23 @@ def test_resolve_max_workers_precedence(
     # No override and no config falls back to ``cpu_count - 1`` (>= 1).
     fallback = _resolve_max_workers(settings, None)
     assert fallback == max(1, (os.cpu_count() or 1) - 1)
+
+
+def test_resolve_parallel_refresh_workers_is_conservative_by_default(
+    pair_project: tuple[AnalysisArtifactPaths, Path],
+) -> None:
+    """Parallel refresh defaults to at most three workers unless explicitly configured."""
+    settings = get_settings()
+    assert _resolve_parallel_refresh_workers(settings, None) == min(
+        3,
+        max(1, (os.cpu_count() or 1) - 1),
+    )
+    assert _resolve_parallel_refresh_workers(settings, 5) == 5
+
+    configured = settings.model_copy(
+        update={"analysis": settings.analysis.model_copy(update={"max_workers": 6})}
+    )
+    assert _resolve_parallel_refresh_workers(configured, None) == 6
 
 
 def test_run_full_analysis_timings_out_populates_per_stage_buckets(
@@ -359,5 +376,89 @@ def test_run_parallel_author_refresh_promotes_after_validation(
     for slug in results:
         assert paths.result_json(slug).is_file()
         assert (paths.analysis_dir / "parallel").is_dir()
+    assert paths.comparison_report_json().is_file()
+    assert paths.run_metadata_json().is_file()
+
+
+def test_validate_and_promote_isolated_outputs_is_all_or_nothing(
+    pair_project: tuple[AnalysisArtifactPaths, Path],
+) -> None:
+    """A bad isolated author output must not partially promote earlier valid outputs."""
+    paths, _cfg = pair_project
+    settings = get_settings()
+    valid = orch_mod._isolated_author_worker("tgt1", paths, settings, {}, "run-validation")
+    invalid = orch_mod._isolated_author_worker("ctrl1", paths, settings, {}, "run-validation")
+    assert valid is not None
+    assert invalid is not None
+
+    (invalid.analysis_dir / "ctrl1_convergence.json").unlink()
+
+    with pytest.raises(ValueError, match="missing isolated companion artifacts"):
+        orch_mod._validate_and_promote_isolated_outputs([valid, invalid], paths, settings)
+
+    assert not paths.result_json("tgt1").exists()
+    assert not paths.result_json("ctrl1").exists()
+
+
+def test_validate_and_promote_isolated_outputs_rejects_stale_config_hash(
+    pair_project: tuple[AnalysisArtifactPaths, Path],
+) -> None:
+    """A stale isolated result hash is rejected before any canonical promotion."""
+    paths, _cfg = pair_project
+    settings = get_settings()
+    valid = orch_mod._isolated_author_worker("tgt1", paths, settings, {}, "run-stale")
+    stale = orch_mod._isolated_author_worker("ctrl1", paths, settings, {}, "run-stale")
+    assert valid is not None
+    assert stale is not None
+
+    stale_result_path = stale.analysis_dir / "ctrl1_result.json"
+    payload = json.loads(stale_result_path.read_text(encoding="utf-8"))
+    payload["config_hash"] = "stale-config"
+    stale_result_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="stale isolated result for ctrl1"):
+        orch_mod._validate_and_promote_isolated_outputs([valid, stale], paths, settings)
+
+    assert not paths.result_json("tgt1").exists()
+    assert not paths.result_json("ctrl1").exists()
+    assert not paths.comparison_report_json().exists()
+    assert not paths.run_metadata_json().exists()
+
+
+def test_parallel_refresh_rebuilds_shared_artifacts_after_promotion(
+    pair_project: tuple[AnalysisArtifactPaths, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Shared artifacts are absent through validation and created after promotion."""
+    paths, _cfg = pair_project
+    settings = get_settings()
+    real_validate_and_promote = orch_mod._validate_and_promote_isolated_outputs
+    observed: dict[str, bool] = {}
+
+    def wrapped_validate_and_promote(*args, **kwargs) -> None:
+        isolated_outputs, active_paths, _active_settings = args
+        assert not active_paths.comparison_report_json().exists()
+        assert not active_paths.run_metadata_json().exists()
+        for isolated in isolated_outputs:
+            assert not active_paths.result_json(isolated.slug).exists()
+
+        real_validate_and_promote(*args, **kwargs)
+
+        for isolated in isolated_outputs:
+            assert active_paths.result_json(isolated.slug).is_file()
+        assert not active_paths.comparison_report_json().exists()
+        assert not active_paths.run_metadata_json().exists()
+        observed["promoted_before_shared_rebuild"] = True
+
+    monkeypatch.setattr(
+        orch_mod,
+        "_validate_and_promote_isolated_outputs",
+        wrapped_validate_and_promote,
+    )
+
+    results = orch_mod.run_parallel_author_refresh(paths, settings, max_workers=1)
+
+    assert set(results) == {"tgt1", "ctrl1", "spare"}
+    assert observed == {"promoted_before_shared_rebuild": True}
     assert paths.comparison_report_json().is_file()
     assert paths.run_metadata_json().is_file()
