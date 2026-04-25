@@ -37,8 +37,7 @@ def _analysis_artifacts_ok(
 
 def _artifact_slugs(analysis_dir: Path) -> list[str]:
     return sorted(
-        path.name.removesuffix("_result.json")
-        for path in analysis_dir.glob("*_result.json")
+        path.name.removesuffix("_result.json") for path in analysis_dir.glob("*_result.json")
     )
 
 
@@ -248,10 +247,7 @@ def _significant_test_rows(analysis: AnalysisResult) -> list[list[str]]:
             test.test_name,
             f"{test.corrected_p_value:.4g}",
             f"{test.effect_size_cohens_d:.2f}",
-            (
-                f"[{test.confidence_interval_95[0]:.2f}, "
-                f"{test.confidence_interval_95[1]:.2f}]"
-            ),
+            (f"[{test.confidence_interval_95[0]:.2f}, {test.confidence_interval_95[1]:.2f}]"),
         ]
         for test in analysis.hypothesis_tests
         if test.significant

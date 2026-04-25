@@ -2,22 +2,130 @@
 # Override with FORENSICS_* environment variables (see pydantic-settings nested keys).
 
 [[authors]]
-name = "Placeholder Target"
-slug = "placeholder-target"
+name = "Ahmad Austin Jr."
+slug = "ahmad-austin"
 outlet = "mediaite.com"
 role = "target"
-archive_url = "https://www.mediaite.com/author/placeholder-target/"
-baseline_start = 2020-01-01
-baseline_end = 2023-12-31
+archive_url = "https://www.mediaite.com/author/ahmad-austin/"
+baseline_start = 1990-01-01
+baseline_end = 2035-12-31
 
 [[authors]]
-name = "Placeholder Control"
-slug = "placeholder-control"
+name = "Alex Griffing"
+slug = "alex-griffing"
 outlet = "mediaite.com"
-role = "control"
-archive_url = "https://www.mediaite.com/author/placeholder-control/"
-baseline_start = 2020-01-01
-baseline_end = 2023-12-31
+role = "target"
+archive_url = "https://www.mediaite.com/author/alex-griffing/"
+baseline_start = 1990-01-01
+baseline_end = 2035-12-31
+
+[[authors]]
+name = "Charlie Nash"
+slug = "charlie-nash"
+outlet = "mediaite.com"
+role = "target"
+archive_url = "https://www.mediaite.com/author/charlie-nash/"
+baseline_start = 1990-01-01
+baseline_end = 2035-12-31
+
+[[authors]]
+name = "Colby Hall"
+slug = "colby-hall"
+outlet = "mediaite.com"
+role = "target"
+archive_url = "https://www.mediaite.com/author/colby-hall/"
+baseline_start = 1990-01-01
+baseline_end = 2035-12-31
+
+[[authors]]
+name = "David Gilmour"
+slug = "david-gilmour"
+outlet = "mediaite.com"
+role = "target"
+archive_url = "https://www.mediaite.com/author/david-gilmour/"
+baseline_start = 1990-01-01
+baseline_end = 2035-12-31
+
+[[authors]]
+name = "Isaac Schorr"
+slug = "isaac-schorr"
+outlet = "mediaite.com"
+role = "target"
+archive_url = "https://www.mediaite.com/author/isaac-schorr/"
+baseline_start = 1990-01-01
+baseline_end = 2035-12-31
+
+[[authors]]
+name = "Jennifer Bowers Bahney"
+slug = "jennifer-bowers-bahney"
+outlet = "mediaite.com"
+role = "target"
+archive_url = "https://www.mediaite.com/author/jennifer-bowers-bahney/"
+baseline_start = 1990-01-01
+baseline_end = 2035-12-31
+
+[[authors]]
+name = "Joe DePaolo"
+slug = "joe-depaolo"
+outlet = "mediaite.com"
+role = "target"
+archive_url = "https://www.mediaite.com/author/joe-depaolo/"
+baseline_start = 1990-01-01
+baseline_end = 2035-12-31
+
+[[authors]]
+name = "Mediaite Staff"
+slug = "mediaite-staff"
+outlet = "mediaite.com"
+role = "target"
+archive_url = "https://www.mediaite.com/author/mediaite-staff/"
+baseline_start = 1990-01-01
+baseline_end = 2035-12-31
+
+[[authors]]
+name = "Mediaite"
+slug = "mediaite"
+outlet = "mediaite.com"
+role = "target"
+archive_url = "https://www.mediaite.com/author/mediaite/"
+baseline_start = 1990-01-01
+baseline_end = 2035-12-31
+
+[[authors]]
+name = "Michael Luciano"
+slug = "michael-luciano"
+outlet = "mediaite.com"
+role = "target"
+archive_url = "https://www.mediaite.com/author/michael-luciano/"
+baseline_start = 1990-01-01
+baseline_end = 2035-12-31
+
+[[authors]]
+name = "Sarah Rumpf"
+slug = "sarah-rumpf"
+outlet = "mediaite.com"
+role = "target"
+archive_url = "https://www.mediaite.com/author/sarah-rumpf/"
+baseline_start = 1990-01-01
+baseline_end = 2035-12-31
+
+[[authors]]
+name = "Tommy Christopher"
+slug = "tommy-christopher"
+outlet = "mediaite.com"
+role = "target"
+archive_url = "https://www.mediaite.com/author/tommy-christopher/"
+baseline_start = 1990-01-01
+baseline_end = 2035-12-31
+
+[[authors]]
+name = "Zachary Leeman"
+slug = "zachary-leeman"
+outlet = "mediaite.com"
+role = "target"
+archive_url = "https://www.mediaite.com/author/zachary-leeman/"
+baseline_start = 1990-01-01
+baseline_end = 2035-12-31
 
 # spaCy pipeline used for feature extraction and preflight validation.
 # Changing this requires: `uv run python -m spacy download <model>`.
