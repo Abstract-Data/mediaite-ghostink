@@ -9,7 +9,7 @@ install hint when the dependency is missing rather than crashing with a raw
 
 from __future__ import annotations
 
-import sys
+import typer
 
 
 def main() -> int:
@@ -22,13 +22,11 @@ def main() -> int:
     try:
         from forensics.tui.app import ForensicsSetupApp
     except ImportError as exc:
-        # Top-level fallback — the only place a bare ``print`` is allowed per
-        # the prompt. Message points the user at the documented install path.
-        print(
+        typer.echo(
             "forensics-setup requires the 'tui' extra.\n"
             "  Install with: uv sync --extra tui\n"
             f"  (import failure: {exc})",
-            file=sys.stderr,
+            err=True,
         )
         return 1
 
@@ -46,11 +44,11 @@ def main_dashboard(
     try:
         from forensics.tui.pipeline_app import run_dashboard_interactive
     except ImportError as exc:
-        print(
+        typer.echo(
             "forensics dashboard requires the 'tui' extra.\n"
             "  Install with: uv sync --extra tui\n"
             f"  (import failure: {exc})",
-            file=sys.stderr,
+            err=True,
         )
         return 1
 

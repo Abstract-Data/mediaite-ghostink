@@ -471,7 +471,8 @@ See `prompts/README.md` for the full versioning contract, bump rules, and releas
 
 ## Learned User Preferences
 
-- When implementing tasks from a numbered repository plan or an attached Cursor plan artifact, do not edit the plan markdown file itself or recreate existing to-dos; only complete the assigned to-dos and update their status as work proceeds.
+- When implementing tasks from a numbered repository plan or an attached Cursor plan artifact, do not edit the plan markdown file itself or recreate existing to-dos; only complete the assigned to-dos and update their status as work proceeds. When work is split across Cursor plan shards, mark each assigned item `in_progress` while actively working it and complete every todo in the shard unless blocked.
+- For scoped repo reconnaissance tagged read-only (for example an explicit `Do not modify files`), deliver concise findings only and skip code or documentation edits until the user expands scope.
 - When the user explicitly asks to mark work in progress on an attached Cursor plan, change only status or checkbox metadata; do not rewrite the plan body or task descriptions.
 - For prompt-library work, ship substantive changes as a new immutable `v*.md` snapshot and advance `current.md`, `versions.json`, and `CHANGELOG.md` together instead of rewriting prior frozen versions.
 - For Notion-linked specs or reports in this workspace, use the Notion MCP tools when a normal URL fetch returns no page body (Notion pages are often auth-walled to anonymous HTTP).

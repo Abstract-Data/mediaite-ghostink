@@ -821,9 +821,25 @@ async def fetch_articles(
         )
 
         async with create_scraping_client(scraping) as client:
-            await asyncio.gather(
-                *(_fetch_one_article_html(client, row, ctx=html_ctx) for row in rows)
+            html_results = await asyncio.gather(
+                *(_fetch_one_article_html(client, row, ctx=html_ctx) for row in rows),
+                return_exceptions=True,
             )
+            for row, outcome in zip(rows, html_results, strict=True):
+                if isinstance(outcome, BaseException):
+                    logger.exception(
+                        "html fetch task failed for article_id=%s url=%s",
+                        row.article_id,
+                        row.url,
+                        exc_info=outcome,
+                    )
+                    await log_scrape_error(
+                        errors,
+                        row.url,
+                        None,
+                        f"{type(outcome).__name__}: {outcome!s}",
+                        "html_fetch",
+                    )
         return done_count[0]
 
     with ensure_repo(db_path, repo) as r:
