@@ -76,6 +76,7 @@ pythonpath = ["src"]
 addopts = "-ra -q --strict-markers --cov=forensics --cov-report=term-missing -m 'not slow'"
 markers = [
   "slow: test requires loading large models / downloading external artifacts",
+  "integration: cross-stage or external-tool integration (opt-in via -m integration)",
 ]
 
 [tool.ruff]

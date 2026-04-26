@@ -4794,3 +4794,58 @@ uv run pytest tests/unit/test_analyze_compare.py tests/unit/test_comparison_targ
 
 #### Risks & Next Steps
 - Decide whether metadata should remain absolute-path informative or switch to relative/path-independent representation for strict byte-parity assertions across different project roots.
+
+---
+
+### E2E pipeline integration test + verification/docs (assigned todos)
+**Status:** Complete (new test + docs; full `pytest tests/` still has unrelated pre-existing failures)
+**Date:** 2026-04-26
+
+#### What Was Done
+- Added `tests/integration/test_pipeline_end_to_end.py`: isolated workspace under `tmp_path`, fixture `tests/integration/fixtures/e2e/config.toml` (one target `fixture-target`, one control `fixture-control`), SQLite corpus seeded in-process (~30 articles/author, 2020–2024), `importlib.import_module("forensics.config.settings")` + monkeypatch on `_project_root` (required because `import forensics.config.settings` resolves to the deprecated `_SettingsProxy` on the package), `extract_all_features(..., skip_embeddings=True, project_root=...)`, `run_full_analysis(..., exploratory=True, max_workers=1)`, assertions on feature parquet columns (`ttr`, `flesch_kincaid`), `AnalysisResult`, optional `HypothesisTest.from_legacy` when hypothesis list non-empty, and **non-empty** `comparison_report.json` → `targets["fixture-target"]`. When `quarto` is on `PATH`, copies repo `index.qmd` + `quarto.yml` into the temp root and runs `run_report(ReportArgs(notebook="index.qmd", report_format="html", verify=False))`.
+- Registered `integration` pytest marker in `pyproject.toml` (alongside `slow`).
+- Updated `docs/RUNBOOK.md`: new “Automated pipeline E2E” subsection + corrected convergence permutation pointer to `orchestrator/` package.
+- Refreshed GitNexus: `npx gitnexus analyze --embeddings` (embeddings count was non-zero in `.gitnexus/meta.json`).
+
+#### Files Modified / Added
+- `tests/integration/test_pipeline_end_to_end.py` (new)
+- `tests/integration/fixtures/e2e/config.toml` (new)
+- `pyproject.toml`
+- `docs/RUNBOOK.md`
+- `HANDOFF.md`
+
+#### Verification Evidence
+```
+uv run ruff format --check .
+  -> 243 files already formatted
+
+uv run ruff check tests/integration/test_pipeline_end_to_end.py pyproject.toml
+  -> All checks passed
+
+uv run pytest tests/integration/test_pipeline_end_to_end.py -v --override-ini "addopts=-ra -q --strict-markers"
+  -> 1 passed (~16s)
+
+uv run pytest tests/ -v --cov-report=term-missing
+  -> 865 passed, 5 failed, 4 deselected (slow), 1 xfailed; total coverage 78.07% (>= fail_under 75%)
+  -> Failures: tests/integration/test_parallel_parity.py::test_serial_run_produces_byte_identical_artifacts_across_invocations; tests/test_narrative.py::test_narrative_strong_signal; tests/unit/test_pelt_l2_swap.py::test_analysis_config_default_is_l2; tests/unit/test_reporting_section.py (2). None introduced by the E2E test files.
+
+uv run forensics preflight
+  -> All preflight checks passed
+
+uv run forensics preflight --output json 2>/dev/null | uv run python -m json.tool
+  -> Valid JSON object (stderr contained HF/ST loader noise; redirect for piping)
+
+npx gitnexus analyze --embeddings
+  -> Repository indexed successfully (~26s)
+```
+
+#### Decisions Made
+- Kept `skip_embeddings=True` for predictable runtime and no sentence-transformers load in the default E2E path; comparison still validates target-vs-control structure.
+- Left default CI `pytest` deselecting `slow` so the ~16s E2E does not inflate every PR run; document explicit invocation in RUNBOOK.
+
+#### Unresolved Questions
+- Whether to fix the five unrelated failing tests (narrative expectations, PELT default assertion, reporting section strings, parallel parity metadata path) in a follow-up.
+
+#### Risks & Next Steps
+- If CI should execute the E2E on every push, add a dedicated workflow job that runs the override-ini command (or drop `slow` from this test only).
+

@@ -1,0 +1,14 @@
+{
+  "family": "implementation-plan",
+  "current_version": "0.1.0",
+  "versions": [
+    {
+      "version": "0.1.0",
+      "date": "2026-04-26",
+      "status": "active",
+      "model": "claude-sonnet-4-6",
+      "file": "v0.1.0.md",
+      "changelog_entry": "7-phase sequenced implementation plan addressing all 92 items from the forensic punch list (M-01 through N-06). Phases ordered by dependency and severity: Phase 0 (blockers/prerequisites), Phase 1 (methodology), Phase 2 (data quality), Phase 3 (code quality/reproducibility), Phase 4 (logging), Phase 5 (testing), Phase 6 (infrastructure), Phase 7 (nits). Includes exact CLI commands, human-decision flags, dependency graph, and first concrete next step. Total estimated effort: 4-6 weeks."
+    }
+  ]
+}
