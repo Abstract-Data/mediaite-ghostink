@@ -2,10 +2,10 @@
 
 Usage:
     uv run python scripts/generate_baseline.py --preflight
-    uv run python scripts/generate_baseline.py --author colby-hall --dry-run
-    uv run python scripts/generate_baseline.py --author colby-hall --articles-per-cell 5
+    uv run python scripts/generate_baseline.py --author <slug> --dry-run
+    uv run python scripts/generate_baseline.py --author <slug> --articles-per-cell 5
     uv run python scripts/generate_baseline.py --all
-    uv run python scripts/generate_baseline.py --author colby-hall --model llama3.1:8b
+    uv run python scripts/generate_baseline.py --author <slug> --model llama3.1:8b
 """
 
 from __future__ import annotations

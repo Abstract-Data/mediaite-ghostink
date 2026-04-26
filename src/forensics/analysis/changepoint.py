@@ -535,13 +535,20 @@ def _changepoints_for_feature(
         return []
     found: list[ChangePoint] = []
     if "pelt" in methods:
+        # Phase 15 J6 calibration — scale the global penalty by the feature's
+        # standard deviation so a single ``pelt_penalty`` value behaves
+        # consistently across features whose raw scales span 3 orders of
+        # magnitude (e.g. ``ttr`` std≈0.07, ``sent_length_mean`` std≈5.5).
+        # Without scaling, any global penalty over-segments low-variance
+        # features and under-detects on high-variance ones.
+        scaled_pen = pen * float(np.std(series))
         found.extend(
             changepoints_from_pelt(
                 col,
                 author_id,
                 series,
                 timestamps,
-                pen,
+                scaled_pen,
                 cost_model=pelt_cost_model,
             )
         )

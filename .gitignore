@@ -48,6 +48,9 @@ data/raw/*
 data/features/*
 # Embedding batches (per-author *.npz) and manifest — large generated artifacts
 data/embeddings/
+# Archive directories created when an embedding model-revision mismatch
+# triggers a full re-embed (timestamped suffix per archive event).
+data/embeddings_archive_*/
 data/analysis/*
 # Phase 15 — keep provenance artifacts committed (profile preservation, etc)
 !data/analysis/provenance/

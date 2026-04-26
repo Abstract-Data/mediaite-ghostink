@@ -124,14 +124,26 @@ class AnalysisConfig(BaseModel):
     )
     effect_size_threshold: float = Field(0.2, json_schema_extra={"include_in_config_hash": True})
     # Signal-bearing: PELT penalty λ scales segmentation density.
+    # Phase 15 J6 calibration — λ is multiplied by per-feature std in
+    # ``_changepoints_for_feature`` so a single value behaves consistently
+    # across features whose raw scales span 3 orders of magnitude. With
+    # ``cost_model="l1"`` and the std-scaling, λ=5.0 gives ~3-8 breaks per
+    # continuous feature per author (sensible density). PELT cannot fire on
+    # the sparse-binary AI-marker features at any practical penalty; BOCPD
+    # handles those.
     pelt_penalty: float = Field(
-        3.0,
+        5.0,
         gt=0.0,
         json_schema_extra={"include_in_config_hash": True},
     )
-    # Phase 15 F0 — swap RBF (O(n²)) for L2 mean-shift cost (default ``l2``).
+    # Phase 15 F0 — swap RBF (O(n²)) for L2 mean-shift cost.
+    # Phase 15 J6 calibration — L2 produced zero CPs on sparse-binary AI-marker
+    # features even at pen=0.1 (the per-segment squared-deviation cost is below
+    # the penalty floor). L1 is outlier-robust and fires at low penalty on the
+    # same data, restoring PELT's contribution to the change-point ensemble
+    # without rewriting the cost model.
     pelt_cost_model: Literal["l2", "l1", "rbf"] = Field(
-        "l2", json_schema_extra={"include_in_config_hash": True}
+        "l1", json_schema_extra={"include_in_config_hash": True}
     )
     # Signal-bearing: BOCPD constant hazard h ∈ (0, 1]; prior expected run length
     # scales as 1/h.

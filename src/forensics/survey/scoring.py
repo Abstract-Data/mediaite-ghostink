@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 
-from forensics.models.analysis import AnalysisResult
+from forensics.analysis.feature_families import family_for
+from forensics.models.analysis import AnalysisResult, ChangePoint
 from forensics.models.features import count_scalar_features
 from forensics.survey.qualification import QualifiedAuthor
 
@@ -13,6 +15,56 @@ from forensics.survey.qualification import QualifiedAuthor
 # a scalar field on any family (lexical, structural, ...) updates the
 # denominator automatically at import time.
 _TOTAL_SCALAR_FEATURES = count_scalar_features()
+
+# Features whose change-points and effect sizes are direct AI-adoption
+# evidence. A change-point on any of these is more diagnostic than the same
+# count of change-points scattered across breadth features, so the scoring
+# math gives them a targeted-detection bonus (see ``_pipeline_a_score``).
+_AI_MARKER_FAMILY = "ai_markers"
+# Per-AI-marker-feature contribution to the targeted Pipeline A path. With
+# four AI-marker features in the family registry, three concurrent hits
+# saturate the score at 1.0; one hit alone yields 0.35 — strong enough to
+# leave the "none" floor without overruling other evidence.
+_AI_MARKER_PER_HIT_WEIGHT = 0.35
+
+# Temporal forensics filters (Phase 15 J6 calibration pass):
+# - Era cutoff: ChatGPT public launch was 2022-11-30. Change-points before
+#   this date cannot be evidence of LLM-assisted writing — they reflect
+#   normal stylistic evolution or BOCPD warm-up. Counted only for diagnostics.
+_AI_ERA_CUTOFF = datetime(2022, 11, 30, tzinfo=UTC)
+# - Tail trim: BOCPD (and PELT) systematically over-detect at series
+#   boundaries because they lack post-CP data to confirm a regime shift is
+#   sustained. Drop change-points within the last 30 days of the corpus.
+_TAIL_TRIM_DAYS = 30
+
+
+def _corpus_tail_cutoff(analysis: AnalysisResult) -> datetime | None:
+    """Cut-off after which a CP is considered too close to the analysis run
+    to have enough post-CP data for BOCPD/PELT to confirm a sustained shift.
+
+    Uses ``analysis.run_timestamp`` as the reference because we don't have
+    the latest article date stored on AnalysisResult. The run_timestamp is
+    set at the start of the analyze stage, immediately after the corpus is
+    materialised, so it is within hours of the actual corpus end.
+    """
+    return analysis.run_timestamp - timedelta(days=_TAIL_TRIM_DAYS)
+
+
+def _is_admissible_ai_evidence(cp: ChangePoint, tail_cutoff: datetime | None) -> bool:
+    """Per change-point gate: only count *post-AI-era*, *increase*-direction
+    AI-marker CPs detected outside the tail-of-series window as positive AI
+    evidence. Decreases on AI-markers, pre-2022-11-30 CPs, and tail CPs are
+    diagnostic noise, not signal.
+    """
+    if family_for(cp.feature_name) != _AI_MARKER_FAMILY:
+        return False
+    if cp.direction != "increase":
+        return False
+    if cp.timestamp < _AI_ERA_CUTOFF:
+        return False
+    if tail_cutoff is not None and cp.timestamp > tail_cutoff:
+        return False
+    return True
 
 
 class SignalStrength(StrEnum):
@@ -58,11 +110,35 @@ class ControlValidation:
 
 
 def _pipeline_a_score(analysis: AnalysisResult) -> tuple[float, int]:
-    """Return ``(score, num_unique_cp_features)`` for stylometric change-points."""
+    """Return ``(score, num_unique_cp_features)`` — the AI-targeted-evidence
+    score for Pipeline A.
+
+    Phase 15 J6 calibration removed the prior "breadth" path (fraction of all
+    scalar features with any CP) because it folded normal stylistic variation
+    into the AI-adoption score: PELT's per-feature std-scaled penalty fires
+    on continuous features (TTR, sentence length, readability) at moderate
+    effect sizes whenever a writer's style evolves over years — not specific
+    to AI use. The targeted path is the only AI-diagnostic Pipeline A signal.
+
+    Targeted score = count of distinct AI-marker family features with at
+    least one *admissible* change-point (post-2022-11-30, ``increase``
+    direction, outside the tail-trim window). Each unique feature
+    contributes ``_AI_MARKER_PER_HIT_WEIGHT``; capped at 1.0.
+
+    The second tuple element (``num_unique_cp_features``) still reports the
+    raw count of distinct CP features for diagnostics in evidence summaries.
+    """
     unique_cp_features = len({cp.feature_name for cp in analysis.change_points})
-    # Normalise to a fraction of features with changepoints, capped at 1.0.
-    denom = max(_TOTAL_SCALAR_FEATURES * 0.3, 1.0)
-    return min(unique_cp_features / denom, 1.0), unique_cp_features
+
+    tail_cutoff = _corpus_tail_cutoff(analysis)
+    targeted_features = {
+        cp.feature_name
+        for cp in analysis.change_points
+        if _is_admissible_ai_evidence(cp, tail_cutoff)
+    }
+    targeted_score = min(len(targeted_features) * _AI_MARKER_PER_HIT_WEIGHT, 1.0)
+
+    return targeted_score, unique_cp_features
 
 
 def _pipeline_b_score(analysis: AnalysisResult) -> float:
@@ -83,8 +159,36 @@ def _pipeline_c_score(analysis: AnalysisResult) -> float | None:
 
 
 def _convergence_score(analysis: AnalysisResult) -> tuple[float, float]:
-    """Return ``(convergence_score, strongest_ratio)``."""
-    windows = analysis.convergence_windows
+    """Return ``(convergence_score, strongest_ratio)``.
+
+    Phase 15 J6 calibration applies four filters:
+
+    1. ``passes_via`` must contain ``ratio`` or ``ab`` — drift-only windows
+       lack multi-pipeline corroboration and were inflating non-AI signal.
+    2. ``features_converging`` must include at least one AI-marker family
+       feature — convergence on stylistic features alone (TTR, sentence
+       length, readability) is "the writer changed in many ways" rather than
+       "the writer adopted AI", and PELT's per-feature std-scaled penalty
+       fires on those features for normal multi-year writing evolution.
+    3. ``start_date`` must be on or after the AI-era cutoff (2022-11-30,
+       ChatGPT public launch). Pre-AI-era convergence cannot evidence LLM
+       adoption — those windows reflect normal stylistic evolution or
+       BOCPD/PELT warm-up artifacts.
+    4. ``start_date`` must be before the tail-trim cutoff (run_timestamp -
+       30d). Windows starting in the last 30 days of the analysis run lack
+       sufficient post-window data for the constituent CPs to confirm a
+       sustained regime shift — same instability that filters CPs at the
+       Pipeline A level.
+    """
+    ai_era_cutoff_date = _AI_ERA_CUTOFF.date()
+    tail_cutoff_date = _corpus_tail_cutoff(analysis).date()
+    windows = [
+        w
+        for w in analysis.convergence_windows
+        if any(channel in {"ratio", "ab"} for channel in w.passes_via)
+        and any(family_for(f) == _AI_MARKER_FAMILY for f in w.features_converging)
+        and ai_era_cutoff_date <= w.start_date < tail_cutoff_date
+    ]
     if not windows:
         return 0.0, 0.0
     strongest_ratio = max(w.convergence_ratio for w in windows)
@@ -97,6 +201,7 @@ def classify_signal(
     conv_score: float = 0.0,
     max_effect: float = 0.0,
     num_windows: int = 0,
+    targeted_max_effect: float = 0.0,
 ) -> SignalStrength:
     """Map numeric scores to a human-readable strength tier.
 
@@ -105,12 +210,24 @@ def classify_signal(
     - MODERATE: composite >= 0.4 AND (conv_score >= 0.3 OR max_d >= 0.5)
     - WEAK:     composite >= 0.15
     - NONE:     otherwise
+
+    Effect-size escape hatch: when ``targeted_max_effect`` (the largest
+    Cohen's d on an AI-marker-family feature among significant hypothesis
+    tests) is very large, the classifier promotes regardless of composite.
+    A d ≥ 1.0 on the purpose-built AI-detection features is more diagnostic
+    than the convergence-windows gate it would otherwise have to clear, and
+    leaving it at NONE because Pipeline B saw no semantic drift produces
+    false negatives on stylistic-only AI assistance.
     """
     if composite >= 0.7 and conv_score >= 0.5 and max_effect >= 0.8 and num_windows >= 2:
         return SignalStrength.STRONG
+    if targeted_max_effect >= 2.0:
+        return SignalStrength.STRONG
     if composite >= 0.4 and (conv_score >= 0.3 or max_effect >= 0.5):
         return SignalStrength.MODERATE
-    if composite >= 0.15:
+    if targeted_max_effect >= 1.0:
+        return SignalStrength.MODERATE
+    if composite >= 0.15 or targeted_max_effect >= 0.5:
         return SignalStrength.WEAK
     return SignalStrength.NONE
 
@@ -176,6 +293,30 @@ def compute_composite_score(
         (abs(t.effect_size_cohens_d) for t in significant_tests),
         default=0.0,
     )
+    # Targeted effect size restricted to AI-marker family AND positive
+    # (`d > 0`) effects — a *decrease* on `formula_opening_score` is the
+    # *opposite* of an AI-adoption signal (writing got less formulaic).
+    # Phase 15 J6 calibration also requires *temporal corroboration* via an
+    # admissible change-point on the same feature: a hypothesis test alone
+    # tells us baseline vs post-baseline means differ, but doesn't say when
+    # the shift happened, so a sig test driven by a tail-of-series outlier
+    # would otherwise spuriously trigger the escape hatch in classify_signal.
+    tail_cutoff = _corpus_tail_cutoff(analysis)
+    admissible_features = {
+        cp.feature_name
+        for cp in analysis.change_points
+        if _is_admissible_ai_evidence(cp, tail_cutoff)
+    }
+    targeted_max_effect = max(
+        (
+            t.effect_size_cohens_d
+            for t in significant_tests
+            if family_for(t.feature_name) == _AI_MARKER_FAMILY
+            and t.effect_size_cohens_d > 0
+            and t.feature_name in admissible_features
+        ),
+        default=0.0,
+    )
 
     if pc_score is not None:
         composite = 0.25 * pa_score + 0.25 * pb_score + 0.15 * pc_score + 0.35 * conv_score
@@ -187,6 +328,7 @@ def compute_composite_score(
         conv_score=conv_score,
         max_effect=max_effect,
         num_windows=len(analysis.convergence_windows),
+        targeted_max_effect=targeted_max_effect,
     )
 
     summary = _build_evidence_summary(

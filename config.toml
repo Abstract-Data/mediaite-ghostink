@@ -39,7 +39,7 @@ baseline_end = 2023-12-31
 name = "Colby Hall"
 slug = "colby-hall"
 outlet = "mediaite.com"
-role = "target"
+role = "control"
 archive_url = "https://www.mediaite.com/author/colby-hall/"
 baseline_start = 2020-01-01
 baseline_end = 2023-12-31
@@ -99,6 +99,15 @@ baseline_start = 2020-01-01
 baseline_end = 2023-12-31
 
 [[authors]]
+name = "Tommy Christopher"
+slug = "tommy-christopher"
+outlet = "mediaite.com"
+role = "control"
+archive_url = "https://www.mediaite.com/author/tommy-christopher/"
+baseline_start = 2020-01-01
+baseline_end = 2023-12-31
+
+[[authors]]
 name = "Zachary Leeman"
 slug = "zachary-leeman"
 outlet = "mediaite.com"
@@ -146,7 +155,7 @@ changepoint_methods = ["pelt", "bocpd"]
 # 99.2% of analysis wall-clock per the Apr 24 2026 profile) to ``l2`` (1-D
 # mean-shift, O(n)); ``l1`` available for outlier-robust runs and ``rbf``
 # retained for comparison/audit. See docs/settings_phase15.md.
-pelt_cost_model = "l2"
+pelt_cost_model = "l1"
 # Phase 15 A — BOCPD detection semantics. ``map_reset`` is the current default:
 # emit a CP when the posterior MAP run-length drops below ``map_drop_ratio``×
 # its previous value, subject to ``min_run_length`` warmup, ``reset_cooldown``

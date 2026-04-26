@@ -259,10 +259,11 @@ def _make_analysis(
     convergence_windows: list[ConvergenceWindow] | None = None,
     drift: DriftScores | None = None,
     hypothesis_tests: list[HypothesisTest] | None = None,
+    run_timestamp: datetime | None = None,
 ) -> AnalysisResult:
     return AnalysisResult(
         author_id="author-x",
-        run_timestamp=datetime(2024, 1, 1, tzinfo=UTC),
+        run_timestamp=run_timestamp or datetime(2026, 4, 25, tzinfo=UTC),
         config_hash="deadbeef",
         change_points=change_points or [],
         convergence_windows=convergence_windows or [],
@@ -298,18 +299,20 @@ def test_composite_score_strong_signal() -> None:
         ConvergenceWindow(
             start_date=date(2023, 6, 1),
             end_date=date(2023, 8, 30),
-            features_converging=[f"feat_{i}" for i in range(15)],
+            features_converging=["formula_opening_score", "ai_marker_frequency", "ttr"],
             convergence_ratio=0.85,
             pipeline_a_score=0.9,
             pipeline_b_score=0.8,
+            passes_via=["ratio", "ab"],
         ),
         ConvergenceWindow(
             start_date=date(2023, 9, 1),
             end_date=date(2023, 11, 30),
-            features_converging=[f"feat_{i}" for i in range(12)],
+            features_converging=["formula_opening_score", "ai_marker_frequency"],
             convergence_ratio=0.75,
             pipeline_a_score=0.8,
             pipeline_b_score=0.7,
+            passes_via=["ratio", "ab"],
         ),
     ]
     drift = DriftScores(
@@ -342,7 +345,7 @@ def test_composite_score_strong_signal() -> None:
     )
 
     assert score.strength == SignalStrength.STRONG
-    assert score.composite > 0.7
+    assert score.composite >= 0.7
     assert score.num_convergence_windows == 2
     assert score.max_effect_size == pytest.approx(1.4)
     assert "strong signal" in score.evidence_summary.lower()
@@ -358,6 +361,7 @@ def test_composite_score_pipeline_c_included_when_available() -> None:
             pipeline_a_score=0.5,
             pipeline_b_score=0.5,
             pipeline_c_score=0.8,
+            passes_via=["ratio"],
         )
     ]
     score = compute_composite_score(_make_analysis(convergence_windows=windows))
@@ -371,6 +375,334 @@ def test_signal_strength_classification_thresholds() -> None:
     assert (
         classify_signal(0.8, conv_score=0.6, max_effect=1.0, num_windows=3) == SignalStrength.STRONG
     )
+
+
+def test_targeted_effect_size_escape_hatch_promotes_when_pipeline_b_silent() -> None:
+    """Author with huge AI-marker effect size escapes the convergence-windows gate.
+
+    Reproduces the false-negative class where Pipeline B sees no semantic
+    drift but Pipeline A registers strong stylometric shifts on the AI-
+    detection-targeted features. Without the escape hatch the composite
+    stays below the moderate threshold and the author is mis-labeled NONE.
+    """
+    # Composite low (Pipeline B silent, no convergence) but targeted_max_effect huge.
+    assert classify_signal(composite=0.06, targeted_max_effect=2.13) == SignalStrength.STRONG
+    assert classify_signal(composite=0.06, targeted_max_effect=1.05) == SignalStrength.MODERATE
+    assert classify_signal(composite=0.06, targeted_max_effect=0.55) == SignalStrength.WEAK
+    # Below 0.5 → no promotion.
+    assert classify_signal(composite=0.06, targeted_max_effect=0.40) == SignalStrength.NONE
+
+
+def test_pipeline_a_targeted_path_admits_two_ai_marker_hits() -> None:
+    """Two admissible AI-marker family CPs → Pipeline A = 2 × 0.35 = 0.70.
+
+    The targeted path is now Pipeline A's only contributor (the breadth
+    path was removed in Phase 15 J6 because it folded normal stylistic
+    variation on continuous features into the AI score).
+    """
+    change_points = [
+        ChangePoint(
+            feature_name="formula_opening_score",
+            author_id="author-x",
+            timestamp=datetime(2024, 6, 1, tzinfo=UTC),
+            confidence=0.95,
+            method="pelt",
+            effect_size_cohens_d=2.1,
+            direction="increase",
+        ),
+        ChangePoint(
+            feature_name="ai_marker_frequency",
+            author_id="author-x",
+            timestamp=datetime(2024, 7, 1, tzinfo=UTC),
+            confidence=0.9,
+            method="bocpd",
+            effect_size_cohens_d=0.22,
+            direction="increase",
+        ),
+    ]
+    tests = [
+        HypothesisTest(
+            test_name="welch_t",
+            feature_name="formula_opening_score",
+            author_id="author-x",
+            raw_p_value=1e-9,
+            corrected_p_value=7e-9,
+            effect_size_cohens_d=2.13,
+            confidence_interval_95=(1.7, 2.5),
+            significant=True,
+        ),
+    ]
+    score = compute_composite_score(
+        _make_analysis(change_points=change_points, hypothesis_tests=tests)
+    )
+    # 2 admissible AI-marker features × _AI_MARKER_PER_HIT_WEIGHT (0.35) = 0.70.
+    assert score.pipeline_a_score == pytest.approx(0.7, abs=0.001)
+    # Targeted-effect escape hatch promotes despite Pipeline B silence and zero
+    # convergence windows — d=2.13 on AI-markers is unambiguous.
+    assert score.strength in {SignalStrength.MODERATE, SignalStrength.STRONG}
+
+
+# ---------------------------------------------------------------------------
+# Phase 15 J6 calibration filters: era + direction + tail trim, drift-only windows
+# ---------------------------------------------------------------------------
+
+
+def _ai_marker_cp(
+    feature: str,
+    ts: datetime,
+    *,
+    direction: str = "increase",
+    d: float = 0.5,
+) -> ChangePoint:
+    return ChangePoint(
+        feature_name=feature,
+        author_id="author-x",
+        timestamp=ts,
+        confidence=0.95,
+        method="bocpd",
+        effect_size_cohens_d=d,
+        direction=direction,  # type: ignore[arg-type]
+    )
+
+
+def test_pre_ai_era_changepoints_are_not_admissible() -> None:
+    """A change-point dated before 2022-11-30 cannot evidence LLM adoption.
+
+    Authors whose only AI-marker CPs predate ChatGPT's public launch should
+    not be promoted by the targeted Pipeline A path.
+    """
+    change_points = [
+        _ai_marker_cp("formula_opening_score", datetime(2021, 6, 1, tzinfo=UTC)),
+        _ai_marker_cp("ai_marker_frequency", datetime(2022, 8, 15, tzinfo=UTC)),
+    ]
+    score = compute_composite_score(_make_analysis(change_points=change_points))
+    # Both CPs predate the AI-era cutoff (2022-11-30) → no admissible
+    # AI-marker features → targeted Pipeline A score = 0.0.
+    assert score.pipeline_a_score == pytest.approx(0.0, abs=0.001)
+    assert score.strength == SignalStrength.NONE
+
+
+def test_decrease_direction_changepoints_are_not_admissible() -> None:
+    """A *decrease* on `formula_opening_score` is the *opposite* of AI signal.
+
+    Without the direction filter, an author who became LESS formulaic over
+    time would be incorrectly counted as an AI adopter just because the
+    feature changed.
+    """
+    change_points = [
+        _ai_marker_cp(
+            "formula_opening_score", datetime(2024, 6, 1, tzinfo=UTC), direction="decrease"
+        ),
+        _ai_marker_cp(
+            "ai_marker_frequency", datetime(2024, 7, 1, tzinfo=UTC), direction="decrease"
+        ),
+    ]
+    score = compute_composite_score(_make_analysis(change_points=change_points))
+    # Both CPs are decreases on AI-marker features → no admissible features
+    # → targeted Pipeline A score = 0.0.
+    assert score.pipeline_a_score == pytest.approx(0.0, abs=0.001)
+    assert score.strength == SignalStrength.NONE
+
+
+def test_tail_of_series_changepoints_are_not_admissible() -> None:
+    """CPs detected within 30 days of the analysis run lack post-CP data.
+
+    BOCPD systematically over-detects at series boundaries because it has
+    fewer than `bocpd_min_run_length` post-CP samples to confirm a sustained
+    regime shift. The tail trim discards these as unstable evidence.
+    """
+    run_ts = datetime(2026, 4, 25, tzinfo=UTC)
+    # Both CPs within the last 30 days of run_ts → trimmed.
+    change_points = [
+        _ai_marker_cp("formula_opening_score", datetime(2026, 4, 10, tzinfo=UTC)),
+        _ai_marker_cp("ai_marker_frequency", datetime(2026, 4, 20, tzinfo=UTC)),
+    ]
+    score = compute_composite_score(
+        _make_analysis(change_points=change_points, run_timestamp=run_ts)
+    )
+    # Both CPs in the tail-trim window → no admissible features → targeted
+    # Pipeline A score = 0.0.
+    assert score.pipeline_a_score == pytest.approx(0.0, abs=0.001)
+    assert score.strength == SignalStrength.NONE
+
+
+def test_drift_only_convergence_windows_are_filtered_from_score() -> None:
+    """A window admitted only via `drift_only` doesn't represent real
+    multi-pipeline corroboration and shouldn't inflate the convergence score.
+    """
+    drift_only_windows = [
+        ConvergenceWindow(
+            start_date=date(2024, 1, 1),
+            end_date=date(2024, 4, 1),
+            features_converging=[],
+            convergence_ratio=0.0,
+            pipeline_a_score=0.0,
+            pipeline_b_score=0.4,
+            passes_via=["drift_only"],
+        ),
+        ConvergenceWindow(
+            start_date=date(2024, 5, 1),
+            end_date=date(2024, 8, 1),
+            features_converging=[],
+            convergence_ratio=0.0,
+            pipeline_a_score=0.0,
+            pipeline_b_score=0.45,
+            passes_via=["drift_only"],
+        ),
+    ]
+    score = compute_composite_score(_make_analysis(convergence_windows=drift_only_windows))
+    # Both windows filtered; convergence_score collapses to 0.
+    assert score.convergence_score == 0.0
+    assert score.num_convergence_windows == 2  # raw count still reflects what was detected
+    assert score.strength == SignalStrength.NONE
+
+
+def test_real_ab_or_ratio_convergence_windows_still_count() -> None:
+    """Windows admitted via 'ab' or 'ratio' AND containing an AI-marker
+    feature in features_converging are kept.
+    """
+    real_windows = [
+        ConvergenceWindow(
+            start_date=date(2024, 1, 1),
+            end_date=date(2024, 4, 1),
+            features_converging=["formula_opening_score", "ai_marker_frequency"],
+            convergence_ratio=0.50,
+            pipeline_a_score=0.6,
+            pipeline_b_score=0.5,
+            passes_via=["ab", "drift_only"],
+        ),
+        ConvergenceWindow(
+            start_date=date(2024, 5, 1),
+            end_date=date(2024, 8, 1),
+            features_converging=["formula_opening_score"],
+            convergence_ratio=0.33,
+            pipeline_a_score=0.5,
+            pipeline_b_score=0.5,
+            passes_via=["ratio"],
+        ),
+    ]
+    score = compute_composite_score(_make_analysis(convergence_windows=real_windows))
+    # 2 windows × 0.2 + 0.50 × 0.8 = 0.40 + 0.40 = 0.80
+    assert score.convergence_score == pytest.approx(0.8, abs=0.01)
+
+
+def test_tail_of_series_convergence_windows_are_filtered() -> None:
+    """Convergence windows starting within 30 days of the analysis run lack
+    enough post-window data to confirm a sustained regime shift, even if
+    they pass the AI-marker and post-AI-era filters.
+    """
+    run_ts = datetime(2026, 4, 25, tzinfo=UTC)
+    tail_window = [
+        ConvergenceWindow(
+            start_date=date(2026, 4, 10),  # 15d before run_ts → in tail
+            end_date=date(2026, 7, 10),
+            features_converging=["formula_opening_score", "ai_marker_frequency"],
+            convergence_ratio=0.50,
+            pipeline_a_score=0.7,
+            pipeline_b_score=0.5,
+            passes_via=["ab", "ratio"],
+        ),
+    ]
+    score = compute_composite_score(
+        _make_analysis(convergence_windows=tail_window, run_timestamp=run_ts)
+    )
+    assert score.convergence_score == 0.0
+
+
+def test_pre_ai_era_convergence_windows_are_filtered() -> None:
+    """Convergence dated before the AI-era cutoff cannot evidence LLM
+    adoption and must not contribute to convergence_score, even if it
+    contains an AI-marker family feature.
+    """
+    pre_era_window = [
+        ConvergenceWindow(
+            start_date=date(2021, 6, 1),
+            end_date=date(2021, 9, 1),
+            features_converging=["formula_opening_score", "ai_marker_frequency"],
+            convergence_ratio=0.66,
+            pipeline_a_score=0.7,
+            pipeline_b_score=0.5,
+            passes_via=["ab", "ratio"],
+        ),
+    ]
+    score = compute_composite_score(_make_analysis(convergence_windows=pre_era_window))
+    assert score.convergence_score == 0.0
+
+
+def test_convergence_windows_without_ai_marker_features_are_filtered() -> None:
+    """Stylistic-only convergence (TTR + sent_length, no AI-markers) is not
+    diagnostic of AI adoption and must not contribute to convergence_score.
+    """
+    stylistic_only_windows = [
+        ConvergenceWindow(
+            start_date=date(2024, 1, 1),
+            end_date=date(2024, 4, 1),
+            features_converging=["ttr", "sent_length_mean", "flesch_kincaid"],
+            convergence_ratio=0.66,
+            pipeline_a_score=0.7,
+            pipeline_b_score=0.5,
+            passes_via=["ab", "ratio"],
+        ),
+    ]
+    score = compute_composite_score(_make_analysis(convergence_windows=stylistic_only_windows))
+    # No AI-marker family feature in features_converging → window filtered.
+    assert score.convergence_score == 0.0
+
+
+def test_targeted_effect_requires_admissible_changepoint_corroboration() -> None:
+    """A huge sig-test d on AI-markers without an admissible CP doesn't promote.
+
+    Reproduces the false-positive class where the only AI-marker CP is in
+    the tail-of-series window (and gets trimmed), but the hypothesis test
+    still registers a large effect because baseline vs. post-baseline means
+    differ. Without temporal corroboration, the escape hatch would still
+    fire on the sig test alone.
+    """
+    run_ts = datetime(2026, 4, 25, tzinfo=UTC)
+    # Single AI-marker CP within the tail trim window → trimmed → no
+    # admissible features.
+    change_points = [
+        _ai_marker_cp("formula_opening_score", datetime(2026, 4, 22, tzinfo=UTC), d=2.12),
+    ]
+    tests = [
+        HypothesisTest(
+            test_name="welch_t",
+            feature_name="formula_opening_score",
+            author_id="author-x",
+            raw_p_value=1e-9,
+            corrected_p_value=7e-9,
+            effect_size_cohens_d=2.12,
+            confidence_interval_95=(1.7, 2.5),
+            significant=True,
+        ),
+    ]
+    score = compute_composite_score(
+        _make_analysis(change_points=change_points, hypothesis_tests=tests, run_timestamp=run_ts)
+    )
+    # Targeted effect blocked by missing CP corroboration → no escape hatch.
+    assert score.strength == SignalStrength.NONE
+
+
+def test_negative_targeted_effect_does_not_promote() -> None:
+    """A *negative* (decrease-direction) Cohen's d on an AI-marker test is
+    *anti*-AI evidence and must not trigger the targeted-effect escape hatch.
+    """
+    tests = [
+        HypothesisTest(
+            test_name="welch_t",
+            feature_name="formula_opening_score",
+            author_id="author-x",
+            raw_p_value=1e-9,
+            corrected_p_value=7e-9,
+            effect_size_cohens_d=-2.13,  # negative — getting LESS formulaic
+            confidence_interval_95=(-2.5, -1.7),
+            significant=True,
+        ),
+    ]
+    score = compute_composite_score(_make_analysis(hypothesis_tests=tests))
+    # No CPs, no convergence, only a strong but anti-direction targeted test
+    # → must remain NONE.
+    assert score.strength == SignalStrength.NONE
 
 
 def test_natural_controls_identified_from_mixed_results() -> None:

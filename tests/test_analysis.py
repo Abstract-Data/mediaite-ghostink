@@ -221,7 +221,10 @@ def test_convergence_window() -> None:
     assert len(wins[0].features_converging) == 5
 
 
-def test_evidence_gate_requires_confidence_and_effect_size() -> None:
+def test_evidence_gate_bocpd_requires_confidence_and_effect_size() -> None:
+    """BOCPD's ``confidence`` is a posterior probability; the ``>= 0.9`` gate
+    is meaningful and combined with the effect-size threshold.
+    """
     base = datetime(2024, 1, 1, tzinfo=UTC)
     cfg = AnalysisConfig(effect_size_threshold=0.2)
     strong = ChangePoint(
@@ -229,7 +232,7 @@ def test_evidence_gate_requires_confidence_and_effect_size() -> None:
         author_id="a1",
         timestamp=base,
         confidence=0.95,
-        method="pelt",
+        method="bocpd",
         effect_size_cohens_d=0.3,
         direction="increase",
     )
@@ -239,6 +242,32 @@ def test_evidence_gate_requires_confidence_and_effect_size() -> None:
     out = filter_evidence_change_points([strong, tiny_effect, low_confidence], cfg)
 
     assert out == [strong]
+
+
+def test_evidence_gate_pelt_uses_effect_size_only() -> None:
+    """PELT's ``confidence`` is a sigmoid of |d| and saturates well below 0.9 —
+    the gate ignores it for PELT and admits on effect size with a very-large
+    floor (d≥1.0) to avoid promoting normal stylistic variation.
+    """
+    base = datetime(2024, 1, 1, tzinfo=UTC)
+    cfg = AnalysisConfig(effect_size_threshold=0.2)
+    pelt_huge = ChangePoint(
+        feature_name="ttr",
+        author_id="a1",
+        timestamp=base,
+        confidence=0.40,  # PELT-typical, below the 0.9 BOCPD gate
+        method="pelt",
+        effect_size_cohens_d=2.0,
+        direction="increase",
+    )
+    pelt_medium = pelt_huge.model_copy(update={"effect_size_cohens_d": 0.7})  # below 1.0 floor
+    pelt_threshold = pelt_huge.model_copy(update={"effect_size_cohens_d": 1.0})
+
+    out = filter_evidence_change_points([pelt_huge, pelt_medium, pelt_threshold], cfg)
+
+    # `pelt_huge` (d=2.0) and `pelt_threshold` (d=1.0) admitted; `pelt_medium`
+    # (d=0.7) rejected by the PELT-specific 1.0 floor. Confidence is ignored.
+    assert out == [pelt_huge, pelt_threshold]
 
 
 def test_chow_test_significant() -> None:
