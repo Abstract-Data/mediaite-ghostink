@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Iterable, Iterator
 
 import xxhash
 
@@ -37,19 +38,19 @@ def _gram_digest(gram_bytes: bytes, hashbits: int) -> int:
     return (hi << 128) | lo
 
 
-def _simhash_char_ngrams(cleaned: str) -> list[str]:
-    grams: list[str] = []
+def _simhash_char_ngrams(cleaned: str) -> Iterator[str]:
+    yielded = False
     for n in (3, 4):
         if len(cleaned) < n:
             continue
         for i in range(len(cleaned) - n + 1):
-            grams.append(cleaned[i : i + n])
-    if not grams:
-        grams = [cleaned or "\x00"]
-    return grams
+            yielded = True
+            yield cleaned[i : i + n]
+    if not yielded:
+        yield cleaned or "\x00"
 
 
-def _simhash_from_grams(grams: list[str], hashbits: int) -> int:
+def _simhash_from_grams(grams: Iterable[str], hashbits: int) -> int:
     top_bit = hashbits - 1
     vector = [0] * hashbits
     for gram in grams:
@@ -81,5 +82,4 @@ def simhash(text: str, hashbits: int = 128) -> int:
         msg = "hashbits must be between 1 and 256"
         raise ValueError(msg)
     cleaned = text.replace("\n", " ")
-    grams = _simhash_char_ngrams(cleaned)
-    return _simhash_from_grams(grams, hashbits)
+    return _simhash_from_grams(_simhash_char_ngrams(cleaned), hashbits)

@@ -4590,3 +4590,207 @@ npx gitnexus analyze --embeddings
 
 #### Risks & Next Steps
 - Operators doing confirmatory work must run `forensics lock-preregistration` after editing analysis thresholds; do not commit the filled lock unless the team explicitly wants a pinned cohort lock in-repo.
+
+---
+
+### Notion remediation — target role, gather resilience, TUI stderr
+**Status:** Complete
+**Date:** 2026-04-26
+
+#### What Was Done
+- Set `colby-hall` to `role = "target"` in `config.toml` (sole study target per AGENTS.md).
+- Added `test_canonical_config_has_exactly_one_target_colby_hall` in `tests/unit/test_settings.py`.
+- Hardened three `asyncio.gather` sites with `return_exceptions=True`, structured logging, and `log_scrape_error` where applicable (`fetcher.py` HTML batch, `crawler.py` discover counts + metadata ingest). Extracted `_aggregate_parallel_ingest_results` to satisfy C901 on `collect_article_metadata`.
+- Replaced TUI fallback `print(..., file=sys.stderr)` with `typer.echo(..., err=True)` in `src/forensics/tui/__init__.py`.
+- Added `tests/unit/test_scraper_gather_resilience.py`.
+
+#### Files Modified
+- `config.toml`, `src/forensics/scraper/fetcher.py`, `src/forensics/scraper/crawler.py`, `src/forensics/tui/__init__.py`
+- `tests/unit/test_settings.py`, `tests/unit/test_scraper_gather_resilience.py`, `HANDOFF.md`
+
+#### Verification Evidence
+```
+uv run ruff check .
+uv run ruff format --check .
+  -> All checks passed; 234 files already formatted
+
+uv run pytest tests/unit/test_settings.py tests/unit/test_scraper_gather_resilience.py tests/test_crawler_metadata_phase_b.py -v --no-cov
+  -> 17 passed
+
+uv run forensics preflight
+  -> exit 0; all preflight checks passed
+```
+
+#### Decisions Made
+- On metadata ingest, non-recoverable exceptions already logged inside `_ingest_one` for recoverable types; gather-level `BaseException` paths log + `log_scrape_error` and count as 0 inserts (same effective sum as plan).
+
+#### Unresolved Questions
+- Full `uv run pytest tests/` still reports 4 failures on this branch **without** these changes (verified via `git stash`): `test_serial_run_produces_byte_identical_artifacts_across_invocations` (`run_metadata.json` hash), `test_analysis_config_default_is_l2` (code default `pelt_cost_model` is `l1`), `test_narrative_strong_signal`, `test_narrative_uses_families_converging` / `test_narrative_falls_back_to_features_when_no_families` (composite tier NONE). Repair is out of scope for this three-todo pass.
+
+#### Risks & Next Steps
+- Align `AnalysisConfig.pelt_cost_model` default vs `test_pelt_l2_swap` and `config.toml` `[analysis]` or update tests/docs.
+- Investigate `run_metadata.json` cross-root byte drift in parallel parity test (likely `section_residualized_sensitivity` absolute paths or `completed_at` ordering).
+
+---
+
+### Notion remediation — feature_families import + preflight JSON
+**Status:** Complete
+**Date:** 2026-04-26
+
+#### What Was Done
+- Removed the dead `ImportError` fallback in `convergence.py`; convergence now imports `FAMILY_COUNT` and `FEATURE_FAMILIES` only from `forensics.analysis.feature_families`.
+- Added `forensics preflight --output {text,json}` with a stable JSON envelope (`json.dumps(..., sort_keys=True)`), `_preflight_json_envelope` helper, and unchanged exit-code contract vs text mode.
+- Added `tests/unit/test_cli_preflight_json.py` (pass/warn/fail mocks, deterministic payload, help lists `--output`).
+- Documented JSON preflight in `docs/RUNBOOK.md` (preflight bullet).
+
+#### Files Modified
+- `src/forensics/analysis/convergence.py`
+- `src/forensics/cli/__init__.py`
+- `tests/unit/test_cli_preflight_json.py`
+- `docs/RUNBOOK.md`
+- `HANDOFF.md`
+
+#### Verification Evidence
+```
+uv run ruff check src/forensics/cli/__init__.py src/forensics/analysis/convergence.py tests/unit/test_cli_preflight_json.py
+uv run ruff format --check src/forensics/cli/__init__.py src/forensics/analysis/convergence.py tests/unit/test_cli_preflight_json.py
+  -> All checks passed; files already formatted
+
+uv run pytest tests/unit/test_cli_preflight_json.py tests/unit/test_convergence.py tests/unit/test_feature_families.py -q --no-cov
+  -> 31 passed
+
+uv run forensics preflight --output json 2>/dev/null | python -m json.tool >/dev/null
+  -> exit 0; valid JSON
+```
+
+#### Decisions Made
+- JSON envelope field order relies on `sort_keys=True` (top-level and nested check dicts) for stable stdout diffs in CI.
+
+#### Unresolved Questions
+- None for this slice.
+
+#### Risks & Next Steps
+- None beyond existing branch-level pytest failures noted in the prior handoff block.
+
+---
+
+### Notion remediation — CLI settings errors cache + streaming simhash n-grams
+**Status:** Complete
+**Date:** 2026-04-26
+
+#### What Was Done
+- Replaced module-level `_SETTINGS_LOAD_ERRORS` + manual lazy init with `@functools.lru_cache(maxsize=1)` on `_settings_load_errors()` in `forensics.cli` (same exception tuple, same `except _settings_load_errors()` usage).
+- Converted `_simhash_char_ngrams` to an `Iterator[str]` generator (same 3- then 4-gram order; fallback `yield cleaned or "\x00"` when no windows); `_simhash_from_grams` now accepts `Iterable[str]`; `simhash()` passes the iterator through in one expression.
+
+#### Files Modified
+- `src/forensics/cli/__init__.py`
+- `src/forensics/utils/hashing.py`
+- `HANDOFF.md`
+
+#### Verification Evidence
+```
+uv run ruff check src/forensics/cli/__init__.py src/forensics/utils/hashing.py
+uv run ruff format --check src/forensics/cli/__init__.py src/forensics/utils/hashing.py
+  -> All checks passed; files already formatted
+
+uv run pytest tests/test_hashing_hypothesis.py tests/test_dedup_streaming_export.py tests/test_dedup_banding.py tests/test_scraper.py::test_simhash_near_duplicate_distance tests/test_scraper.py::test_simhash_distinct_texts -v --no-cov
+  -> 47 passed
+```
+
+#### Decisions Made
+- Used a `yielded` flag (not materializing n-grams into a list) to preserve the previous “no n-grams → single fallback token” rule without double-consuming an iterator.
+
+#### Unresolved Questions
+- None.
+
+#### Risks & Next Steps
+- Public `simhash` / `simhash_hamming` API unchanged; fingerprints stay byte-identical for the exercised tests. Re-run full `uv run pytest tests/` when stabilizing the branch.
+
+---
+
+### Notion remediation — decompose `analysis/orchestrator.py` into package
+**Status:** Complete
+**Date:** 2026-04-26
+
+#### What Was Done
+- Replaced monolithic `src/forensics/analysis/orchestrator.py` with package modules under `src/forensics/analysis/orchestrator/`:
+  - `timings.py`, `per_author.py`, `parallel.py`, `comparison.py`, `sensitivity.py`, `staleness.py`, `runner.py`, `__init__.py`.
+- Preserved public import surface via `forensics.analysis.orchestrator` re-exports:
+  - `AnalysisTimings`, `assemble_analysis_result`, `run_compare_only`, `run_full_analysis`, `run_parallel_author_refresh`.
+- Added compatibility shims in `orchestrator/__init__.py` for legacy test monkeypatch points used by existing tests:
+  - `_clean_feature_series`, `_run_hypothesis_tests_for_changepoints`, `_run_per_author_analysis`, `_run_section_residualized_sensitivity`, plus patchable `uuid4`/`datetime`.
+- Completed required GitNexus upstream impact checks (repo `mediaite-ghostink`) for:
+  - `run_full_analysis` (CRITICAL), `assemble_analysis_result` (HIGH), `run_compare_only` (HIGH), `run_parallel_author_refresh` (HIGH), `AnalysisTimings` (MEDIUM).
+- Attempted `gitnexus_detect_changes` gate; CLI in this environment exposes no `detect_changes` command and GitNexus MCP server is unavailable in active server list, so the gate could not be executed here.
+- Documented the new orchestrator package layout in `docs/RUNBOOK.md`.
+
+#### Files Modified
+- `src/forensics/analysis/orchestrator.py` (deleted)
+- `src/forensics/analysis/orchestrator/__init__.py`
+- `src/forensics/analysis/orchestrator/timings.py`
+- `src/forensics/analysis/orchestrator/per_author.py`
+- `src/forensics/analysis/orchestrator/parallel.py`
+- `src/forensics/analysis/orchestrator/comparison.py`
+- `src/forensics/analysis/orchestrator/sensitivity.py`
+- `src/forensics/analysis/orchestrator/staleness.py`
+- `src/forensics/analysis/orchestrator/runner.py`
+- `docs/RUNBOOK.md`
+- `HANDOFF.md`
+
+#### Verification Evidence
+```
+uv run ruff check src/forensics/analysis/orchestrator src/forensics/analysis/__init__.py
+  -> All checks passed
+
+uv run pytest tests/test_orchestrator_assemble.py tests/unit/test_orchestrator_feature_cache.py tests/unit/test_sensitivity_outputs.py -v --no-cov
+  -> 6 passed
+
+uv run pytest tests/integration/test_parallel_parity.py::test_serial_run_produces_byte_identical_artifacts_across_invocations -v --no-cov
+  -> 1 failed (pre-existing parity drift on run_metadata.json absolute sensitivity path)
+```
+
+#### Decisions Made
+- Kept a compatibility layer in `orchestrator/__init__.py` to preserve legacy monkeypatch semantics expected by existing tests while still splitting implementation across modules.
+
+#### Unresolved Questions
+- Whether to normalize `section_residualized_sensitivity.analysis_dir` in `run_metadata.json` for cross-root byte parity remains unresolved and out of this todo's direct scope.
+
+#### Risks & Next Steps
+- If strict byte-identity is required across different project roots, follow up by normalizing or omitting absolute analysis paths in metadata.
+
+---
+
+### Notion remediation — orchestrator package compatibility follow-up
+**Status:** Complete
+**Date:** 2026-04-26
+
+#### What Was Done
+- Expanded `src/forensics/analysis/orchestrator/__init__.py` compatibility exports so legacy private test imports continue to work after package split:
+  - `_resolve_targets_and_controls`, `_resolve_max_workers`, `_resolve_parallel_refresh_workers`, `_isolated_author_worker`, `_per_author_worker`, `_validate_and_promote_isolated_outputs`.
+- Added patch-forwarding in `run_parallel_author_refresh(...)` so monkeypatching the package-level private symbols still affects the underlying split module execution path.
+- Re-ran orchestrator-adjacent regression tests to confirm parity with previous import/monkeypatch contracts.
+
+#### Files Modified
+- `src/forensics/analysis/orchestrator/__init__.py`
+- `HANDOFF.md`
+
+#### Verification Evidence
+```
+uv run ruff check src/forensics/analysis/orchestrator/__init__.py
+  -> All checks passed
+
+uv run pytest tests/unit/test_analyze_compare.py -v --no-cov
+  -> 16 passed
+
+uv run pytest tests/unit/test_analyze_compare.py tests/unit/test_comparison_target_controls.py tests/test_analysis.py tests/integration/test_parallel_parity.py tests/integration/test_cli.py tests/unit/test_sensitivity_outputs.py tests/unit/test_analyze_survey_gate.py tests/unit/test_orchestrator_feature_cache.py tests/test_orchestrator_assemble.py -v --no-cov
+  -> 87 passed, 1 failed (tests/integration/test_parallel_parity.py::test_serial_run_produces_byte_identical_artifacts_across_invocations)
+```
+
+#### Decisions Made
+- Preserved backward-compatible package-level private symbol access for existing tests/callers rather than rewriting tests during this refactor task.
+
+#### Unresolved Questions
+- Same as previous block: parity failure remains on `run_metadata.json` due root-specific path content under `section_residualized_sensitivity.analysis_dir`.
+
+#### Risks & Next Steps
+- Decide whether metadata should remain absolute-path informative or switch to relative/path-independent representation for strict byte-parity assertions across different project roots.

@@ -10,52 +10,13 @@ from datetime import date, datetime, timedelta
 import numpy as np
 
 from forensics.analysis.changepoint import PELT_FEATURE_COLUMNS
+from forensics.analysis.feature_families import FAMILY_COUNT, FEATURE_FAMILIES
 from forensics.analysis.monthkeys import iter_months_in_window, month_key_to_range
 from forensics.config.settings import ForensicsSettings
 from forensics.models.analysis import ChangePoint, ConvergenceWindow
 from forensics.paths import closed_interval_contains
 
 logger = logging.getLogger(__name__)
-
-# Phase 15 B1/B2 — feature-family grouping. The canonical registry lives in
-# ``forensics.analysis.feature_families`` (Unit 4). Until that lands we carry a
-# local fallback with the exact same content so convergence scoring can ship
-# family semantics ahead of the registry module.
-try:
-    from forensics.analysis.feature_families import FAMILY_COUNT, FEATURE_FAMILIES
-except ImportError:  # pragma: no cover - fallback exercised only pre-Unit-4
-    FEATURE_FAMILIES: dict[str, str] = {
-        # Lexical richness
-        "ttr": "lexical_richness",
-        "mattr": "lexical_richness",
-        "hapax_ratio": "lexical_richness",
-        "yules_k": "lexical_richness",
-        "simpsons_d": "lexical_richness",
-        # Readability
-        "flesch_kincaid": "readability",
-        "coleman_liau": "readability",
-        "gunning_fog": "readability",
-        # Sentence structure (incl. paragraph_length_variance)
-        "sent_length_mean": "sentence_structure",
-        "sent_length_std": "sentence_structure",
-        "sent_length_skewness": "sentence_structure",
-        "subordinate_clause_depth": "sentence_structure",
-        "conjunction_freq": "sentence_structure",
-        "passive_voice_ratio": "sentence_structure",
-        "paragraph_length_variance": "sentence_structure",
-        # Entropy
-        "bigram_entropy": "entropy",
-        "trigram_entropy": "entropy",
-        # Self-similarity
-        "self_similarity_30d": "self_similarity",
-        "self_similarity_90d": "self_similarity",
-        # AI / formula / voice register markers
-        "ai_marker_frequency": "ai_markers",
-        "formula_opening_score": "ai_markers",
-        "hedging_frequency": "ai_markers",
-        "first_person_ratio": "ai_markers",
-    }
-    FAMILY_COUNT: int = len(set(FEATURE_FAMILIES.values()))
 
 # Named convergence-scoring constants (RF-SMELL-003 / audit for pre-registration lock).
 PIPELINE_SCORE_PASS_THRESHOLD: float = 0.3
