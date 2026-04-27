@@ -9,6 +9,9 @@ from typing import Annotated
 
 import typer
 
+from forensics.cli._envelope import status
+from forensics.cli.state import get_cli_state
+
 logger = logging.getLogger(__name__)
 
 calibrate_app = typer.Typer(
@@ -21,6 +24,7 @@ calibrate_app = typer.Typer(
 
 @calibrate_app.callback(invoke_without_command=True)
 def calibrate(
+    ctx: typer.Context,
     positive_trials: Annotated[
         int,
         typer.Option("--positive-trials", help="Number of spliced-corpus trials (default: 5)."),
@@ -75,9 +79,10 @@ def calibrate(
         )
     )
 
-    typer.echo("")
-    typer.echo(f"Calibration Results ({len(report.trials)} trials)")
-    typer.echo("=" * 50)
+    fmt = get_cli_state(ctx).output_format
+    status("", output_format=fmt)
+    status(f"Calibration Results ({len(report.trials)} trials)", output_format=fmt)
+    status("=" * 50, output_format=fmt)
     typer.echo(f"  Sensitivity (TPR):  {report.sensitivity:.1%}")
     typer.echo(f"  Specificity (TNR):  {report.specificity:.1%}")
     typer.echo(f"  Precision:          {report.precision:.1%}")

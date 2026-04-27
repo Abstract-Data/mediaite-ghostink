@@ -1,6 +1,6 @@
 # AGENTS.md
-# Version: 0.4.0
-# Last Updated: 2026-04-23
+# Version: 0.4.1
+# Last Updated: 2026-04-26
 # Environment: dev
 # Model: gpt-5-3-codex
 # Fallback Model: gpt-5.1
@@ -481,6 +481,7 @@ See `prompts/README.md` for the full versioning contract, bump rules, and releas
 - Prefer refactoring long functions and shared helpers over adding new McCabe C901 suppressions; if a suppression is unavoidable, pair it with a short decomposition plan or tracking comment rather than silent noqa growth.
 - When expanding README or onboarding docs for this repo, document which models and measurements the pipeline uses, how to run it locally, and chain-of-custody style forensic expectations; add diagrams or flow figures when they materially clarify stages or data flow.
 - For this investigation's `config.toml` roster, keep exactly one `role = "target"` (Colby Hall, `slug = "colby-hall"`) and every other configured writer as `role = "control"`; never include `placeholder-target` / `placeholder-control` slugs (they trip preflight/scrape guards) and never add `mediaite` or `mediaite-staff` to `[[authors]]` — leave `[survey] exclude_shared_bylines = true` so shared-byline accounts stay out of the cohort.
+- When asked to build an implementation or remediation plan from a code-review report, punch-list, or @-tagged readiness/review prompt with wording like "implement everything," "do not defer," or "all fixes regardless of tier," include **all** listed items and severity tiers in the plan unless the user explicitly narrows scope—do not treat lower tiers as optional follow-ups by default.
 
 ## Learned Workspace Facts
 

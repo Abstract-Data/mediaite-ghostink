@@ -561,4 +561,4 @@ def scrape(
                 observer=observer,
             )
         )
-    raise typer.Exit(code=rc)
+    raise typer.Exit(int(rc))

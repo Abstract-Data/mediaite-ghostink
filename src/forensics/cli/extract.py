@@ -7,6 +7,7 @@ from typing import Annotated
 
 import typer
 
+from forensics.cli._exit import ExitCode
 from forensics.cli.state import get_cli_state
 from forensics.config import get_project_root, get_settings
 from forensics.pipeline_context import PipelineContext
@@ -59,7 +60,7 @@ def extract(
         )
     except ValueError as exc:
         logger.error("%s", exc)
-        raise typer.Exit(code=1) from exc
+        raise typer.Exit(int(ExitCode.GENERAL_ERROR)) from exc
     logger.info("extract: processed %d article(s)", n)
 
     if probability:
@@ -72,7 +73,7 @@ def extract(
                 "Probability features unavailable (%s). Install with: uv sync --extra probability",
                 exc,
             )
-            raise typer.Exit(code=1) from exc
+            raise typer.Exit(int(ExitCode.GENERAL_ERROR)) from exc
 
         count = extract_probability_features(
             db_path,

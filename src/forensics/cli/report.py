@@ -7,6 +7,7 @@ from typing import Annotated
 
 import typer
 
+from forensics.cli._exit import ExitCode
 from forensics.models.report_args import ReportArgs
 from forensics.pipeline_context import PipelineContext
 
@@ -79,6 +80,6 @@ def report(
         rc = run_report(args)
     except ValueError as exc:
         logger.error("%s", exc)
-        raise typer.Exit(code=1) from exc
+        raise typer.Exit(int(ExitCode.GENERAL_ERROR)) from exc
     if rc != 0:
-        raise typer.Exit(code=rc)
+        raise typer.Exit(int(rc))

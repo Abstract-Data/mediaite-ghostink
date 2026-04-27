@@ -23,6 +23,10 @@ from typing import Annotated
 
 import typer
 
+from forensics.cli._envelope import status
+from forensics.cli._exit import ExitCode
+from forensics.cli.state import get_cli_state
+
 features_app = typer.Typer(
     name="features",
     help="Feature-store maintenance commands (schema migrations, etc).",
@@ -31,6 +35,7 @@ features_app = typer.Typer(
 
 
 def migrate(
+    ctx: typer.Context,
     db_path: Annotated[
         Path | None,
         typer.Option(
@@ -48,10 +53,11 @@ def migrate(
     from forensics.storage.repository import Repository
 
     logger = logging.getLogger(__name__)
+    st = get_cli_state(ctx)
     target = db_path or (get_project_root() / "data" / "articles.db")
     if not target.parent.is_dir():
-        typer.echo(f"Parent directory does not exist: {target.parent}", err=True)
-        raise typer.Exit(code=1)
+        status(f"Parent directory does not exist: {target.parent}", output_format=st.output_format)
+        raise typer.Exit(int(ExitCode.AUTH_OR_RESOURCE))
 
     with Repository(target) as repo:
         applied = repo.apply_migrations()
@@ -59,11 +65,13 @@ def migrate(
         logger.info("Applied %d SQLite migration(s): %s", len(applied), applied)
         typer.echo(f"Applied migrations: {applied}")
     else:
-        typer.echo("No pending SQLite migrations.")
+        status("No pending SQLite migrations.", output_format=st.output_format)
+        raise typer.Exit(int(ExitCode.CONFLICT))
 
 
 @features_app.command(name="migrate")
 def features_migrate(
+    ctx: typer.Context,
     features_dir: Annotated[
         Path | None,
         typer.Option(
@@ -99,13 +107,14 @@ def features_migrate(
     from forensics.config import get_project_root
 
     logger = logging.getLogger(__name__)
+    st = get_cli_state(ctx)
     mig = importlib.import_module("forensics.storage.migrations.002_feature_parquet_section")
     project_root = get_project_root()
     target = features_dir or (project_root / "data" / "features")
     if not target.is_dir():
-        typer.echo(
+        status(
             f"features directory not found: {target} (nothing to migrate).",
-            err=True,
+            output_format=st.output_format,
         )
         return
 

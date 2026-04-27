@@ -12,7 +12,8 @@ from typing import Annotated, Literal
 import httpx
 import typer
 
-from forensics.cli._envelope import emit, success
+from forensics.cli._envelope import emit, status, success
+from forensics.cli._exit import ExitCode
 from forensics.cli.state import ForensicsCliState, get_cli_state
 from forensics.preflight import PreflightReport
 
@@ -20,6 +21,7 @@ app = typer.Typer(
     name="forensics",
     help="AI Writing Forensics Pipeline",
     no_args_is_help=True,
+    epilog="Exit code reference: docs/EXIT_CODES.md (retry backoff only on code 4).",
 )
 
 
@@ -30,7 +32,7 @@ def _version_callback(value: bool) -> None:
         except importlib.metadata.PackageNotFoundError:
             version = "0.0.0+unknown"
         typer.echo(f"forensics {version}")
-        raise typer.Exit()
+        raise typer.Exit(int(ExitCode.OK))
 
 
 def _configure_logging(
@@ -212,33 +214,43 @@ def preflight(
     else:
         icons = {"pass": "PASS", "warn": "WARN", "fail": "FAIL"}
         for check in report.checks:
-            typer.echo(f"  [{icons[check.status]}] {check.name}: {check.message}", err=True)
+            status(
+                f"  [{icons[check.status]}] {check.name}: {check.message}",
+                output_format=state.output_format,
+            )
 
         if report.has_failures:
-            typer.echo(
+            status(
                 "\nSome required checks failed. Fix issues before running the pipeline.",
-                err=True,
+                output_format=state.output_format,
             )
         elif report.has_warnings:
-            typer.echo("\nAll required checks passed (some warnings).", err=True)
+            status(
+                "\nAll required checks passed (some warnings).",
+                output_format=state.output_format,
+            )
         else:
-            typer.echo("\nAll preflight checks passed.", err=True)
+            status("\nAll preflight checks passed.", output_format=state.output_format)
 
     if report.has_failures:
-        raise typer.Exit(code=1)
-    raise typer.Exit(code=0)
+        raise typer.Exit(int(ExitCode.GENERAL_ERROR))
+    raise typer.Exit(int(ExitCode.OK))
 
 
 @app.command(name="lock-preregistration")
-def lock_preregistration_cmd() -> None:
+def lock_preregistration_cmd(ctx: typer.Context) -> None:
     """Lock analysis thresholds for pre-registration (run before analyzing data)."""
     from forensics.config import get_settings
     from forensics.preregistration import lock_preregistration
 
     settings = get_settings()
     path = lock_preregistration(settings)
-    typer.echo(f"Pre-registration locked: {path}")
-    typer.echo("Run analysis AFTER this point. Threshold changes will trigger warnings.")
+    st = get_cli_state(ctx)
+    status(f"Pre-registration locked: {path}", output_format=st.output_format)
+    status(
+        "Run analysis AFTER this point. Threshold changes will trigger warnings.",
+        output_format=st.output_format,
+    )
 
 
 _WP_TYPES_URL = "https://www.mediaite.com/wp-json/wp/v2/types"
@@ -258,6 +270,7 @@ def _probe_endpoint(url: str, *, timeout: float = 3.0) -> tuple[bool, str]:
 
 @app.command(name="validate")
 def validate_config(
+    ctx: typer.Context,
     check_endpoints: Annotated[
         bool,
         typer.Option(
@@ -271,12 +284,13 @@ def validate_config(
     from forensics.preflight import run_all_preflight_checks
 
     logger = logging.getLogger(__name__)
+    st = get_cli_state(ctx)
     try:
         settings = get_settings()
     except _settings_load_errors() as exc:
         logger.error("Config error: %s", exc)
-        typer.echo(f"Config error: {exc}")
-        raise typer.Exit(code=1) from exc
+        status(f"Config error: {exc}", output_format=st.output_format)
+        raise typer.Exit(int(ExitCode.USAGE_ERROR)) from exc
 
     typer.echo(f"Config parsed: {len(settings.authors)} author(s)")
 
@@ -286,24 +300,34 @@ def validate_config(
         typer.echo(f"  [{icons[check.status]}] {check.name}: {check.message}")
 
     if check_endpoints:
-        typer.echo("\nEndpoint probes (warnings only, do not affect exit code):")
+        status(
+            "\nEndpoint probes (warnings only, do not affect exit code):",
+            output_format=st.output_format,
+        )
         wp_ok, wp_detail = _probe_endpoint(_WP_TYPES_URL)
-        typer.echo(f"  [{'PASS' if wp_ok else 'WARN'}] WordPress API: {wp_detail}")
+        status(
+            f"  [{'PASS' if wp_ok else 'WARN'}] WordPress API: {wp_detail}",
+            output_format=st.output_format,
+        )
         oll_ok, oll_detail = _probe_endpoint(_OLLAMA_TAGS_URL)
-        typer.echo(f"  [{'PASS' if oll_ok else 'WARN'}] Ollama: {oll_detail}")
+        status(
+            f"  [{'PASS' if oll_ok else 'WARN'}] Ollama: {oll_detail}",
+            output_format=st.output_format,
+        )
 
     if report.has_failures:
-        typer.echo("\nSome required checks failed.")
-        raise typer.Exit(code=1)
+        status("\nSome required checks failed.", output_format=st.output_format)
+        raise typer.Exit(int(ExitCode.GENERAL_ERROR))
     if report.has_warnings:
-        typer.echo("\nAll required checks passed (some warnings).")
+        status("\nAll required checks passed (some warnings).", output_format=st.output_format)
     else:
-        typer.echo("\nAll validation checks passed.")
-    raise typer.Exit(code=0)
+        status("\nAll validation checks passed.", output_format=st.output_format)
+    raise typer.Exit(int(ExitCode.OK))
 
 
 @app.command(name="export")
 def export_data(
+    ctx: typer.Context,
     output: Annotated[
         Path,
         typer.Option(
@@ -335,9 +359,10 @@ def export_data(
     db_path = root / "data" / "articles.db"
     out_path = output if output.is_absolute() else root / output
 
+    st = get_cli_state(ctx)
     if not db_path.is_file():
-        typer.echo(f"SQLite source not found: {db_path}")
-        raise typer.Exit(code=1)
+        status(f"SQLite source not found: {db_path}", output_format=st.output_format)
+        raise typer.Exit(int(ExitCode.AUTH_OR_RESOURCE))
 
     report = export_to_duckdb(
         db_path,
@@ -348,7 +373,7 @@ def export_data(
     typer.echo(f"Exported to {report.output_path} ({report.bytes_written} bytes)")
     for name, count in report.tables.items():
         typer.echo(f"  {name}: {count} rows")
-    typer.echo(f"Query with: duckdb {report.output_path}")
+    status(f"Query with: duckdb {report.output_path}", output_format=st.output_format)
 
 
 @app.command(name="all")
@@ -418,7 +443,7 @@ def dashboard_cmd(
             "Omit --no-progress, or use `forensics all` / `forensics survey` with --no-progress.",
             err=True,
         )
-        raise typer.Exit(code=1)
+        raise typer.Exit(int(ExitCode.USAGE_ERROR))
 
     if not survey and (
         skip_scrape
@@ -434,7 +459,7 @@ def dashboard_cmd(
             "--min-span-days, --post-year-min, --post-year-max) require --survey.",
             err=True,
         )
-        raise typer.Exit(code=2)
+        raise typer.Exit(int(ExitCode.USAGE_ERROR))
 
     from dataclasses import replace
 

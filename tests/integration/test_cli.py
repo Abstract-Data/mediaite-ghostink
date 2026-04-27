@@ -97,7 +97,7 @@ def test_all_help_exits_cleanly() -> None:
 def test_analyze_verify_corpus_fails_on_missing_custody(
     tmp_path, forensics_config_path, monkeypatch
 ) -> None:
-    """`analyze --verify-corpus` must exit 1 when the custody file is absent."""
+    """`analyze --verify-corpus` must exit AUTH_OR_RESOURCE (3) when custody is absent."""
     import importlib
 
     analyze_mod = importlib.import_module("forensics.cli.analyze")
@@ -106,7 +106,7 @@ def test_analyze_verify_corpus_fails_on_missing_custody(
     init_db(tmp_path / "data" / "articles.db")
     monkeypatch.setattr(analyze_mod, "get_project_root", lambda: tmp_path)
     result = runner.invoke(app, ["analyze", "--verify-corpus", "--author", "fixture-author"])
-    assert result.exit_code == 1
+    assert result.exit_code == 3
 
 
 def test_analyze_verify_corpus_passes_on_matching_custody(
@@ -186,7 +186,7 @@ def test_validate_config_command(forensics_config_path, monkeypatch) -> None:
 
 
 def test_validate_detects_config_error(tmp_path, monkeypatch) -> None:
-    """An unparseable config.toml should make ``validate`` exit 1."""
+    """An unparseable config.toml should make ``validate`` exit USAGE_ERROR (2)."""
     bad_cfg = tmp_path / "config.toml"
     bad_cfg.write_text("this is = not valid = toml [[[\n", encoding="utf-8")
     monkeypatch.setenv("FORENSICS_CONFIG_FILE", str(bad_cfg))
@@ -195,8 +195,9 @@ def test_validate_detects_config_error(tmp_path, monkeypatch) -> None:
     get_settings.cache_clear()
     try:
         result = runner.invoke(app, ["validate"])
-        assert result.exit_code == 1
-        assert "Config error" in result.output
+        assert result.exit_code == 2
+        combined = (result.stdout or "") + (result.stderr or "")
+        assert "Config error" in combined
     finally:
         get_settings.cache_clear()
 

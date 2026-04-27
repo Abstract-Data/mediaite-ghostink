@@ -9,6 +9,7 @@ from typing import Annotated
 import typer
 
 from forensics.cli._envelope import emit, success
+from forensics.cli._exit import ExitCode
 from forensics.cli.state import get_cli_state
 from forensics.config import DEFAULT_DB_RELATIVE, get_project_root
 from forensics.storage.repository import Repository
@@ -35,7 +36,7 @@ def recompute_fingerprints(
     db_path = db if db is not None else root / DEFAULT_DB_RELATIVE
     if not db_path.is_file():
         logger.error("database not found: %s", db_path)
-        raise typer.Exit(code=1)
+        raise typer.Exit(int(ExitCode.AUTH_OR_RESOURCE))
     with Repository(db_path) as repo:
         summary = repo.recompute_stale_dedup_simhashes(limit=limit)
     state = get_cli_state(ctx)

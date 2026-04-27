@@ -7,7 +7,7 @@ todos:
     status: completed
   - id: item-2-3
     content: status()/stream sweep; _exit.py + docs/EXIT_CODES.md + Typer epilog; replace typer.Exit literals
-    status: pending
+    status: completed
   - id: item-4-5
     content: commands + walk + text tree; with_examples on all CLI commands; tests commands_dump + help_examples
     status: pending
