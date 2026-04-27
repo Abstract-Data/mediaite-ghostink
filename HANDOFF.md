@@ -6054,7 +6054,7 @@ npx gitnexus analyze --embeddings   # Repository indexed successfully (~29s); no
 #### What Was Done
 
 - **G1:** `scripts/migrate_feature_parquets.py` — default SQLite path uses `DEFAULT_DB_RELATIVE` from `forensics.config` (same as CLI); `--articles-db` help reflects the canonical relative path.
-- **G2:** `tests/unit/test_config_hash.py` — `test_e2e_fixture_empty_analysis_hash_matches_default_golden` locks empty `[analysis]` in `tests/integration/fixtures/e2e/config.toml` to the same digest as nested `AnalysisConfig()` defaults (`81d550a7032fbe95`).
+- **G2:** `tests/unit/test_config_hash.py` — `test_e2e_fixture_empty_analysis_hash_matches_default_golden` locks empty `[analysis]` in `tests/integration/fixtures/e2e/config.toml` to the same digest as nested `AnalysisConfig()` defaults (golden updated in TASK-2 below when `pipeline_b_mode` default moved to `percentile`).
 
 #### Files Modified
 
@@ -6110,3 +6110,37 @@ uv run pytest tests/ -q --tb=line   # 1021 passed; same 2 pre-existing failures 
 #### Risks & Next Steps
 
 - Confirmatory `run_compare_only` still defaults to `exploratory=False`; toy fixtures without embeddings must pass `exploratory=True` or ship drift/embedding artifacts.
+
+---
+
+### TASK-2 — `pipeline_b_mode` default `percentile` (plan shard)
+
+**Status:** Complete  
+**Date:** 2026-04-27
+
+#### What Was Done
+
+- `HypothesisConfig.pipeline_b_mode` default changed from `"legacy"` to `"percentile"` in `src/forensics/config/analysis_settings.py`.
+- Golden analysis-config hash in `tests/unit/test_config_hash.py` updated to `c91006c9b9cec525`; `_FLIP_VALUES["pipeline_b_mode"]` set to `"legacy"` so the hash-flip test remains meaningful.
+- Docs: `docs/adr/016-analysis-config-nesting.md` amendment, `docs/RUNBOOK.md` Local Setup bullet, `docs/settings_phase15.md` default column aligned.
+
+#### Files Modified
+
+- `src/forensics/config/analysis_settings.py`
+- `tests/unit/test_config_hash.py`
+- `docs/adr/016-analysis-config-nesting.md`, `docs/RUNBOOK.md`, `docs/settings_phase15.md`
+- `HANDOFF.md` — this block
+
+#### Verification Evidence
+
+```
+uv run pytest tests/unit/test_config_hash.py tests/test_preregistration.py -v --no-cov -q   # 56 passed
+```
+
+#### GitNexus
+
+- MCP `user-gitnexus` not available this session; `gitnexus_impact` not run.
+
+#### Risks & Next Steps
+
+- Projects with no `pipeline_b_mode` in TOML now hash as percentile-first; explicit `pipeline_b_mode = "legacy"` preserves old behavior. `data/preregistration/preregistration_lock.json` already used `percentile`; no lock edit required.

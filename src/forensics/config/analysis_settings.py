@@ -161,7 +161,7 @@ class HypothesisConfig(BaseModel):
     )
     enable_ks_test: bool = Field(False, json_schema_extra={"include_in_config_hash": True})
     pipeline_b_mode: Literal["legacy", "percentile"] = Field(
-        "legacy",
+        "percentile",
         json_schema_extra={"include_in_config_hash": True},
     )
     section_residualize_features: bool = Field(

@@ -4,6 +4,8 @@ Operational quick reference. Agents: append new sections here whenever you disco
 
 ## Local Setup
 
+- **Analysis defaults:** With an empty or omitted `[analysis] pipeline_b_mode` in `config.toml`, the nested model default is **`percentile`** (cross-author comparable Pipeline B). Override with `pipeline_b_mode = "legacy"` only when you need the older absolute-cosine behavior.
+
 1. Install dependencies: `uv sync`
 2. For Phase 10 (baseline generation): `uv sync --extra baseline`
 3. Validate environment: `uv run ruff check . && uv run ruff format --check .`
