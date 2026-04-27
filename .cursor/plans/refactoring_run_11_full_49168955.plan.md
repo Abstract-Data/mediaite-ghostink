@@ -19,7 +19,7 @@ todos:
     status: completed
   - id: task-6-verify-handoff
     content: "TASK-6: ruff/pytest/gitnexus analyze; HANDOFF.md + RUNBOOK if needed"
-    status: pending
+    status: completed
 isProject: false
 ---
 

@@ -5994,3 +5994,52 @@ uv run pytest tests/test_analysis_infrastructure.py tests/unit/test_analyze_comp
 #### Risks & Next Steps
 
 - External notebooks still importing `forensics.analysis.artifact_paths` continue to work via shim; migrate to `forensics.paths` when convenient.
+
+---
+
+### Refactoring Run 11 — TASK-6 verification + GitNexus index refresh
+
+**Status:** Complete  
+**Date:** 2026-04-27
+
+#### What Was Done
+
+- Ran full quality gates (`ruff check`, `ruff format --check`, full `pytest` suite).
+- Reindexed the repo with GitNexus **preserving embeddings** (`npx gitnexus analyze --embeddings`) so `.gitnexus` matches post–Run 11 graph edits.
+- Appended this handoff block; added a short GitNexus operator note to `docs/RUNBOOK.md`.
+
+#### Files Modified
+
+- `HANDOFF.md` — this completion log entry.
+- `docs/RUNBOOK.md` — GitNexus reindex guidance (`analyze` vs `--embeddings`).
+
+#### Verification Evidence
+
+```
+uv run ruff check .   # All checks passed
+uv run ruff format --check .   # 284 files already formatted
+uv run pytest tests/ -v --tb=no -q   # 1016 passed, 3 deselected, 1 xfailed, 2 failed (see below)
+npx gitnexus analyze --embeddings   # Repository indexed successfully (~29s); nodes/edges updated
+```
+
+**Pytest failures (pre-existing, unchanged by TASK-6):**
+
+- `tests/integration/test_pipeline_end_to_end.py::test_pipeline_extract_analyze_comparison_end_to_end` — `FileNotFoundError` (repo-root `quarto.yml` / temp copy path; see RUNBOOK “Automated pipeline E2E”).
+- `tests/unit/test_parser_html_fuzz.py::test_extract_article_text_from_rest_never_raises` — `AssertionError` on fuzz sentinel (parser edge case).
+
+#### Decisions Made
+
+- Documented GitNexus `--embeddings` in RUNBOOK because `.gitnexus/meta.json` had non-zero embeddings; plain `analyze` would drop them per AGENTS.md.
+
+#### GitNexus
+
+- CLI `npx gitnexus analyze --embeddings` executed successfully (MCP descriptors absent this session; no `detect_changes` on staged scope — verification-only task).
+
+#### Unresolved Questions
+
+- None for TASK-6.
+
+#### Risks & Next Steps
+
+- Fix or fixture the two failing tests if the default `uv run pytest tests/` gate must be green locally.
+- After future large merges, re-run `npx gitnexus analyze` (with `--embeddings` when `stats.embeddings > 0`).

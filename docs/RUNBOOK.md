@@ -35,6 +35,13 @@ For scripts, CI, or LLM agents driving the CLI:
 3. **Stdout vs stderr:** with `--output json`, successful commands emit **exactly one** JSON envelope line on stdout (`ok`, `type`, `schemaVersion`, `data` or `error`); status and logs belong on stderr. Do not scrape stdout for prose when in JSON mode.
 4. **Discovery:** `uv run forensics --output json commands` dumps the full command tree (params, help, examples) for tooling.
 
+### GitNexus code graph (reindex)
+
+After large refactors or merges, refresh the local graph so impact/context tools stay accurate:
+
+- **Default:** `npx gitnexus analyze` (from repo root).
+- **Embeddings preserved:** If `.gitnexus/meta.json` shows `stats.embeddings` greater than zero, use `npx gitnexus analyze --embeddings`. Running `analyze` without `--embeddings` **removes** any previously generated index embeddings (see `AGENTS.md` / CLAUDE GitNexus section).
+
 ## Phase 16 hash-break migration
 
 Phase 16 intentionally changes the analysis-config hash, corpus fingerprint, and embedding revision contract. Treat any pre–Phase-16 `data/analysis/*_result.json` and preregistration locks as **stale** relative to a Phase-16 `config.toml` until you re-lock and re-run (see GUARDRAILS Sign: *Pre-Phase-16 locked artifacts must be re-locked*).
