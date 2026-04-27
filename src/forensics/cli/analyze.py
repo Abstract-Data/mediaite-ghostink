@@ -734,7 +734,6 @@ def section_profile_cmd(
     paths = AnalysisArtifactPaths.from_project(root, db_path)
     feat_dir = features_dir if features_dir is not None else paths.features_dir
     analysis_dir = paths.analysis_dir
-    analysis_dir.mkdir(parents=True, exist_ok=True)
 
     result = run_section_profile(
         settings,
@@ -799,7 +798,6 @@ def section_contrast_cmd(
     paths = AnalysisArtifactPaths.from_project(root, db_path)
     feat_dir = features_dir if features_dir is not None else paths.features_dir
     analysis_dir = paths.analysis_dir
-    analysis_dir.mkdir(parents=True, exist_ok=True)
 
     with Repository(db_path) as repo:
         author_rows = resolve_author_rows(repo, settings, author_slug=author)

@@ -38,10 +38,19 @@ def normalize_stored_datetime(value: datetime) -> datetime:
     return value.astimezone(UTC)
 
 
+def utc_archive_stamp() -> str:
+    """Compact UTC timestamp for directory suffixes (``%Y%m%dT%H%M%SZ``).
+
+    Used for archive / run folder names so embedding rollback, calibration runs,
+    and similar paths share one format (RF-DRY-003).
+    """
+    return datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+
+
 def timestamps_from_frame(df: pl.DataFrame, col: str = "timestamp") -> list[datetime]:
     """Materialize a Polars timestamp column into a list of ``datetime`` objects.
 
     Centralizes the ``df[col].to_list()`` → ``[parse_datetime(t) for t in ...]``
-    two-liner that used to repeat across the analysis stages (RF-DRY-003).
+    two-liner that used to repeat across the analysis stages.
     """
     return [parse_datetime(t) for t in df[col].to_list()]

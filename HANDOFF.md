@@ -5797,3 +5797,83 @@ uv run pytest tests/test_report.py -v --no-cov
 **Unresolved**
 
 - No outstanding issues. The full pipeline `analyze → report` cycle is reproducible end-to-end.
+
+---
+
+## 2026-04-27 — Removed `docs/AI_USAGE_FINDINGS.md`
+
+**Status:** complete.
+
+**What was done**
+
+- Deleted `docs/AI_USAGE_FINDINGS.md`. The file was a hand-authored narrative pinned to a 2026-04-24 quantitative run (id `5d0fd46a-…`, config hash `d5c12a3aae737aa2`, 14-row pooled-byline cohort). After today's analysis run produced different findings (id `2ac67e19-…`, config hash `6bffd326f0074688514c3d595ad2bc6065725ea17e783489`, 12-row individual-author cohort), the narrative was actively misleading — it claimed "primary quantitative run remains 2026-04-24" but readers might assume it described the latest output.
+- Updated `docs/punch-list-closure-index.md` row R-01–R-09 to mark the narrative as removed and direct readers to the Quarto book chapter (`notebooks/09_full_report.ipynb` → `data/reports/notebooks/09_full_report.html`) as the canonical narrative artifact.
+
+**Why this is OK**
+
+- The Quarto book chapter 9 covers the same ground (executive summary, per-author determinations, caveats), and unlike the standalone markdown it's bound to whatever `data/analysis/*_result.json` is on disk when the notebook is re-executed (`uv run quarto render --execute`).
+- The deleted file is recoverable from git: `git show 714a84e:data/reports/AI_USAGE_FINDINGS.md`. If a standalone narrative is wanted again, regenerate against current analysis output rather than restoring the stale one.
+
+**Files modified / removed**
+
+- `docs/AI_USAGE_FINDINGS.md` (removed)
+- `docs/punch-list-closure-index.md` (row R-01–R-09 pointer updated to reflect removal)
+
+**Files intentionally not modified**
+
+- HANDOFF.md historical entries describing prior R-01–R-09 work — accurate when written.
+- `prompts/punch-list/{v0.1.0.md,current.md,CHANGELOG.md}`, `prompts/implementation-plan/{v0.1.0.md,current.md}` — bound by the prompt-library immutability contract.
+
+**Caveat — Quarto book is also stale (not addressed in this block)**
+
+The HTML at `data/reports/notebooks/09_full_report.html` was rendered today but the notebook cell outputs baked into `notebooks/09_full_report.ipynb` are from the 2026-04-24 run (visible in the rendered "Report rendered at" footer). `_quarto.yml` has `execute: freeze: auto` and Quarto for ipynb uses existing cell outputs by default. To bind the rendered HTML to today's analysis run, execute `uv run quarto render --execute` (forces re-execution of every notebook against current `data/analysis/`). Not done in this block.
+
+**Unresolved**
+
+- Quarto book content still reflects 2026-04-24 analysis (see caveat above). Owner's call whether to re-execute now or wait for the next analysis cycle.
+
+---
+
+### Refactoring Run 11 — TASK-1 quick wins (RF-DEAD / RF-DRY)
+
+**Status:** Complete  
+**Date:** 2026-04-27
+
+#### What Was Done
+
+- **RF-DEAD-001:** Replaced stale Phase 8 TODO / “stub” framing in `forensics.models.report` with accurate docs for `ReportManifest` and `classify_finding_strength`.
+- **RF-DEAD-002:** Removed redundant `analysis_dir.mkdir(...)` before `section-profile` and `section-contrast` CLI paths (`write_json_artifact` / section helpers already ensure parents).
+- **RF-DRY-002:** `_run_preregistered_split_tests` now uses `_clean_feature_series` after the existing `finite.size == 0` guard so cleaning matches changepoint hypothesis tests.
+- **RF-DRY-003:** Added `utc_archive_stamp()` in `forensics.utils.datetime` and switched embedding archive paths in `features/pipeline.py` plus calibration `run_dir` / report timestamp in `calibration/runner.py`.
+- Corrected a mistaken “RF-DRY-003” tag on `timestamps_from_frame` docstring (unrelated helper).
+
+#### Files Modified
+
+- `src/forensics/models/report.py` — module + class documentation only.
+- `src/forensics/cli/analyze.py` — drop redundant mkdir (2 sites).
+- `src/forensics/analysis/orchestrator/per_author.py` — preregistered split tests reuse `_clean_feature_series`.
+- `src/forensics/utils/datetime.py` — `utc_archive_stamp`; docstring fix on `timestamps_from_frame`.
+- `src/forensics/features/pipeline.py` — use `utc_archive_stamp`; drop unused `UTC` import.
+- `src/forensics/calibration/runner.py` — `utc_archive_stamp`; trim unused `datetime`/`UTC` imports.
+
+#### Verification Evidence
+
+```
+uv run ruff check .   # pass
+uv run ruff format --check .   # pass
+uv run pytest tests/ -v   # 1015 passed, 1 failed, 3 deselected, 1 xfailed
+```
+
+Failure: `tests/integration/test_pipeline_end_to_end.py::test_pipeline_extract_analyze_comparison_end_to_end` — `FileNotFoundError` for repo-root `quarto.yml` (file absent in workspace; unrelated to TASK-1 edits).
+
+#### Decisions Made
+
+- Placed `utc_archive_stamp` in existing `forensics.utils.datetime` instead of a new module to avoid import-path proliferation; name avoids clashing with stdlib `datetime`.
+
+#### GitNexus
+
+- MCP `user-gitnexus` had no tool descriptor JSON in the Cursor mcps folder this session; `impact` / `detect_changes` were not invoked (stale/skipped).
+
+#### Risks & Next Steps
+
+- Restore or fixture `quarto.yml` (or adjust the integration test) if that e2e test must pass in CI.

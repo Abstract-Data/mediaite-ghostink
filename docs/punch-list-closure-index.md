@@ -104,7 +104,7 @@ This document maps each punch **ID** to the **primary deliverable** (code path, 
 
 | ID | Tag | Primary evidence |
 |----|-----|-------------------|
-| R-01–R-09 | artifact | `docs/AI_USAGE_FINDINGS.md` (exploratory tone, caveats, tables); Quarto/report inputs as applicable. Relocated 2026-04-27 from `data/reports/` so it survives Quarto output-dir wipes. |
+| R-01–R-09 | artifact | Standalone narrative removed 2026-04-27 (was `docs/AI_USAGE_FINDINGS.md`, originally `data/reports/AI_USAGE_FINDINGS.md`). It described a 2026-04-24 quantitative run that no longer matches current analysis output and was confusing readers. The forensic narrative now lives only in the Quarto book — chapter `notebooks/09_full_report.ipynb` rendered to `data/reports/notebooks/09_full_report.html`. To regenerate a standalone narrative, re-derive from `data/analysis/*_result.json` and `data/analysis/comparison_report.json`. Recoverable from git history at commit `714a84e` if ever needed. |
 
 ---
 

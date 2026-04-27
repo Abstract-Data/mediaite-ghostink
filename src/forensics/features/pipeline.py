@@ -6,7 +6,7 @@ import logging
 import shutil
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -43,6 +43,7 @@ from forensics.storage.parquet import (
     write_features,
 )
 from forensics.storage.repository import Repository
+from forensics.utils.datetime import utc_archive_stamp
 from forensics.utils.model_cache import KeyedModelCache
 from forensics.utils.url import section_from_url
 
@@ -119,7 +120,7 @@ def _archive_embeddings_if_mismatch(
     expected = (model_name, model_version, str(model_revision or ""))
     triples = {(r.model_name, r.model_version, str(r.model_revision or "")) for r in records}
     if len(triples) > 1:
-        ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+        ts = utc_archive_stamp()
         dest = embed_root.parent / f"embeddings_archive_{ts}"
         logger.warning(
             "Embedding manifest mixes multiple model tuples %s; archiving to %s",
@@ -133,7 +134,7 @@ def _archive_embeddings_if_mismatch(
     got = triples.pop()
     if got == expected:
         return
-    ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    ts = utc_archive_stamp()
     dest = embed_root.parent / f"embeddings_archive_{ts}"
     logger.warning(
         "Embedding model mismatch (manifest=%s/%s@%s, config=%s/%s@%s). Archiving to %s",

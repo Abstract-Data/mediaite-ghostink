@@ -1,14 +1,14 @@
-"""Report generation manifests (stub for later phases).
+"""Report-side metadata and finding labels for the forensic pipeline.
 
-Phase 8 leaves several report-sidecar structures unimplemented until Quarto render
-emits a unified metadata bundle next to HTML/PDF outputs.
+Phase 8 reporting is implemented (Quarto-driven outputs); this module holds
+types used by analysis and reporting code paths, not a dormant placeholder.
 
-TODO(phase-8): Add build provenance (Quarto/git/tooling versions), per-chapter
-artifact manifests (figures, tables, custody cross-refs), and optional deploy
-bundle URIs when ``forensics report`` writes a single JSON manifest.
-
-TODO(phase-8): Extend ``ReportManifest.output_paths`` with stable keys for
-``html_index``, ``pdf_bundle``, ``custody_attestation``, and figure asset dirs.
+:class:`ReportManifest` is the canonical Pydantic shape for optional run-scoped
+metadata (``run_id``, ``title``, ``generated_at``, ``sections``,
+``output_paths``). Persisting a full sidecar manifest next to rendered books,
+plus richer ``output_paths`` keys (for example ``html_index``, ``pdf_bundle``,
+custody cross-refs, or build provenance), remains **optional** follow-up when
+the report CLI standardizes on a single emitted JSON bundle.
 """
 
 from __future__ import annotations
@@ -55,10 +55,6 @@ def classify_finding_strength(
     if len(significant_tests) >= 1:
         return FindingStrength.WEAK
     return FindingStrength.NONE
-
-
-# TODO(phase-8): ``ReportManifest`` is a minimal stub; wire writers when the
-# report CLI persists manifests alongside rendered books.
 
 
 class ReportManifest(BaseModel):

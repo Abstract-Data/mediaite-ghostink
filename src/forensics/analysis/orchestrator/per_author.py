@@ -165,8 +165,7 @@ def _run_preregistered_split_tests(
         finite = raw[np.isfinite(raw)]
         if finite.size == 0:
             continue
-        fill = float(np.nanmedian(finite))
-        series = [float(x) for x in np.nan_to_num(raw, nan=fill)]
+        series = _clean_feature_series(df_author, feature)
         tests = run_hypothesis_tests(
             series,
             split_idx,

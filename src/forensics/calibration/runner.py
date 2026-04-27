@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +30,7 @@ from forensics.models.author import Author
 from forensics.storage.json_io import write_json_artifact
 from forensics.storage.repository import Repository, init_db
 from forensics.survey.scoring import SignalStrength, compute_composite_score
+from forensics.utils.datetime import utc_archive_stamp
 
 logger = logging.getLogger(__name__)
 
@@ -356,7 +357,7 @@ async def run_calibration(
     db = db_path if db_path is not None else root / "data" / "articles.db"
 
     rng = np.random.default_rng(seed)
-    run_timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    run_timestamp = utc_archive_stamp()
     run_dir = root / "data" / "calibration" / f"run_{run_timestamp}"
 
     if dry_run:
