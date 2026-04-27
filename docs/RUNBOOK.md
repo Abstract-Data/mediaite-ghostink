@@ -91,6 +91,7 @@ Fingerprint values are versioned (`dedup_simhash_version`, current = `v2` in cod
 - Stages return **non-zero** on fatal errors (scrape failure, missing Quarto, analysis `typer.Exit`, report subprocess failure). `forensics all` propagates the first non-zero code.
 - `forensics all` returns exit code **`2`** when preflight hard-fails (distinct from `1` used by analyze).
 - `insert_analysis_run` at the start of `all` / scrape / extract / analyze is **best-effort**: SQLite permission or I/O errors log **`Could not record analysis_runs row`** and the stage still continues where the code path allows.
+- **`forensics scrape`** may exit **`4` (TRANSIENT)** when the run recorded at least one `scrape_errors.jsonl` line, **every** logged line is classified `transient: true` (timeouts, exhausted 429/5xx retries, etc.), and there was **no** successful ingest/fetch outcome for the run (see `docs/EXIT_CODES.md`). Each JSONL row now includes a boolean `transient` field for downstream tooling.
 
 ## Expected Artifacts
 

@@ -16,10 +16,10 @@ todos:
     status: completed
   - id: item-9
     content: Scraper transient classification + scrape CLI exit 4 + test_scrape_transient_classification
-    status: pending
+    status: completed
   - id: item-7-10-docs
     content: forensics-cli SKILL (clone) + CLAUDE.md; HANDOFF/RUNBOOK/GUARDRAILS; suite-wide test fixes; verification + gitnexus
-    status: pending
+    status: in_progress
 isProject: false
 ---
 

@@ -3,6 +3,12 @@
 Contract: a successful ``--output json`` invocation MUST emit exactly
 one JSON object on stdout and nothing else. Logs, progress, warnings,
 and errors go to stderr.
+
+For machine-readable failures mapped to exit code ``TRANSIENT`` (4), the
+conventional extra field on the failure envelope's ``error`` object is
+``retry_after_ms`` (integer milliseconds). Populate it when the upstream
+HTTP response includes a ``Retry-After`` header (or equivalent) so agents
+can backoff deterministically.
 """
 
 from __future__ import annotations

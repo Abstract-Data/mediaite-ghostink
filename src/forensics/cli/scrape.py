@@ -12,6 +12,7 @@ from typing import Annotated, assert_never
 import typer
 
 from forensics.cli._decorators import forensics_examples
+from forensics.cli._exit import ExitCode
 from forensics.cli._helpers import guard_placeholder_authors
 from forensics.cli.state import get_cli_state
 from forensics.config import DEFAULT_DB_RELATIVE, get_project_root, get_settings
@@ -24,7 +25,12 @@ from forensics.scraper.crawler import (
     resolve_posts_year_window,
 )
 from forensics.scraper.dedup import deduplicate_articles
-from forensics.scraper.fetcher import archive_raw_year_dirs, fetch_articles
+from forensics.scraper.fetcher import (
+    SCRAPE_RUN_TELEMETRY,
+    ScrapeRunTelemetry,
+    archive_raw_year_dirs,
+    fetch_articles,
+)
 from forensics.storage.export import export_articles_jsonl
 from forensics.storage.repository import Repository, ensure_repo
 
@@ -452,54 +458,62 @@ async def dispatch_scrape(
     manifest_path = root / "data/authors_manifest.jsonl"
     db_path = root / DEFAULT_DB_RELATIVE
 
+    telemetry = ScrapeRunTelemetry()
+    tel_token = SCRAPE_RUN_TELEMETRY.set(telemetry)
     try:
-        year_win = resolve_posts_year_window(
-            settings.scraping,
-            override_min=post_year_min,
-            override_max=post_year_max,
+        try:
+            year_win = resolve_posts_year_window(
+                settings.scraping,
+                override_min=post_year_min,
+                override_max=post_year_max,
+            )
+        except ValueError as exc:
+            logger.error("%s", exc)
+            return 1
+
+        if dry_run and not fetch:
+            logger.error("--dry-run is only valid with --fetch")
+            return 1
+
+        scrape_like = discover or metadata or fetch
+        default_full = not (scrape_like or dedup or archive)
+        if not all_authors and (scrape_like or default_full):
+            guard_placeholder_authors(settings)
+
+        audit_desc = "forensics scrape"
+        if year_win is not None:
+            audit_desc += f" post_years={year_win[0]}-{year_win[1]}"
+        PipelineContext.resolve(root=root).record_audit(
+            audit_desc,
+            optional=True,
+            log=logger,
         )
-    except ValueError as exc:
-        logger.error("%s", exc)
-        return 1
 
-    if dry_run and not fetch:
-        logger.error("--dry-run is only valid with --fetch")
-        return 1
-
-    scrape_like = discover or metadata or fetch
-    default_full = not (scrape_like or dedup or archive)
-    if not all_authors and (scrape_like or default_full):
-        guard_placeholder_authors(settings)
-
-    audit_desc = "forensics scrape"
-    if year_win is not None:
-        audit_desc += f" post_years={year_win[0]}-{year_win[1]}"
-    PipelineContext.resolve(root=root).record_audit(
-        audit_desc,
-        optional=True,
-        log=logger,
-    )
-
-    mode = _resolve_scrape_mode(discover, metadata, fetch, dedup, archive)
-    if mode is None:
-        logger.error(
-            "unsupported flag combination for scrape "
-            "(try individual --discover, --metadata, --fetch, --dedup, --archive)"
+        mode = _resolve_scrape_mode(discover, metadata, fetch, dedup, archive)
+        if mode is None:
+            logger.error(
+                "unsupported flag combination for scrape "
+                "(try individual --discover, --metadata, --fetch, --dedup, --archive)"
+            )
+            return 1
+        rc = await _run_scrape_mode(
+            mode,
+            db_path=db_path,
+            root=root,
+            settings=settings,
+            manifest_path=manifest_path,
+            dry_run=dry_run,
+            force_refresh=force_refresh,
+            all_authors=all_authors,
+            post_year_min=post_year_min,
+            post_year_max=post_year_max,
+            observer=observer,
         )
-        return 1
-    return await _run_scrape_mode(
-        mode,
-        db_path=db_path,
-        root=root,
-        settings=settings,
-        manifest_path=manifest_path,
-        dry_run=dry_run,
-        force_refresh=force_refresh,
-        all_authors=all_authors,
-        post_year_min=post_year_min,
-        post_year_max=post_year_max,
-        observer=observer,
-    )
+        if rc == 0 and telemetry.transient_only_total_failure():
+            return int(ExitCode.TRANSIENT)
+        return rc
+    finally:
+        SCRAPE_RUN_TELEMETRY.reset(tel_token)
 
 
 @scrape_app.callback(invoke_without_command=True, epilog=_SCRAPE_EPILOG)

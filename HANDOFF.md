@@ -5466,3 +5466,43 @@ uv run ruff check src/forensics/cli/ src/forensics/storage/repository.py tests/u
 #### Risks & Next Steps
 - Operators/scripts that used `forensics lock-preregistration --yes` must move `--yes` to the root (`forensics --yes lock-preregistration`).
 - GitNexus MCP was unavailable this session; run `impact` / `detect_changes` when the server is enabled.
+
+---
+
+### CLI agent-readiness — item 9 (scrape TRANSIENT + JSONL classification)
+**Status:** Complete  
+**Date:** 2026-04-26  
+**Agent/Session:** Cursor agent  
+
+#### What Was Done
+- Added `scrape_failure_transient()`, `scrape_error_transient_from_http_status()`, `ScrapeRunTelemetry`, and `SCRAPE_RUN_TELEMETRY` in `src/forensics/scraper/fetcher.py`; extended `scrape_error_record` / `log_scrape_error` with a `transient` flag (recorded on each JSONL line and mirrored into telemetry when `dispatch_scrape` installs the context var).
+- Wired transient classification at all `log_scrape_error` sites in `fetcher.py` and `crawler.py`; mark successful discover/manifest writes, metadata inserts, and HTML parse commits for telemetry `any_row_success`.
+- `dispatch_scrape` (`src/forensics/cli/scrape.py`) returns `ExitCode.TRANSIENT` (4) when `rc == 0` and `transient_only_total_failure()` (no successes, ≥1 error, all transient).
+- Documented `retry_after_ms` convention for TRANSIENT failures in `src/forensics/cli/_envelope.py` module docstring.
+- `docs/RUNBOOK.md` — exit 4 scrape semantics + `transient` JSONL field.
+- Tests: `tests/unit/test_scrape_transient_classification.py`.
+
+#### Files Modified
+- `src/forensics/scraper/fetcher.py`, `src/forensics/scraper/crawler.py`, `src/forensics/cli/scrape.py`, `src/forensics/cli/_envelope.py`, `docs/RUNBOOK.md`
+- `tests/unit/test_scrape_transient_classification.py` — new
+
+#### Verification Evidence
+```
+uv run pytest tests/unit/test_scrape_transient_classification.py -v --no-cov
+  -> 10 passed
+
+uv run pytest tests/ -q --no-cov
+  -> 1016 passed, 1 xfailed (known)
+
+uv run ruff check src/forensics/scraper/fetcher.py src/forensics/scraper/crawler.py src/forensics/cli/scrape.py …
+  -> All checks passed
+```
+
+#### Decisions Made
+- **Correctness (hierarchy):** TRANSIENT (4) only when telemetry shows no successful work units for the run and every appended scrape error was transient — avoids masking partial successes or mixed permanent/transient failures.
+
+#### Unresolved Questions
+- None.
+
+#### Risks & Next Steps
+- Consumers that parse `scrape_errors.jsonl` should tolerate the new `transient` key (additive). GitNexus `impact` was not run (MCP path unavailable this session).

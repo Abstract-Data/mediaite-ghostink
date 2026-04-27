@@ -11,7 +11,8 @@ import tarfile
 import time
 import weakref
 from collections.abc import Callable
-from dataclasses import dataclass
+from contextvars import ContextVar
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -53,6 +54,48 @@ def _error_lock_for_current_loop() -> asyncio.Lock:
     return lock
 
 
+@dataclass
+class ScrapeRunTelemetry:
+    """Per-``dispatch_scrape`` scrape_errors.jsonl classification + coarse success signal."""
+
+    error_transient: list[bool] = field(default_factory=list)
+    any_row_success: bool = False
+
+    def record_scrape_error_line(self, transient: bool) -> None:
+        self.error_transient.append(transient)
+
+    def mark_row_success(self) -> None:
+        self.any_row_success = True
+
+    def transient_only_total_failure(self) -> bool:
+        return not self.any_row_success and bool(self.error_transient) and all(self.error_transient)
+
+
+SCRAPE_RUN_TELEMETRY: ContextVar[ScrapeRunTelemetry | None] = ContextVar(
+    "forensics_scrape_run_telemetry",
+    default=None,
+)
+
+
+def scrape_failure_transient(exc: BaseException) -> bool:
+    """True when ``exc`` is a retry-class network/HTTP failure (timeouts, 5xx, 429)."""
+    if isinstance(exc, httpx.TimeoutException):
+        return True
+    if isinstance(exc, httpx.HTTPStatusError):
+        code = exc.response.status_code
+        return code >= 500 or code == 429
+    return False
+
+
+def scrape_error_transient_from_http_status(status_code: int | None) -> bool:
+    """Classify a terminal HTTP status for scrape_errors.jsonl when no exception object exists."""
+    if status_code is None:
+        return False
+    if status_code == 429:
+        return True
+    return status_code >= 500
+
+
 class RateLimiter:
     """Async rate limiter enforcing a minimum gap between successive waits."""
 
@@ -91,6 +134,8 @@ def scrape_error_record(
     status_code: int | None,
     error: str,
     phase: str,
+    *,
+    transient: bool = False,
 ) -> dict[str, Any]:
     """Structured line for ``append_scrape_error`` (timestamp, url, status, error, phase)."""
     return {
@@ -99,6 +144,7 @@ def scrape_error_record(
         "status_code": status_code,
         "error": error,
         "phase": phase,
+        "transient": transient,
     }
 
 
@@ -108,9 +154,15 @@ async def log_scrape_error(
     status_code: int | None,
     error: str,
     phase: str,
+    *,
+    transient: bool = False,
 ) -> None:
     """Append one structured scrape error (``scrape_error_record`` shape)."""
-    await append_scrape_error(path, scrape_error_record(url, status_code, error, phase))
+    tel = SCRAPE_RUN_TELEMETRY.get()
+    if tel is not None:
+        tel.record_scrape_error_line(transient)
+    record = scrape_error_record(url, status_code, error, phase, transient=transient)
+    await append_scrape_error(path, record)
 
 
 def _retry_after_seconds(response: httpx.Response) -> float | None:
@@ -144,7 +196,7 @@ async def _handle_retried_response(
 ) -> httpx.Response | None:
     """Return ``response`` when done; return ``None`` to retry the HTTP request."""
     if response.status_code == 404:
-        await log_scrape_error(errors_path, url, 404, "Not Found", phase)
+        await log_scrape_error(errors_path, url, 404, "Not Found", phase, transient=False)
         return response
 
     if response.status_code == 429:
@@ -156,6 +208,7 @@ async def _handle_retried_response(
                 429,
                 "Too Many Requests (exhausted retries)",
                 phase,
+                transient=True,
             )
             return response
         logger.warning("429 for %s; sleeping %.1fs", url, wait429)
@@ -170,6 +223,7 @@ async def _handle_retried_response(
                 response.status_code,
                 response.reason_phrase,
                 phase,
+                transient=True,
             )
             return response
         sleep_s = _exponential_backoff_seconds(attempt, backoff_base)
@@ -208,7 +262,14 @@ async def request_with_retry(
             response = await client.request(method, url, **kwargs)
         except httpx.RequestError as exc:
             if attempt >= max_retries:
-                await log_scrape_error(errors_path, url, None, repr(exc), phase)
+                await log_scrape_error(
+                    errors_path,
+                    url,
+                    None,
+                    repr(exc),
+                    phase,
+                    transient=scrape_failure_transient(exc),
+                )
                 raise
             logger.warning("Request error %s (attempt %s): %s", url, attempt + 1, exc)
             await _sleep_exponential_backoff(attempt, backoff_base)
@@ -589,6 +650,7 @@ async def _handle_off_domain(
         response.status_code,
         f"redirect_off_domain:{final_host}",
         "html_fetch",
+        transient=False,
     )
     await _persist_and_log(
         ctx,
@@ -688,6 +750,9 @@ async def _handle_success(
             ctx.total,
             row.author_name,
         )
+    tel = SCRAPE_RUN_TELEMETRY.get()
+    if tel is not None:
+        tel.mark_row_success()
 
 
 async def _fetch_one_article_html(
@@ -839,6 +904,7 @@ async def fetch_articles(
                         None,
                         f"{type(outcome).__name__}: {outcome!s}",
                         "html_fetch",
+                        transient=scrape_failure_transient(outcome),
                     )
         return done_count[0]
 
