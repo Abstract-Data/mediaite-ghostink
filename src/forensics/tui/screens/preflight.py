@@ -1,8 +1,4 @@
-"""Preflight screen (Phase 12 §2h).
-
-Re-runs :func:`forensics.preflight.run_all_preflight_checks` against the
-freshly generated ``config.toml`` and blocks progression on hard-fails.
-"""
+"""Preflight screen wrapping :func:`forensics.preflight.run_all_preflight_checks`."""
 
 from __future__ import annotations
 

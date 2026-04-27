@@ -508,11 +508,6 @@ def test_ab_threshold_persists_pb_positive_windows() -> None:
     assert window.pipeline_b_score > PIPELINE_SCORE_PASS_THRESHOLD
 
 
-# --------------------------------------------------------------------------- #
-# Phase 15 Fix-G — drift-only persistence channel.
-# --------------------------------------------------------------------------- #
-
-
 def _drift_only_inputs() -> tuple[list[ChangePoint], list[tuple[str, float]]]:
     """Build a fixture where pa is tiny but pb_score clears the drift threshold.
 

@@ -31,10 +31,6 @@ from forensics.analysis.changepoint import (
 )
 from forensics.config.settings import AnalysisConfig, ForensicsSettings, ScrapingConfig
 
-# ---------------------------------------------------------------------------
-# Happy path
-# ---------------------------------------------------------------------------
-
 
 def test_l2_detects_synthetic_mean_shift() -> None:
     """L2 PELT recovers a synthetic mean shift near the true change point."""
@@ -62,11 +58,6 @@ def test_l2_is_the_default_cost_model() -> None:
     assert default_bps == explicit_l2, (
         "default cost_model must be 'l2' (Phase 15 F0 default flip from 'rbf')"
     )
-
-
-# ---------------------------------------------------------------------------
-# Edge cases
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("cost_model", ["l2", "l1", "rbf"])
@@ -97,11 +88,6 @@ def test_nan_input_is_handled_without_raising() -> None:
     assert all(isinstance(b, int) for b in bps)
 
 
-# ---------------------------------------------------------------------------
-# Regression pin — captured once, locked in
-# ---------------------------------------------------------------------------
-
-
 def test_l2_regression_pin_two_mean_shifts() -> None:
     """L2 break indices on a fixed-seed two-shift signal are pinned.
 
@@ -124,11 +110,6 @@ def test_l2_regression_pin_single_mean_shift() -> None:
     rng = np.random.default_rng(7)
     signal = np.concatenate([rng.normal(0.0, 0.5, 100), rng.normal(2.0, 0.5, 100)])
     assert detect_pelt(signal, pen=3.0, cost_model="l2") == [100]
-
-
-# ---------------------------------------------------------------------------
-# Settings wiring — AnalysisConfig.pelt_cost_model reaches the kernel
-# ---------------------------------------------------------------------------
 
 
 def test_analysis_config_default_is_l1() -> None:

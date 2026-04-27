@@ -1,13 +1,7 @@
-"""Calibration suite — validate detection accuracy against synthetic ground truth.
+"""Synthetic corpora and trial runner.
 
-Phase 12 §4. Provides:
-
-- :mod:`forensics.calibration.synthetic` — build spliced / negative-control
-  corpora from a real author's archive.
-- :mod:`forensics.calibration.runner` — execute calibration trials and
-  compute sensitivity / specificity / precision / F1 / date accuracy.
-
-The CLI entry point lives in :mod:`forensics.cli.calibrate`.
+Submodules: :mod:`forensics.calibration.synthetic`, :mod:`forensics.calibration.runner`.
+CLI: :mod:`forensics.cli.calibrate`.
 """
 
 from forensics.calibration.markers import (

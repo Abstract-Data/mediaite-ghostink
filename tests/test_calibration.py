@@ -26,10 +26,6 @@ from forensics.scraper.crawler import stable_article_id
 from forensics.storage.repository import Repository
 from forensics.survey.scoring import SignalStrength
 
-# ---------------------------------------------------------------------------
-# helpers
-# ---------------------------------------------------------------------------
-
 
 def _make_author(slug: str = "test-author") -> Author:
     return Author(
@@ -116,11 +112,6 @@ def _make_analysis(
     )
 
 
-# ---------------------------------------------------------------------------
-# synthetic corpus builder
-# ---------------------------------------------------------------------------
-
-
 def test_build_spliced_corpus_correct_split() -> None:
     author = _make_author("split-test")
     start = datetime(2021, 1, 1, tzinfo=UTC)
@@ -185,11 +176,6 @@ def test_build_negative_control_unmodified() -> None:
         assert copy.clean_text == orig.clean_text
 
 
-# ---------------------------------------------------------------------------
-# metric correctness
-# ---------------------------------------------------------------------------
-
-
 def _trial(is_positive: bool, detected: bool, date_err: int | None = None) -> CalibrationTrial:
     return CalibrationTrial(
         author_slug="x",
@@ -250,11 +236,6 @@ def test_marker_discrimination_scorer_filters_non_finite_values() -> None:
     assert score.ai_mean == pytest.approx(0.15)
     assert score.separation == pytest.approx(0.145)
     assert score.passes_threshold is True
-
-
-# ---------------------------------------------------------------------------
-# runner — perfect + blind detector (mocked analysis)
-# ---------------------------------------------------------------------------
 
 
 def _seed_db_with_author(db_path: Path, author: Author, articles: list[Article]) -> None:

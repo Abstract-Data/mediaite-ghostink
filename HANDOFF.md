@@ -5712,3 +5712,18 @@ Global churn is dominated by `src/forensics/analysis/` (3394); that maps to **Ph
 **GitNexus:** `user-gitnexus` not in available MCP servers this session; run `impact` / `detect_changes` before merge if connected.
 
 **Next:** Phase 7 reporting/survey/TUI deslop per plan, or merge.
+
+---
+
+### 2026-04-27 — Phase 7–8 deslop: reporting / survey / baseline / calibration / TUI + tests (completed)
+
+**Status:** Complete  
+**Scope:** `src/forensics/reporting/` (`narrative.py`, `html_report.py`, `plots.py`), `src/forensics/survey/` (`scoring.py`, `qualification.py`, `orchestrator.py`, `shared_byline.py`), `src/forensics/baseline/orchestrator.py`, `src/forensics/calibration/` (`__init__.py`, `runner.py`, `synthetic.py`), `src/forensics/tui/` (`__init__.py`, `app.py`, `screens/*.py`); `tests/` — removed three-line `# ---` banner blocks (20 files) via script, manual cleanup for multi-line banner in `tests/unit/test_bootstrap_vectorized.py`, tightened module/fixture docstrings in `tests/unit/test_reporting_section.py`, `tests/unit/test_reporting_diagnostics.py`, `tests/test_narrative.py`.
+
+**Changes:** Comment/section-banner removal and shorter docstrings only; no logic, thresholds, strings consumed by assertions, or exception behavior changed. Assertions and pinned literals untouched.
+
+**Verification:** `uv run ruff format` + `uv run ruff check` on touched trees — passed. `uv run pytest tests/test_narrative.py tests/test_survey.py tests/test_calibration.py tests/test_tui.py tests/unit/test_reporting_section.py tests/unit/test_reporting_diagnostics.py tests/unit/test_pipeline_b_diagnostics.py tests/unit/test_shared_byline.py tests/unit/test_analyze_survey_gate.py tests/unit/test_statistics.py tests/unit/test_bootstrap_vectorized.py -q --no-cov` — passed. Full `uv run pytest tests/ -q --no-cov` currently fails one pre-existing check: `tests/test_report.py::test_quarto_config_exists` (`quarto.yml` lists 11 `.ipynb` substrings vs expected 10 — workspace `quarto.yml` drift, not introduced by this deslop).
+
+**GitNexus:** MCP tool descriptors not available this session; run upstream `impact` / `detect_changes` before merge if connected.
+
+**Next:** Reconcile `quarto.yml` with `test_quarto_config_exists` expectation or update the test when the book index is finalized; merge Phase 7–8 deslop PR.

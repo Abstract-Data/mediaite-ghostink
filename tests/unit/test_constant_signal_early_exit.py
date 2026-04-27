@@ -49,21 +49,11 @@ def _frame(values: np.ndarray, *, column: str = "ttr") -> pl.DataFrame:
     return pl.DataFrame({"timestamp": timestamps, column: values})
 
 
-# ---------------------------------------------------------------------------
-# Edge case: constant zero
-# ---------------------------------------------------------------------------
-
-
 def test_constant_zero_series_returns_empty_cleanly() -> None:
     """A literal ``np.zeros`` series yields ``[]`` with no exception, no NaN."""
     df = _frame(np.zeros(60, dtype=float))
     cps = analyze_author_feature_changepoints(df, author_id="author-1", settings=_settings())
     assert cps == []
-
-
-# ---------------------------------------------------------------------------
-# Edge case: near-constant (std < 1e-9 but not literally zero) + DEBUG log
-# ---------------------------------------------------------------------------
 
 
 def test_near_constant_series_is_skipped_and_logged(
@@ -93,11 +83,6 @@ def test_near_constant_series_is_skipped_and_logged(
         msg = f"expected DEBUG log for skipped constant signal; got {seen}"
         raise AssertionError(msg)
     assert all(rec.levelno == logging.DEBUG for rec in matched)
-
-
-# ---------------------------------------------------------------------------
-# Negative test: non-constant series is NOT skipped
-# ---------------------------------------------------------------------------
 
 
 def test_non_constant_series_is_not_skipped() -> None:

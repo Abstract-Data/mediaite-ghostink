@@ -28,10 +28,6 @@ from forensics.config.settings import AnalysisConfig, ForensicsSettings, Scrapin
 from forensics.models.analysis import ChangePoint
 from forensics.storage.repository import init_db
 
-# --------------------------------------------------------------------------- #
-# Shared fixtures + helpers                                                    #
-# --------------------------------------------------------------------------- #
-
 
 def _settings() -> ForensicsSettings:
     return ForensicsSettings(
@@ -80,11 +76,6 @@ def _cp(feature_name: str, ts: datetime) -> ChangePoint:
     )
 
 
-# --------------------------------------------------------------------------- #
-# E1 — DEBUG component logging                                                 #
-# --------------------------------------------------------------------------- #
-
-
 def test_e1_score_single_window_emits_debug_components(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -118,11 +109,6 @@ def test_e1_score_single_window_emits_debug_components(
     assert any("author=author-diag" in r.message for r in debug_records), (
         "DEBUG record must identify the author so per-author diagnostics is possible"
     )
-
-
-# --------------------------------------------------------------------------- #
-# E2 — WARNING on missing drift artifacts when embeddings exist                #
-# --------------------------------------------------------------------------- #
 
 
 def test_e2_warns_when_artifacts_missing_but_embeddings_exist(

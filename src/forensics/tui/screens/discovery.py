@@ -1,10 +1,4 @@
-"""Author discovery screen (Phase 12 §2f).
-
-Shows how many authors are already in ``articles.db`` (via
-:meth:`Repository.all_authors`) and lets the user pick between
-blind-survey and hand-pick modes. Writes the choice into
-``app.wizard_state`` so the config generation screen can use it.
-"""
+"""Author discovery: DB count, survey vs hand-pick mode, stores choice on ``app.wizard_state``."""
 
 from __future__ import annotations
 

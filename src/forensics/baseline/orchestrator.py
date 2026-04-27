@@ -27,8 +27,7 @@ logger = logging.getLogger(__name__)
 
 PROMPT_MODES = ("raw_generation", "style_mimicry")
 
-# Baseline templates historically asked for “article body only”; the PydanticAI
-# agent expects JSON. Append an explicit delivery contract on every cell prompt.
+# Baseline prompts must end with a JSON delivery contract for the PydanticAI agent.
 _JSON_DELIVERY_SUFFIX = """
 
 ---

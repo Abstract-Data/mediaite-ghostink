@@ -149,11 +149,6 @@ def test_analyze_verify_corpus_passes_on_matching_custody(
     assert result.exit_code == 0, result.output
 
 
-# ---------------------------------------------------------------------------
-# Phase 12 §7 — validate + export CLI coverage
-# ---------------------------------------------------------------------------
-
-
 def test_validate_help() -> None:
     result = runner.invoke(app, ["validate", "--help"])
     assert result.exit_code == 0
@@ -242,11 +237,6 @@ def test_export_to_duckdb_smoke(tmp_path, sample_author, sample_article) -> None
         assert conn.execute("SELECT COUNT(*) FROM articles").fetchone()[0] == 1
     finally:
         conn.close()
-
-
-# ---------------------------------------------------------------------------
-# Phase 12 §10 — survey / calibrate / preflight / lock / setup CLI surface
-# ---------------------------------------------------------------------------
 
 
 def test_survey_help_lists_flags() -> None:

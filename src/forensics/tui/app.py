@@ -1,15 +1,4 @@
-"""Textual TUI application — multi-step setup wizard (Phase 12 §2d).
-
-Five screens, navigated in order:
-
-1. Dependencies — environment + model availability
-2. Discovery   — author count (from ``articles.db`` or WordPress API)
-3. Config      — generate ``config.toml``
-4. Preflight   — re-run :func:`forensics.preflight.run_all_preflight_checks`
-5. Launch      — confirm + emit recommended next CLI command
-
-Navigation keybindings: ``q`` quit, ``n`` next, ``b`` back.
-"""
+"""Five-step Textual wizard: deps → discovery → config → preflight → launch (``q``/``n``/``b``)."""
 
 from __future__ import annotations
 

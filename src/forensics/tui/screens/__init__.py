@@ -1,4 +1,4 @@
-"""TUI wizard screens (Phase 12 §2j)."""
+"""TUI wizard screen exports."""
 
 from __future__ import annotations
 

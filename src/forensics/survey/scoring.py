@@ -11,30 +11,15 @@ from forensics.models.analysis import AnalysisResult, ChangePoint
 from forensics.models.features import count_scalar_features
 from forensics.survey.qualification import QualifiedAuthor
 
-# Derived from the feature-model registry (P3-MAINT-001). Adding or removing
-# a scalar field on any family (lexical, structural, ...) updates the
-# denominator automatically at import time.
+# Denominator tracks scalar feature count from the family registry (P3-MAINT-001).
 _TOTAL_SCALAR_FEATURES = count_scalar_features()
 
-# Features whose change-points and effect sizes are direct AI-adoption
-# evidence. A change-point on any of these is more diagnostic than the same
-# count of change-points scattered across breadth features, so the scoring
-# math gives them a targeted-detection bonus (see ``_pipeline_a_score``).
+# AI-marker CPs get a targeted bonus in ``_pipeline_a_score``; weight tuned for registry size.
 _AI_MARKER_FAMILY = "ai_markers"
-# Per-AI-marker-feature contribution to the targeted Pipeline A path. With
-# four AI-marker features in the family registry, three concurrent hits
-# saturate the score at 1.0; one hit alone yields 0.35 — strong enough to
-# leave the "none" floor without overruling other evidence.
 _AI_MARKER_PER_HIT_WEIGHT = 0.35
 
-# Temporal forensics filters (Phase 15 J6 calibration pass):
-# - Era cutoff: ChatGPT public launch was 2022-11-30. Change-points before
-#   this date cannot be evidence of LLM-assisted writing — they reflect
-#   normal stylistic evolution or BOCPD warm-up. Counted only for diagnostics.
+# Post–2022-11-30 AI-marker CPs only; drop tail window (BOCPD/PELT boundary over-detection).
 _AI_ERA_CUTOFF = datetime(2022, 11, 30, tzinfo=UTC)
-# - Tail trim: BOCPD (and PELT) systematically over-detect at series
-#   boundaries because they lack post-CP data to confirm a regime shift is
-#   sustained. Drop change-points within the last 30 days of the corpus.
 _TAIL_TRIM_DAYS = 30
 
 
@@ -95,13 +80,7 @@ class SurveyScore:
 
 @dataclass(frozen=True)
 class ControlValidation:
-    """Summary of the natural control cohort (shipped Phase 12 scope).
-
-    This is a lightweight robustness check: counts and composite-score aggregates
-    for the control slug set. Per-feature distributional tests (Welch, Mann–Whitney
-    on time-aligned feature frames) are **out of scope** for this release; open a
-    separate methodology task if those comparisons are required.
-    """
+    """Control cohort size and composite aggregates; per-feature tests are out of scope here."""
 
     num_controls: int
     mean_composite: float
@@ -354,11 +333,6 @@ def compute_composite_score(
     )
 
 
-# ---------------------------------------------------------------------------
-# §5c — Natural control cohort
-# ---------------------------------------------------------------------------
-
-
 def identify_natural_controls(
     scores: dict[str, SurveyScore],
     *,
@@ -383,17 +357,7 @@ def validate_against_controls(
     scores: dict[str, SurveyScore],
     control_slugs: list[str],
 ) -> ControlValidation:
-    """Summarise the natural control cohort (composite-level only).
-
-    **Shipped behaviour:** aggregates control cohort size, mean composite score,
-    max composite, and sorted control slugs so flagged authors can be reasoned
-    about against a newsroom baseline.
-
-    **Not included:** loading per-author feature Parquets and running per-feature
-    two-sample tests (as sketched in older Phase 12 prose). Defer that work
-    explicitly if product owners need stronger control-vs-flagged separation
-    than composite summaries provide.
-    """
+    """Composite-level control cohort aggregates only (no per-feature Parquet tests)."""
     control_set = set(control_slugs)
     control_scores = [s.composite for slug, s in scores.items() if slug in control_set]
     if not control_scores:

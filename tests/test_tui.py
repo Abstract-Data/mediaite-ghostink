@@ -15,10 +15,6 @@ pytest.importorskip("textual")
 from forensics.tui.screens import config as config_screen  # noqa: E402
 from forensics.tui.screens import dependencies as deps_screen  # noqa: E402
 
-# ---------------------------------------------------------------------------
-# Core dependency checks (unit tests — no Textual runtime).
-# ---------------------------------------------------------------------------
-
 
 def test_dependency_check_returns_structured_results() -> None:
     results = deps_screen.check_dependencies()
@@ -67,11 +63,6 @@ def test_dependency_check_has_blocking_failures_helper() -> None:
     )
     assert deps_screen.has_blocking_failures([ok, optional_warn]) is False
     assert deps_screen.has_blocking_failures([ok, blocker, optional_warn]) is True
-
-
-# ---------------------------------------------------------------------------
-# Config generation.
-# ---------------------------------------------------------------------------
 
 
 def test_config_generation_no_placeholders_blind() -> None:
@@ -124,11 +115,6 @@ def test_write_config_no_backup_when_missing(tmp_path: Path) -> None:
     backup = config_screen.write_config(target, new_text)
     assert backup is None
     assert target.read_text() == new_text
-
-
-# ---------------------------------------------------------------------------
-# Textual pilot test — ensures the app actually mounts without crashing.
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio

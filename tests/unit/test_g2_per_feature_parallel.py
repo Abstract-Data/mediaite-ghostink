@@ -85,11 +85,6 @@ def _serialise_cps(cps: list) -> list[tuple]:
     ]
 
 
-# ---------------------------------------------------------------------------
-# Parity: feature_workers=1 vs feature_workers=2 byte-identical
-# ---------------------------------------------------------------------------
-
-
 def test_feature_workers_two_matches_serial_byte_identical() -> None:
     """The opt-in parallel path produces the same CP list as the serial baseline."""
     df = _multi_feature_frame()
@@ -116,11 +111,6 @@ def test_feature_workers_four_matches_serial_byte_identical() -> None:
     assert _serialise_cps(serial) == _serialise_cps(parallel)
 
 
-# ---------------------------------------------------------------------------
-# Edge case: single-feature fixture with over-provisioned workers
-# ---------------------------------------------------------------------------
-
-
 def test_single_feature_with_overprovisioned_workers_does_not_crash() -> None:
     """1 feature + ``feature_workers=4`` is harmless (executor caps at task count)."""
     base = datetime(2024, 1, 1, tzinfo=UTC)
@@ -141,11 +131,6 @@ def test_single_feature_with_overprovisioned_workers_does_not_crash() -> None:
     assert all(cp.feature_name == "ttr" for cp in cps)
 
 
-# ---------------------------------------------------------------------------
-# Edge case: bocpd path also parallel-safe
-# ---------------------------------------------------------------------------
-
-
 def test_bocpd_path_parity_under_parallelism() -> None:
     """BOCPD-only run is byte-identical between serial and parallel paths."""
     df = _multi_feature_frame(seed=314)
@@ -160,11 +145,6 @@ def test_bocpd_path_parity_under_parallelism() -> None:
         settings=_settings(feature_workers=3, methods=["bocpd"]),
     )
     assert _serialise_cps(serial) == _serialise_cps(parallel)
-
-
-# ---------------------------------------------------------------------------
-# Sanity: PELT_FEATURE_COLUMNS is the canonical ordering source
-# ---------------------------------------------------------------------------
 
 
 def test_output_walks_pelt_feature_columns_order() -> None:

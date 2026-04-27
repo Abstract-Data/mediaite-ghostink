@@ -1,17 +1,6 @@
-"""Plot helpers for the per-author HTML report (Phase 15 K4).
+"""K4 twin-panel HTML (:func:`render_cp_twin_panel`).
 
-Currently exposes :func:`render_cp_twin_panel`, the adjusted-vs-unadjusted
-change-point twin-panel visualisation. The function is deliberately
-side-effect-free — it returns an HTML fragment string so the calling
-``html_report`` module can splice it into the page without having to know
-how plotly is invoked.
-
-When the J5 section-residualization toggle has not produced any
-``pelt_section_adjusted`` / ``bocpd_section_adjusted`` change-points for
-an author, the helper returns a short HTML notice rather than a chart.
-This keeps the report renderable even before J5 ships (the spec calls
-this out as the "single most important forensic-defensibility visual"
-which therefore must always render *something*).
+Uses the J5 placeholder when no section-adjusted CPs exist.
 """
 
 from __future__ import annotations
@@ -28,15 +17,13 @@ SECTION_ADJUSTED_METHODS: frozenset[str] = frozenset(
     {"pelt_section_adjusted", "bocpd_section_adjusted"}
 )
 
-# Stable visual constants (reviewed in tests so future restyles surface as diffs).
+# Visual constants (tests snapshot diffs on restyle).
 RAW_CP_COLOR = "red"
 ADJUSTED_CP_COLOR = "blue"
 RAW_CP_DASH = "dash"
 ADJUSTED_CP_DASH = "solid"
 
-# Notice rendered when J5 outputs are absent. Tests pin the exact prefix so
-# downstream readers (and reviewers grepping the report) can detect the
-# placeholder at a glance.
+# Tests pin prefix for placeholder detection.
 J5_PLACEHOLDER_PREFIX = "Section-adjusted CPs not computed"
 J5_PLACEHOLDER_HTML = (
     f'<div class="cp-twin-panel-placeholder">'
@@ -148,8 +135,6 @@ def render_cp_twin_panel(
     raw, adjusted = _split_by_source(marks)
 
     if not adjusted:
-        # Spec K4: render the placeholder rather than crashing or omitting the
-        # section. The reviewer should always see *something* about CP source.
         return J5_PLACEHOLDER_HTML
 
     fig = make_subplots(

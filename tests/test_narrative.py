@@ -17,10 +17,6 @@ from forensics.models.analysis import (
 from forensics.reporting.narrative import generate_evidence_narrative
 from forensics.survey.scoring import compute_composite_score
 
-# ---------------------------------------------------------------------------
-# Fixture helpers
-# ---------------------------------------------------------------------------
-
 
 def _empty_result(slug: str = "jane-doe") -> AnalysisResult:
     """An AnalysisResult with no signal in any pipeline."""
@@ -144,11 +140,6 @@ def _strong_result(slug: str = "jane-doe") -> AnalysisResult:
         drift_scores=drift,
         hypothesis_tests=tests,
     )
-
-
-# ---------------------------------------------------------------------------
-# Tests
-# ---------------------------------------------------------------------------
 
 
 def test_narrative_deterministic() -> None:

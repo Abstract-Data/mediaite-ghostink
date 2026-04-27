@@ -13,20 +13,11 @@ from forensics.storage.duckdb_queries import (
     _validated_sqlite_path_for_attach,
 )
 
-# ---------------------------------------------------------------------------
-# _sql_string_literal
-# ---------------------------------------------------------------------------
-
 
 def test_sql_string_literal_doubles_embedded_quotes() -> None:
     assert _sql_string_literal("foo") == "'foo'"
     assert _sql_string_literal("O'Brien") == "'O''Brien'"
     assert _sql_string_literal("a'b'c") == "'a''b''c'"
-
-
-# ---------------------------------------------------------------------------
-# _validated_sqlite_path_for_attach
-# ---------------------------------------------------------------------------
 
 
 def test_validated_sqlite_path_accepts_existing_file(tmp_path: Path) -> None:
@@ -54,11 +45,6 @@ def test_validated_sqlite_path_escapes_single_quotes(tmp_path: Path) -> None:
     lit = _validated_sqlite_path_for_attach(weird)
     # Single quote in filename must be SQL-escaped.
     assert "''" in lit
-
-
-# ---------------------------------------------------------------------------
-# _validated_parquet_pattern
-# ---------------------------------------------------------------------------
 
 
 def test_validated_parquet_pattern_accepts_plain_glob(tmp_path: Path) -> None:
@@ -101,11 +87,6 @@ def test_validated_parquet_pattern_escapes_single_quotes(tmp_path: Path) -> None
     pattern = tmp_path / "o'brien-*.parquet"
     lit = _validated_parquet_pattern(pattern)
     assert "''" in lit
-
-
-# ---------------------------------------------------------------------------
-# _validate_feature_name (SQL-column injection guard)
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("name", ["ttr", "mattr_30d", "_private", "col0", "x_y_z"])

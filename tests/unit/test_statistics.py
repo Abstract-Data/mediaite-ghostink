@@ -17,10 +17,6 @@ from forensics.analysis.statistics import (
 )
 from forensics.models.analysis import HypothesisTest
 
-# ---------------------------------------------------------------------------
-# cohens_d
-# ---------------------------------------------------------------------------
-
 
 def test_cohens_d_equal_groups_is_zero() -> None:
     assert cohens_d([1.0, 2.0, 3.0], [1.0, 2.0, 3.0]) == 0.0
@@ -66,11 +62,6 @@ def test_cohens_d_accepts_ndarray() -> None:
     assert cohens_d(a, b) > 0
 
 
-# ---------------------------------------------------------------------------
-# bootstrap_ci
-# ---------------------------------------------------------------------------
-
-
 def test_bootstrap_ci_returns_ordered_bounds() -> None:
     lo, hi = bootstrap_ci([1.0] * 20, [5.0] * 20, n_bootstrap=200, seed=1)
     assert lo <= hi
@@ -94,11 +85,6 @@ def test_bootstrap_ci_contains_point_estimate() -> None:
     b = [5.0] * 30
     lo, hi = bootstrap_ci(a, b, n_bootstrap=500, seed=7)
     assert lo > 0
-
-
-# ---------------------------------------------------------------------------
-# run_hypothesis_tests
-# ---------------------------------------------------------------------------
 
 
 def test_run_hypothesis_tests_short_series_returns_skipped_battery() -> None:
@@ -136,11 +122,6 @@ def test_run_hypothesis_tests_tiny_segment_returns_skipped_battery() -> None:
     out = run_hypothesis_tests([1.0, 5.0, 5.0, 5.0], 1, "f", "a")
     assert len(out) == 2
     assert all(t.skipped_reason == "insufficient_finite_values_per_segment" for t in out)
-
-
-# ---------------------------------------------------------------------------
-# apply_correction (copy-on-write)
-# ---------------------------------------------------------------------------
 
 
 def _make_test(raw_p: float, effect: float = 0.5) -> HypothesisTest:
@@ -254,11 +235,6 @@ def test_apply_cross_author_correction_single_author_no_pmin_substitution() -> N
     out = apply_cross_author_correction({"solo": [lone]})
     assert out["solo"][0].cross_author_corrected_p is None
     assert out["solo"][0].cross_author_correction_reason == "single-author-no-cross-correction"
-
-
-# ---------------------------------------------------------------------------
-# filter_by_effect_size (copy-on-write)
-# ---------------------------------------------------------------------------
 
 
 def test_filter_by_effect_size_requires_both_criteria() -> None:

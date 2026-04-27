@@ -37,11 +37,6 @@ from forensics.storage.repository import Repository
 OUTLET = "mediaite.com"
 
 
-# ---------------------------------------------------------------------------
-# fixtures / helpers
-# ---------------------------------------------------------------------------
-
-
 def _make_author(slug: str, *, name: str | None = None, shared: bool = False) -> Author:
     return Author(
         id=f"author-{slug}",
@@ -151,11 +146,6 @@ def _stub_stages(monkeypatch: pytest.MonkeyPatch) -> dict[str, MagicMock]:
     }
 
 
-# ---------------------------------------------------------------------------
-# happy path: real single-author slug
-# ---------------------------------------------------------------------------
-
-
 def test_analyze_runs_for_non_shared_author(
     isolated_project: dict[str, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -172,11 +162,6 @@ def test_analyze_runs_for_non_shared_author(
     stages["full"].assert_called_once()
     _, kwargs = stages["full"].call_args
     assert kwargs.get("author_slug") == "isaac-schorr"
-
-
-# ---------------------------------------------------------------------------
-# edge case: shared byline without flag → gate trips
-# ---------------------------------------------------------------------------
 
 
 def test_analyze_refuses_shared_byline_without_flag(
@@ -198,11 +183,6 @@ def test_analyze_refuses_shared_byline_without_flag(
     stages["full"].assert_not_called()
 
 
-# ---------------------------------------------------------------------------
-# edge case: shared byline WITH flag → gate is bypassed
-# ---------------------------------------------------------------------------
-
-
 def test_analyze_allows_shared_byline_with_flag(
     isolated_project: dict[str, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -218,11 +198,6 @@ def test_analyze_allows_shared_byline_with_flag(
     stages["full"].assert_called_once()
     _, kwargs = stages["full"].call_args
     assert kwargs.get("author_slug") == "mediaite-staff"
-
-
-# ---------------------------------------------------------------------------
-# edge case: heuristic fallback fires when DB flag is missing
-# ---------------------------------------------------------------------------
 
 
 def test_analyze_refuses_unflagged_shared_via_heuristic(
@@ -242,11 +217,6 @@ def test_analyze_refuses_unflagged_shared_via_heuristic(
         run_analyze(author="mediaite-staff")
 
     stages["full"].assert_not_called()
-
-
-# ---------------------------------------------------------------------------
-# happy path: author=None bypasses gate (newsroom-wide invocation)
-# ---------------------------------------------------------------------------
 
 
 def test_analyze_without_author_bypasses_gate(
@@ -269,11 +239,6 @@ def test_analyze_without_author_bypasses_gate(
     stages["full"].assert_called_once()
     _, kwargs = stages["full"].call_args
     assert kwargs.get("author_slug") is None
-
-
-# ---------------------------------------------------------------------------
-# extra: explicit signature contract
-# ---------------------------------------------------------------------------
 
 
 def test_run_analyze_accepts_include_shared_bylines_kwarg() -> None:

@@ -1,24 +1,7 @@
-"""Run calibration trials and compute detection accuracy metrics (Phase 12 §4d).
+"""Calibration trials (splice vs negative), survey scoring, metrics JSON.
 
-The runner:
-
-1. Selects one qualifying author (or the one supplied via ``author``).
-2. For each *positive* trial, picks a random splice date, substitutes the
-   second half of the timeline with AI-generated baseline articles, writes the
-   spliced corpus to an isolated temp SQLite database, extracts features, runs
-   the full analysis, and asks the survey scorer whether the detector fires.
-3. For each *negative* trial, repeats the above on the unmodified corpus and
-   checks that the detector does **not** fire.
-4. Aggregates TP / TN / FP / FN counts into sensitivity / specificity /
-   precision / F1 and a median absolute date error, then writes a timestamped
-   JSON report under ``data/calibration/``.
-
-Side-effect boundaries (so tests can patch them cheaply):
-
-- :func:`_load_author_articles` — read the archive from SQLite.
-- :func:`_load_ai_articles` — read Phase 10 AI baseline articles.
-- :func:`_run_trial_analysis` — the expensive extract+analyze step. Monkeypatch
-  this in tests to simulate the detector without running real analysis.
+Output lives under ``data/calibration/``. Tests patch ``_load_author_articles``,
+``_load_ai_articles``, and ``_run_trial_analysis``.
 """
 
 from __future__ import annotations
@@ -50,9 +33,7 @@ from forensics.survey.scoring import SignalStrength, compute_composite_score
 
 logger = logging.getLogger(__name__)
 
-# Authors are treated as "flagged" when their composite score passes WEAK.
-# Anything at WEAK-or-above counts as a detection fire, matching the §1d
-# convention that NONE is the explicit "no signal" tier.
+# WEAK+ counts as a detection fire (NONE = no signal).
 _FIRED_STRENGTHS = frozenset({SignalStrength.WEAK, SignalStrength.MODERATE, SignalStrength.STRONG})
 
 
@@ -93,11 +74,6 @@ class _TrialOutcome:
     convergence_windows: int
 
 
-# ---------------------------------------------------------------------------
-# metric helpers
-# ---------------------------------------------------------------------------
-
-
 def compute_metrics(trials: list[CalibrationTrial]) -> dict[str, float | None]:
     """Compute sensitivity / specificity / precision / F1 / median date error.
 
@@ -130,11 +106,6 @@ def compute_metrics(trials: list[CalibrationTrial]) -> dict[str, float | None]:
     }
 
 
-# ---------------------------------------------------------------------------
-# detector adapter
-# ---------------------------------------------------------------------------
-
-
 def _earliest_changepoint_date(analysis: AnalysisResult) -> date | None:
     if not analysis.change_points:
         return None
@@ -157,11 +128,6 @@ def _outcome_from_analysis(analysis: AnalysisResult | None) -> _TrialOutcome:
         detection_date=_earliest_changepoint_date(analysis),
         convergence_windows=len(analysis.convergence_windows),
     )
-
-
-# ---------------------------------------------------------------------------
-# corpus i/o
-# ---------------------------------------------------------------------------
 
 
 def _load_author_articles(db_path: Path, slug: str | None) -> tuple[Author, list[Article]]:
@@ -216,11 +182,6 @@ def _write_corpus_to_db(
             repo.upsert_article(art)
 
 
-# ---------------------------------------------------------------------------
-# splice date selection
-# ---------------------------------------------------------------------------
-
-
 def _pick_splice_date(articles: list[Article], rng: np.random.Generator) -> date:
     """Pick a random splice date between the 30th and 70th percentile of dates."""
     dates = sorted(a.published_date.date() for a in articles)
@@ -230,11 +191,6 @@ def _pick_splice_date(articles: list[Article], rng: np.random.Generator) -> date
     hi_idx = int(len(dates) * 0.7)
     idx = int(rng.integers(lo_idx, max(hi_idx, lo_idx + 1)))
     return dates[idx]
-
-
-# ---------------------------------------------------------------------------
-# trial execution (the expensive step — tests monkeypatch this)
-# ---------------------------------------------------------------------------
 
 
 async def _run_trial_analysis(
@@ -264,11 +220,6 @@ async def _run_trial_analysis(
     paths = AnalysisArtifactPaths.from_project(trial_root, trial_db)
     analysis_map = run_full_analysis(paths, settings, author_slug=author.slug)
     return analysis_map.get(author.slug)
-
-
-# ---------------------------------------------------------------------------
-# public entry point
-# ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)

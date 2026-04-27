@@ -18,8 +18,7 @@ from forensics.utils.url import section_from_url
 logger = logging.getLogger(__name__)
 
 
-# Phase 15 J2 — header pinned for spreadsheet consumers; column order is part
-# of the public contract for the audit CSV. Tests assert this tuple exactly.
+# Public CSV contract; tests assert this header tuple exactly.
 EXCLUDED_ARTICLES_CSV_HEADER: tuple[str, ...] = (
     "id",
     "url",

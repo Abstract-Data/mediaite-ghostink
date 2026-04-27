@@ -1,22 +1,6 @@
-"""HTML report assembly for the per-author and aggregate report (Phase 15 K-series).
+"""Per-author HTML fragments (K2–K5) and :func:`render_author_section` assembly.
 
-This module is intentionally tiny: each helper renders one named HTML
-fragment and is owned by a single K-series step:
-
-- K2 — section-mix stacked-area chart (``render_section_mix_chart``)
-- K3 — section-contrast table (``render_section_contrast_table``)
-- K4 — adjusted-vs-unadjusted CP twin panel (``_render_cp_twin_panel_section``)
-- K5 — outlet-level section profile embed (``render_section_profile_embed``)
-
-The aggregator :func:`render_author_section` stitches them together in a
-fixed order so sibling agents can land helpers without coordinating prose
-changes. Every helper here is a free function with no shared state.
-
-Soft-failure semantics: a missing artifact yields a short placeholder
-fragment so the surrounding report renders cleanly even when its sibling
-wave hasn't shipped yet (e.g. J5 residualization). The chart helpers use
-:mod:`plotly.graph_objects` directly (rather than ``plotly.express``) so
-the report stage stays pandas-free — this project is Polars-native.
+Missing artifacts render placeholders. Chart code uses ``plotly.graph_objects`` only (no pandas).
 """
 
 from __future__ import annotations
@@ -42,7 +26,6 @@ __all__ = [
     "render_section_profile_embed",
 ]
 
-# K5 — outlet-level section profile artifact path (relative to project_root)
 SECTION_PROFILE_REPORT_RELPATH: str = "data/analysis/section_profile_report.md"
 
 K5_FALLBACK_HTML = (
@@ -54,7 +37,7 @@ K5_FALLBACK_HTML = (
     "</section>"
 )
 
-# K2 — verbatim caption from the prompt spec (Phase 15). Tests pin this string.
+# Verbatim caption; tests pin this string.
 SECTION_MIX_CAPTION = (
     "Section mix. Use this to distinguish stylistic drift from editorial mix shifts."
 )
@@ -72,11 +55,6 @@ _INSUFFICIENT_VOLUME_FRAGMENT = (
 )
 
 
-# ---------------------------------------------------------------------------
-# Loading helpers — defensive: a missing/malformed file is a soft failure.
-# ---------------------------------------------------------------------------
-
-
 def _load_json(path: Path) -> dict | None:
     """Return the parsed JSON dict, or ``None`` when missing/invalid."""
     try:
@@ -85,11 +63,6 @@ def _load_json(path: Path) -> dict | None:
     except (OSError, json.JSONDecodeError):
         return None
     return data if isinstance(data, dict) else None
-
-
-# ---------------------------------------------------------------------------
-# K2 — section-mix stacked-area chart
-# ---------------------------------------------------------------------------
 
 
 def _section_mix_payload(data: dict) -> tuple[list[str], list[str], list[list[float]]]:
@@ -167,11 +140,6 @@ def render_section_mix_chart(
         f'<p class="section-mix-caption"><em>{html.escape(SECTION_MIX_CAPTION)}</em></p>'
         "</div>"
     )
-
-
-# ---------------------------------------------------------------------------
-# K3 — section-contrast table
-# ---------------------------------------------------------------------------
 
 
 def _pair_label(pair: dict) -> str | None:
@@ -268,11 +236,6 @@ def render_section_contrast_table(
     )
 
 
-# ---------------------------------------------------------------------------
-# K4 — adjusted-vs-unadjusted CP twin panel
-# ---------------------------------------------------------------------------
-
-
 def _render_cp_twin_panel_section(
     *,
     author_slug: str,
@@ -297,11 +260,6 @@ def _render_cp_twin_panel_section(
     )
 
 
-# ---------------------------------------------------------------------------
-# K5 — outlet-level section profile embed
-# ---------------------------------------------------------------------------
-
-
 def render_section_profile_embed(project_root: Path) -> str:
     """K5: embed the outlet-level section profile report when present."""
     report_path = project_root / SECTION_PROFILE_REPORT_RELPATH
@@ -316,11 +274,6 @@ def render_section_profile_embed(project_root: Path) -> str:
         "</pre>"
         "</section>"
     )
-
-
-# ---------------------------------------------------------------------------
-# Aggregator
-# ---------------------------------------------------------------------------
 
 
 def render_author_section(

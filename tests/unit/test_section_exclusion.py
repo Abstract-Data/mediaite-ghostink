@@ -75,11 +75,6 @@ def _news_articles(author: Author, *, count: int = 60, section: str = "news") ->
     ]
 
 
-# ---------------------------------------------------------------------------
-# happy path: a sponsored article does not count toward qualification volume
-# ---------------------------------------------------------------------------
-
-
 def test_sponsored_article_excluded_from_volume_count(tmp_db: Path, tmp_path: Path) -> None:
     author = _make_author("real-reporter")
     # 60 valid news articles (clears min_articles=50) + 5 sponsored articles
@@ -106,11 +101,6 @@ def test_sponsored_article_excluded_from_volume_count(tmp_db: Path, tmp_path: Pa
     assert qa.total_articles == 60
 
 
-# ---------------------------------------------------------------------------
-# edge case: an entirely-sponsored author drops below min_articles
-# ---------------------------------------------------------------------------
-
-
 def test_author_with_only_sponsored_articles_disqualified(tmp_db: Path, tmp_path: Path) -> None:
     author = _make_author("partner-only")
     # 60 sponsored articles — would qualify on volume alone, but every single
@@ -129,11 +119,6 @@ def test_author_with_only_sponsored_articles_disqualified(tmp_db: Path, tmp_path
     dq = disqualified[0]
     assert dq.author.slug == "partner-only"
     assert dq.disqualification_reason == "all_articles_excluded_by_section"
-
-
-# ---------------------------------------------------------------------------
-# regression-pin: CSV header + column order are pinned for spreadsheet consumers
-# ---------------------------------------------------------------------------
 
 
 def test_excluded_articles_csv_header_and_columns_pinned(tmp_db: Path, tmp_path: Path) -> None:
@@ -173,11 +158,6 @@ def test_excluded_articles_csv_header_and_columns_pinned(tmp_db: Path, tmp_path:
     assert data_row["likely_author_own_work"] == "false"
 
 
-# ---------------------------------------------------------------------------
-# crosspost flag: real (non-shared) author + crosspost == likely_author_own_work
-# ---------------------------------------------------------------------------
-
-
 def test_crosspost_by_real_author_flagged_likely_own_work(tmp_db: Path, tmp_path: Path) -> None:
     author = _make_author("isaac-schorr", name="Isaac Schorr", shared=False)
     crosspost = _make_article(
@@ -195,11 +175,6 @@ def test_crosspost_by_real_author_flagged_likely_own_work(tmp_db: Path, tmp_path
     crosspost_rows = [r for r in rows if r["section"] == "crosspost"]
     assert len(crosspost_rows) == 1
     assert crosspost_rows[0]["likely_author_own_work"] == "true"
-
-
-# ---------------------------------------------------------------------------
-# escape hatch: ``--include-advertorial`` re-includes excluded sections
-# ---------------------------------------------------------------------------
 
 
 def test_include_advertorial_reincludes_sponsored(tmp_db: Path, tmp_path: Path) -> None:
@@ -223,11 +198,6 @@ def test_include_advertorial_reincludes_sponsored(tmp_db: Path, tmp_path: Path) 
     assert "partner-only" not in disqualified_slugs
 
 
-# ---------------------------------------------------------------------------
-# settings wiring: SurveyConfig + FeaturesConfig defaults flow through
-# ---------------------------------------------------------------------------
-
-
 def test_qualification_criteria_from_settings_inherits_excluded_sections() -> None:
     from forensics.config.settings import FeaturesConfig, SurveyConfig
 
@@ -242,18 +212,8 @@ def test_qualification_criteria_from_settings_inherits_excluded_sections() -> No
     assert features.excluded_sections == survey.excluded_sections
 
 
-# ---------------------------------------------------------------------------
-# audit CSV path: layout-derived default
-# ---------------------------------------------------------------------------
-
-
 def test_audit_csv_path_constant_uses_data_survey_subdir() -> None:
     assert EXCLUDED_ARTICLES_CSV_RELPATH == Path("data") / "survey" / "excluded_articles.csv"
-
-
-# ---------------------------------------------------------------------------
-# features pipeline: helper drops excluded sections + emits info log
-# ---------------------------------------------------------------------------
 
 
 def test_features_filter_drops_excluded_sections(caplog: pytest.LogCaptureFixture) -> None:

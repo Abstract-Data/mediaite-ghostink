@@ -1,30 +1,4 @@
-"""Phase 15 K4+K5+K6 — reporting integration tests.
-
-Coverage targets (per H1 spec, ≥3 functions per file):
-
-K4 — Adjusted-vs-unadjusted CP twin-panel renderer
-    * happy path: a result with both raw and section-adjusted CPs renders
-      a twin-panel HTML fragment carrying both color/dash variants.
-    * edge: a result with only raw CPs renders the J5 placeholder
-      notice rather than crashing.
-    * regression-pin: the J5 placeholder HTML fragment is byte-stable
-      under SHA-256 (downstream parsers / log-grep dashboards key on it).
-
-K5 — Outlet-level section profile embed
-    * happy path: an existing ``section_profile_report.md`` is embedded
-      with its contents present (HTML-escaped).
-    * edge: a missing ``section_profile_report.md`` renders the K5
-      fallback notice with the documented CLI hint.
-
-K6 — Pipeline B diagnostic block (narrative)
-    * happy path: an author dir missing ``drift.json`` with embeddings
-      present produces the diagnostic prose.
-    * edge: an author dir with all three artifacts present and embeddings
-      present returns an empty string.
-    * edge: an author dir with no embeddings returns an empty string
-      regardless of artifact presence (mirrors E2's silent-when-empty
-      default to keep log noise / report noise both low).
-"""
+"""K4 twin-panel + J5 pin, K5 section profile embed, K6 Pipeline B diagnostics."""
 
 from __future__ import annotations
 
@@ -50,10 +24,6 @@ from forensics.reporting.plots import (
     RAW_CP_COLOR,
     render_cp_twin_panel,
 )
-
-# --------------------------------------------------------------------------- #
-# Shared helpers                                                               #
-# --------------------------------------------------------------------------- #
 
 
 def _paths(tmp_path: Path) -> AnalysisArtifactPaths:
@@ -89,11 +59,6 @@ def _seed_drift_artifacts(paths: AnalysisArtifactPaths, slug: str) -> None:
     paths.drift_json(slug).write_text("{}", encoding="utf-8")
     paths.baseline_curve_json(slug).write_text("[]", encoding="utf-8")
     paths.centroids_npz(slug).write_bytes(b"\x00")
-
-
-# --------------------------------------------------------------------------- #
-# K4 — twin-panel CP visualisation                                             #
-# --------------------------------------------------------------------------- #
 
 
 def test_k4_twin_panel_renders_when_section_adjusted_cps_present() -> None:
@@ -155,11 +120,6 @@ def test_k4_placeholder_html_is_byte_stable() -> None:
     assert J5_PLACEHOLDER_PREFIX == "Section-adjusted CPs not computed"
 
 
-# --------------------------------------------------------------------------- #
-# K5 — outlet-level section profile embed                                      #
-# --------------------------------------------------------------------------- #
-
-
 def test_k5_section_profile_embed_includes_report_when_present(tmp_path: Path) -> None:
     """The embedded section-profile MD shows up inside a labelled <section>."""
     target = tmp_path / SECTION_PROFILE_REPORT_RELPATH
@@ -182,11 +142,6 @@ def test_k5_section_profile_embed_falls_back_when_missing(tmp_path: Path) -> Non
     assert html == K5_FALLBACK_HTML
     assert "forensics analyze section-profile" in html
     assert "Section profile not yet computed" in html
-
-
-# --------------------------------------------------------------------------- #
-# K6 — Pipeline B diagnostic block                                             #
-# --------------------------------------------------------------------------- #
 
 
 def test_k6_diagnostic_renders_when_drift_artifact_missing(tmp_path: Path) -> None:
@@ -228,11 +183,6 @@ def test_k6_diagnostic_silent_when_no_embeddings(tmp_path: Path) -> None:
     # state, but the helper must still hold the silence invariant.
     _seed_drift_artifacts(paths, slug)
     assert pipeline_b_diagnostics_block(slug, paths) == ""
-
-
-# --------------------------------------------------------------------------- #
-# Aggregator integration                                                       #
-# --------------------------------------------------------------------------- #
 
 
 def test_render_author_section_includes_diagnostic_and_chart(tmp_path: Path) -> None:

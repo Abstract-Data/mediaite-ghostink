@@ -1,9 +1,4 @@
-"""Blind survey orchestrator — run the full pipeline across every qualified author.
-
-Phase 12 §1c. Produces per-author analysis results ranked by composite AI-adoption
-signal, with a JSON checkpoint after each author so long runs can resume after
-interruption.
-"""
+"""Blind survey orchestrator: full pipeline per qualified author with JSON checkpoints."""
 
 from __future__ import annotations
 

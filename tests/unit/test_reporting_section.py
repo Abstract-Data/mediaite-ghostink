@@ -1,16 +1,4 @@
-"""Tests for Phase 15 K1+K2+K3 reporting integration.
-
-Covers:
-- K1: narrative consumes ``ConvergenceWindow.families_converging`` and falls
-  back to legacy feature-level wording when the field is empty.
-- K2: ``render_section_mix_chart`` produces a stacked-area chart fragment
-  with the verbatim caption, and soft-fails when the artifact is absent.
-- K3: ``render_section_contrast_table`` produces a section-pair × family
-  table, soft-fails when the artifact is missing or malformed, and emits a
-  short note when ``disposition == "insufficient_section_volume"``.
-- H2 byte-stability: a fixed-seed fixture renders to a stable SHA-256 hash
-  for both helpers.
-"""
+"""K1–K3 reporting: narrative family path, section mix/contrast HTML, H2 hash pins."""
 
 from __future__ import annotations
 
@@ -35,21 +23,9 @@ from forensics.reporting.html_report import (
 )
 from forensics.reporting.narrative import generate_evidence_narrative
 
-# ---------------------------------------------------------------------------
-# K1 — narrative + families_converging
-# ---------------------------------------------------------------------------
-
 
 def _result_with_families() -> AnalysisResult:
-    """Synthetic ``AnalysisResult`` exercising the families_converging path.
-
-    Phase 15 B-followup (issue #5): the family registry was regrouped from
-    8 → 6 families. ``voice`` was folded into ``ai_markers`` and
-    ``paragraph_shape`` into ``sentence_structure``; the fixture below
-    represents 5 of the 6 surviving families with one canonical
-    representative feature each (mirroring what the per-family pipeline-A
-    scorer emits in production).
-    """
+    """``AnalysisResult`` with five families represented (post-registry regroup)."""
     slug = "david-gilmour"
     cps = [
         ChangePoint(
@@ -199,11 +175,6 @@ def test_narrative_falls_back_to_features_when_no_families() -> None:
     assert "feature families" not in text  # Make sure we did NOT emit the K1 wording.
 
 
-# ---------------------------------------------------------------------------
-# K2 — section-mix chart
-# ---------------------------------------------------------------------------
-
-
 def _write_section_mix(tmp_path: Path, slug: str = "david-gilmour") -> Path:
     payload = {
         "author_id": slug,
@@ -242,11 +213,6 @@ def test_section_mix_chart_missing_artifact_soft_fails(tmp_path: Path) -> None:
     )
     assert "section-mix-missing" in fragment
     assert "No section-mix data" in fragment
-
-
-# ---------------------------------------------------------------------------
-# K3 — section-contrast table
-# ---------------------------------------------------------------------------
 
 
 def _write_section_contrast(tmp_path: Path, slug: str = "david-gilmour") -> Path:
@@ -308,11 +274,6 @@ def test_section_contrast_table_insufficient_volume(tmp_path: Path) -> None:
     fragment = render_section_contrast_table(path, author_slug="lowvol")
     assert "Insufficient section volume" in fragment
     assert "<table" not in fragment
-
-
-# ---------------------------------------------------------------------------
-# H2 byte-stability: SHA-256 pin for the contrast table.
-# ---------------------------------------------------------------------------
 
 
 # Pinned SHA-256 of the K3 contrast-table fixture. If this drifts, the

@@ -31,10 +31,10 @@ todos:
     status: completed
   - id: deslop-phase-7-reporting
     content: Phase 7 — Deslop reporting, survey, baseline, calibration, TUI + tests
-    status: pending
+    status: completed
   - id: deslop-phase-8-tests
     content: Phase 8 — Deslop remaining tests (do not weaken assertions)
-    status: pending
+    status: completed
   - id: deslop-gate-after-phase-1
     content: After Phase 1 merges — re-run churn on src/ + tests/ vs BASE; adjust phase order if needed
     status: pending
