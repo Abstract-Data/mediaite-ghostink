@@ -25,7 +25,7 @@ import typer
 
 from forensics.cli.analyze import run_analyze
 from forensics.cli.scrape import dispatch_scrape
-from forensics.config import get_project_root, get_settings
+from forensics.config import DEFAULT_DB_RELATIVE, get_project_root, get_settings
 from forensics.features.pipeline import extract_all_features
 from forensics.models.report_args import ReportArgs
 from forensics.pipeline_context import PipelineContext
@@ -81,8 +81,7 @@ def run_all_pipeline(
     for warning in report.warnings():
         logger.warning("preflight WARN: %s — %s", warning.name, warning.message)
 
-    root = get_project_root()
-    db_path = root / "data" / "articles.db"
+    db_path = get_project_root() / DEFAULT_DB_RELATIVE
     PipelineContext.resolve().record_audit("forensics all — preflight", optional=True, log=logger)
     PipelineContext.resolve().record_audit("forensics all", optional=True, log=logger)
 

@@ -57,11 +57,11 @@ def migrate(
     Idempotent. Safe to run on every deploy — migrations that have already
     been recorded in ``schema_version`` are skipped.
     """
-    from forensics.config import get_project_root
+    from forensics.config import DEFAULT_DB_RELATIVE, get_project_root
     from forensics.storage.repository import Repository
 
     logger = logging.getLogger(__name__)
-    target = db_path or (get_project_root() / "data" / "articles.db")
+    target = db_path or (get_project_root() / DEFAULT_DB_RELATIVE)
     if not target.parent.is_dir():
         raise fail(
             ctx,
@@ -124,7 +124,7 @@ def features_migrate(
     ``section`` for every row. If the DB is missing, rows without a ``url``
     column fall back to ``section = "unknown"`` (with a WARNING per file).
     """
-    from forensics.config import get_project_root
+    from forensics.config import DEFAULT_DB_RELATIVE, get_project_root
 
     logger = logging.getLogger(__name__)
     st = get_cli_state(ctx)
@@ -138,7 +138,7 @@ def features_migrate(
         )
         return
 
-    db_target = articles_db or (project_root / "data" / "articles.db")
+    db_target = articles_db or (project_root / DEFAULT_DB_RELATIVE)
     migrated, skipped = mig.migrate_all(target, dry_run=dry_run, articles_db=db_target)
     logger.info(
         "features migrate: migrated=%d skipped=%d dry_run=%s articles_db=%s",

@@ -7,7 +7,7 @@ todos:
     status: completed
   - id: task-2-db-path
     content: "TASK-2: RF-DRY-001 — replace all default articles.db constructions with settings.db_path or threaded db_path (incl. tui/discovery, migrate, orchestrator defaults)"
-    status: pending
+    status: completed
   - id: task-3-analyze-request
     content: "TASK-3: Introduce AnalyzeRequest; refactor run_analyze + Typer analyze callback/options module; update forensics all and tests"
     status: pending

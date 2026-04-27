@@ -16,7 +16,7 @@ from forensics.cli._envelope import status
 from forensics.cli._errors import fail
 from forensics.cli._exit import ExitCode
 from forensics.cli.state import get_cli_state
-from forensics.config import get_project_root, get_settings
+from forensics.config import DEFAULT_DB_RELATIVE, get_project_root, get_settings
 from forensics.config.settings import ForensicsSettings
 from forensics.pipeline_context import PipelineContext
 from forensics.preregistration import verify_preregistration
@@ -371,7 +371,7 @@ def run_analyze(  # noqa: C901
         residualize_sections=residualize_sections,
     )
     root = get_project_root()
-    db_path = root / "data" / "articles.db"
+    db_path = root / DEFAULT_DB_RELATIVE
     if author is not None:
         _enforce_shared_byline_gate(
             db_path,
@@ -730,7 +730,7 @@ def section_profile_cmd(
 
     settings = get_settings()
     root = get_project_root()
-    db_path = root / "data" / "articles.db"
+    db_path = root / DEFAULT_DB_RELATIVE
     paths = AnalysisArtifactPaths.from_project(root, db_path)
     feat_dir = features_dir if features_dir is not None else paths.features_dir
     analysis_dir = paths.analysis_dir
@@ -794,7 +794,7 @@ def section_contrast_cmd(
 
     settings = get_settings()
     root = get_project_root()
-    db_path = root / "data" / "articles.db"
+    db_path = root / DEFAULT_DB_RELATIVE
     paths = AnalysisArtifactPaths.from_project(root, db_path)
     feat_dir = features_dir if features_dir is not None else paths.features_dir
     analysis_dir = paths.analysis_dir

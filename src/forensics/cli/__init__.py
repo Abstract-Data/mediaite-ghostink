@@ -400,11 +400,11 @@ def export_data(
     ] = True,
 ) -> None:
     """Export SQLite + features + analysis into a single ``.duckdb`` file."""
-    from forensics.config import get_project_root
+    from forensics.config import DEFAULT_DB_RELATIVE, get_project_root
     from forensics.storage.duckdb_queries import export_to_duckdb
 
     root = get_project_root()
-    db_path = root / "data" / "articles.db"
+    db_path = root / DEFAULT_DB_RELATIVE
     out_path = output if output.is_absolute() else root / output
 
     st = get_cli_state(ctx)
@@ -565,12 +565,13 @@ def dashboard_cmd(
 
     from dataclasses import replace
 
-    from forensics.config import get_project_root, get_settings
+    from forensics.config import DEFAULT_DB_RELATIVE, get_project_root, get_settings
     from forensics.survey.qualification import QualificationCriteria
     from forensics.tui import main_dashboard
 
+    settings = get_settings()
     root = get_project_root()
-    db_path = root / "data" / "articles.db"
+    db_path = root / DEFAULT_DB_RELATIVE
     survey_kw: dict[str, object] = {
         "project_root": root,
         "db_path": db_path,
@@ -581,7 +582,6 @@ def dashboard_cmd(
         "post_year_max": post_year_max,
     }
     if survey:
-        settings = get_settings()
         overrides: dict[str, int] = {}
         if min_articles is not None:
             overrides["min_articles"] = min_articles

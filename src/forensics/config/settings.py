@@ -390,7 +390,7 @@ class ForensicsSettings(BaseSettings):
     @property
     def db_path(self) -> Path:
         """Default SQLite corpus path under the project root."""
-        return _project_root() / DEFAULT_DB_RELATIVE
+        return get_project_root() / DEFAULT_DB_RELATIVE
 
     @classmethod
     def settings_customise_sources(

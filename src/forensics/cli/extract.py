@@ -11,7 +11,7 @@ from forensics.cli._decorators import with_examples
 from forensics.cli._errors import fail
 from forensics.cli._exit import ExitCode
 from forensics.cli.state import get_cli_state
-from forensics.config import get_project_root, get_settings
+from forensics.config import DEFAULT_DB_RELATIVE, get_project_root, get_settings
 from forensics.pipeline_context import PipelineContext
 
 logger = logging.getLogger(__name__)
@@ -48,8 +48,7 @@ def extract(
     from forensics.features.pipeline import extract_all_features
 
     settings = get_settings()
-    root = get_project_root()
-    db_path = root / "data" / "articles.db"
+    db_path = get_project_root() / DEFAULT_DB_RELATIVE
     PipelineContext.resolve().record_audit("forensics extract", optional=True, log=logger)
 
     show = get_cli_state(ctx).show_progress

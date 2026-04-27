@@ -22,7 +22,7 @@ from forensics.calibration.synthetic import (
     build_negative_control,
     build_spliced_corpus,
 )
-from forensics.config.settings import ForensicsSettings
+from forensics.config.settings import DEFAULT_DB_RELATIVE, ForensicsSettings
 from forensics.features.pipeline import extract_all_features
 from forensics.models.analysis import AnalysisResult
 from forensics.models.article import Article
@@ -354,7 +354,7 @@ async def run_calibration(
     from forensics.config import get_project_root
 
     root = project_root if project_root is not None else get_project_root()
-    db = db_path if db_path is not None else root / "data" / "articles.db"
+    db = db_path if db_path is not None else root / DEFAULT_DB_RELATIVE
 
     rng = np.random.default_rng(seed)
     run_timestamp = utc_archive_stamp()

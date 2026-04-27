@@ -16,7 +16,7 @@ from uuid import uuid4
 
 from forensics.analysis.artifact_paths import AnalysisArtifactPaths
 from forensics.analysis.orchestrator import run_full_analysis
-from forensics.config.settings import ForensicsSettings
+from forensics.config.settings import DEFAULT_DB_RELATIVE, ForensicsSettings
 from forensics.features.pipeline import extract_all_features
 from forensics.models.analysis import AnalysisResult
 from forensics.progress import PipelineObserver, PipelineRunPhase, live_ui_mode
@@ -472,7 +472,7 @@ async def run_survey(
     from forensics.config import get_project_root
 
     root = project_root if project_root is not None else get_project_root()
-    db = db_path if db_path is not None else root / "data" / "articles.db"
+    db = db_path if db_path is not None else root / DEFAULT_DB_RELATIVE
 
     run_id = resume or str(uuid4())
     run_dir = _run_dir_for(root, run_id)
