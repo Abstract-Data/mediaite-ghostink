@@ -40,10 +40,10 @@ todos:
     status: pending
   - id: deslop-optional-testing-doc
     content: (Optional) Add deslop checklist bullets to docs/TESTING.md
-    status: pending
+    status: completed
   - id: deslop-optional-ci-type-ignore
     content: "(Optional) CI policy for new type: ignore in touched files"
-    status: pending
+    status: completed
 isProject: false
 ---
 

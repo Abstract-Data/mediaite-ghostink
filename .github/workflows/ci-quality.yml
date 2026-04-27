@@ -25,3 +25,22 @@ jobs:
           enable-cache: true
       - run: uv sync --frozen --extra dev
       - run: uv run ruff format --check .
+
+  # Policy: no new ``# type: ignore`` / ``type: ignore[...]`` lines in ``src/`` or ``tests/``
+  # on pull requests (see ``docs/TESTING.md`` — Deslop checklist).
+  no-new-type-ignore:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Fetch PR base
+        run: git fetch origin "${{ github.base_ref }}"
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+      - run: uv sync --frozen --extra dev
+      - name: Block new type: ignore in src/ or tests/
+        run: uv run python scripts/check_no_new_type_ignore.py "origin/${{ github.base_ref }}"

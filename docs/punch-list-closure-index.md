@@ -104,7 +104,7 @@ This document maps each punch **ID** to the **primary deliverable** (code path, 
 
 | ID | Tag | Primary evidence |
 |----|-----|-------------------|
-| R-01–R-09 | artifact | `data/reports/AI_USAGE_FINDINGS.md` (exploratory tone, caveats, tables); Quarto/report inputs as applicable |
+| R-01–R-09 | artifact | `docs/AI_USAGE_FINDINGS.md` (exploratory tone, caveats, tables); Quarto/report inputs as applicable. Relocated 2026-04-27 from `data/reports/` so it survives Quarto output-dir wipes. |
 
 ---
 

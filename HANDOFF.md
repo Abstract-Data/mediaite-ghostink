@@ -5727,3 +5727,73 @@ Global churn is dominated by `src/forensics/analysis/` (3394); that maps to **Ph
 **GitNexus:** MCP tool descriptors not available this session; run upstream `impact` / `detect_changes` before merge if connected.
 
 **Next:** Reconcile `quarto.yml` with `test_quarto_config_exists` expectation or update the test when the book index is finalized; merge Phase 7–8 deslop PR.
+
+---
+
+### 2026-04-27 — Deslop optional: TESTING.md + CI no-new-type-ignore (completed)
+
+**Status:** Complete  
+**Scope:** `docs/TESTING.md`, `scripts/check_no_new_type_ignore.py`, `.github/workflows/ci-quality.yml`
+
+**Changes:** Added “Deslop and hygiene PR checklist” to testing docs (diff-first, comments, typing, exceptions, tests) and documented local `uv run python scripts/check_no_new_type_ignore.py origin/main`. New script compares `git diff <base>...HEAD` under `src/` and `tests/` for added lines containing `# type: ignore` / `type: ignore[...]`. CI job `no-new-type-ignore` runs on `pull_request` only, after fetching the PR base branch.
+
+**Verification:** `uv run ruff check scripts/check_no_new_type_ignore.py`; `uv run ruff format --check scripts/check_no_new_type_ignore.py`; `uv run python scripts/check_no_new_type_ignore.py origin/main` — passed (no new ignores vs `origin/main` on this branch at check time).
+
+**Decisions:** Gate applies to PRs only so direct pushes to `main` are unchanged; base ref is `origin/${{ github.base_ref }}` to match GitHub’s merge comparison.
+
+**Next:** None required for this item.
+
+---
+
+## 2026-04-27 — Quarto report config repair + AI_USAGE_FINDINGS relocation
+
+**Status:** complete — full book renders cleanly to `data/reports/` (11 HTML chapters, exit 0).
+
+**What was done**
+
+- Renamed `quarto.yml` → `_quarto.yml` (canonical Quarto project-config filename). Quarto reads `_quarto.yml` for the full project schema; the non-underscored variant was being parsed only partially, which silently dropped `project.render` and forced a tree-walk over the whole repo (135 files including every `prompts/`, `docs/`, `HANDOFF.md`, etc.).
+- Added `project.render` to `_quarto.yml` with explicit chapter sources + negative globs to keep the render scope to the 11 book chapters only.
+- Relocated `data/reports/AI_USAGE_FINDINGS.md` → `docs/AI_USAGE_FINDINGS.md`. The old path lived inside the Quarto output dir, which is wiped at the start of every render — every `forensics report` would have deleted the file before it could be referenced.
+- `.gitignore`: removed the `!data/reports/AI_USAGE_FINDINGS.md` un-ignore (no longer needed; the file lives under `docs/` which is fully tracked).
+- `tests/test_report.py::test_quarto_config_exists`: updated to read `_quarto.yml` and expect 11 `.ipynb` mentions (10 explicit chapter paths + 1 `notebooks/*.ipynb` glob in the new render list).
+- `docs/punch-list-closure-index.md`: updated R-01–R-09 row to point at the new `docs/AI_USAGE_FINDINGS.md` path.
+
+**Files modified / added**
+
+- `_quarto.yml` (new — canonical Quarto config)
+- `quarto.yml` (deleted — was the non-canonical duplicate)
+- `docs/AI_USAGE_FINDINGS.md` (new at this path; content extracted from PR #94 commit `714a84e`)
+- `.gitignore` (removed the AI_USAGE_FINDINGS un-ignore)
+- `tests/test_report.py` (updated `test_quarto_config_exists`)
+- `docs/punch-list-closure-index.md` (R row pointer updated)
+
+**Files intentionally not modified**
+
+- `prompts/punch-list/v0.1.0.md`, `prompts/punch-list/current.md`, `prompts/implementation-plan/v0.1.0.md`, `prompts/implementation-plan/current.md`, `prompts/punch-list/CHANGELOG.md` — bound by the prompt-library immutability contract (`prompts/README.md`). Their references to `data/reports/AI_USAGE_FINDINGS.md` are historical and accurate at the version they describe; updating them requires a prompt version bump.
+- HANDOFF.md historical entries describing the prior `data/reports/AI_USAGE_FINDINGS.md` location are left as-is — they were accurate when written; this new block records the change forward.
+
+**Verification commands run**
+
+```
+uv run forensics analyze --exploratory --allow-pre-phase16-embeddings
+  -> exit 0; 16m 11s wall; 12/12 authors; 0 errors
+uv run forensics report --format html
+  -> exit 0; 11 HTML chapters under data/reports/
+uv run pytest tests/test_report.py -v --no-cov
+  -> 25 passed
+```
+
+**Output inventory**
+
+- `data/reports/index.html`
+- `data/reports/notebooks/00_power_analysis.html` … `09_full_report.html`
+
+**Decisions / rationale**
+
+- Kept output-dir at `data/reports/` per CLAUDE.md "writes go under `data/` only".
+- Chose `docs/AI_USAGE_FINDINGS.md` (over e.g. `data/findings/`) because the file is documentation/narrative, not pipeline data.
+- Did not delete the historical references in immutable prompt artifacts; the old path is part of those snapshots' truth.
+
+**Unresolved**
+
+- No outstanding issues. The full pipeline `analyze → report` cycle is reproducible end-to-end.
