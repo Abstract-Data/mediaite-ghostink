@@ -24,6 +24,7 @@ from forensics.analysis.orchestrator.per_author import (
     _write_per_author_json_artifacts,
 )
 from forensics.analysis.orchestrator.staleness import _merge_run_metadata, _stale_author_slugs
+from forensics.analysis.probability_trajectories import build_probability_trajectory_by_slug
 from forensics.config.settings import ForensicsSettings
 from forensics.models.analysis import AnalysisResult, ChangePoint
 from forensics.paths import AnalysisArtifactPaths
@@ -514,7 +515,12 @@ def run_parallel_author_refresh(
     exploratory: bool = False,
     allow_pre_phase16_embeddings: bool = False,
 ) -> dict[str, AnalysisResult]:
-    """Refresh stale configured authors through isolated parallel author directories."""
+    """Refresh stale configured authors through isolated parallel author directories.
+
+    When ``probability_trajectory_by_slug`` is ``None``, trajectories are loaded
+    the same way as :func:`run_full_analysis` (feature parquet or
+    ``data/probability/<slug>.parquet``).
+    """
     run_id = str(uuid4())
     slugs = _stale_author_slugs(paths, config, author_slug)
     workers = _resolve_parallel_refresh_workers(config, max_workers)
@@ -523,7 +529,11 @@ def run_parallel_author_refresh(
         len(slugs),
         workers,
     )
-    prob_map = probability_trajectory_by_slug or {}
+    if probability_trajectory_by_slug is None:
+        all_slugs = [a.slug for a in config.authors]
+        prob_map = build_probability_trajectory_by_slug(paths, all_slugs)
+    else:
+        prob_map = probability_trajectory_by_slug
     isolated_outputs = _run_isolated_author_jobs(
         paths,
         config,

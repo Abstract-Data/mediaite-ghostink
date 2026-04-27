@@ -50,6 +50,21 @@ Phase 16 intentionally changes the analysis-config hash, corpus fingerprint, and
 
 ### Pre-registration lock (template → confirmatory)
 
+**TL;DR — confirmatory IS the default.** `uv run forensics analyze` enforces `verify_preregistration()` at line 507 of `cli/analyze.py` and **refuses to run** unless either (a) the lock matches the current `config.toml` analysis thresholds, or (b) you explicitly opt out with `--exploratory`. There is no "set it as default" knob — refusing-to-run-without-a-lock is already the wired behavior.
+
+Typical operator workflow:
+
+| Action | Command | When |
+|---|---|---|
+| Initial lock | `uv run forensics lock-preregistration` | Once, after the methodology team agrees on thresholds |
+| Confirmatory analyze | `uv run forensics analyze [--changepoint …]` | Every routine run; lock is silently checked first |
+| Methodology change | edit `config.toml`, then `uv run forensics --yes lock-preregistration`, then re-run analyze | Only when an intentional threshold change has been agreed |
+| Sensitivity / dev iteration | `uv run forensics analyze --exploratory …` | When poking at thresholds before deciding to lock |
+
+To check the live lock state at any time: `cat data/preregistration/preregistration_lock.json | jq '{locked_at, content_hash}'`. To check whether the **most recent run** was confirmatory: `jq '.preregistration_status, .exploratory' data/analysis/run_metadata.json` — `ok` and `false` (or absent) means confirmatory.
+
+Detail / lifecycle:
+
 1. **Write or refresh the lock** from the current `config.toml` thresholds: `uv run forensics lock-preregistration` → updates `data/preregistration/preregistration_lock.json` with `locked_at` (UTC ISO), `analysis` snapshot, and `content_hash`.
 2. **Template / exploratory state:** the committed repo default is an unfilled lock (`{"locked_at": null}` only). `verify_preregistration` reports `status="missing"` — confirmatory `analyze` exits non-zero until you run `lock-preregistration` or pass `--exploratory`.
 3. **Verify after a run:** read `data/analysis/run_metadata.json` → `preregistration_status` is `ok`, `missing`, or `mismatch`. A **mismatch** means the live settings no longer match the lock; confirmatory analyze **hard-fails** (exit code 1) after writing run metadata under `rid=preregistration-blocked`.

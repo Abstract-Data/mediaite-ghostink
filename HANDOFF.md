@@ -6144,3 +6144,37 @@ uv run pytest tests/unit/test_config_hash.py tests/test_preregistration.py -v --
 #### Risks & Next Steps
 
 - Projects with no `pipeline_b_mode` in TOML now hash as percentile-first; explicit `pipeline_b_mode = "legacy"` preserves old behavior. `data/preregistration/preregistration_lock.json` already used `percentile`; no lock edit required.
+
+---
+
+### TASK-3 — Pipeline C probability trajectories (plan: wire-pipeline-c)
+
+**Status:** Complete  
+**Date:** 2026-04-27
+
+#### What Was Done
+
+- Added `build_probability_trajectory_by_slug` in `src/forensics/analysis/probability_trajectories.py`: monthly aggregation of `mean_perplexity`, `perplexity_variance`, optional `binoculars_score` from per-author feature parquet when those columns exist, otherwise from `data/probability/<slug>.parquet` (output of `extract --probability`).
+- `run_full_analysis` and `run_parallel_author_refresh` now default `probability_trajectory_by_slug=None` to that loader so CLI, survey, and calibration pick up Pipeline C without callers passing a map. Explicit `{}` or a custom dict still overrides.
+
+#### Files Modified
+
+- `src/forensics/analysis/probability_trajectories.py` (new)
+- `src/forensics/analysis/orchestrator/runner.py`, `src/forensics/analysis/orchestrator/parallel.py`
+- `tests/unit/test_probability_trajectories.py` (new)
+- `HANDOFF.md` — this block
+
+#### Verification Evidence
+
+```
+uv run ruff check src/forensics/analysis/probability_trajectories.py src/forensics/analysis/orchestrator/runner.py src/forensics/analysis/orchestrator/parallel.py tests/unit/test_probability_trajectories.py
+uv run pytest tests/unit/test_probability_trajectories.py tests/unit/test_analyze_compare.py tests/integration/test_parallel_parity.py -q --cov=forensics --cov-fail-under=0
+```
+
+#### GitNexus
+
+- MCP `user-gitnexus` tool descriptors not in workspace; `gitnexus_impact` not run.
+
+#### Risks & Next Steps
+
+- Optional `analysis.convergence.require_probability_inputs` flag from the plan was not added; publication runs still rely on having run `extract --probability` when Pipeline C is desired.
