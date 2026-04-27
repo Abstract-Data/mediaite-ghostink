@@ -57,6 +57,8 @@ a bump.
 ## References
 
 - `src/forensics/config/analysis_settings.py`
+- `src/forensics/config/compat_analysis.py` (flat TOML lift / `_FLAT_TO_GROUP`)
+- `docs/adr/017-analysis-config-change-control.md` (field-growth governance)
 - `src/forensics/utils/provenance.py` (`_build_recursive_hash_payload`,
   `analysis_config_hash_field_names`)
 - `tests/unit/test_config_hash.py` (`test_default_analysis_config_model_hash_golden`)

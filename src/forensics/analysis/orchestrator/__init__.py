@@ -5,14 +5,31 @@ Monkeypatch contract
 Tests may replace the following names on *this package module only*
 (``forensics.analysis.orchestrator.<symbol>``). :func:`_sync_patchable_globals`
 re-binds them into submodules that would otherwise resolve stale references
-from their own module globals:
+from their own module globals.
 
-- ``uuid4``, ``datetime``, ``_clean_feature_series``, ``_run_per_author_analysis``,
-  ``_resolve_parallel_refresh_workers``, ``_isolated_author_worker``,
-  ``_validate_and_promote_isolated_outputs``.
+**Maintainer rule —** :data:`_PATCH_TARGETS` is the single source of truth for
+which names participate in that re-bind. When you add or change a symbol that
+must be patchable from this package *and* is read from another submodule's
+global namespace (for example workers that close over ``_run_per_author_analysis``),
+you **must**:
 
-Any other symbol must be patched on its defining submodule (for example
-``forensics.analysis.orchestrator.comparison``), not here.
+1. Assign the symbol on this module (as today).
+2. Add it to :data:`_PATCH_TARGETS` with **every** submodule tuple entry that
+   holds a stale binding to the same name (see keys below).
+3. Extend ``tests/unit/test_orchestrator_patch_surface.py`` so
+   ``_PATCH_SETTERS`` / ``_PATCH_ASSERTS`` cover the new key (drift fails CI).
+
+Stdlib hooks ``uuid4`` and ``datetime`` are patch targets but intentionally
+omitted from :data:`__all__`. Any other :data:`_PATCH_TARGETS` key must remain
+listed in :data:`__all__` so the public patch surface matches the sync table.
+
+Patch-synced names (keys of :data:`_PATCH_TARGETS`): ``uuid4``, ``datetime``,
+``_clean_feature_series``, ``_run_per_author_analysis``,
+``_resolve_parallel_refresh_workers``, ``_isolated_author_worker``,
+``_validate_and_promote_isolated_outputs``.
+
+Any symbol **not** in :data:`_PATCH_TARGETS` must be patched on its defining
+submodule (for example ``forensics.analysis.orchestrator.comparison``), not here.
 """
 
 from __future__ import annotations

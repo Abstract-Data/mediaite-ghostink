@@ -19,13 +19,13 @@ todos:
     status: completed
   - id: task-6-patch-targets
     content: Document _PATCH_TARGETS registration; unit test vs __all__/allowlist (P2-TEST-006 + RF-SMELL-003)
-    status: pending
+    status: completed
   - id: task-7-config-hygiene
     content: ADR for AnalysisConfig field growth; compat module split for flat TOML lift; optional HashableField only if hash-stable
-    status: pending
+    status: completed
   - id: task-8-parallel-coverage
     content: RF-CPLX-002/RF-ARCH-001 parallel/per_author dedup with integration parity; P3-QUAL-009 optional coverage profile + RUNBOOK
-    status: pending
+    status: completed
 isProject: false
 ---
 

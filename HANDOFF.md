@@ -6415,3 +6415,38 @@ uv run pytest tests/ -q --no-cov
 #### GitNexus
 
 `gitnexus_impact` / `detect_changes` not run (no GitNexus tool descriptors under workspace `mcps/user-gitnexus/tools` this session).
+
+---
+
+### Run 12 — TASK-6 / TASK-7 / TASK-8 (patch surface, config compat, parallel dedup + coverage)
+
+**Status:** Complete  
+**Date:** 2026-04-27
+
+#### What was done
+
+- **TASK-6:** Expanded `forensics.analysis.orchestrator` module docstring with maintainer rules for `_PATCH_TARGETS` vs `__all__`; added `test_patch_targets_subset_of_all_exports`, `test_patch_surface_tests_track_patch_targets`, `test_patch_targets_modules_nonempty` in `tests/unit/test_orchestrator_patch_surface.py`.
+- **TASK-7:** Added ADR-017 (AnalysisConfig change control; no `HashableField` — governance + compat split); moved flat TOML lift / `_FLAT_TO_GROUP` / `_GROUP_ATTRS` into `src/forensics/config/compat_analysis.py` with `analysis_settings` importing from it; amended ADR-016 references.
+- **TASK-8:** Factored `_run_repo_per_author_pipeline_with_artifacts` in `parallel.py` for `_per_author_worker` and `_isolated_author_worker` (isolated path keeps `emit_success_log=False` for log parity); added root `coverage-tui.toml` and RUNBOOK § item 7 for `pytest --cov-config=coverage-tui.toml` when TUI extra is installed.
+
+#### Files modified
+
+- `src/forensics/analysis/orchestrator/__init__.py`, `parallel.py`
+- `src/forensics/config/compat_analysis.py` (new), `analysis_settings.py`
+- `docs/adr/017-analysis-config-change-control.md` (new), `docs/adr/016-analysis-config-nesting.md`, `docs/RUNBOOK.md`
+- `tests/unit/test_orchestrator_patch_surface.py`, `coverage-tui.toml` (new), `HANDOFF.md`
+
+#### Verification
+
+```
+uv run ruff check . && uv run ruff format --check .
+uv run pytest tests/ -q
+uv run pytest tests/integration/test_parallel_parity.py -v --no-cov -q
+uv run pytest tests/unit/test_config_hash.py -v --no-cov -q
+```
+
+Full suite: **passed** (1 known xfail); parallel parity: **3 passed**. GitNexus MCP server not available in this Cursor session; run upstream `impact` on edited symbols before merge when enabled.
+
+#### Unresolved / next steps
+
+- None for this slice.

@@ -20,6 +20,7 @@ import shutil
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
 from uuid import uuid4
 
 from forensics.analysis.convergence import ProbabilityTrajectory
@@ -57,6 +58,59 @@ def _embedding_fail_should_propagate(mode: AnalysisMode, exc: BaseException) -> 
         exc,
         (EmbeddingDriftInputsError, EmbeddingRevisionGateError),
     )
+
+
+def _run_repo_per_author_pipeline_with_artifacts(
+    slug: str,
+    repo: Repository,
+    paths: AnalysisArtifactPaths,
+    config: ForensicsSettings,
+    prob_map: dict[str, ProbabilityTrajectory],
+    mode: AnalysisMode,
+    stage_timings: dict[str, float],
+    *,
+    job_kind: Literal["analysis", "analysis-refresh"],
+    emit_success_log: bool,
+) -> AnalysisResult | None:
+    """Shared path: analyze, assert strict-decode reset, write per-author JSON.
+
+    ``job_kind`` selects log prefixes and assert diagnostics. Isolated refresh
+    workers omit the per-author success log line to match historical behavior.
+    """
+    per_author = _run_per_author_analysis(
+        slug,
+        repo,
+        paths,
+        config,
+        probability_trajectory_by_slug=prob_map,
+        stage_timings=stage_timings,
+        mode=mode,
+    )
+    assert not STRICT_DECODE_CTX.get(), (
+        f"STRICT_DECODE_CTX must be reset after _run_per_author_analysis ({job_kind} slug={slug!r})"
+    )
+    if per_author is None:
+        logger.info("%s: slug=%s skipped (missing author or features)", job_kind, slug)
+        return None
+    assembled, change_points, convergence_windows, all_tests = per_author
+    _write_per_author_json_artifacts(
+        slug,
+        paths,
+        change_points,
+        convergence_windows,
+        assembled,
+        all_tests,
+    )
+    if emit_success_log:
+        logger.info(
+            "%s: slug=%s change_points=%d windows=%d tests=%d",
+            job_kind,
+            slug,
+            len(change_points),
+            len(convergence_windows),
+            len(all_tests),
+        )
+    return assembled
 
 
 _REQUIRED_AUTHOR_ARTIFACT_SUFFIXES = (
@@ -121,37 +175,19 @@ def _per_author_worker(
         )
     stage_timings: dict[str, float] = {}
     with Repository(db_path) as repo:
-        per_author = _run_per_author_analysis(
+        assembled = _run_repo_per_author_pipeline_with_artifacts(
             slug,
             repo,
             paths,
             config,
-            probability_trajectory_by_slug=prob_map,
-            stage_timings=stage_timings,
-            mode=mode,
+            prob_map,
+            mode,
+            stage_timings,
+            job_kind="analysis",
+            emit_success_log=True,
         )
-    assert not STRICT_DECODE_CTX.get(), (
-        f"STRICT_DECODE_CTX must be reset after _run_per_author_analysis (worker slug={slug!r})"
-    )
-    if per_author is None:
-        logger.info("analysis: slug=%s skipped (missing author or features)", slug)
+    if assembled is None:
         return slug, None, stage_timings
-    assembled, change_points, convergence_windows, all_tests = per_author
-    _write_per_author_json_artifacts(
-        slug,
-        paths,
-        change_points,
-        convergence_windows,
-        assembled,
-        all_tests,
-    )
-    logger.info(
-        "analysis: slug=%s change_points=%d windows=%d tests=%d",
-        slug,
-        len(change_points),
-        len(convergence_windows),
-        len(all_tests),
-    )
     return slug, assembled, stage_timings
 
 
@@ -181,31 +217,19 @@ def _isolated_author_worker(
     isolated_paths = _isolated_author_paths(paths, run_id, slug)
     stage_timings: dict[str, float] = {}
     with Repository(paths.db_path) as repo:
-        per_author = _run_per_author_analysis(
+        assembled = _run_repo_per_author_pipeline_with_artifacts(
             slug,
             repo,
             isolated_paths,
             config,
-            probability_trajectory_by_slug=prob_map,
-            stage_timings=stage_timings,
-            mode=mode,
+            prob_map,
+            mode,
+            stage_timings,
+            job_kind="analysis-refresh",
+            emit_success_log=False,
         )
-    assert not STRICT_DECODE_CTX.get(), (
-        "STRICT_DECODE_CTX must be reset after _run_per_author_analysis "
-        f"(isolated worker slug={slug!r})"
-    )
-    if per_author is None:
-        logger.info("analysis-refresh: slug=%s skipped (missing author or features)", slug)
+    if assembled is None:
         return None
-    assembled, change_points, convergence_windows, all_tests = per_author
-    _write_per_author_json_artifacts(
-        slug,
-        isolated_paths,
-        change_points,
-        convergence_windows,
-        assembled,
-        all_tests,
-    )
     return IsolatedAuthorAnalysis(
         slug=slug,
         analysis_dir=isolated_paths.analysis_dir,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import Final
 
 import pytest
 
@@ -105,3 +106,26 @@ def test_non_patch_surface_symbol_not_forwarded_from_package(
     monkeypatch.setattr(orch, "_resolve_targets_and_controls", lambda *a, **k: "nope")
     orch._sync_patchable_globals()
     assert comp_mod._resolve_targets_and_controls is orig
+
+
+_STDLIB_PATCH_KEYS: Final[frozenset[str]] = frozenset({"uuid4", "datetime"})
+
+
+def test_patch_targets_subset_of_all_exports() -> None:
+    """Every synced patch key is either a stdlib hook or listed in ``__all__``."""
+    public = frozenset(orch.__all__)
+    for key in orch._PATCH_TARGETS:
+        assert key in _STDLIB_PATCH_KEYS or key in public, (
+            f"{key!r} must be in __all__ or stdlib patch allowlist"
+        )
+
+
+def test_patch_surface_tests_track_patch_targets() -> None:
+    """Parametrized patch tests must stay aligned with :data:`_PATCH_TARGETS`."""
+    assert set(_PATCH_SETTERS) == set(orch._PATCH_TARGETS)
+    assert set(_PATCH_ASSERTS) == set(orch._PATCH_TARGETS)
+
+
+def test_patch_targets_modules_nonempty() -> None:
+    for name, modules in orch._PATCH_TARGETS.items():
+        assert modules, f"{name!r} must list at least one submodule"

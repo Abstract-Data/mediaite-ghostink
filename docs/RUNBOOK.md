@@ -12,6 +12,13 @@ Operational quick reference. Agents: append new sections here whenever you disco
 4. Run tests: `uv run pytest tests/ -v`
 5. Run with coverage: `uv run pytest tests/ -v --cov-report=term-missing` (coverage target `forensics` is configured in [`pyproject.toml`](../pyproject.toml) `addopts`)
 6. Optional Textual TUI: `uv sync --extra tui` enables `tests/test_tui.py` and related progress tests. A plain `uv sync` skips them; coverage config **omits** `forensics/tui/*` from the aggregate denominator so `fail_under=75` still passes without the extra.
+7. **Coverage including TUI (optional):** after `uv sync --extra dev --extra tui`, measure the Textual package with the alternate RC so the denominator includes `forensics/tui/*`:
+
+   ```bash
+   uv run pytest tests/ -v --cov=forensics --cov-config=coverage-tui.toml --cov-report=term-missing
+   ```
+
+   CI keeps the default [`pyproject.toml`](../pyproject.toml) `[tool.coverage.run]` omit list for speed and stable `fail_under`.
 
 ### Automated pipeline E2E (`tests/integration/test_pipeline_end_to_end.py`)
 
