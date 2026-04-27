@@ -4,7 +4,7 @@ overview: "Implement the Phase 17 prompt end-to-end: AI-direction priors registr
 todos:
   - id: phase-a-priors
     content: Add direction_priors.py + tests/unit/test_direction_priors.py (feature-key audit)
-    status: pending
+    status: completed
   - id: phase-b-report
     content: Extend report.py (DirectionConcordance, DirectionBreakdown, VolumeRampFlag, classify_*, compute_*) + models/__init__.py re-exports
     status: pending
