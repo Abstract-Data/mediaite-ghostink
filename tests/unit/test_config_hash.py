@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import pytest
 
+from forensics.config import get_settings
 from forensics.config.analysis_settings import AnalysisConfig, apply_flat_analysis_overrides
 from forensics.config.settings import FeaturesConfig, ForensicsSettings
 from forensics.utils.provenance import (
@@ -157,6 +159,29 @@ def test_default_analysis_config_model_hash_golden() -> None:
     """
     base = AnalysisConfig()
     assert compute_model_config_hash(base, length=16, round_trip=True) == "81d550a7032fbe95"
+
+
+def test_e2e_fixture_empty_analysis_hash_matches_default_golden(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Flat TOML with empty ``[analysis]`` must match nested ``AnalysisConfig()`` hash."""
+    fixture = (
+        Path(__file__).resolve().parents[2]
+        / "tests"
+        / "integration"
+        / "fixtures"
+        / "e2e"
+        / "config.toml"
+    )
+    monkeypatch.setenv("FORENSICS_CONFIG_FILE", str(fixture))
+    get_settings.cache_clear()
+    try:
+        settings = get_settings()
+        golden = compute_model_config_hash(AnalysisConfig(), length=16, round_trip=True)
+        assert compute_analysis_config_hash(settings) == golden
+        assert golden == "81d550a7032fbe95"
+    finally:
+        get_settings.cache_clear()
 
 
 def test_pipeline_config_hash_invalidates_when_scraping_hash_field_changes() -> None:

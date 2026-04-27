@@ -6043,3 +6043,36 @@ npx gitnexus analyze --embeddings   # Repository indexed successfully (~29s); no
 
 - Fix or fixture the two failing tests if the default `uv run pytest tests/` gate must be green locally.
 - After future large merges, re-run `npx gitnexus analyze` (with `--embeddings` when `stats.embeddings > 0`).
+
+---
+
+### Refactoring Run 11 — gap fill (G1/G2)
+
+**Status:** Complete  
+**Date:** 2026-04-27
+
+#### What Was Done
+
+- **G1:** `scripts/migrate_feature_parquets.py` — default SQLite path uses `DEFAULT_DB_RELATIVE` from `forensics.config` (same as CLI); `--articles-db` help reflects the canonical relative path.
+- **G2:** `tests/unit/test_config_hash.py` — `test_e2e_fixture_empty_analysis_hash_matches_default_golden` locks empty `[analysis]` in `tests/integration/fixtures/e2e/config.toml` to the same digest as nested `AnalysisConfig()` defaults (`81d550a7032fbe95`).
+
+#### Files Modified
+
+- `scripts/migrate_feature_parquets.py`
+- `tests/unit/test_config_hash.py`
+- `HANDOFF.md` — this block
+
+#### Verification Evidence
+
+```
+uv run ruff check scripts/migrate_feature_parquets.py tests/unit/test_config_hash.py   # pass
+uv run pytest tests/unit/test_config_hash.py -v --no-cov   # 45 passed
+```
+
+#### GitNexus
+
+- Script + test only (no `src/` symbol edits); MCP impact not invoked.
+
+#### Risks & Next Steps
+
+- None; optional full `uv run pytest tests/` if you want repo-wide regression signal beyond `test_config_hash`.
