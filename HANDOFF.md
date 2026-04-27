@@ -5333,3 +5333,48 @@ uv run forensics preflight --output json
 #### Risks & Next Steps
 - Before merge: enable GitNexus MCP and attach `detect_changes` output to the PR (or paste `git diff --stat origin/main...HEAD` if MCP stays disabled).
 - Commit docs + any pending `src/` changes together or in dependency order per team GitButler / branch policy.
+
+---
+
+### CLI agent-readiness — item 1 (envelope, root `--output`, preflight/dedup)
+**Status:** Complete  
+**Date:** 2026-04-26  
+**Agent/Session:** Cursor agent  
+
+#### What Was Done
+- Added `src/forensics/cli/_envelope.py` (`SCHEMA_VERSION`, `success`, `failure`, `emit`, `status` for text vs json).
+- Extended `ForensicsCliState` with `output_format`, `non_interactive`, `assume_yes`; root callback sets `show_progress=not no_progress and output != "json"`.
+- Moved `--output` / `--non-interactive` / `--yes` to root `_root` in `src/forensics/cli/__init__.py`; `preflight` uses `get_cli_state(ctx)` and emits `emit(success("preflight", _preflight_json_envelope(...)))` in json mode; text preflight lines go to stderr.
+- `dedup recompute-fingerprints`: json via root `--output json` + `emit(success("dedup.recompute_fingerprints", summary))`; default text prints a one-line human summary on stdout.
+
+#### Files Modified
+- `src/forensics/cli/_envelope.py` — new
+- `src/forensics/cli/state.py` — CLI state fields
+- `src/forensics/cli/__init__.py` — root flags, preflight ctx + envelope
+- `src/forensics/cli/dedup.py` — ctx + format branch
+- `tests/unit/test_cli_envelope.py` — new
+- `tests/unit/test_cli_preflight_json.py` — global flag order + envelope assertions
+- `tests/unit/test_simhash_migration.py` — dedup JSON via `--output json` before subcommand
+- `docs/RUNBOOK.md` — machine-readable preflight command + envelope `data` note
+
+#### Verification Evidence
+```
+uv run pytest tests/unit/test_cli_envelope.py tests/unit/test_cli_preflight_json.py tests/unit/test_simhash_migration.py -v --no-cov
+  -> 15 passed
+
+uv run pytest tests/ -v --no-cov -q
+  -> 975 passed, 3 deselected, 1 xfailed
+
+uv run ruff check src/forensics/cli/_envelope.py src/forensics/cli/state.py src/forensics/cli/__init__.py src/forensics/cli/dedup.py tests/unit/test_cli_envelope.py tests/unit/test_cli_preflight_json.py
+  -> pass (after I001 fix on test_cli_envelope)
+```
+
+#### Decisions Made
+- Machine-readable preflight is now `forensics --output json preflight` (global flag before subcommand); inner check payload unchanged under envelope `data`.
+
+#### Unresolved Questions
+- None for this slice.
+
+#### Risks & Next Steps
+- **Breaking:** `forensics preflight --output json` no longer works; use `forensics --output json preflight`. `docs/RUNBOOK.md` preflight line updated; grep for stale `preflight --output` elsewhere if needed (item 10).
+- GitNexus `impact` / `detect_changes`: MCP server not verified in this session; run when enabled before merge.

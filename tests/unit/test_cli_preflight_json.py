@@ -1,4 +1,4 @@
-"""Unit tests for ``forensics preflight --output json`` (P2-OPS-001)."""
+"""Unit tests for ``forensics --output json preflight`` (P2-OPS-001)."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ import pytest
 from typer.testing import CliRunner
 
 from forensics.cli import _preflight_json_envelope, app
+from forensics.cli._envelope import success
 from forensics.preflight import PreflightCheck, PreflightReport
 
 runner = CliRunner()
@@ -76,15 +77,20 @@ def test_preflight_json_status_and_exit(
         "run_all_preflight_checks",
         lambda *_a, **_kw: PreflightReport(checks=checks),
     )
-    result = runner.invoke(app, ["preflight", "--output", "json"])
-    assert result.exit_code == exit_code, result.output
-    body = json.loads(result.output.strip())
-    assert body["status"] == expected_status
-    assert body["strict"] is False
-    assert body["has_failures"] == (expected_status == "fail")
-    assert body["has_warnings"] == (expected_status == "warn")
-    assert "[PASS]" not in result.output
-    assert "Some required checks failed" not in result.output
+    result = runner.invoke(app, ["--output", "json", "preflight"], color=False)
+    assert result.exit_code == exit_code, (result.stdout or "") + (result.stderr or "")
+    stdout = (result.stdout or result.output or "").strip()
+    body = json.loads(stdout)
+    assert body["ok"] is True
+    assert body["type"] == "preflight"
+    assert body["schemaVersion"] == 1
+    data = body["data"]
+    assert data["status"] == expected_status
+    assert data["strict"] is False
+    assert data["has_failures"] == (expected_status == "fail")
+    assert data["has_warnings"] == (expected_status == "warn")
+    assert "[PASS]" not in stdout
+    assert "Some required checks failed" not in stdout
 
 
 def test_preflight_json_deterministic_exact_payload(
@@ -100,16 +106,15 @@ def test_preflight_json_deterministic_exact_payload(
         "run_all_preflight_checks",
         lambda *_a, **_kw: report,
     )
-    expected = json.dumps(
-        _preflight_json_envelope(report, strict=False),
-        sort_keys=True,
-    )
-    result = runner.invoke(app, ["preflight", "--output", "json"])
+    inner = _preflight_json_envelope(report, strict=False)
+    expected = json.dumps(success("preflight", inner), sort_keys=True)
+    result = runner.invoke(app, ["--output", "json", "preflight"], color=False)
     assert result.exit_code == 0
-    assert result.output.strip() == expected
+    assert (result.stdout or result.output or "").strip() == expected
 
 
-def test_preflight_help_lists_output_option() -> None:
-    result = runner.invoke(app, ["preflight", "--help"])
+def test_preflight_help_root_lists_global_output_option() -> None:
+    """``--output`` is a root callback option (must appear before subcommand)."""
+    result = runner.invoke(app, ["--help"], color=False)
     assert result.exit_code == 0
-    assert "--output" in _plain_help(result.output)
+    assert "--output" in _plain_help(result.stdout or result.output)

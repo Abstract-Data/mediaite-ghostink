@@ -105,7 +105,14 @@ def test_dedup_recompute_cli_json(tmp_path: Path) -> None:
         repo.upsert_article(art)
 
     runner = CliRunner()
-    r = runner.invoke(app, ["dedup", "recompute-fingerprints", "--db", str(db)])
-    assert r.exit_code == 0, r.output
-    summary = json.loads(r.output.strip())
-    assert summary == {"recomputed": 1, "skipped": 0, "errors": 0}
+    r = runner.invoke(
+        app,
+        ["--output", "json", "dedup", "recompute-fingerprints", "--db", str(db)],
+        color=False,
+    )
+    assert r.exit_code == 0, (r.stdout or r.output) + (r.stderr or "")
+    stdout = (r.stdout or r.output or "").strip()
+    body = json.loads(stdout)
+    assert body["ok"] is True
+    assert body["type"] == "dedup.recompute_fingerprints"
+    assert body["data"] == {"recomputed": 1, "skipped": 0, "errors": 0}

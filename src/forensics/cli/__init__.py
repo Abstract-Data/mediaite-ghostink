@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import functools
 import importlib.metadata
-import json
 import logging
 import sys
 from pathlib import Path
@@ -13,6 +12,7 @@ from typing import Annotated, Literal
 import httpx
 import typer
 
+from forensics.cli._envelope import emit, success
 from forensics.cli.state import ForensicsCliState, get_cli_state
 from forensics.preflight import PreflightReport
 
@@ -73,6 +73,31 @@ def _root(
             help="Disable Rich progress bars and pipeline observers (CI, logs, minimal TTY).",
         ),
     ] = False,
+    output: Annotated[
+        Literal["text", "json"],
+        typer.Option(
+            "--output",
+            help=(
+                "text (default): human-readable lines on stdout. "
+                "json: one JSON envelope object on stdout (logs to stderr)."
+            ),
+        ),
+    ] = "text",
+    non_interactive: Annotated[
+        bool,
+        typer.Option(
+            "--non-interactive",
+            help="Disable TUI fallbacks and refuse any prompt; auto-fail if a prompt would block.",
+        ),
+    ] = False,
+    yes: Annotated[
+        bool,
+        typer.Option(
+            "--yes",
+            "-y",
+            help="Bypass any confirmation prompt.",
+        ),
+    ] = False,
     log_format: Annotated[
         Literal["text", "json"],
         typer.Option(
@@ -82,7 +107,12 @@ def _root(
     ] = "text",
 ) -> None:
     """AI Writing Forensics Pipeline."""
-    ctx.obj = ForensicsCliState(show_progress=not no_progress)
+    ctx.obj = ForensicsCliState(
+        show_progress=not no_progress and output != "json",
+        output_format=output,
+        non_interactive=non_interactive,
+        assume_yes=yes,
+    )
     level = logging.DEBUG if verbose else logging.INFO
     _configure_logging(level, log_format)
 
@@ -113,7 +143,7 @@ def _preflight_json_envelope(
     *,
     strict: bool,
 ) -> dict[str, object]:
-    """Build the stable JSON object for ``forensics preflight --output json``."""
+    """Build the inner ``data`` payload for ``forensics --output json preflight``."""
     if report.has_failures:
         status = "fail"
     elif report.has_warnings:
@@ -155,6 +185,7 @@ def _settings_load_errors() -> tuple[type[BaseException], ...]:
 
 @app.command(name="preflight")
 def preflight(
+    ctx: typer.Context,
     strict: Annotated[
         bool,
         typer.Option(
@@ -162,19 +193,13 @@ def preflight(
             help="Promote warnings to failures (useful in CI).",
         ),
     ] = False,
-    output: Annotated[
-        Literal["text", "json"],
-        typer.Option(
-            "--output",
-            help="text: human-readable lines; json: one JSON object on stdout (sort_keys=True).",
-        ),
-    ] = "text",
 ) -> None:
     """Run preflight checks and report pass/warn/fail for each boundary."""
     from forensics.config import get_settings
     from forensics.preflight import run_all_preflight_checks
 
     logger = logging.getLogger(__name__)
+    state = get_cli_state(ctx)
     try:
         settings = get_settings()
     except _settings_load_errors() as exc:
@@ -182,20 +207,22 @@ def preflight(
         settings = None
     report = run_all_preflight_checks(settings, strict=strict)
 
-    if output == "json":
-        payload = _preflight_json_envelope(report, strict=strict)
-        typer.echo(json.dumps(payload, sort_keys=True))
+    if state.output_format == "json":
+        emit(success("preflight", _preflight_json_envelope(report, strict=strict)))
     else:
         icons = {"pass": "PASS", "warn": "WARN", "fail": "FAIL"}
         for check in report.checks:
-            typer.echo(f"  [{icons[check.status]}] {check.name}: {check.message}")
+            typer.echo(f"  [{icons[check.status]}] {check.name}: {check.message}", err=True)
 
         if report.has_failures:
-            typer.echo("\nSome required checks failed. Fix issues before running the pipeline.")
+            typer.echo(
+                "\nSome required checks failed. Fix issues before running the pipeline.",
+                err=True,
+            )
         elif report.has_warnings:
-            typer.echo("\nAll required checks passed (some warnings).")
+            typer.echo("\nAll required checks passed (some warnings).", err=True)
         else:
-            typer.echo("\nAll preflight checks passed.")
+            typer.echo("\nAll preflight checks passed.", err=True)
 
     if report.has_failures:
         raise typer.Exit(code=1)

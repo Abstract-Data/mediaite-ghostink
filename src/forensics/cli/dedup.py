@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from pathlib import Path
 from typing import Annotated
 
 import typer
 
+from forensics.cli._envelope import emit, success
+from forensics.cli.state import get_cli_state
 from forensics.config import DEFAULT_DB_RELATIVE, get_project_root
 from forensics.storage.repository import Repository
 
@@ -19,6 +20,7 @@ dedup_app = typer.Typer(help="Near-duplicate fingerprint utilities")
 
 @dedup_app.command("recompute-fingerprints")
 def recompute_fingerprints(
+    ctx: typer.Context,
     limit: Annotated[
         int | None,
         typer.Option("--limit", help="Max rows to recompute (testing)."),
@@ -36,4 +38,13 @@ def recompute_fingerprints(
         raise typer.Exit(code=1)
     with Repository(db_path) as repo:
         summary = repo.recompute_stale_dedup_simhashes(limit=limit)
-    typer.echo(json.dumps(summary, sort_keys=True))
+    state = get_cli_state(ctx)
+    if state.output_format == "json":
+        emit(success("dedup.recompute_fingerprints", summary))
+    else:
+        typer.echo(
+            "Dedup fingerprint recompute: "
+            f"recomputed={summary['recomputed']} "
+            f"skipped={summary['skipped']} "
+            f"errors={summary['errors']}",
+        )
