@@ -5425,3 +5425,44 @@ uv run ruff format src/forensics/cli/_commands.py
 #### Risks & Next Steps
 - If new CLI commands are added, register `epilog=` + `with_examples` (or `forensics_examples`) so `test_cli_help_examples` and leaf JSON example assertions keep passing.
 - Re-run `npx gitnexus detect_changes` (MCP) before merge when available.
+
+---
+
+### CLI agent-readiness — items 6 & 8 (`fail()` + TUI / lock / dedup CONFLICT)
+**Status:** Complete  
+**Date:** 2026-04-26  
+**Agent/Session:** Cursor agent  
+
+#### What Was Done
+- Added `src/forensics/cli/_errors.py` with `fail(ctx, cmd, code, message, *, exit_code, suggestion=..., **extra)` returning `typer.Exit` (JSON envelope on stdout in json mode; stderr human lines in text; always logs).
+- Refactored CLI exits to use `fail` where appropriate: `validate`, `export`, `all`, `migrate` (parent missing + no pending migrations), `extract`, `report` (new `ctx` param), `analyze` / `run_analyze` (optional `typer_context` for preregistration, corpus hash, AI baseline paths), `dedup` (missing DB), `section-contrast` (no authors).
+- Item 8: `setup` / `dashboard` refuse `--non-interactive` with `tty_required` (USAGE_ERROR 2); dashboard survey-only flags use `fail`; `lock-preregistration` checks existing lock file and exits CONFLICT (5) unless root `assume_yes` from global `--yes` / `-y` (**must** be `forensics --yes lock-preregistration`, not after subcommand); `dedup recompute-fingerprints` exits CONFLICT (5) when dedup columns exist, `recomputed == 0`, `errors == 0` (after emitting JSON summary in json mode).
+- `Repository.dedup_simhash_columns_present()` for CONFLICT vs missing-schema distinction.
+- Tests: `tests/unit/test_cli_failure_envelope.py`, `tests/unit/test_cli_exit_codes.py`; extended `test_simhash_migration.py` for second-run dedup exit 5; `tests/integration/test_cli.py` assert updated for `config_invalid`.
+
+#### Files Modified
+- `src/forensics/cli/_errors.py` — new
+- `src/forensics/cli/__init__.py` — `fail`, lock guard, validate/export/all/setup/dashboard
+- `src/forensics/cli/analyze.py` — `fail` + `typer_context` threading
+- `src/forensics/cli/dedup.py`, `extract.py`, `report.py`, `migrate.py`
+- `src/forensics/storage/repository.py` — `dedup_simhash_columns_present`
+- `tests/unit/test_cli_failure_envelope.py`, `tests/unit/test_cli_exit_codes.py`, `tests/unit/test_simhash_migration.py`, `tests/integration/test_cli.py`
+
+#### Verification Evidence
+```
+uv run pytest tests/ -q --no-cov
+  -> pass (1 xfail known)
+
+uv run ruff check src/forensics/cli/ src/forensics/storage/repository.py tests/unit/test_cli_exit_codes.py tests/unit/test_cli_failure_envelope.py tests/unit/test_simhash_migration.py tests/integration/test_cli.py
+  -> All checks passed
+```
+
+#### Decisions Made
+- Root `--yes` is stored on `ForensicsCliState.assume_yes`; Typer only binds root options when they appear **before** the subcommand, so overwrite flow is `forensics --yes lock-preregistration` (examples and analyze suggestion updated accordingly).
+
+#### Unresolved Questions
+- None.
+
+#### Risks & Next Steps
+- Operators/scripts that used `forensics lock-preregistration --yes` must move `--yes` to the root (`forensics --yes lock-preregistration`).
+- GitNexus MCP was unavailable this session; run `impact` / `detect_changes` when the server is enabled.

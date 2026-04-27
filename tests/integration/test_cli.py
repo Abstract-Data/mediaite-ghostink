@@ -197,7 +197,7 @@ def test_validate_detects_config_error(tmp_path, monkeypatch) -> None:
         result = runner.invoke(app, ["validate"])
         assert result.exit_code == 2
         combined = (result.stdout or "") + (result.stderr or "")
-        assert "Config error" in combined
+        assert "config_invalid" in combined or "Config error" in combined
     finally:
         get_settings.cache_clear()
 

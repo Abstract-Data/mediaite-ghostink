@@ -13,7 +13,7 @@ todos:
     status: completed
   - id: item-6-8
     content: _errors.fail refactor; lock overwrite + non-interactive TUI + dedup CONFLICT; failure envelope tests
-    status: pending
+    status: completed
   - id: item-9
     content: Scraper transient classification + scrape CLI exit 4 + test_scrape_transient_classification
     status: pending

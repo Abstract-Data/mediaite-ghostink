@@ -16,6 +16,7 @@ from typer.main import get_command
 from forensics.cli._commands import run_list_commands
 from forensics.cli._decorators import examples_epilog, forensics_examples
 from forensics.cli._envelope import emit, status, success
+from forensics.cli._errors import fail
 from forensics.cli._exit import ExitCode
 from forensics.cli.state import ForensicsCliState, get_cli_state
 from forensics.preflight import PreflightReport
@@ -257,7 +258,7 @@ def preflight(
 
 
 _LOCK_EPILOG, _lock_ex = forensics_examples(
-    "forensics lock-preregistration --yes",
+    "forensics --yes lock-preregistration",
     "forensics lock-preregistration",
 )
 
@@ -266,12 +267,25 @@ _LOCK_EPILOG, _lock_ex = forensics_examples(
 @_lock_ex
 def lock_preregistration_cmd(ctx: typer.Context) -> None:
     """Lock analysis thresholds for pre-registration (run before analyzing data)."""
-    from forensics.config import get_settings
+    from forensics.config import get_project_root, get_settings
     from forensics.preregistration import lock_preregistration
 
+    st = get_cli_state(ctx)
+    lock_path = get_project_root() / "data" / "preregistration" / "preregistration_lock.json"
+    if lock_path.is_file() and not st.assume_yes:
+        raise fail(
+            ctx,
+            "lock-preregistration",
+            "lock_exists",
+            f"Pre-registration lock already exists: {lock_path}",
+            exit_code=ExitCode.CONFLICT,
+            suggestion=(
+                "re-run: forensics --yes lock-preregistration "
+                "(place global --yes before the subcommand)"
+            ),
+        )
     settings = get_settings()
     path = lock_preregistration(settings)
-    st = get_cli_state(ctx)
     status(f"Pre-registration locked: {path}", output_format=st.output_format)
     status(
         "Run analysis AFTER this point. Threshold changes will trigger warnings.",
@@ -313,14 +327,18 @@ def validate_config(
     from forensics.config import get_settings
     from forensics.preflight import run_all_preflight_checks
 
-    logger = logging.getLogger(__name__)
     st = get_cli_state(ctx)
     try:
         settings = get_settings()
     except _settings_load_errors() as exc:
-        logger.error("Config error: %s", exc)
-        status(f"Config error: {exc}", output_format=st.output_format)
-        raise typer.Exit(int(ExitCode.USAGE_ERROR)) from exc
+        raise fail(
+            ctx,
+            "validate",
+            "config_invalid",
+            f"Could not parse config.toml: {exc}",
+            exit_code=ExitCode.USAGE_ERROR,
+            suggestion="run: forensics preflight to see which check failed",
+        ) from exc
 
     typer.echo(f"Config parsed: {len(settings.authors)} author(s)")
 
@@ -397,8 +415,14 @@ def export_data(
 
     st = get_cli_state(ctx)
     if not db_path.is_file():
-        status(f"SQLite source not found: {db_path}", output_format=st.output_format)
-        raise typer.Exit(int(ExitCode.AUTH_OR_RESOURCE))
+        raise fail(
+            ctx,
+            "export",
+            "database_missing",
+            f"SQLite source not found: {db_path}",
+            exit_code=ExitCode.AUTH_OR_RESOURCE,
+            suggestion="run: forensics scrape --discover --metadata to populate data/articles.db",
+        )
 
     report = export_to_duckdb(
         db_path,
@@ -424,12 +448,20 @@ def run_all(ctx: typer.Context) -> None:
     """Run full pipeline end-to-end: scrape → extract → analyze → report."""
     from forensics.pipeline import run_all_pipeline
 
-    logger = logging.getLogger(__name__)
     st = get_cli_state(ctx)
     rc = run_all_pipeline(show_progress=st.show_progress)
     if rc != 0:
-        logger.error("pipeline exited with code %d", rc)
-        raise typer.Exit(code=rc)
+        try:
+            ec = ExitCode(rc)
+        except ValueError:
+            ec = ExitCode.GENERAL_ERROR
+        raise fail(
+            ctx,
+            "all",
+            "pipeline_failed",
+            f"Pipeline exited with code {rc}",
+            exit_code=ec,
+        )
 
 
 _SETUP_EPILOG, _setup_ex = forensics_examples("forensics setup")
@@ -437,8 +469,18 @@ _SETUP_EPILOG, _setup_ex = forensics_examples("forensics setup")
 
 @app.command(name="setup", epilog=_SETUP_EPILOG)
 @_setup_ex
-def setup_wizard() -> None:
+def setup_wizard(ctx: typer.Context) -> None:
     """Launch the interactive setup wizard (requires the 'tui' extra)."""
+    if get_cli_state(ctx).non_interactive:
+        raise fail(
+            ctx,
+            "setup",
+            "tty_required",
+            "This command requires an interactive terminal (TUI).",
+            exit_code=ExitCode.USAGE_ERROR,
+            suggestion="Omit --non-interactive for headless environments; "
+            "use `forensics preflight` / `forensics all` instead.",
+        )
     from forensics.tui import main as tui_main
 
     rc = tui_main()
@@ -488,13 +530,25 @@ def dashboard_cmd(
 ) -> None:
     """Full-screen pipeline dashboard (``tui`` extra). Incompatible with ``--no-progress``."""
     st = get_cli_state(ctx)
+    if st.non_interactive:
+        raise fail(
+            ctx,
+            "dashboard",
+            "tty_required",
+            "This command requires an interactive terminal (TUI).",
+            exit_code=ExitCode.USAGE_ERROR,
+            suggestion="Omit --non-interactive, or use `forensics all` / `forensics survey` "
+            "for headless runs.",
+        )
     if not st.show_progress:
-        typer.echo(
+        raise fail(
+            ctx,
+            "dashboard",
+            "tty_required",
             "The dashboard needs an interactive terminal. "
             "Omit --no-progress, or use `forensics all` / `forensics survey` with --no-progress.",
-            err=True,
+            exit_code=ExitCode.USAGE_ERROR,
         )
-        raise typer.Exit(int(ExitCode.USAGE_ERROR))
 
     if not survey and (
         skip_scrape
@@ -505,12 +559,15 @@ def dashboard_cmd(
         or post_year_min is not None
         or post_year_max is not None
     ):
-        typer.echo(
-            "Survey-only options (--skip-scrape, --resume, --author, --min-articles, "
-            "--min-span-days, --post-year-min, --post-year-max) require --survey.",
-            err=True,
+        raise fail(
+            ctx,
+            "dashboard",
+            "invalid_options",
+            "Survey-only flags were passed without --survey.",
+            exit_code=ExitCode.USAGE_ERROR,
+            suggestion="Add --survey, or remove --skip-scrape / --resume / --author / "
+            "--min-articles / --min-span-days / --post-year-*.",
         )
-        raise typer.Exit(int(ExitCode.USAGE_ERROR))
 
     from dataclasses import replace
 

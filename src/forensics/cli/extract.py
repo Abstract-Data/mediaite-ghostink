@@ -8,6 +8,7 @@ from typing import Annotated
 import typer
 
 from forensics.cli._decorators import with_examples
+from forensics.cli._errors import fail
 from forensics.cli._exit import ExitCode
 from forensics.cli.state import get_cli_state
 from forensics.config import get_project_root, get_settings
@@ -61,8 +62,13 @@ def extract(
             show_rich_progress=show,
         )
     except ValueError as exc:
-        logger.error("%s", exc)
-        raise typer.Exit(int(ExitCode.GENERAL_ERROR)) from exc
+        raise fail(
+            ctx,
+            "extract",
+            "extract_failed",
+            str(exc),
+            exit_code=ExitCode.GENERAL_ERROR,
+        ) from exc
     logger.info("extract: processed %d article(s)", n)
 
     if probability:
@@ -75,7 +81,14 @@ def extract(
                 "Probability features unavailable (%s). Install with: uv sync --extra probability",
                 exc,
             )
-            raise typer.Exit(int(ExitCode.GENERAL_ERROR)) from exc
+            raise fail(
+                ctx,
+                "extract",
+                "probability_extra_missing",
+                str(exc),
+                exit_code=ExitCode.GENERAL_ERROR,
+                suggestion="Install with: uv sync --extra probability",
+            ) from exc
 
         count = extract_probability_features(
             db_path,

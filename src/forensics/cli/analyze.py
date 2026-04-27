@@ -20,6 +20,7 @@ import typer
 from forensics.analysis.artifact_paths import AnalysisArtifactPaths
 from forensics.cli._decorators import examples_epilog, forensics_examples, with_examples
 from forensics.cli._envelope import status
+from forensics.cli._errors import fail
 from forensics.cli._exit import ExitCode
 from forensics.cli.state import get_cli_state
 from forensics.config import get_project_root, get_settings
@@ -232,6 +233,7 @@ def _run_ai_baseline_stage(
     skip_generation: bool,
     articles_per_cell: int | None,
     baseline_model: str | None,
+    typer_context: typer.Context | None,
 ) -> None:
     from forensics.cli.baseline import run_ai_baseline_command
 
@@ -246,11 +248,20 @@ def _run_ai_baseline_stage(
             model_filter=baseline_model,
         )
     except ValueError as exc:
-        logger.error("ai-baseline failed: %s", exc)
-        raise typer.Exit(int(ExitCode.GENERAL_ERROR)) from exc
+        raise fail(
+            typer_context,
+            "analyze",
+            "ai_baseline_failed",
+            str(exc),
+            exit_code=ExitCode.GENERAL_ERROR,
+        ) from exc
 
 
-def _verify_requested_ai_baseline_vectors(ctx: AnalyzeContext) -> None:
+def _verify_requested_ai_baseline_vectors(
+    ctx: AnalyzeContext,
+    *,
+    typer_context: typer.Context | None,
+) -> None:
     from forensics.analysis.drift import load_ai_baseline_embeddings
 
     slugs = (
@@ -267,11 +278,16 @@ def _verify_requested_ai_baseline_vectors(ctx: AnalyzeContext) -> None:
         ):
             missing.append(slug)
     if missing:
-        logger.error(
-            "ai-baseline requested but drift artifacts have no usable AI baseline vectors: %s",
-            ", ".join(missing),
+        raise fail(
+            typer_context,
+            "analyze",
+            "ai_baseline_vectors_missing",
+            (
+                "ai-baseline requested but drift artifacts have no usable AI baseline vectors: "
+                + ", ".join(missing)
+            ),
+            exit_code=ExitCode.AUTH_OR_RESOURCE,
         )
-        raise typer.Exit(int(ExitCode.AUTH_OR_RESOURCE))
 
 
 def _enforce_shared_byline_gate(
@@ -379,6 +395,7 @@ def run_analyze(  # noqa: C901
     compare_pair: tuple[str, str] | None = None,
     parallel_authors: bool = False,
     allow_pre_phase16_embeddings: bool = False,
+    typer_context: typer.Context | None = None,
 ) -> None:
     """Execute the analyze stage as a plain Python function.
 
@@ -423,12 +440,29 @@ def run_analyze(  # noqa: C901
 
         ok, message = verify_corpus_hash(db_path, analysis_dir)
         if not ok:
-            logger.error("corpus hash verification failed: %s", message)
             if "Corpus hash mismatch" in message:
-                raise typer.Exit(int(ExitCode.CONFLICT))
+                raise fail(
+                    typer_context,
+                    "analyze",
+                    "corpus_hash_mismatch",
+                    message,
+                    exit_code=ExitCode.CONFLICT,
+                )
             if "No custody record" in message:
-                raise typer.Exit(int(ExitCode.AUTH_OR_RESOURCE))
-            raise typer.Exit(int(ExitCode.GENERAL_ERROR))
+                raise fail(
+                    typer_context,
+                    "analyze",
+                    "corpus_custody_missing",
+                    message,
+                    exit_code=ExitCode.AUTH_OR_RESOURCE,
+                )
+            raise fail(
+                typer_context,
+                "analyze",
+                "corpus_hash_error",
+                message,
+                exit_code=ExitCode.GENERAL_ERROR,
+            )
         logger.info("corpus hash verified (%s)", message)
 
     preregistration = verify_preregistration(settings)
@@ -443,8 +477,17 @@ def run_analyze(  # noqa: C901
             "allow_pre_phase16_embeddings": allow_pre_phase16_embeddings,
         }
         _write_run_metadata(analysis_dir, rid="preregistration-blocked", meta=meta)
-        logger.error("pre-registration gate failed: %s", preregistration.message)
-        raise typer.Exit(int(ExitCode.CONFLICT))
+        raise fail(
+            typer_context,
+            "analyze",
+            "preregistration_not_locked",
+            preregistration.message,
+            exit_code=ExitCode.CONFLICT,
+            suggestion=(
+                "run: forensics --yes lock-preregistration "
+                "(or pass --exploratory to bypass)"
+            ),
+        )
 
     if compare and not (
         parallel_authors or changepoint or timeseries or drift or ai_baseline or convergence
@@ -499,8 +542,9 @@ def run_analyze(  # noqa: C901
             skip_generation=skip_generation,
             articles_per_cell=articles_per_cell,
             baseline_model=baseline_model,
+            typer_context=typer_context,
         )
-        _verify_requested_ai_baseline_vectors(ctx)
+        _verify_requested_ai_baseline_vectors(ctx, typer_context=typer_context)
     logger.info(
         "analyze: completed (changepoint=%s, timeseries=%s, drift=%s, "
         "full_analysis=%s, ai_baseline=%s, author=%s)",
@@ -697,6 +741,7 @@ def analyze(
         compare_pair=parsed_pair,
         parallel_authors=parallel_authors,
         allow_pre_phase16_embeddings=allow_pre_phase16_embeddings,
+        typer_context=ctx,
     )
 
 
@@ -812,7 +857,13 @@ def section_contrast_cmd(
             "section-contrast: no authors resolved (check --author / config.toml)",
             output_format=fmt,
         )
-        raise typer.Exit(int(ExitCode.USAGE_ERROR))
+        raise fail(
+            ctx,
+            "analyze.section_contrast",
+            "no_authors",
+            "No authors resolved (check --author / config.toml).",
+            exit_code=ExitCode.USAGE_ERROR,
+        )
 
     written = 0
     for author_row in author_rows:

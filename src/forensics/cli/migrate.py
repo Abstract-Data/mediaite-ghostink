@@ -25,6 +25,7 @@ import typer
 
 from forensics.cli._decorators import examples_epilog, forensics_examples, with_examples
 from forensics.cli._envelope import status
+from forensics.cli._errors import fail
 from forensics.cli._exit import ExitCode
 from forensics.cli.state import get_cli_state
 
@@ -60,11 +61,16 @@ def migrate(
     from forensics.storage.repository import Repository
 
     logger = logging.getLogger(__name__)
-    st = get_cli_state(ctx)
     target = db_path or (get_project_root() / "data" / "articles.db")
     if not target.parent.is_dir():
-        status(f"Parent directory does not exist: {target.parent}", output_format=st.output_format)
-        raise typer.Exit(int(ExitCode.AUTH_OR_RESOURCE))
+        raise fail(
+            ctx,
+            "migrate",
+            "parent_missing",
+            f"Parent directory does not exist: {target.parent}",
+            exit_code=ExitCode.AUTH_OR_RESOURCE,
+            suggestion="Create the path or pass a valid --db location.",
+        )
 
     with Repository(target) as repo:
         applied = repo.apply_migrations()
@@ -72,8 +78,14 @@ def migrate(
         logger.info("Applied %d SQLite migration(s): %s", len(applied), applied)
         typer.echo(f"Applied migrations: {applied}")
     else:
-        status("No pending SQLite migrations.", output_format=st.output_format)
-        raise typer.Exit(int(ExitCode.CONFLICT))
+        raise fail(
+            ctx,
+            "migrate",
+            "no_pending_migrations",
+            "No pending SQLite migrations (schema already current).",
+            exit_code=ExitCode.CONFLICT,
+            suggestion="Nothing to apply; use a newer migration package if you expected changes.",
+        )
 
 
 @features_app.command(name="migrate", epilog=_FEATURES_MIG_EPILOG)
