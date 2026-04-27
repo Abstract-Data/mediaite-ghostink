@@ -83,16 +83,17 @@ def compute_analysis_config_hash(settings: ForensicsSettings) -> str:
     return compute_model_config_hash(settings.analysis, length=16, round_trip=True)
 
 
-def validate_analysis_result_config_hashes(
-    settings: ForensicsSettings,
+def _scan_author_result_hashes(
     analysis_dir: Path,
     author_slugs: list[str],
-) -> tuple[bool, str]:
-    """Validate that per-author results match the current analysis config hash."""
-    expected = compute_analysis_config_hash(settings)
+    *,
+    expected: str,
+) -> tuple[list[str], list[str], list[str], list[tuple[str, str]]]:
+    """Load per-slug results; return (missing, invalid, mismatched_messages, observed_hashes)."""
     missing: list[str] = []
     mismatched: list[str] = []
     invalid: list[str] = []
+    observed_hashes: list[tuple[str, str]] = []
     for slug in author_slugs:
         path = analysis_dir / f"{slug}_result.json"
         if not path.is_file():
@@ -104,15 +105,43 @@ def validate_analysis_result_config_hashes(
             invalid.append(str(path))
             continue
         actual = payload.get("config_hash")
+        if isinstance(actual, str) and actual:
+            observed_hashes.append((slug, actual))
         if actual != expected:
             mismatched.append(f"{path} config_hash={actual!r} expected={expected!r}")
+    return missing, invalid, mismatched, observed_hashes
+
+
+def validate_analysis_result_config_hashes(
+    settings: ForensicsSettings,
+    analysis_dir: Path,
+    author_slugs: list[str],
+) -> tuple[bool, str]:
+    """Validate that per-author results match the current analysis config hash.
+
+    P-01 — refuses a cohort where per-author ``*_result.json`` files carry
+    **distinct** ``config_hash`` values (mixed pipeline runs), even before
+    checking whether any hash matches the live settings.
+    """
+    expected = compute_analysis_config_hash(settings)
+    missing, invalid, mismatched, observed_hashes = _scan_author_result_hashes(
+        analysis_dir,
+        author_slugs,
+        expected=expected,
+    )
     problems: list[str] = []
     if missing:
         problems.append("missing result artifacts: " + "; ".join(missing))
     if invalid:
         problems.append("invalid result artifacts: " + "; ".join(invalid))
-    if mismatched:
-        problems.append("stale or mixed analysis config hashes: " + "; ".join(mismatched))
+    distinct = {h for _slug, h in observed_hashes}
+    if len(distinct) > 1:
+        detail = "; ".join(f"{s}={h!r}" for s, h in sorted(observed_hashes))
+        problems.append(
+            "mixed config_hash across authors (re-run full analysis for a single cohort): " + detail
+        )
+    elif mismatched:
+        problems.append("stale or mismatched analysis config hashes: " + "; ".join(mismatched))
     if problems:
         return False, "Analysis artifact compatibility failed: " + " | ".join(problems)
     return True, "Analysis result config hashes match current analysis settings."
@@ -171,6 +200,22 @@ def get_run_metadata(settings: ForensicsSettings) -> dict[str, str]:
         "timestamp": datetime.now(UTC).isoformat(),
         "python_version": sys.version,
     }
+
+
+def read_latest_scraped_at_iso(db_path: Path) -> str | None:
+    """D-09 — newest ``articles.scraped_at`` timestamp for run-metadata staleness cues."""
+    if not db_path.is_file():
+        return None
+    conn = open_repository_connection(db_path)
+    try:
+        row = conn.execute(
+            "SELECT MAX(scraped_at) FROM articles WHERE scraped_at IS NOT NULL",
+        ).fetchone()
+    finally:
+        conn.close()
+    if not row or row[0] is None:
+        return None
+    return str(row[0])
 
 
 def write_corpus_custody(db_path: Path, analysis_dir: Path) -> Path:

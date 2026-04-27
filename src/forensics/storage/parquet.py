@@ -70,6 +70,28 @@ def _read_parquet_schema_version(path: Path) -> int | None:
         return None
 
 
+def merge_parquet_metadata(path: Path, extra: dict[str, str]) -> None:
+    """Merge string key/value pairs into Parquet Arrow schema metadata (N-04).
+
+    Used after :func:`write_parquet_atomic` to attach non-schema version tags
+    such as ``forensics.ai_marker_list_version`` without bumping the integer
+    ``forensics.schema_version`` contract.
+    """
+    try:
+        import pyarrow.parquet as pq
+    except ImportError:  # pragma: no cover
+        return
+    try:
+        table = pq.read_table(path)
+    except (OSError, ValueError):
+        return
+    meta = dict(table.schema.metadata or {})
+    for k, v in extra.items():
+        meta[k.encode("utf-8")] = str(v).encode("utf-8")
+    table = table.replace_schema_metadata(meta)
+    pq.write_table(table, path)
+
+
 def _stamp_parquet_schema_version(path: Path, version: int) -> None:
     """Rewrite ``path`` preserving data but adding our schema-version key.
 
@@ -153,10 +175,17 @@ def write_features(features: list[FeatureVector], output_path: Path) -> None:
 
     ``write_parquet_atomic`` stamps the current
     ``feature_parquet_schema_version`` into parquet key/value metadata
-    automatically (Phase 15 Step 0.3).
+    automatically (Phase 15 Step 0.3). N-04 stamps ``ai_marker_list_version``
+    alongside without forcing a parquet schema migration.
     """
+    from forensics.features.lexical import AI_MARKER_LIST_VERSION
+
     rows = [_serialize_record(f.to_flat_dict()) for f in features]
     write_parquet_atomic(output_path, rows)
+    merge_parquet_metadata(
+        output_path,
+        {"forensics.ai_marker_list_version": AI_MARKER_LIST_VERSION},
+    )
 
 
 def scan_features(path: Path) -> pl.LazyFrame:
@@ -208,9 +237,13 @@ def load_feature_frame_sorted(features_path: Path) -> pl.LazyFrame:
     if found is None or found < required:
         raise SchemaMigrationRequired(features_path, found, required)
     lf = scan_features(features_path)
-    if "timestamp" not in lf.collect_schema().names():
+    schema_names = lf.collect_schema().names()
+    if "timestamp" not in schema_names:
         msg = f"features parquet missing timestamp: {features_path}"
         raise ValueError(msg)
+    # C-01 — tie-break equal timestamps so changepoint / hypothesis ordering is stable.
+    if "article_id" in schema_names:
+        return lf.sort(["timestamp", "article_id"])
     return lf.sort("timestamp")
 
 
@@ -229,15 +262,17 @@ def write_embeddings_manifest(records: list[EmbeddingRecord], path: Path) -> Non
 
 
 def read_embeddings_manifest(path: Path) -> list[EmbeddingRecord]:
+    """D-05 — last row wins per ``article_id`` when the manifest contains duplicates."""
     if not path.is_file():
         return []
-    out: list[EmbeddingRecord] = []
+    by_id: dict[str, EmbeddingRecord] = {}
     for line in path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line:
             continue
-        out.append(EmbeddingRecord.model_validate_json(line))
-    return out
+        rec = EmbeddingRecord.model_validate_json(line)
+        by_id[rec.article_id] = rec
+    return list(by_id.values())
 
 
 # Per-author batch file (Phase 5): many articles, one compressed NPZ on disk.

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 
 from forensics.analysis.artifact_paths import AnalysisArtifactPaths
@@ -22,7 +23,9 @@ from forensics.analysis.orchestrator.timings import AnalysisTimings
 from forensics.config.settings import ForensicsSettings
 from forensics.models.analysis import AnalysisResult
 from forensics.storage.json_io import write_json_artifact
-from forensics.utils.provenance import write_corpus_custody
+from forensics.utils.provenance import read_latest_scraped_at_iso, write_corpus_custody
+
+logger = logging.getLogger(__name__)
 
 __all__ = ["assemble_analysis_result", "run_full_analysis"]
 
@@ -67,11 +70,12 @@ def run_full_analysis(
     buckets so the bench script can emit non-zero per-stage measurements.
 
     ``mp_context`` selects the ``multiprocessing`` start method for the
-    worker pool (e.g. ``"fork"`` / ``"spawn"`` / ``"forkserver"``). The
-    ``"fork"`` context inherits the parent process' module state — used by
-    the parity test in ``tests/integration/test_parallel_parity.py`` so the
-    monkeypatched ``uuid4`` / ``datetime`` pinning propagates into workers.
-    Production callers should leave this ``None`` (system default).
+    worker pool (e.g. ``"fork"`` / ``"spawn"`` / ``"forkserver"``). When
+    omitted, the orchestrator uses ``"spawn"`` (C-09 / macOS-safe). The
+    ``"fork"`` context inherits the parent process' module state — pass
+    ``mp_context="fork"`` in ``tests/integration/test_parallel_parity.py``-style
+    fixtures so monkeypatched ``uuid4`` / ``datetime`` pinning propagates into
+    workers; do not use ``fork`` in production after native libs load.
     """
     # Parent dirs for analysis outputs are created inside the write helpers
     # (``write_json_artifact`` / ``write_corpus_custody``); no explicit mkdir
@@ -122,9 +126,21 @@ def run_full_analysis(
     )
     compare_seconds = time.perf_counter() - t_compare
 
+    if not comparison_payload.get("targets"):
+        logger.warning(
+            "comparison_report: empty targets — no target-vs-control comparisons produced; "
+            "check target role in config, on-disk result artifacts, and --author scope (L-02)"
+        )
+
     write_json_artifact(paths.comparison_report_json(), comparison_payload)
 
     _merge_run_metadata(paths, results, comparison_payload)
+    scraped = read_latest_scraped_at_iso(paths.db_path)
+    if scraped:
+        meta_path = paths.run_metadata_json()
+        meta = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.is_file() else {}
+        meta["last_scraped_at"] = scraped
+        write_json_artifact(meta_path, meta)
     if sensitivity_summary:
         meta_path = paths.run_metadata_json()
         meta = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.is_file() else {}

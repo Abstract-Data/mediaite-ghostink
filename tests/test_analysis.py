@@ -448,7 +448,7 @@ def test_intra_variance_uniform() -> None:
     ]
     out = compute_intra_period_variance(pairs, period="month")
     assert out[0][0] == "2024-03"
-    assert out[0][1] == 0.0
+    assert out[0][1] == pytest.approx(0.0, abs=1e-9)
 
 
 def test_ai_convergence_signal() -> None:

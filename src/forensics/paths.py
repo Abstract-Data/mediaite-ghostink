@@ -47,6 +47,14 @@ class AnalysisArtifactPaths:
     def convergence_json(self, author_slug: str) -> Path:
         return self.analysis_dir / f"{author_slug}_convergence.json"
 
+    def convergence_components_json(self, author_slug: str) -> Path:
+        """L-01 — per-window convergence component breakdown (JSON)."""
+        return self.analysis_dir / f"{author_slug}_convergence_components.json"
+
+    def imputation_stats_json(self, author_slug: str) -> Path:
+        """L-05 — NaN / inf imputation counts prior to changepoint detection."""
+        return self.analysis_dir / f"{author_slug}_imputation_stats.json"
+
     def result_json(self, author_slug: str) -> Path:
         return self.analysis_dir / f"{author_slug}_result.json"
 

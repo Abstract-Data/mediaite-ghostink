@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import shutil
-from collections import defaultdict
+from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -38,6 +37,7 @@ from forensics.paths import AnalysisArtifactPaths, resolve_author_rows
 from forensics.storage.json_io import ensure_dir
 from forensics.storage.parquet import (
     AUTHOR_EMBEDDING_BATCH_BASENAME,
+    read_embeddings_manifest,
     write_author_embedding_batch,
     write_embeddings_manifest,
     write_features,
@@ -78,20 +78,26 @@ class _AuthorBatchResult:
     failed: int = 0
 
 
-def _recent_peer_texts(
-    articles_chrono: list[Article],
-    idx: int,
-    days: int,
-) -> list[str]:
-    """Clean texts of same-author articles in ``[cur-days, cur)`` (exclude current index)."""
-    cur = articles_chrono[idx].published_date
-    start = cur - timedelta(days=days)
-    out: list[str] = []
-    for j in range(idx):
-        a = articles_chrono[j]
-        if start <= a.published_date < cur:
-            out.append(a.clean_text)
-    return out
+@dataclass(slots=True)
+class _PeerDequeWindows:
+    """C-12 — sliding 90-day deque for peer texts (O(n) per author vs O(n²) rescans)."""
+
+    _q: deque[tuple[datetime, str]] = field(default_factory=deque)
+
+    def peers_before(self, article: Article) -> tuple[list[str], list[str]]:
+        """Return ``(recent30, recent90)`` for ``article`` without mutating history."""
+        cur = article.published_date
+        start90 = cur - timedelta(days=90)
+        while self._q and self._q[0][0] < start90:
+            self._q.popleft()
+        start30 = cur - timedelta(days=30)
+        recent30 = [t for dt, t in self._q if dt >= start30]
+        recent90 = [t for _dt, t in self._q]
+        return recent30, recent90
+
+    def record(self, article: Article) -> None:
+        """Append ``article`` after successful feature extraction for this index."""
+        self._q.append((article.published_date, article.clean_text))
 
 
 def _archive_embeddings_if_mismatch(
@@ -100,27 +106,40 @@ def _archive_embeddings_if_mismatch(
     model_version: str,
     model_revision: str,
 ) -> None:
+    """P-05 — scan the full embedding manifest; archive on any model mismatch or mixed tuples."""
     manifest = embed_root / "manifest.jsonl"
     if not manifest.is_file():
         return
     try:
-        first = json.loads(manifest.read_text(encoding="utf-8").splitlines()[0])
-    except (json.JSONDecodeError, IndexError, OSError):
+        records = read_embeddings_manifest(manifest)
+    except OSError:
         return
-    manifest_rev = str(first.get("model_revision") or "")
-    if (
-        first.get("model_name") == model_name
-        and first.get("model_version") == model_version
-        and manifest_rev == model_revision
-    ):
+    if not records:
+        return
+    expected = (model_name, model_version, str(model_revision or ""))
+    triples = {(r.model_name, r.model_version, str(r.model_revision or "")) for r in records}
+    if len(triples) > 1:
+        ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+        dest = embed_root.parent / f"embeddings_archive_{ts}"
+        logger.warning(
+            "Embedding manifest mixes multiple model tuples %s; archiving to %s",
+            triples,
+            dest,
+        )
+        if embed_root.exists():
+            shutil.move(str(embed_root), str(dest))
+        ensure_dir(embed_root)
+        return
+    got = triples.pop()
+    if got == expected:
         return
     ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     dest = embed_root.parent / f"embeddings_archive_{ts}"
     logger.warning(
         "Embedding model mismatch (manifest=%s/%s@%s, config=%s/%s@%s). Archiving to %s",
-        first.get("model_name"),
-        first.get("model_version"),
-        manifest_rev or "(none)",
+        got[0],
+        got[1],
+        got[2] or "(none)",
         model_name,
         model_version,
         model_revision,
@@ -170,6 +189,8 @@ def _extract_features_for_article(
     nlp: Any,
     settings: ForensicsSettings,
     doc: Any | None = None,
+    *,
+    peer_windows: _PeerDequeWindows,
 ) -> FeatureVector:
     """Compute the per-article :class:`FeatureVector`.
 
@@ -186,8 +207,7 @@ def _extract_features_for_article(
     lex = lexical.extract_lexical_features(article.clean_text, doc)
     pos = pos_patterns.extract_pos_pattern_features(doc)
     struct = structural.extract_structural_features(article.clean_text, doc)
-    recent30 = _recent_peer_texts(seq, idx, 30)
-    recent90 = _recent_peer_texts(seq, idx, 90)
+    recent30, recent90 = peer_windows.peers_before(article)
     cont = content.extract_content_features(
         article.clean_text,
         doc,
@@ -288,6 +308,7 @@ def _process_author_batch(
     # multiprocessing would deadlock when nested.
     texts = [a.clean_text for a in articles_seq]
     docs_iter = nlp.pipe(texts, batch_size=200, n_process=1)
+    peer_windows = _PeerDequeWindows()
 
     for idx, (article, doc) in enumerate(zip(articles_seq, docs_iter, strict=True)):
         running_processed = processed_before_batch + result.processed
@@ -298,7 +319,15 @@ def _process_author_batch(
                 author_name,
             )
         try:
-            fv = _extract_features_for_article(article, idx, articles_seq, nlp, settings, doc=doc)
+            fv = _extract_features_for_article(
+                article,
+                idx,
+                articles_seq,
+                nlp,
+                settings,
+                doc=doc,
+                peer_windows=peer_windows,
+            )
             result.features.append(fv)
 
             if not skip_embeddings:
@@ -328,6 +357,7 @@ def _process_author_batch(
                 )
                 raise RuntimeError(msg) from exc
         finally:
+            peer_windows.record(article)
             if progress is not None and task_id is not None:
                 progress.update(task_id, advance=1)
 

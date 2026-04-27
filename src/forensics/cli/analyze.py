@@ -126,7 +126,8 @@ def _run_compare_only_flow(ctx: AnalyzeContext) -> None:
         "run_timestamp": datetime.now(UTC).isoformat(),
         "config_hash": pipeline_ctx.config_hash,
         "compare_only": True,
-        "author": ctx.author_slug,
+        "last_processed_author": ctx.author_slug,
+        "authors_in_run": ([ctx.author_slug] if ctx.author_slug else []),
         "compare_pair": list(ctx.compare_pair) if ctx.compare_pair else None,
     }
     _write_run_metadata(analysis_dir, rid=rid, meta=meta)
@@ -248,7 +249,11 @@ def _verify_requested_ai_baseline_vectors(ctx: AnalyzeContext) -> None:
     for slug in slugs:
         if not ctx.paths.drift_json(slug).is_file():
             continue
-        if not load_ai_baseline_embeddings(slug, ctx.paths):
+        if not load_ai_baseline_embeddings(
+            slug,
+            ctx.paths,
+            expected_dim=int(ctx.settings.analysis.embedding_vector_dim),
+        ):
             missing.append(slug)
     if missing:
         logger.error(
@@ -415,7 +420,8 @@ def run_analyze(  # noqa: C901
     if preregistration.status != "ok" and not exploratory:
         meta = {
             "run_timestamp": datetime.now(UTC).isoformat(),
-            "author": author,
+            "last_processed_author": author,
+            "authors_in_run": ([author] if author else []),
             "preregistration_status": preregistration.status,
             "preregistration_message": preregistration.message,
             "exploratory": False,
@@ -455,7 +461,8 @@ def run_analyze(  # noqa: C901
         "timeseries": do_timeseries,
         "drift": do_drift,
         "convergence_full": do_full_analysis,
-        "author": author,
+        "last_processed_author": author,
+        "authors_in_run": ([author] if author else []),
         "preregistration_status": preregistration.status,
         "preregistration_message": preregistration.message,
         "exploratory": exploratory,

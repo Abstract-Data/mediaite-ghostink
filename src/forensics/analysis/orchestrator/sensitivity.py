@@ -15,6 +15,11 @@ from forensics.models.analysis import AnalysisResult
 from forensics.storage.json_io import write_json_artifact
 from forensics.storage.repository import Repository
 
+# M-14 — always section-residualize these slugs when primary run skipped J5.
+_SECTION_SENSITIVITY_PRIORITY_SLUGS: frozenset[str] = frozenset(
+    {"colby-hall", "isaac-schorr", "michael-luciano", "mediaite-staff"},
+)
+
 
 def _section_residualized_settings(config: ForensicsSettings) -> ForensicsSettings:
     analysis = config.analysis.model_copy(update={"section_residualize_features": True})
@@ -37,14 +42,21 @@ def _run_section_residualized_sensitivity(
         slug
         for slug in slugs
         if slug in primary_results
-        and (primary_results[slug].change_points or primary_results[slug].convergence_windows)
+        and (
+            slug in _SECTION_SENSITIVITY_PRIORITY_SLUGS
+            or primary_results[slug].change_points
+            or primary_results[slug].convergence_windows
+        )
     ]
     if not flagged:
         return {}
 
     sensitivity_paths = paths.with_analysis_dir(paths.sensitivity_dir("section_residualized"))
     sensitivity_config = _section_residualized_settings(config)
-    summary: dict[str, Any] = {"authors": {}, "analysis_dir": str(sensitivity_paths.analysis_dir)}
+    # Project-relative path keeps ``run_metadata.json`` byte-stable across
+    # machines and isolated parity corpora (H2); resolve with ``project_root``.
+    rel_analysis = sensitivity_paths.analysis_dir.relative_to(paths.project_root)
+    summary: dict[str, Any] = {"authors": {}, "analysis_dir": rel_analysis.as_posix()}
     with Repository(paths.db_path) as repo:
         for slug in flagged:
             per_author = _run_per_author_analysis(

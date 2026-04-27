@@ -23,6 +23,7 @@ from forensics.utils.url import section_from_url
 # If a future URL-shape change drops one of these, J1's WARNING log line fires
 # in production AND this list flags the regression in CI.
 _REGRESSION_URLS: tuple[tuple[str, str], ...] = (
+    ("https://www.mediaite.com/2024/05/15/year-segment-story/", "unknown"),
     ("https://www.mediaite.com/politics/some-slug-here/", "politics"),
     ("https://mediaite.com/media/breaking-news/", "media"),
     ("https://www.mediaite.com/opinion/the-take/", "opinion"),
@@ -66,7 +67,7 @@ def test_section_from_url_lowercases_section() -> None:
 
 @pytest.mark.parametrize(("url", "expected"), _REGRESSION_URLS)
 def test_section_from_url_regression_pins(url: str, expected: str) -> None:
-    """Lock 12 real-shaped Mediaite URLs to their expected sections (≥10 per H1)."""
+    """Lock real-shaped Mediaite URLs to their expected sections (D-07 year-only path)."""
     assert section_from_url(url) == expected
 
 

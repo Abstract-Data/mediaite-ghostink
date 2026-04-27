@@ -20,6 +20,7 @@ from forensics.models.analysis import ChangePoint, ConvergenceWindow, DriftScore
 from forensics.models.author import Author
 from forensics.paths import intervals_overlap, load_feature_frame_for_author
 from forensics.storage.repository import Repository
+from forensics.utils.datetime import timestamps_from_frame
 
 logger = logging.getLogger(__name__)
 
@@ -237,12 +238,15 @@ def _summarize_control_authors(
 
         summary = load_drift_summary(slug, paths, settings=settings)
         cps = control_change_points[slug]
+        frame = control_feature_frames.get(slug)
+        ts_ctrl = timestamps_from_frame(frame) if frame is not None else None
         control_windows[slug] = compute_convergence_scores(
             ConvergenceInput.from_settings(
                 cps,
                 summary.velocities,
                 summary.baseline_curve,
                 settings,
+                article_timestamps=ts_ctrl,
             )
         )
     return control_change_points, control_drift_scores, control_windows
@@ -281,6 +285,7 @@ def _editorial_signal_for_target(
             summary.velocities,
             summary.baseline_curve,
             settings,
+            article_timestamps=timestamps_from_frame(df_t),
         )
     )
     return compute_signal_attribution(target_windows, control_windows)

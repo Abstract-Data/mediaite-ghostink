@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import weakref
 from pathlib import Path
@@ -59,4 +60,29 @@ def export_articles_jsonl(db_path: Path, output_path: Path, *, batch_size: int =
         for article in repo.iter_all_articles(batch_size=batch_size):
             handle.write(json.dumps(article.model_dump(mode="json"), default=str) + "\n")
             count += 1
+    _write_export_manifest(db_path, output_path, record_count=count)
     return count
+
+
+def _sqlite_sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _write_export_manifest(db_path: Path, output_path: Path, *, record_count: int) -> None:
+    """D-06 — sidecar manifest with SQLite mtime + digest for export provenance."""
+    manifest_path = output_path.with_name(output_path.name + ".manifest.json")
+    st = db_path.stat()
+    digest = _sqlite_sha256(db_path) if db_path.is_file() else ""
+    payload = {
+        "articles_db_path": str(db_path),
+        "articles_db_mtime_ns": st.st_mtime_ns,
+        "articles_db_sha256": digest,
+        "export_record_count": record_count,
+        "export_path": str(output_path),
+    }
+    ensure_parent(manifest_path)
+    manifest_path.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")

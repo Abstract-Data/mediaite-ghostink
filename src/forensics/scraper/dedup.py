@@ -159,9 +159,7 @@ def deduplicate_articles(db_path: Path, *, hamming_threshold: int | None = None)
             )
 
         parent = _dedup_union_find(fingerprints, hamming_threshold)
-        repo.clear_duplicate_flags(pool_ids)
         duplicate_ids = _duplicate_ids_from_components(parent, pool_ids, pool_dates, pool_titles)
-        if duplicate_ids:
-            repo.mark_duplicates(duplicate_ids)
+        repo.apply_duplicate_flags_transaction(pool_ids, duplicate_ids)
 
         return duplicate_ids

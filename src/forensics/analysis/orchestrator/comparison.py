@@ -123,5 +123,9 @@ def run_compare_only(
             )
         except (ValueError, OSError) as exc:
             logger.warning("compare-only: failed for %s (%s)", tid, exc)
+    if not out.get("targets"):
+        logger.warning(
+            "comparison_report: empty targets after compare-only — no comparisons written (L-02)"
+        )
     write_json_artifact(paths.comparison_report_json(), out)
     return out

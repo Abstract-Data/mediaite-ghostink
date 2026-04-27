@@ -56,6 +56,8 @@ data/analysis/*
 !data/analysis/provenance/
 !data/analysis/provenance/*
 data/reports/*
+# Cross-author narrative used as a public-facing / audit artifact (Phase 0 R-*).
+!data/reports/AI_USAGE_FINDINGS.md
 data/pipeline/*
 # Probability-model outputs (per-author Parquet + sidecars)
 data/probability/

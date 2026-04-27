@@ -6,7 +6,8 @@ import hashlib
 import os
 from pathlib import Path
 
-from forensics.config.settings import get_project_root
+from forensics.config.settings import ForensicsSettings, get_project_root
+from forensics.utils.provenance import compute_model_config_hash
 
 
 def config_fingerprint() -> str | None:
@@ -24,3 +25,8 @@ def config_fingerprint() -> str | None:
             digest = hashlib.sha256(path.read_bytes()).hexdigest()
             return digest[:48]
     return None
+
+
+def scraper_signal_digest(settings: ForensicsSettings) -> str:
+    """I-01 — short hash of signal-bearing scraper knobs (subset of full config)."""
+    return compute_model_config_hash(settings.scraping, length=16, round_trip=True)

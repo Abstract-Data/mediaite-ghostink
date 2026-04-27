@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from bisect import bisect_left
+from collections import defaultdict, deque
 from datetime import UTC, datetime
 from datetime import time as dt_time
 from uuid import uuid4
@@ -12,7 +13,10 @@ import numpy as np
 import polars as pl
 
 from forensics.analysis.artifact_paths import AnalysisArtifactPaths
-from forensics.analysis.changepoint import analyze_author_feature_changepoints
+from forensics.analysis.changepoint import (
+    analyze_author_feature_changepoints,
+    write_imputation_stats_artifact,
+)
 from forensics.analysis.convergence import (
     ConvergenceInput,
     ProbabilityTrajectory,
@@ -28,6 +32,7 @@ from forensics.analysis.evidence import filter_evidence_change_points
 from forensics.analysis.orchestrator.timings import _StageTimer
 from forensics.analysis.statistics import (
     apply_correction,
+    apply_cross_author_correction,
     compute_n_rankable_features_per_family,
     filter_by_effect_size,
     run_hypothesis_tests,
@@ -133,7 +138,9 @@ def _run_hypothesis_tests_for_changepoints(
                 cp.feature_name,
                 author_id,
                 n_bootstrap=analysis_cfg.bootstrap_iterations,
+                bootstrap_seed=analysis_cfg.hypothesis_bootstrap_seed,
                 enable_ks_test=analysis_cfg.enable_ks_test,
+                hypothesis_min_segment_n=analysis_cfg.hypothesis_min_segment_n,
             )
         )
     return all_tests
@@ -166,6 +173,8 @@ def _run_preregistered_split_tests(
             feature,
             author_id,
             n_bootstrap=analysis_cfg.bootstrap_iterations,
+            bootstrap_seed=analysis_cfg.hypothesis_bootstrap_seed,
+            hypothesis_min_segment_n=analysis_cfg.hypothesis_min_segment_n,
         )
         all_tests.extend(test for test in tests if test.test_name.startswith(allowed_prefixes))
     return all_tests
@@ -183,8 +192,15 @@ def _apply_global_test_gates(
         method=analysis_cfg.multiple_comparison_method,
         alpha=analysis_cfg.significance_threshold,
     )
+    by_slug: dict[str, list] = defaultdict(list)
+    for (slug, _), t in zip(labeled, corrected, strict=True):
+        by_slug[slug].append(t)
+    if analysis_cfg.enable_cross_author_correction:
+        by_slug = apply_cross_author_correction(dict(by_slug))
+    queues = {slug: deque(tests) for slug, tests in by_slug.items()}
+    corrected_in_order = [queues[slug].popleft() for slug, _ in labeled]
     gated = filter_by_effect_size(
-        corrected,
+        corrected_in_order,
         analysis_cfg.effect_size_threshold,
         alpha=analysis_cfg.significance_threshold,
     )
@@ -308,8 +324,26 @@ def _run_per_author_analysis(
         df_author = lf_author.collect()
         if df_author.is_empty():
             df_author = lf_all.collect()
+        min_w = int(config.analysis.analysis_min_word_count)
+        if min_w > 0 and "word_count" in df_author.columns:
+            before = int(df_author.height)
+            df_author = df_author.filter(pl.col("word_count") >= min_w)
+            after = int(df_author.height)
+            if after < before:
+                logger.info(
+                    "analysis: slug=%s dropped %d article(s) below analysis_min_word_count=%d",
+                    slug,
+                    before - after,
+                    min_w,
+                )
         timer.record("extract")
 
+        write_imputation_stats_artifact(
+            paths.imputation_stats_json(slug),
+            df_author,
+            author_id=author.id,
+            settings=config,
+        )
         raw_change_points = analyze_author_feature_changepoints(
             df_author,
             author_id=author.id,
@@ -357,7 +391,10 @@ def _run_per_author_analysis(
                 ai_convergence_curve=ai_conv,
                 probability_trajectory=prob,
                 n_rankable_per_family=n_rankable,
-            )
+                article_timestamps=timestamps,
+            ),
+            components_artifact_path=paths.convergence_components_json(slug),
+            author_slug=slug,
         )
         timer.record("convergence")
 

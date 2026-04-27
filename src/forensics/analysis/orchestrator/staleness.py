@@ -59,6 +59,7 @@ def _merge_run_metadata(
     prev.update(
         {
             "full_analysis_authors": sorted(results.keys()),
+            "authors_in_run": sorted(results.keys()),
             "comparison_targets": sorted(comparison_payload["targets"].keys()),
             "completed_at": datetime.now(UTC).isoformat(),
         }

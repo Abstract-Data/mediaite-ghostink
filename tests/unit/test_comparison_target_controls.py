@@ -184,6 +184,25 @@ def test_run_compare_only_writes_comparison_report_json(
     assert "feature_comparisons" in out["targets"]["t1"]
 
 
+def test_comparison_report_non_empty_when_configured_target_exists(
+    compare_project: tuple[AnalysisArtifactPaths, Path],
+) -> None:
+    """T-01 — regression guard: comparison must emit real stats when a target has features."""
+    paths, _cfg_path = compare_project
+    settings = get_settings()
+    for slug in ("t1", "c1", "c2"):
+        paths.changepoints_json(slug).write_text("[]", encoding="utf-8")
+    _write_current_result_hashes(paths, ("t1", "c1", "c2"))
+
+    out = run_compare_only(settings, paths=paths, author_slug=None)
+    t1 = out["targets"]["t1"]
+    fc = t1["feature_comparisons"]
+    assert fc, "feature_comparisons must not be empty when target parquet has rows"
+    sample = next(iter(fc.values()))
+    assert "all" in sample
+    assert "p_value" in sample["all"] and "t_stat" in sample["all"]
+
+
 def test_run_compare_only_forces_slug_with_warning(
     compare_project: tuple[AnalysisArtifactPaths, Path], caplog: pytest.LogCaptureFixture
 ) -> None:

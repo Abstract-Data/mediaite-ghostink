@@ -9,6 +9,7 @@ Operational quick reference. Agents: append new sections here whenever you disco
 3. Validate environment: `uv run ruff check . && uv run ruff format --check .`
 4. Run tests: `uv run pytest tests/ -v`
 5. Run with coverage: `uv run pytest tests/ -v --cov-report=term-missing` (coverage target `forensics` is configured in [`pyproject.toml`](../pyproject.toml) `addopts`)
+6. Optional Textual TUI: `uv sync --extra tui` enables `tests/test_tui.py` and related progress tests. A plain `uv sync` skips them; coverage config **omits** `forensics/tui/*` from the aggregate denominator so `fail_under=75` still passes without the extra.
 
 ### Automated pipeline E2E (`tests/integration/test_pipeline_end_to_end.py`)
 
@@ -60,6 +61,7 @@ Near-duplicate detection (`forensics.scraper.dedup`) compares 128-bit simhashes 
 - Lock pre-registration thresholds: `uv run forensics lock-preregistration` writes `data/preregistration/preregistration_lock.json` (SHA256-hashed canonical JSON). Run **before** first `analyze` to convert the run from exploratory to confirmatory. Re-running simply overwrites with the current thresholds. Analyze always invokes `verify_preregistration` (same return statuses). See `src/forensics/preregistration.py`.
 - Convergence permutation null (Phase 12 §5b): under `[analysis]` in `config.toml`, set `convergence_use_permutation = true` to draw an empirical null for each convergence window (p-values are **logged only**; detected windows are unchanged). Defaults: `convergence_use_permutation = false` (CPU), `convergence_permutation_iterations = 1000`, `convergence_permutation_seed = 42`. Wired from `src/forensics/config/settings.py` into `compute_convergence_scores` in `src/forensics/analysis/orchestrator/` (runner + `comparison.py`) and `src/forensics/analysis/comparison.py`.
 - Blind newsroom survey (Phase 12 §1): `uv run forensics survey` runs the full pipeline across every qualified author on the manifest and ranks them by composite AI-adoption signal. Options: `--dry-run` (list qualified authors, no analysis), `--resume <run_id>` (skip authors already in `data/survey/run_<id>/checkpoint.json`), `--skip-scrape` (reuse existing corpus), `--author <slug>` (single-author debug run), `--min-articles` / `--min-span-days` (override `[survey]` thresholds). Output lands under `data/survey/run_<id>/` with `checkpoint.json` (written after each author) and `survey_results.json` (ranked, with the natural control cohort). Thresholds default to `SurveyConfig` in `config.toml` (`min_articles=50`, `min_span_days=730`, `min_words_per_article=200`, `min_articles_per_year=12.0`, `require_recent_activity=true`, `recent_activity_days=180`). Natural controls are authors whose composite score ≤ 0.2 AND `SignalStrength.NONE`; see `src/forensics/survey/scoring.py::identify_natural_controls`.
+- **Survey parallelism:** with more than one pending author, `run_survey` may dispatch `ProcessPoolExecutor` workers sized by env `SURVEY_AUTHOR_WORKERS` or default `min(8, os.cpu_count())`. Child processes do **not** inherit parent `pytest` monkeypatches — the survey test stubs set `SURVEY_AUTHOR_WORKERS=1` to force sequential in-process fakes.
 - Calibration suite (Phase 12 §4): `uv run forensics calibrate` validates detector accuracy against synthetic ground truth. Options: `--positive-trials <n>` (spliced-corpus trials, default 5), `--negative-trials <n>` (unmodified-corpus trials, default 5), `--author <slug>` (target author; otherwise most prolific), `--seed <int>` (splice-date RNG, default 42), `--output <path>` (override report path), `--dry-run` (emit an empty report without touching the DB — smoke-test only). Positive trials substitute post-splice articles with Phase 10 baseline AI text loaded from `data/ai_baseline/<slug>/articles.json`; missing file triggers a warning and a best-effort no-op splice. Each trial runs in an isolated `data/calibration/run_<ts>/{positive,negative}_NN/` tree with its own `articles.db`. Final metrics (`sensitivity`, `specificity`, `precision`, `f1_score`, `median_date_error_days`) land in `data/calibration/calibration_<ts>.json`. A real calibration run is expensive (extract + full analysis per trial); the `--help` + pytest suite (`tests/test_calibration.py`) is the CI smoke test.
 - Validate config + environment (Phase 12 §7a): `uv run forensics validate` parses `config.toml`, reports author count, runs `run_all_preflight_checks(settings)`, and prints PASS/WARN/FAIL per check. Exits `1` when any preflight check hard-fails (spaCy model missing, placeholder authors, disk < 5 GB, config parse error, Python < 3.13). Pass `--check-endpoints` to also probe `https://www.mediaite.com/wp-json/wp/v2/types` and `http://localhost:11434/api/tags` with a 3s timeout — endpoint results are reported as PASS/WARN but **do not** affect the exit code. Use as a pre-commit or CI gate before running the pipeline. Preflight logic lives in `src/forensics/preflight.py`; the probes live in `src/forensics/cli/__init__.py::_probe_endpoint`.
 - Single-file DuckDB export (Phase 12 §7b): `uv run forensics export [--output PATH] [--no-features] [--no-analysis]` folds `data/articles.db` (authors + articles via DuckDB's `sqlite` extension), optional `data/features/*.parquet`, and optional `data/analysis/*_result.json` into a single `.duckdb` file (default `data/forensics_export.duckdb`). Query it with any DuckDB client (`duckdb data/forensics_export.duckdb` then `SHOW TABLES`). `ExportReport` returns `output_path`, `bytes_written`, and a `tables` dict of per-table rowcounts. The export lives in `src/forensics/storage/duckdb_queries.py::export_to_duckdb`; `*.duckdb` is gitignored.
@@ -83,6 +85,7 @@ After a successful full run, verify (paths depend on configured authors):
 - `data/features/{slug}.parquet` — per-author features
 - `data/embeddings/{slug}/batch.npz` — embeddings when not skipped
 - `data/analysis/` — per-author `*_result.json`, `run_metadata.json`, and other stage JSON as enabled
+  - When present, `run_metadata.json` → `section_residualized_sensitivity.analysis_dir` is a **project-relative** path (e.g. `data/analysis/sensitivity/section_residualized`), not an absolute path — resolve with repo root when opening artifacts.
 - `data/reports/` — Quarto HTML/PDF outputs (not a single `report.md` at repo root)
 
 Phase 9 outputs: `data/probability/{author_slug}.parquet`, `data/probability/model_card.json`  
@@ -454,6 +457,14 @@ uv run forensics features migrate --dry-run # preview only
 uv run python scripts/bench_phase15.py --author mediaite-staff
 ```
 
+### Phase 1 — synthetic PELT null calibration (M-23)
+
+```bash
+# Writes data/provenance/synthetic_null_pelt_calibration.json (Gaussian noise,
+# fixed penalty). Re-run after changing AnalysisConfig.pelt_penalty materially.
+uv run python scripts/synthetic_null_pelt_calibration.py
+```
+
 ### Typer subcommand registration pattern (Phase 15 L6)
 
 New CLI subcommands follow this pattern so the dispatch table in
@@ -538,3 +549,23 @@ When handing off active work:
 - `orchestrator/runner.py` — `run_full_analysis` entrypoint
 
 Import surface remains `from forensics.analysis.orchestrator import ...`.
+
+## Phase 0 — preregistration lock, comparison report, AI baseline continuity
+
+**Order of operations (punch-list Phase 0):**
+
+1. **Amendment (M-05):** Append post-hoc threshold documentation to `data/preregistration/amendment_phase15.md` when Fix-F / Fix-G (or similar) apply.
+2. **Lock (M-01):** `uv run forensics lock-preregistration` — writes `data/preregistration/preregistration_lock.json` with `locked_at`, `analysis`, and `content_hash`. Confirmatory `forensics analyze` (without `--exploratory`) requires `verify_preregistration` → `ok`.
+3. **Comparison (M-03):** With exactly one `role = "target"` in `config.toml` (M-04), run `uv run forensics analyze --compare` to populate `data/analysis/comparison_report.json`. If `validate_analysis_result_config_hashes` fails, refresh per-author `*_result.json` under the current analysis config hash first.
+4. **AI baseline metric (M-02):** Intended path: `ollama serve` locally, `uv sync --extra baseline`, then `uv run forensics analyze --ai-baseline --author <slug>` (see `[baseline]` in `config.toml`). Cell prompts append a **JSON delivery contract** so local Llama checkpoints return `{"headline","text","actual_word_count"}`; `forensics.baseline.agent.parse_generated_article_text` unwraps tool-shaped blobs and tolerates plain-text fallbacks. **Stub continuity (local only — `data/ai_baseline/` is gitignored):** `uv run python scripts/seed_phase0_ai_baseline_stubs.py` is only for environments without Ollama. After real generation, re-run `forensics analyze --drift --author <slug>` (add `--exploratory --allow-pre-phase16-embeddings` if article embedding manifests still lag the pinned HF revision).
+5. **Embedding revision drift:** If `EmbeddingRevisionGateError` appears during `--drift`, re-extract embeddings for the pinned revision or run drift **exploratory** with `forensics analyze --drift --exploratory --allow-pre-phase16-embeddings` (warnings only; not confirmatory).
+
+## Punch-list C/D/I — operational notes
+
+- **C-06 (analyze vs SQLite):** Options and approval gate are documented in `docs/adr/ADR-009-analyze-stage-sqlite-reads.md`. No default behavior change until a path is chosen.
+- **Scrape coverage summary (D-03):** `forensics.scraper.coverage.write_scrape_coverage_summary` can write a JSON summary next to `data/scrape_errors.jsonl` (call from a scrape completion path or a one-off script when you need coverage metrics for reports).
+- **Crawl summary (L-04):** After `collect_article_metadata`, the crawler writes `crawl_summary.json` alongside `scrape_errors.jsonl` (per-author error buckets and top messages) via `forensics.scraper.coverage.write_crawl_summary_json`.
+- **Run metadata staleness (D-09):** `run_metadata.json` may include `last_scraped_at` (ISO) when scrape artifacts are present; see `forensics.utils.provenance.read_latest_scraped_at_iso`.
+- **Parallel analyze promotion (I-06):** After a successful `--parallel-authors` promotion, `data/analysis/parallel/<run>/parallel_promotion_complete.json` records completion metadata for debugging “partial promote” issues.
+- **Disk preflight (I-05):** Helpers live in `forensics.utils.disk` (`free_disk_bytes`, `ensure_min_free_disk_bytes`); wire into preflight/CLI where you need a hard stop before large writes.
+- **Config fingerprint (I-01):** Scraper-affecting fields and analysis seeds (LDA/UMAP/bootstrap, etc.) participate in `compute_model_config_hash` / `scraper_signal_digest`; re-lock preregistration if you change those and run confirmatory analysis.

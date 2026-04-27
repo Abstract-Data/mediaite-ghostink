@@ -75,7 +75,7 @@ def test_ai_marker_detection(nlp) -> None:
 def test_ai_marker_list_version_is_pinned() -> None:
     from forensics.features import lexical
 
-    assert lexical.AI_MARKER_LIST_VERSION == "0.1.0"
+    assert lexical.AI_MARKER_LIST_VERSION == "0.2.0"
 
 
 def test_pos_bigram_extraction(nlp) -> None:
@@ -141,48 +141,57 @@ def test_punctuation_profile(nlp) -> None:
 
 
 def test_bigram_entropy(nlp) -> None:
+    from forensics.config.settings import AnalysisConfig
     from forensics.features import content
 
+    ac = AnalysisConfig()
     # "foo bar" repeated → one bigram ("foo_bar") → entropy ≈ 0.
     rep = "foo bar " * 40
     # All-alphabetic unique tokens so spaCy's is_alpha filter keeps them all.
     diverse = " ".join(chr(97 + i // 26) + chr(97 + i % 26) for i in range(80))
     doc_r = nlp(rep)
     doc_d = nlp(diverse)
-    er = content.extract_content_features(rep, doc_r, [], [])
-    ed = content.extract_content_features(diverse, doc_d, [], [])
+    er = content.extract_content_features(rep, doc_r, [], [], analysis=ac)
+    ed = content.extract_content_features(diverse, doc_d, [], [], analysis=ac)
     assert er["bigram_entropy"] < ed["bigram_entropy"]
 
 
 def test_self_similarity(nlp) -> None:
+    from forensics.config.settings import AnalysisConfig
     from forensics.features import content
+
+    ac = AnalysisConfig()
 
     # Self-similarity requires ≥ MIN_PEERS_FOR_SIMILARITY (=5) usable peers
     # — supply six identical peers so TF-IDF cosine is ~1.0.
     t = "identical text " * 20
     doc = nlp(t)
     peers = [t] * 6
-    sim = content.extract_content_features(t, doc, peers, peers)
+    sim = content.extract_content_features(t, doc, peers, peers, analysis=ac)
     assert sim["self_similarity_30d"] == pytest.approx(1.0, abs=0.05)
 
 
 def test_self_similarity_ignores_blank_peers(nlp) -> None:
+    from forensics.config.settings import AnalysisConfig
     from forensics.features import content
+
+    ac = AnalysisConfig()
 
     # Blank/whitespace peers are filtered, but there are still five non-blank
     # identical peers — above the MIN_PEERS_FOR_SIMILARITY threshold.
     t = "identical text " * 20
     doc = nlp(t)
     peers = ["", "  \n\t  ", t, t, t, t, t]
-    sim = content.extract_content_features(t, doc, peers, peers)
+    sim = content.extract_content_features(t, doc, peers, peers, analysis=ac)
     assert sim["self_similarity_30d"] == pytest.approx(1.0, abs=0.05)
 
 
 def test_content_features_regression_values(nlp) -> None:
+    from forensics.config.settings import AnalysisConfig
     from forensics.features import content
 
     text = "Perhaps we might agree. I could be argued into it. Our view appears to hold."
-    out = content.extract_content_features(text, nlp(text), [], [])
+    out = content.extract_content_features(text, nlp(text), [], [], analysis=AnalysisConfig())
     assert out["hedging_frequency"] > 0
     assert out["first_person_ratio"] > 0
 

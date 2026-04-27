@@ -8,7 +8,7 @@ from typing import Any
 
 from spacy.tokens import Doc
 
-AI_MARKER_LIST_VERSION = "0.1.0"
+AI_MARKER_LIST_VERSION = "0.2.0"
 
 # Top-50 function words (order stable for reproducible dict keys).
 FUNCTION_WORDS: tuple[str, ...] = (
@@ -65,21 +65,17 @@ FUNCTION_WORDS: tuple[str, ...] = (
 )
 
 # Phrases or patterns (case-insensitive). ``*`` matches non-empty run within phrase.
+# M-06 — trimmed phrases that fire heavily on pre-2020 journalism (see punch list).
 _AI_MARKER_SPECS: tuple[str, ...] = (
     "it's important to note",
     "it's worth noting",
     "delve",
     "in today's * landscape",
-    "navigate",
-    "underscores",
-    "arguably",
     "at its core",
     "a testament to",
     "in an era of",
-    "serves as a",
     "plays a crucial role",
     "it should be noted",
-    "represents a significant",
     "offers a unique",
     "is a game-changer",
 )

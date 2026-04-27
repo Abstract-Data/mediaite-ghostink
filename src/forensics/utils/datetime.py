@@ -31,6 +31,13 @@ def parse_wp_datetime(value: str) -> datetime:
     return parse_datetime(value, naive_as_utc=True)
 
 
+def normalize_stored_datetime(value: datetime) -> datetime:
+    """D-02 — canonical UTC instant for persistence comparisons (naive → UTC)."""
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
 def timestamps_from_frame(df: pl.DataFrame, col: str = "timestamp") -> list[datetime]:
     """Materialize a Polars timestamp column into a list of ``datetime`` objects.
 

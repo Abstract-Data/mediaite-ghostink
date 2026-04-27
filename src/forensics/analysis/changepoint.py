@@ -70,6 +70,63 @@ PELT_FEATURE_COLUMNS: tuple[str, ...] = (
 )
 
 
+def collect_imputation_stats_for_changepoint_frame(
+    df: pl.DataFrame,
+    *,
+    author_id: str,
+    feature_columns: tuple[str, ...] = PELT_FEATURE_COLUMNS,
+    section_residualize_applies: bool = False,
+) -> dict[str, Any]:
+    """L-05 — non-finite value counts per feature before median imputation in detectors."""
+    per_feature: dict[str, dict[str, int]] = {}
+    for col in feature_columns:
+        if col not in df.columns:
+            continue
+        arr = df[col].cast(pl.Float64, strict=False).to_numpy()
+        n = int(arr.size)
+        n_nan = int(np.isnan(arr).sum())
+        n_inf = int(np.isinf(arr).sum())
+        per_feature[col] = {
+            "n_values": n,
+            "n_nan": n_nan,
+            "n_inf": n_inf,
+            "n_imputed": n_nan + n_inf,
+        }
+    return {
+        "author_id": author_id,
+        "section_residualize_features": section_residualize_applies,
+        "note": (
+            "Counts use the feature frame as passed into changepoint analysis "
+            "(before internal section residualization and per-feature median imputation)."
+        ),
+        "per_feature": per_feature,
+    }
+
+
+def write_imputation_stats_artifact(
+    path: Path,
+    df: pl.DataFrame,
+    *,
+    author_id: str,
+    settings: ForensicsSettings,
+) -> None:
+    """Write L-05 imputation stats JSON for one author."""
+    payload = collect_imputation_stats_for_changepoint_frame(
+        df,
+        author_id=author_id,
+        section_residualize_applies=settings.analysis.section_residualize_features,
+    )
+    write_json_artifact(path, payload)
+
+
+def _impute_finite_feature_series(values: np.ndarray) -> np.ndarray:
+    """C-02 — single imputation site for changepoint detectors (median of finite values)."""
+    y = np.asarray(values, dtype=float).ravel()
+    finite = y[np.isfinite(y)]
+    med = float(np.nanmedian(finite)) if finite.size else 0.0
+    return np.nan_to_num(y, nan=med, posinf=med, neginf=med)
+
+
 def detect_pelt(
     signal: np.ndarray,
     pen: float = 3.0,
@@ -81,12 +138,16 @@ def detect_pelt(
     Phase 15 F0 — default ``cost_model`` is ``"l2"`` (1-D mean-shift,
     O(n)); ``"rbf"`` is the legacy O(n²) kernel kept for audit, ``"l1"``
     is the outlier-robust alternative. See ``AnalysisConfig.pelt_cost_model``.
+
+    Callers must pass a finite series (impute upstream via
+    :func:`_impute_finite_feature_series`).
     """
     y = np.asarray(signal, dtype=float).ravel()
     if len(y) < 10:
         return []
     if not np.isfinite(y).all():
-        y = np.nan_to_num(y, nan=np.nanmedian(y))
+        msg = "detect_pelt expects finite values; use _impute_finite_feature_series first"
+        raise ValueError(msg)
     algo = rpt.Pelt(model=cost_model, min_size=5).fit(y.reshape(-1, 1))
     breakpoints = algo.predict(pen=pen)
     return [int(b) for b in breakpoints[:-1]]
@@ -421,12 +482,14 @@ def _changepoints_from_breaks(
         d = cohens_d(before, after)
         m_before, m_after = float(np.mean(before)), float(np.mean(after))
         direction: str = "increase" if m_after >= m_before else "decrease"
+        conf = confidence_for_break(idx, before, after, d)
         out.append(
             ChangePoint(
                 feature_name=feature_name,
                 author_id=author_id,
                 timestamp=_breakpoint_timestamp(timestamps, idx),
-                confidence=confidence_for_break(idx, before, after, d),
+                confidence=conf,
+                effect_proxy=conf,
                 method=method,
                 effect_size_cohens_d=float(d),
                 direction=direction,  # type: ignore[arg-type]
@@ -517,9 +580,9 @@ def _changepoints_for_feature(
     """
     if col not in df.columns:
         return []
-    series = df[col].cast(pl.Float64, strict=False).to_numpy()
-    if not np.isfinite(series).all():
-        series = np.nan_to_num(series, nan=np.nanmedian(series))
+    series = _impute_finite_feature_series(
+        df[col].cast(pl.Float64, strict=False).to_numpy(),
+    )
     if len(series) < 10:
         return []
     # Phase 15 F3: skip flat series. PELT cannot produce meaningful CPs on
@@ -602,7 +665,12 @@ def analyze_author_feature_changepoints(
     methods = {m.lower() for m in settings.analysis.changepoint_methods}
     pen = settings.analysis.pelt_penalty
     pelt_cost_model = settings.analysis.pelt_cost_model
-    hazard = settings.analysis.bocpd_hazard_rate
+    n_articles = int(df.height)
+    hazard = float(settings.analysis.bocpd_hazard_rate)
+    if settings.analysis.bocpd_hazard_auto:
+        exp = max(1, int(settings.analysis.bocpd_expected_changes_per_author))
+        hazard = float(exp) / float(max(1, n_articles))
+        hazard = max(1e-6, min(1.0, hazard))
     # Phase 15 Phase A — read all six BOCPD knobs from settings. The legacy
     # ``bocpd_threshold`` field is gone (see GUARDRAILS Sign + Unit 1 notes);
     # only ``mode="p_r0_legacy"`` consults ``threshold`` and we hard-code the
@@ -705,6 +773,12 @@ def run_changepoint_analysis(
         if df_author is None:
             logger.warning("Skipping author %s: no rows in %s", author.slug, feat_path)
             continue
+        write_imputation_stats_artifact(
+            paths.imputation_stats_json(author.slug),
+            df_author,
+            author_id=author.id,
+            settings=settings,
+        )
         # Deferred import breaks the changepoint ↔ convergence cycle (convergence.py
         # depends on ``PELT_FEATURE_COLUMNS`` from this module).
         from forensics.analysis.convergence import ConvergenceInput, compute_convergence_scores

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 import threading
 from collections.abc import Iterable, Iterator
@@ -18,6 +19,8 @@ from forensics.models.author import Author
 from forensics.storage.json_io import ensure_parent
 from forensics.storage.migrations import apply_migrations as _apply_sqlite_migrations
 from forensics.utils.datetime import parse_datetime
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "Repository",
@@ -176,7 +179,14 @@ def _validate_batch_size(batch_size: int) -> None:
 
 def _row_to_article(row: sqlite3.Row) -> Article:
     metadata_raw = row["metadata"]
-    metadata: dict[str, object] = json.loads(metadata_raw) if metadata_raw else {}
+    if metadata_raw:
+        try:
+            metadata = json.loads(metadata_raw)
+        except json.JSONDecodeError:
+            logger.warning("Skipping malformed article metadata JSON for id=%s", row["id"])
+            metadata = {}
+    else:
+        metadata = {}
     modified_raw = row["modified_date"] if row["modified_date"] is not None else None
     mod_dt = parse_datetime(modified_raw) if modified_raw else None
     scraped_raw = row["scraped_at"] if row["scraped_at"] is not None else None
@@ -530,6 +540,64 @@ class Repository(RepositoryReader):
         """
         return self._bulk_set_is_duplicate(article_ids, 1, chunk_size=chunk_size)
 
+    def apply_duplicate_flags_transaction(
+        self,
+        clear_ids: Iterable[str],
+        mark_duplicate_ids: Iterable[str],
+        *,
+        chunk_size: int = 500,
+    ) -> tuple[int, int]:
+        """C-05 — atomically reset then mark duplicate flags (single ``BEGIN IMMEDIATE``).
+
+        Use for simhash dedup so a crash cannot leave ``is_duplicate`` cleared
+        without the subsequent mark pass completing.
+        """
+        clear_list = list(clear_ids)
+        mark_list = list(mark_duplicate_ids)
+        if chunk_size < 1:
+            msg = f"chunk_size must be >= 1, got {chunk_size}"
+            raise ValueError(msg)
+        conn = self._require_conn()
+        cleared = 0
+        marked = 0
+        with self._lock:
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                cleared = self._bulk_set_is_duplicate_on_conn(
+                    conn, clear_list, 0, chunk_size=chunk_size
+                )
+                marked = self._bulk_set_is_duplicate_on_conn(
+                    conn, mark_list, 1, chunk_size=chunk_size
+                )
+            except Exception:
+                conn.rollback()
+                raise
+            else:
+                conn.commit()
+        return cleared, marked
+
+    @staticmethod
+    def _bulk_set_is_duplicate_on_conn(
+        conn: sqlite3.Connection,
+        article_ids: list[str],
+        value: int,
+        *,
+        chunk_size: int,
+    ) -> int:
+        if not article_ids:
+            return 0
+        total = 0
+        for i in range(0, len(article_ids), chunk_size):
+            chunk = article_ids[i : i + chunk_size]
+            placeholders = ",".join("?" * len(chunk))
+            cur = conn.execute(
+                f"UPDATE articles SET is_duplicate = ? WHERE id IN ({placeholders})",
+                (value, *chunk),
+            )
+            if cur.rowcount >= 0:
+                total += cur.rowcount
+        return total
+
     def _bulk_set_is_duplicate(
         self, article_ids: Iterable[str], value: int, *, chunk_size: int
     ) -> int:
@@ -542,15 +610,7 @@ class Repository(RepositoryReader):
         conn = self._require_conn()
         total = 0
         with self._lock:
-            for i in range(0, len(ids), chunk_size):
-                chunk = ids[i : i + chunk_size]
-                placeholders = ",".join("?" * len(chunk))
-                cur = conn.execute(
-                    f"UPDATE articles SET is_duplicate = ? WHERE id IN ({placeholders})",
-                    (value, *chunk),
-                )
-                if cur.rowcount >= 0:
-                    total += cur.rowcount
+            total = self._bulk_set_is_duplicate_on_conn(conn, ids, value, chunk_size=chunk_size)
         return total
 
     def rewrite_raw_paths_after_archive(self, year: int) -> int:

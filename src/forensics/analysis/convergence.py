@@ -6,17 +6,39 @@ import logging
 from collections.abc import Iterable
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta
+from pathlib import Path
+from typing import Any
 
 import numpy as np
 
 from forensics.analysis.changepoint import PELT_FEATURE_COLUMNS
 from forensics.analysis.feature_families import FAMILY_COUNT, FEATURE_FAMILIES
 from forensics.analysis.monthkeys import iter_months_in_window, month_key_to_range
-from forensics.config.settings import ForensicsSettings
+from forensics.config.settings import AnalysisConfig, ForensicsSettings
 from forensics.models.analysis import ChangePoint, ConvergenceWindow
 from forensics.paths import closed_interval_contains
+from forensics.storage.json_io import write_json_artifact
 
 logger = logging.getLogger(__name__)
+
+
+def resolve_effective_convergence_window_days(
+    analysis: AnalysisConfig,
+    article_timestamps: list[datetime],
+) -> int:
+    """I-02 — bounded convergence window from median inter-article spacing (days)."""
+    if not analysis.convergence_window_adaptive or len(article_timestamps) < 2:
+        return int(analysis.convergence_window_days)
+    ts = sorted(article_timestamps)
+    deltas = [max(0.0, (ts[i] - ts[i - 1]).total_seconds() / 86400.0) for i in range(1, len(ts))]
+    if not deltas:
+        return int(analysis.convergence_window_days)
+    deltas.sort()
+    med = float(deltas[len(deltas) // 2])
+    adaptive = int(round(max(14.0, med * 6.0)))
+    lo, hi = int(analysis.convergence_window_days_min), int(analysis.convergence_window_days_max)
+    return max(lo, min(hi, adaptive))
+
 
 # Named convergence-scoring constants (RF-SMELL-003 / audit for pre-registration lock).
 PIPELINE_SCORE_PASS_THRESHOLD: float = 0.3
@@ -37,6 +59,10 @@ persisted *zero* windows with positive pipeline_b because their pa fell below
 0.3, hiding the drift signal from the report. The runtime value lives on
 ``AnalysisConfig.convergence_drift_only_pb_threshold`` and is propagated via
 :class:`ConvergenceInput`.
+
+M-18 — treat ``passes_via`` entries containing ``drift_only`` as the weakest
+admission tier in narratives; the 0.3 threshold was chosen post-hoc (see
+``data/preregistration/amendment_phase15.md``).
 """
 
 EMBEDDING_DROP_EPSILON: float = 0.05
@@ -195,7 +221,11 @@ def _pipeline_a_from_stylometry(
         fam = FEATURE_FAMILIES.get(cp.feature_name)
         if fam is None:
             continue
-        score = float(cp.confidence) * abs(float(cp.effect_size_cohens_d))
+        # M-19 — cap per change-point before family aggregation (extreme |d|
+        # no longer saturates the family mean). ``effect_proxy`` is the
+        # strength axis (M-10); fall back to ``confidence`` for legacy rows.
+        proxy = float(cp.effect_proxy) if cp.effect_proxy is not None else float(cp.confidence)
+        score = min(1.0, proxy * abs(float(cp.effect_size_cohens_d)))
         prev = family_reps.get(fam, -1.0)
         if score > prev:
             family_reps[fam] = score
@@ -326,10 +356,16 @@ class ConvergenceInput:
         n_permutations: int = 1000,
         drift_only_pb_threshold: float | None = None,
         n_rankable_per_family: dict[str, int] | None = None,
+        article_timestamps: list[datetime] | None = None,
     ) -> ConvergenceInput:
         """Resolve defaults from ``settings`` and from ``PELT_FEATURE_COLUMNS``."""
         if settings is not None:
             window_days = settings.analysis.convergence_window_days
+            if article_timestamps is not None:
+                window_days = resolve_effective_convergence_window_days(
+                    settings.analysis,
+                    list(article_timestamps),
+                )
             min_feature_ratio = settings.analysis.convergence_min_feature_ratio
             if drift_only_pb_threshold is None:
                 drift_only_pb_threshold = settings.analysis.convergence_drift_only_pb_threshold
@@ -368,6 +404,7 @@ class ConvergenceInput:
         probability_trajectory: ProbabilityTrajectory | None = None,
         total_feature_count: int | None = None,
         n_rankable_per_family: dict[str, int] | None = None,
+        article_timestamps: list[datetime] | None = None,
     ) -> ConvergenceInput:
         """Build a ``ConvergenceInput`` using permutation knobs drawn from settings.
 
@@ -390,6 +427,7 @@ class ConvergenceInput:
             n_permutations=ac.convergence_permutation_iterations,
             permutation_seed=ac.convergence_permutation_seed,
             n_rankable_per_family=n_rankable_per_family,
+            article_timestamps=article_timestamps,
         )
 
 
@@ -437,8 +475,11 @@ def _score_single_window(
     sim_by_date: list[tuple[date, float]],
     sim_std_author: float,
     ai_by_month: dict[str, float],
-) -> ConvergenceWindow | None:
-    """Score one candidate window; ``None`` means the window failed the cutoffs."""
+) -> tuple[ConvergenceWindow | None, dict[str, Any]]:
+    """Score one candidate window; ``None`` window means the window failed the cutoffs.
+
+    Always returns a component dict (L-01) for structured convergence diagnostics.
+    """
     cps_in_window = _cps_in_window(input_.change_points, start_d, end_d)
     features_converging, families_converging, ratio, pipeline_a_score = _pipeline_a_from_stylometry(
         cps_in_window,
@@ -508,9 +549,7 @@ def _score_single_window(
     # / velocity signal is strong enough on its own, even if pipeline_a is too
     # weak to clear the AB intersection and the family ratio gate misses.
     passes_drift_only = pipeline_b_score >= input_.drift_only_pb_threshold
-    if not (passes_ratio or passes_ab or passes_drift_only):
-        return None
-
+    admitted = bool(passes_ratio or passes_ab or passes_drift_only)
     passes_via: list[str] = []
     if passes_ratio:
         passes_via.append("ratio")
@@ -519,11 +558,29 @@ def _score_single_window(
     if passes_drift_only:
         passes_via.append("drift_only")
 
-    # Phase 15 B4 — ``families_converging`` is added to ``ConvergenceWindow``
-    # by Unit 4. Fall through to the legacy constructor if the field isn't
-    # present yet so behaviour is unchanged pre-Unit-4.
-    try:
-        return ConvergenceWindow(
+    components: dict[str, Any] = {
+        "window_start": start_d.isoformat(),
+        "window_end": end_d.isoformat(),
+        "peak_signal": peak_signal,
+        "sim_signal": sim_signal,
+        "ai_signal": ai_signal,
+        "pipeline_a_score": pipeline_a_score,
+        "pipeline_b_score": pipeline_b_score,
+        "pipeline_c_score": pipeline_c,
+        "convergence_ratio": ratio,
+        "min_feature_ratio": input_.min_feature_ratio,
+        "passes_ratio": passes_ratio,
+        "passes_ab": passes_ab,
+        "passes_drift_only": passes_drift_only,
+        "passes_via": list(passes_via),
+        "admitted": admitted,
+        "n_change_points_in_window": len(cps_in_window),
+    }
+    if not admitted:
+        return None, components
+
+    return (
+        ConvergenceWindow(
             start_date=start_d,
             end_date=end_d,
             features_converging=features_converging,
@@ -534,18 +591,9 @@ def _score_single_window(
             pipeline_b_score=pipeline_b_score,
             pipeline_c_score=pipeline_c,
             passes_via=passes_via,
-        )
-    except (TypeError, ValueError):  # pragma: no cover - exercised pre-Unit-4 only
-        return ConvergenceWindow(
-            start_date=start_d,
-            end_date=end_d,
-            features_converging=features_converging,
-            n_rankable_per_family=dict(input_.n_rankable_per_family),
-            convergence_ratio=ratio,
-            pipeline_a_score=pipeline_a_score,
-            pipeline_b_score=pipeline_b_score,
-            pipeline_c_score=pipeline_c,
-        )
+        ),
+        components,
+    )
 
 
 def _run_permutation_test(
@@ -633,7 +681,12 @@ def _filter_change_points_by_source(
     return change_points
 
 
-def compute_convergence_scores(input_: ConvergenceInput) -> list[ConvergenceWindow]:
+def compute_convergence_scores(
+    input_: ConvergenceInput,
+    *,
+    components_artifact_path: Path | None = None,
+    author_slug: str | None = None,
+) -> list[ConvergenceWindow]:
     """Quantify agreement between Pipeline A (stylometry), Pipeline B (embeddings), and C.
 
     When ``input_.use_permutation`` is True, each returned window's convergence ratio
@@ -674,6 +727,7 @@ def compute_convergence_scores(input_: ConvergenceInput) -> list[ConvergenceWind
         return []
 
     windows_out: list[ConvergenceWindow] = []
+    component_rows: list[dict[str, Any]] = []
     seen: set[tuple[date, date]] = set()
 
     for start_d in sorted(starts):
@@ -682,7 +736,7 @@ def compute_convergence_scores(input_: ConvergenceInput) -> list[ConvergenceWind
         if key in seen:
             continue
         seen.add(key)
-        window = _score_single_window(
+        window, comp = _score_single_window(
             start_d,
             end_d,
             input_=input_,
@@ -691,8 +745,17 @@ def compute_convergence_scores(input_: ConvergenceInput) -> list[ConvergenceWind
             sim_std_author=sim_std,
             ai_by_month=ai_by_month,
         )
+        component_rows.append(comp)
         if window is not None:
             windows_out.append(window)
+
+    if components_artifact_path is not None:
+        payload: dict[str, Any] = {
+            "author_slug": author_slug or "",
+            "windows_evaluated": len(component_rows),
+            "window_components": component_rows,
+        }
+        write_json_artifact(components_artifact_path, payload)
 
     if input_.use_permutation and windows_out and input_.change_points:
         _run_permutation_test(input_, windows_out)

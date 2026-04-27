@@ -26,16 +26,16 @@ from forensics.models.analysis import ChangePoint, HypothesisTest
 
 def test_run_hypothesis_tests_logs_nan_drops_and_counts(caplog: pytest.LogCaptureFixture) -> None:
     caplog.set_level(logging.INFO)
-    # 4+ points, valid breakpoint; inject NaN in pre segment only
-    pre = [1.0, float("nan"), 2.0, 3.0]
-    post = [8.0, 9.0, 10.0, 11.0]
+    # Valid breakpoint; inject NaN in pre segment only — keep ≥10 finite/side.
+    pre = [1.0, float("nan"), *([2.0] * 12)]
+    post = [8.0] * 15
     series = pre + post
     out = run_hypothesis_tests(series, len(pre), "ttr", "author-z", n_bootstrap=30)
     assert any("dropped_nonfinite pre=1 post=0" in r.message for r in caplog.records)
     assert len(out) == 2
     assert all(t.n_nan_dropped == 1 for t in out)
-    assert all(t.n_pre == 3 for t in out)
-    assert all(t.n_post == 4 for t in out)
+    assert all(t.n_pre == 13 for t in out)
+    assert all(t.n_post == 15 for t in out)
     assert all(t.skipped_reason is None for t in out)
 
 
@@ -117,6 +117,7 @@ def test_hypothesis_test_from_legacy_defaults_sample_fields() -> None:
     assert t.n_nan_dropped == 0
     assert t.skipped_reason is None
     assert t.degenerate is False
+    assert t.cross_author_corrected_p is None
 
 
 def test_compute_n_rankable_features_per_family_counts_distinct_features() -> None:

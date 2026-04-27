@@ -148,6 +148,16 @@ Each Sign has:
 - Reason: `corpus_hash_v1` exists only to bridge pre–Phase-16 verification semantics (`ORDER BY id`, all rows) against the new analyzable-corpus fingerprint (`WHERE is_duplicate = 0 ORDER BY content_hash`).
 - Provenance: Phase 16 adversarial remediation — Step C4 (2026-04-25).
 
+## Known statistical limitations
+
+- **Serial autocorrelation (M-16):** Consecutive articles by the same author
+  carry correlated stylometric features. Welch and Mann–Whitney tests assume
+  (approximate) independence between observations, so positive serial
+  dependence can inflate Type I error rates. Within-family
+  Benjamini–Hochberg is only a partial mitigation. Full mitigation requires
+  block-bootstrap resampling or HAC-corrected standard errors; those are **not**
+  applied in the default v0.4 analysis path.
+
 ## Agent and Change Management
 
 - Follow `AGENTS.md` in dev mode and `AGENTS.staging.md` in staging mode.

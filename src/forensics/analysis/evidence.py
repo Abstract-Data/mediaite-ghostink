@@ -20,6 +20,7 @@ MIN_EVIDENCE_CONFIDENCE = 0.9
 # adoption. d ≥ 1.0 reserves PELT for genuine regime shifts that
 # corroborate BOCPD (whose posterior probability already gates noise).
 _PELT_MIN_EFFECT_SIZE = 1.0
+_PELT_METHODS: frozenset[str] = frozenset({"pelt", "pelt_section_adjusted"})
 
 
 def filter_evidence_change_points(
@@ -39,7 +40,7 @@ def filter_evidence_change_points(
     cohort: list[ChangePoint] = []
     for cp in change_points:
         d_abs = abs(cp.effect_size_cohens_d)
-        if cp.method == "pelt":
+        if cp.method in _PELT_METHODS:
             if d_abs >= max(analysis_cfg.effect_size_threshold, _PELT_MIN_EFFECT_SIZE):
                 cohort.append(cp)
             continue

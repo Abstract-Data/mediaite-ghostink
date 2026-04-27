@@ -25,6 +25,7 @@ from forensics.models.article import Article
 from forensics.models.author import Author, AuthorManifest
 from forensics.progress import PipelineObserver
 from forensics.scraper.client import create_scraping_client
+from forensics.scraper.coverage import write_crawl_summary_json
 from forensics.scraper.fetcher import RateLimiter, log_scrape_error, request_with_retry
 from forensics.scraper.parser import (
     extract_article_text_from_rest,
@@ -540,7 +541,9 @@ async def collect_article_metadata(
         return await _aggregate_parallel_ingest_results(author_cfgs, ingest_results, errors)
 
     with ensure_repo(db_path, repo) as r:
-        return await _run(r)
+        inserted = await _run(r)
+    write_crawl_summary_json(errors, errors.with_name("crawl_summary.json"))
+    return inserted
 
 
 def _ingest_single_post(post: object, author_id: str) -> Article | None:

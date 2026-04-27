@@ -28,7 +28,10 @@ from forensics.config.settings import ForensicsSettings
 from forensics.models.analysis import AnalysisResult, ChangePoint
 from forensics.storage.json_io import write_json_artifact
 from forensics.storage.repository import Repository
-from forensics.utils.provenance import compute_model_config_hash, write_corpus_custody
+from forensics.utils.provenance import (
+    compute_model_config_hash,
+    write_corpus_custody,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -243,7 +246,12 @@ def _run_full_analysis_per_authors(
             len(slugs),
             worker_count,
         )
-        ctx = multiprocessing.get_context(mp_context) if mp_context else None
+        # C-09 — default to spawn (macOS-safe); tests pass ``mp_context="fork"`` for parity hooks.
+        ctx = (
+            multiprocessing.get_context(mp_context)
+            if mp_context
+            else multiprocessing.get_context("spawn")
+        )
         with ProcessPoolExecutor(max_workers=worker_count, mp_context=ctx) as executor:
             future_to_slug = {
                 executor.submit(
@@ -344,6 +352,15 @@ def _validate_and_promote_isolated_outputs(
         _validate_isolated_author_output(isolated, config)
     for isolated in isolated_outputs:
         _promote_isolated_author_output(isolated, paths)
+    # I-06 — explicit marker so operators can tell the last parallel promotion completed cleanly.
+    marker = paths.analysis_dir / "parallel_promotion_complete.json"
+    write_json_artifact(
+        marker,
+        {
+            "validated_slugs": sorted(item.slug for item in isolated_outputs),
+            "config_hash": compute_model_config_hash(config.analysis, length=16, round_trip=True),
+        },
+    )
 
 
 def _run_isolated_author_jobs(
@@ -376,7 +393,8 @@ def _run_isolated_author_jobs(
                 isolated_outputs.append(isolated)
         return isolated_outputs
     isolated_outputs: list[IsolatedAuthorAnalysis] = []
-    with ProcessPoolExecutor(max_workers=worker_count) as executor:
+    ctx = multiprocessing.get_context("spawn")
+    with ProcessPoolExecutor(max_workers=worker_count, mp_context=ctx) as executor:
         future_to_slug = {
             executor.submit(
                 _isolated_author_worker,
@@ -471,6 +489,11 @@ def run_parallel_author_refresh(
         paths=paths,
         config=config,
     )
+    if not comparison_payload.get("targets"):
+        logger.warning(
+            "comparison_report: empty targets — no target-vs-control comparisons produced; "
+            "check target role in config, on-disk result artifacts, and --author scope (L-02)"
+        )
     write_json_artifact(paths.comparison_report_json(), comparison_payload)
     _merge_run_metadata(paths, results, comparison_payload)
     meta_path = paths.run_metadata_json()

@@ -1,0 +1,16 @@
+# Example external-control author stubs (M-08) — NOT ACTIVE
+#
+# Picking outlets requires legal/ToS review. Duplicate this file, set
+# ``enabled = true`` on vetted rows only after human approval, then merge
+# entries into the main ``config.toml`` ``[[authors]]`` table or load via
+# a future multi-file config mechanism.
+#
+# [[authors]]
+# name = "Example Columnist"
+# slug = "example-columnist"
+# role = "control"
+# outlet = "external.example.com"
+# archive_url = "https://example.com/author/example/"
+# baseline_start = 2018-01-01
+# baseline_end = 2022-10-31
+# enabled = false

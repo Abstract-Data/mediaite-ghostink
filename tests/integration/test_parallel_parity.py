@@ -173,6 +173,7 @@ def _pin_nondeterminism(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr("forensics.analysis.orchestrator.uuid4", fake_uuid4)
     monkeypatch.setattr("forensics.analysis.orchestrator.datetime", FixedDateTime)
+    monkeypatch.setattr("forensics.analysis.orchestrator.staleness.datetime", FixedDateTime)
     monkeypatch.setattr("forensics.utils.provenance.datetime", FixedDateTime)
 
 
@@ -251,6 +252,8 @@ def test_run_metadata_top_level_lists_sort_alphabetically(
 
     meta = json.loads(serial_paths.run_metadata_json().read_text(encoding="utf-8"))
     assert meta["full_analysis_authors"] == sorted(meta["full_analysis_authors"])
+    assert meta["authors_in_run"] == sorted(meta["authors_in_run"])
+    assert meta["authors_in_run"] == meta["full_analysis_authors"]
     assert meta["comparison_targets"] == sorted(meta["comparison_targets"])
 
 

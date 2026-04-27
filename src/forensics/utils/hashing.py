@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import unicodedata
 from collections.abc import Iterable, Iterator
 
 import xxhash
@@ -67,6 +68,16 @@ def _simhash_from_grams(grams: Iterable[str], hashbits: int) -> int:
     return fingerprint
 
 
+def normalize_text_for_simhash(text: str) -> str:
+    """D-01 — Unicode NFKC + whitespace collapse before n-gram fingerprinting.
+
+    Recomputing simhashes after changing normalization is required for stored
+    duplicate flags to stay aligned with live ingest.
+    """
+    s = unicodedata.normalize("NFKC", text or "")
+    return " ".join(s.replace("\n", " ").split())
+
+
 def simhash(text: str, hashbits: int = 128) -> int:
     """Character n-gram simhash for near-duplicate detection (up to 256 bits).
 
@@ -81,5 +92,5 @@ def simhash(text: str, hashbits: int = 128) -> int:
     if hashbits < 1 or hashbits > 256:
         msg = "hashbits must be between 1 and 256"
         raise ValueError(msg)
-    cleaned = text.replace("\n", " ")
+    cleaned = normalize_text_for_simhash(text)
     return _simhash_from_grams(_simhash_char_ngrams(cleaned), hashbits)

@@ -14,6 +14,8 @@ This document enumerates every identified problem with the pipeline's methodolog
 
 Severity scale: **CRITICAL** → **HIGH** → **MEDIUM** → **LOW** → **NIT**
 
+**Phase 0 status (2026-04-26):** M-01, M-02, M-03, M-04 (verify), M-05, and R-01–R-09 are addressed in-repo (lock, amendment, comparison JSON, drift metric continuity, findings narrative). See [CHANGELOG § Phase 0 closure](CHANGELOG.md) for the ID → artifact map. **All punch IDs (M/C/D/I/R/P/L/T/N):** full remediation index in [`docs/punch-list-closure-index.md`](../../docs/punch-list-closure-index.md). Rows below retain the original audit wording for traceability; where they contradict shipped fixes, the CHANGELOG / artifacts win.
+
 ---
 
 ## A. Methodology — Forensic / Statistical / Conceptual
