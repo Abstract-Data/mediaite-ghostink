@@ -322,7 +322,7 @@ def test_analysis_artifacts_ok_rejects_stale_config_hash(tmp_path: Path) -> None
     )
     ok, msg = _analysis_artifacts_ok(settings, analysis)
     assert ok is False
-    assert "stale or mixed analysis config hashes" in msg
+    assert "stale or mismatched analysis config hashes" in msg
 
 
 def test_generate_author_evidence_pages_writes_qmd(tmp_path: Path) -> None:

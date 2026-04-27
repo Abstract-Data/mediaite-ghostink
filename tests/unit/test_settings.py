@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from datetime import date
+from pathlib import Path
 from typing import Any
 
 import pytest
 from pydantic import ValidationError
 
+from forensics.config import get_settings
 from forensics.config.settings import (
     AnalysisConfig,
     AuthorConfig,
@@ -44,6 +46,22 @@ def test_get_settings_from_fixture(settings) -> None:
     assert len(settings.authors) == 1
     assert settings.authors[0].slug == "fixture-author"
     assert settings.scraping.max_retries == 3
+
+
+def test_canonical_config_has_exactly_one_target_colby_hall(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Repository ``config.toml`` must declare Colby Hall as the sole study target."""
+    canonical = Path(__file__).resolve().parents[2] / "config.toml"
+    monkeypatch.setenv("FORENSICS_CONFIG_FILE", str(canonical))
+    get_settings.cache_clear()
+    try:
+        loaded = get_settings()
+        targets = [a for a in loaded.authors if a.role == "target"]
+        assert len(targets) == 1
+        assert targets[0].slug == "colby-hall"
+    finally:
+        get_settings.cache_clear()
 
 
 @pytest.mark.parametrize(("field", "alt"), _HASH_SMOKE_FIELDS)

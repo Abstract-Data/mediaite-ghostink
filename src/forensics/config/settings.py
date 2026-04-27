@@ -64,15 +64,30 @@ class ScrapingConfig(BaseModel):
     # When True, the metadata phase also pulls `content.rendered` (100 posts per
     # request) and writes body text inline, so `fetch_articles` no-ops. Trades
     # per-article OG/ld+json metadata for ~100× fewer requests.
-    bulk_fetch_mode: bool = False
+    bulk_fetch_mode: bool = Field(False, json_schema_extra={"include_in_config_hash": True})
     retry_backoff_seconds: float = 5.0
     # Hamming-distance threshold passed to ``deduplicate_articles``.
     # Lower is stricter; 0 disables near-duplicate collapsing entirely.
-    simhash_threshold: int = Field(default=3, ge=0, le=64)
+    simhash_threshold: int = Field(
+        default=3,
+        ge=0,
+        le=64,
+        json_schema_extra={"include_in_config_hash": True},
+    )
     # Inclusive calendar-year window for WordPress ``wp/v2/posts`` queries
     # (``after`` / ``before``). Both unset = no date filter (full history).
-    post_year_min: int | None = Field(default=None, ge=1900, le=2100)
-    post_year_max: int | None = Field(default=None, ge=1900, le=2100)
+    post_year_min: int | None = Field(
+        default=None,
+        ge=1900,
+        le=2100,
+        json_schema_extra={"include_in_config_hash": True},
+    )
+    post_year_max: int | None = Field(
+        default=None,
+        ge=1900,
+        le=2100,
+        json_schema_extra={"include_in_config_hash": True},
+    )
 
     @model_validator(mode="after")
     def _post_year_range_consistent(self) -> ScrapingConfig:
@@ -153,6 +168,11 @@ class AnalysisConfig(BaseModel):
         le=1.0,
         json_schema_extra={"include_in_config_hash": True},
     )
+    # M-11 — when True, override ``bocpd_hazard_rate`` with ~expected_changes/n_articles.
+    bocpd_hazard_auto: bool = Field(False, json_schema_extra={"include_in_config_hash": True})
+    bocpd_expected_changes_per_author: int = Field(
+        3, ge=1, json_schema_extra={"include_in_config_hash": True}
+    )
     # Phase 15 A — MAP-run-length reset replaces ``P(r=0)`` thresholding as
     # the default. ``bocpd_threshold`` was removed (algebraically pinned to
     # the hazard rate; see docs/GUARDRAILS.md). Set ``bocpd_detection_mode``
@@ -176,7 +196,28 @@ class AnalysisConfig(BaseModel):
     # Phase 15 A4 — Student-t posterior predictive (NIG conjugate).
     bocpd_student_t: bool = Field(True, json_schema_extra={"include_in_config_hash": True})
     baseline_embedding_count: int = 20
-    convergence_window_days: int = 90
+    # I-03 — optional counts for manual baseline-curve sensitivity sweeps (empty = off).
+    baseline_embedding_count_sensitivity: list[int] = Field(default_factory=list)
+    convergence_window_days: int = Field(
+        90,
+        ge=1,
+        json_schema_extra={"include_in_config_hash": True},
+    )
+    # I-02 — when True, derive window length from posting cadence (bounded).
+    convergence_window_adaptive: bool = Field(
+        False,
+        json_schema_extra={"include_in_config_hash": True},
+    )
+    convergence_window_days_min: int = Field(
+        30,
+        ge=1,
+        json_schema_extra={"include_in_config_hash": True},
+    )
+    convergence_window_days_max: int = Field(
+        180,
+        ge=1,
+        json_schema_extra={"include_in_config_hash": True},
+    )
     # Phase 15 B3 — threshold interpreted against feature *families* (≈8 independent
     # axes), not the 23 raw features. Default dropped 0.60 → 0.50 so 4-of-8 family
     # shifts surface as convergence.
@@ -220,9 +261,25 @@ class AnalysisConfig(BaseModel):
     content_lda_max_features: int = 2000
     content_lda_max_df: float = 0.95
     content_lda_max_chars_per_document: int = 96_000
+    content_lda_random_state: int = Field(42, json_schema_extra={"include_in_config_hash": True})
+    drift_umap_random_state: int = Field(42, json_schema_extra={"include_in_config_hash": True})
+    hypothesis_bootstrap_seed: int = Field(42, json_schema_extra={"include_in_config_hash": True})
+    embedding_vector_dim: int = Field(384, ge=1, json_schema_extra={"include_in_config_hash": True})
+    # D-10 — drop sub-threshold articles at analyze time (0 = disabled).
+    analysis_min_word_count: int = Field(0, ge=0)
     # Phase 15 C — FDR grouping dimension (author-wide vs per feature family).
     fdr_grouping: Literal["author", "family"] = Field(
         "family", json_schema_extra={"include_in_config_hash": True}
+    )
+    # M-09 — optional second BH pass across authors on per-family minima.
+    enable_cross_author_correction: bool = Field(
+        False, json_schema_extra={"include_in_config_hash": True}
+    )
+    # M-15 — minimum finite observations per pre/post segment for Welch / MW.
+    hypothesis_min_segment_n: int = Field(
+        10,
+        ge=2,
+        json_schema_extra={"include_in_config_hash": True},
     )
     # Phase 15 C1 — Kolmogorov–Smirnov is highly correlated with Mann–Whitney
     # for the location shifts this analysis cares about. Default OFF drops the

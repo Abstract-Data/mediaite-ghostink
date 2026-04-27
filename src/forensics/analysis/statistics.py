@@ -43,6 +43,41 @@ from forensics.models.analysis import HypothesisTest
 logger = logging.getLogger(__name__)
 
 
+def _cohens_d_value_and_degenerate(
+    group1: list[float] | np.ndarray,
+    group2: list[float] | np.ndarray,
+) -> tuple[float, bool]:
+    """C-07 — single implementation for Cohen's *d* and variance-degeneracy (Phase 16 D3)."""
+    a = np.asarray(group1, dtype=float).ravel()
+    b = np.asarray(group2, dtype=float).ravel()
+    degenerate = False
+    if a.size < 1 or b.size < 1:
+        return 0.0, degenerate
+    if a.size == 1 and b.size >= 2:
+        pooled = float(np.std(b, ddof=1))
+        degenerate = pooled < 1e-12 or not math.isfinite(pooled)
+        if degenerate:
+            return 0.0, degenerate
+        return (float(np.mean(b)) - float(a[0])) / pooled, degenerate
+    if b.size == 1 and a.size >= 2:
+        pooled = float(np.std(a, ddof=1))
+        degenerate = pooled < 1e-12 or not math.isfinite(pooled)
+        if degenerate:
+            return 0.0, degenerate
+        return (float(b[0]) - float(np.mean(a))) / pooled, degenerate
+    if a.size < 2 or b.size < 2:
+        d = float(np.mean(b) - np.mean(a)) if a.size and b.size else 0.0
+        return d, degenerate
+    m1, m2 = float(np.mean(a)), float(np.mean(b))
+    v1, v2 = float(np.var(a, ddof=1)), float(np.var(b, ddof=1))
+    n1, n2 = a.size, b.size
+    pooled_std = math.sqrt(((n1 - 1) * v1 + (n2 - 1) * v2) / (n1 + n2 - 2))
+    degenerate = pooled_std <= 0.0 or not math.isfinite(pooled_std)
+    if degenerate:
+        return 0.0, degenerate
+    return float((m2 - m1) / pooled_std), degenerate
+
+
 def cohens_d(
     group1: list[float] | np.ndarray,
     group2: list[float] | np.ndarray,
@@ -51,29 +86,7 @@ def cohens_d(
 
     Handles length-1 tails (changepoint segments) like the legacy numpy helper.
     """
-    a = np.asarray(group1, dtype=float).ravel()
-    b = np.asarray(group2, dtype=float).ravel()
-    if a.size < 1 or b.size < 1:
-        return 0.0
-    if a.size == 1 and b.size >= 2:
-        pooled = float(np.std(b, ddof=1))
-        if pooled < 1e-12:
-            return 0.0
-        return (float(np.mean(b)) - float(a[0])) / pooled
-    if b.size == 1 and a.size >= 2:
-        pooled = float(np.std(a, ddof=1))
-        if pooled < 1e-12:
-            return 0.0
-        return (float(b[0]) - float(np.mean(a))) / pooled
-    if a.size < 2 or b.size < 2:
-        return float(np.mean(b) - np.mean(a)) if a.size and b.size else 0.0
-    m1, m2 = float(np.mean(a)), float(np.mean(b))
-    v1, v2 = float(np.var(a, ddof=1)), float(np.var(b, ddof=1))
-    n1, n2 = a.size, b.size
-    pooled_std = math.sqrt(((n1 - 1) * v1 + (n2 - 1) * v2) / (n1 + n2 - 2))
-    if pooled_std <= 0.0 or not math.isfinite(pooled_std):
-        return 0.0
-    return float((m2 - m1) / pooled_std)
+    return _cohens_d_value_and_degenerate(group1, group2)[0]
 
 
 def bootstrap_ci(
@@ -149,34 +162,8 @@ def _cohens_d_meta(
     group1: list[float] | np.ndarray,
     group2: list[float] | np.ndarray,
 ) -> tuple[float, bool]:
-    """Cohen's *d* plus variance-degeneracy flag (Phase 16 D3).
-
-    Degenerate when the pooled (or single-group) standard deviation path that
-    :func:`cohens_d` uses collapses to a non-informative zero / non-finite
-    denominator — mirroring ``cohens_d`` without changing its public return
-    contract for legacy callers.
-    """
-    a = np.asarray(group1, dtype=float).ravel()
-    b = np.asarray(group2, dtype=float).ravel()
-    d = cohens_d(a, b)
-    degenerate = False
-    if a.size < 1 or b.size < 1:
-        return d, degenerate
-    if a.size == 1 and b.size >= 2:
-        pooled = float(np.std(b, ddof=1))
-        degenerate = pooled < 1e-12 or not math.isfinite(pooled)
-        return d, degenerate
-    if b.size == 1 and a.size >= 2:
-        pooled = float(np.std(a, ddof=1))
-        degenerate = pooled < 1e-12 or not math.isfinite(pooled)
-        return d, degenerate
-    if a.size < 2 or b.size < 2:
-        return d, degenerate
-    v1, v2 = float(np.var(a, ddof=1)), float(np.var(b, ddof=1))
-    n1, n2 = a.size, b.size
-    pooled_std = math.sqrt(((n1 - 1) * v1 + (n2 - 1) * v2) / (n1 + n2 - 2))
-    degenerate = pooled_std <= 0.0 or not math.isfinite(pooled_std)
-    return d, degenerate
+    """Cohen's *d* plus variance-degeneracy flag (Phase 16 D3)."""
+    return _cohens_d_value_and_degenerate(group1, group2)
 
 
 def _skipped_hypothesis_battery(
@@ -256,7 +243,9 @@ def run_hypothesis_tests(
     author_id: str,
     *,
     n_bootstrap: int = 1000,
+    bootstrap_seed: int = 42,
     enable_ks_test: bool = False,
+    hypothesis_min_segment_n: int = 10,
 ) -> list[HypothesisTest]:
     """Welch t and Mann–Whitney U at a candidate split index (KS opt-in).
 
@@ -315,12 +304,23 @@ def run_hypothesis_tests(
             enable_ks_test=enable_ks_test,
         )
 
+    if n_pre < hypothesis_min_segment_n or n_post < hypothesis_min_segment_n:
+        return _skipped_hypothesis_battery(
+            feature_name=feature_name,
+            author_id=author_id,
+            skipped_reason=f"insufficient_n_pre_or_post (min={hypothesis_min_segment_n})",
+            n_pre=n_pre,
+            n_post=n_post,
+            n_nan_dropped=n_nan_dropped,
+            enable_ks_test=enable_ks_test,
+        )
+
     tests: list[HypothesisTest] = []
 
     _t_stat, p_welch = stats.ttest_ind(pre, post, equal_var=False)
     p_welch_f = float(p_welch)
     d, d_degenerate = _cohens_d_meta(pre, post)
-    ci = bootstrap_ci(pre, post, n_bootstrap=n_bootstrap)
+    ci = bootstrap_ci(pre, post, n_bootstrap=n_bootstrap, seed=bootstrap_seed)
     welch_degenerate = (not math.isfinite(p_welch_f)) or d_degenerate
     tests.append(
         _hypothesis_test(
@@ -434,6 +434,124 @@ def apply_correction(
         else t.model_copy(update={"corrected_p_value": float("nan"), "significant": False})
         for i, t in enumerate(tests)
     ]
+
+
+def _bh_adjusted_pvalues(
+    p_values: list[float],
+    *,
+    slugs: list[str] | None = None,
+) -> list[float]:
+    """Benjamini–Hochberg adjusted *p* in the same index order as ``p_values``.
+
+    When ``slugs`` is provided (same length as ``p_values``), ties on *p* are
+    broken lexicographically by slug so ordering is stable across dict/input
+    permutations.
+    """
+    n_r = len(p_values)
+    if slugs is not None and len(slugs) != n_r:
+        msg = "slugs length must match p_values"
+        raise ValueError(msg)
+    if slugs is None:
+        order = sorted(range(n_r), key=lambda i: (p_values[i], str(i)))
+    else:
+        order = sorted(range(n_r), key=lambda i: (p_values[i], slugs[i]))
+    bh = [0.0] * n_r
+    for rank, oi in enumerate(order, start=1):
+        bh[oi] = min(float(p_values[oi]) * n_r / rank, 1.0)
+    for k in range(n_r - 2, -1, -1):
+        oi = order[k]
+        oj = order[k + 1]
+        bh[oi] = min(bh[oi], bh[oj])
+    return [min(c, 1.0) for c in bh]
+
+
+def _min_rankable_corrected_p(tests: list[HypothesisTest]) -> float | None:
+    rankable_ps = [
+        float(t.corrected_p_value)
+        for t in tests
+        if hypothesis_test_is_bh_rankable(t) and math.isfinite(float(t.corrected_p_value))
+    ]
+    return min(rankable_ps) if rankable_ps else None
+
+
+def _cross_author_adjustments_for_family(
+    fam: str,
+    slug_map: dict[str, list[HypothesisTest]],
+) -> tuple[dict[tuple[str, str], float | None], dict[tuple[str, str], str | None]]:
+    entries: list[tuple[str, float]] = []
+    for slug, ts in slug_map.items():
+        m = _min_rankable_corrected_p(ts)
+        if m is not None:
+            entries.append((slug, m))
+    out_p: dict[tuple[str, str], float | None] = {}
+    out_r: dict[tuple[str, str], str | None] = {}
+    n_r = len(entries)
+    if n_r == 0:
+        return out_p, out_r
+    if n_r < 2:
+        for slug, _pmin in entries:
+            key = (slug, fam)
+            out_p[key] = None
+            out_r[key] = "single-author-no-cross-correction"
+        return out_p, out_r
+    entries_sorted = sorted(entries, key=lambda e: (e[1], e[0]))
+    slugs_order = [e[0] for e in entries_sorted]
+    pvals = [e[1] for e in entries_sorted]
+    bh_vals = _bh_adjusted_pvalues(pvals, slugs=slugs_order)
+    for i, slug in enumerate(slugs_order):
+        out_p[(slug, fam)] = bh_vals[i]
+    return out_p, out_r
+
+
+def apply_cross_author_correction(
+    tests_by_slug: dict[str, list[HypothesisTest]],
+) -> dict[str, list[HypothesisTest]]:
+    """M-09 — second-pass BH on each family's across-author minima.
+
+    For every stylometric family (see :func:`forensics.analysis.feature_families.family_for`),
+    collects each author's minimum first-pass ``corrected_p_value`` among
+    BH-rankable tests in that family, runs Benjamini–Hochberg across those
+    author-level minima, then stamps ``cross_author_corrected_p`` on *all*
+    hypothesis rows for that author × family with the adjusted value.
+
+    Families with fewer than two contributing authors leave
+    ``cross_author_corrected_p`` unset (``None``) and set
+    ``cross_author_correction_reason`` to ``single-author-no-cross-correction``.
+    """
+    from forensics.analysis.feature_families import family_for
+
+    inv_family: dict[str, dict[str, list[HypothesisTest]]] = defaultdict(lambda: defaultdict(list))
+    for slug, tests in tests_by_slug.items():
+        for t in tests:
+            fam = family_for(t.feature_name)
+            if fam == "unknown":
+                continue
+            inv_family[fam][slug].append(t)
+
+    adjustments_p: dict[tuple[str, str], float | None] = {}
+    adjustments_r: dict[tuple[str, str], str | None] = {}
+    for fam, slug_map in inv_family.items():
+        p_part, r_part = _cross_author_adjustments_for_family(fam, slug_map)
+        adjustments_p.update(p_part)
+        adjustments_r.update(r_part)
+
+    out: dict[str, list[HypothesisTest]] = {}
+    for slug, tests in tests_by_slug.items():
+        new_tests: list[HypothesisTest] = []
+        for t in tests:
+            fam = family_for(t.feature_name)
+            q = adjustments_p.get((slug, fam))
+            reason = adjustments_r.get((slug, fam))
+            new_tests.append(
+                t.model_copy(
+                    update={
+                        "cross_author_corrected_p": q,
+                        "cross_author_correction_reason": reason,
+                    }
+                )
+            )
+        out[slug] = new_tests
+    return out
 
 
 def apply_correction_grouped(

@@ -25,6 +25,7 @@ from forensics.models.analysis import (
     AnalysisResult,
     ChangePoint,
     ConvergenceWindow,
+    DriftScores,
     HypothesisTest,
 )
 from forensics.reporting.html_report import (
@@ -54,7 +55,7 @@ def _result_with_families() -> AnalysisResult:
         ChangePoint(
             feature_name=feat,
             author_id=slug,
-            timestamp=datetime(2025, 12, 10, tzinfo=UTC),
+            timestamp=datetime(2025, 6, 10, tzinfo=UTC),
             confidence=0.9,
             method="pelt",
             effect_size_cohens_d=0.8,
@@ -89,6 +90,7 @@ def _result_with_families() -> AnalysisResult:
         pipeline_a_score=0.72,
         pipeline_b_score=0.0,
         pipeline_c_score=None,
+        passes_via=["ratio"],
     )
     tests = [
         HypothesisTest(
@@ -126,6 +128,26 @@ def _result_legacy_no_families() -> AnalysisResult:
         pipeline_a_score=0.5,
         pipeline_b_score=0.0,
         pipeline_c_score=None,
+        passes_via=["ratio"],
+    )
+    drift = DriftScores(
+        author_id=slug,
+        baseline_centroid_similarity=0.5,
+        ai_baseline_similarity=None,
+        monthly_centroid_velocities=[0.1, 0.2, 0.3, 0.4, 0.5],
+        intra_period_variance_trend=[0.05, 0.06, 0.07, 0.08, 0.09],
+    )
+    hyp = HypothesisTest(
+        test_name="mann_whitney_ai_marker_frequency",
+        feature_name="ai_marker_frequency",
+        author_id=slug,
+        raw_p_value=0.01,
+        corrected_p_value=0.02,
+        effect_size_cohens_d=0.85,
+        confidence_interval_95=(0.5, 1.2),
+        significant=True,
+        n_pre=20,
+        n_post=20,
     )
     return AnalysisResult(
         author_id=slug,
@@ -134,18 +156,18 @@ def _result_legacy_no_families() -> AnalysisResult:
         config_hash="0123456789abcdef",
         change_points=[
             ChangePoint(
-                feature_name="ttr",
+                feature_name="ai_marker_frequency",
                 author_id=slug,
                 timestamp=datetime(2024, 5, 15, tzinfo=UTC),
-                confidence=0.8,
+                confidence=0.85,
                 method="pelt",
                 effect_size_cohens_d=0.7,
                 direction="increase",
             ),
         ],
         convergence_windows=[window],
-        drift_scores=None,
-        hypothesis_tests=[],
+        drift_scores=drift,
+        hypothesis_tests=[hyp],
     )
 
 

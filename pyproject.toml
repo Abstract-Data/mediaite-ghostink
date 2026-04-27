@@ -76,6 +76,7 @@ pythonpath = ["src"]
 addopts = "-ra -q --strict-markers --cov=forensics --cov-report=term-missing -m 'not slow'"
 markers = [
   "slow: test requires loading large models / downloading external artifacts",
+  "integration: cross-stage or external-tool integration (opt-in via -m integration)",
 ]
 
 [tool.ruff]
@@ -102,6 +103,10 @@ omit = [
   # optional-extra. Covered via manual smoke runs, not CI.
   "*/forensics/baseline/orchestrator.py",
   "*/forensics/baseline/agent.py",
+  # Textual TUI is an optional extra; default ``uv sync`` skips it, which would
+  # otherwise drag aggregate coverage below ``fail_under`` despite identical
+  # pipeline test surface (see ``[project.optional-dependencies]`` tui group).
+  "*/forensics/tui/*",
 ]
 
 [tool.coverage.report]

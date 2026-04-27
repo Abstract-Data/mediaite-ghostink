@@ -83,13 +83,15 @@ def test_constant_signal_emits_no_breakpoints() -> None:
 
 
 def test_nan_input_is_handled_without_raising() -> None:
-    """NaNs are imputed via the median path; the call must not raise."""
+    """NaNs are imputed upstream (C-02); ``detect_pelt`` requires finite input."""
+    from forensics.analysis.changepoint import _impute_finite_feature_series
+
     rng = np.random.default_rng(0)
     signal = np.concatenate([rng.normal(0.0, 0.3, 50), rng.normal(2.0, 0.3, 50)])
     signal[10] = np.nan
     signal[60] = np.nan
 
-    bps = detect_pelt(signal, pen=3.0, cost_model="l2")
+    bps = detect_pelt(_impute_finite_feature_series(signal), pen=3.0, cost_model="l2")
 
     assert isinstance(bps, list)
     assert all(isinstance(b, int) for b in bps)
@@ -129,9 +131,9 @@ def test_l2_regression_pin_single_mean_shift() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_analysis_config_default_is_l2() -> None:
-    """``AnalysisConfig`` ships with ``pelt_cost_model = 'l2'`` post-F0."""
-    assert AnalysisConfig().pelt_cost_model == "l2"
+def test_analysis_config_default_is_l1() -> None:
+    """``AnalysisConfig`` defaults to ``l1`` (Phase 15 J6 std-scaled PELT path)."""
+    assert AnalysisConfig().pelt_cost_model == "l1"
 
 
 def _settings_with_cost_model(cost_model: str) -> ForensicsSettings:

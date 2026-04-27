@@ -130,6 +130,52 @@ def test_generated_article_autofills_word_count() -> None:
     assert art.with_auto_word_count().actual_word_count == 4
 
 
+def test_parse_generated_article_plain_json() -> None:
+    raw = '{"headline": "A", "text": "one two", "actual_word_count": 0}'
+    art = agent_mod.parse_generated_article_text(raw)
+    assert art.headline == "A"
+    assert art.text == "one two"
+    assert art.with_auto_word_count().actual_word_count == 2
+
+
+def test_parse_generated_article_tool_wrapper() -> None:
+    raw = (
+        '{"name": "generate_article", "parameters": {"headline": "B", '
+        '"text": "x y z", "actual_word_count": 0}}'
+    )
+    art = agent_mod.parse_generated_article_text(raw)
+    assert art.headline == "B"
+    assert art.with_auto_word_count().actual_word_count == 3
+
+
+def test_parse_generated_article_markdown_fence() -> None:
+    raw = '```json\n{"headline": "C", "text": "only", "actual_word_count": 1}\n```'
+    art = agent_mod.parse_generated_article_text(raw)
+    assert art.headline == "C"
+    assert art.text == "only"
+
+
+def test_parse_generated_article_prose_prefix() -> None:
+    raw = 'Here is the JSON:\n{"headline": "D", "text": "a b", "actual_word_count": 0}\nThanks.'
+    art = agent_mod.parse_generated_article_text(raw)
+    assert art.headline == "D"
+    assert art.with_auto_word_count().actual_word_count == 2
+
+
+def test_parse_generated_article_trailing_junk() -> None:
+    raw = '{"headline": "E", "text": "ok", "actual_word_count": 0} trailing prose'
+    art = agent_mod.parse_generated_article_text(raw)
+    assert art.headline == "E"
+    assert art.text == "ok"
+
+
+def test_parse_generated_article_loose_plaintext() -> None:
+    raw = '"Hed Here Is Long"\n\nPara one.\nPara two.'
+    art = agent_mod.parse_generated_article_text(raw)
+    assert "Hed Here" in art.headline
+    assert "Para one" in art.text
+
+
 def test_make_baseline_agent_requires_pydantic_ai(monkeypatch: pytest.MonkeyPatch) -> None:
     import builtins
 

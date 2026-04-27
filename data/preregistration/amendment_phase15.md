@@ -130,3 +130,25 @@ completed. Any subsequent edit to H1–H7 requires a new amendment file
 - GitHub handle:    _____________________________
 - Signed (ISO-8601): _____________________________
 - SHA of Phase-15 Unit 1 PR: _____________________________
+
+## Amendment: Post-hoc Threshold Changes (Fix-F and Fix-G)
+
+Recorded: 2026-04-26
+
+### Fix-F — PIPELINE_SCORE_PASS_THRESHOLD lowered 0.5 → 0.3
+
+Reason: the 0.5 threshold filtered all percentile-mode pipeline-B windows because
+peak_signal alone tops at 0.5 when sim_signal=ai_signal=0 (baseline not populated).
+
+Status: **EXPLORATORY ONLY.** This threshold was chosen after observing output, not
+before. Any confirmatory run must either restore 0.5 or preregister 0.3 with a
+documented rationale independent of the current data.
+
+### Fix-G — DRIFT_ONLY_PB_THRESHOLD = 0.3 added
+
+Reason: 13 of 14 authors persisted zero convergence windows under the original
+two-gate (ratio OR ab) logic.
+
+Status: **EXPLORATORY ONLY.** Same constraint as Fix-F. The drift-only channel is
+a potentially valid forensic tool but must be preregistered before use in
+confirmatory analysis.

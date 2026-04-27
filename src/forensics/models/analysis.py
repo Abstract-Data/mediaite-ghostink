@@ -7,7 +7,9 @@ from datetime import UTC, date, datetime
 from typing import Any, Literal, Self
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from forensics.utils.velocity_metrics import compute_velocity_acceleration
 
 
 class ChangePoint(BaseModel):
@@ -15,6 +17,10 @@ class ChangePoint(BaseModel):
     author_id: str
     timestamp: datetime
     confidence: float = Field(ge=0.0, le=1.0)
+    # M-10 — PELT ``confidence`` is a monotone transform of |d|, not a probability.
+    # ``effect_proxy`` is the canonical strength score for PELT; for BOCPD it
+    # mirrors posterior ``confidence``. Persisted for convergence / reports.
+    effect_proxy: float | None = Field(default=None, ge=0.0, le=1.0)
     method: Literal[
         "pelt",
         "bocpd",
@@ -25,6 +31,14 @@ class ChangePoint(BaseModel):
     ]
     effect_size_cohens_d: float
     direction: Literal["increase", "decrease"]
+
+    @model_validator(mode="before")
+    @classmethod
+    def _default_effect_proxy_from_confidence(cls, data: Any) -> Any:
+        """M-10 — legacy JSON and callers may omit ``effect_proxy``; mirror ``confidence``."""
+        if isinstance(data, dict) and data.get("effect_proxy") is None and "confidence" in data:
+            return {**data, "effect_proxy": data["confidence"]}
+        return data
 
 
 class ConvergenceWindow(BaseModel):
@@ -57,12 +71,6 @@ class DriftScores(BaseModel):
     @property
     def velocity_acceleration_ratio(self) -> float:
         """(late-early)/early split of ``monthly_centroid_velocities`` clamped to [0, 1]."""
-        # Deferred import breaks the models → analysis → models cycle
-        # (``forensics.analysis.utils`` re-exports helpers that themselves
-        # reference models in this module). Keeping it local to the property
-        # avoids the import happening at module-load time.
-        from forensics.analysis.utils import compute_velocity_acceleration
-
         return compute_velocity_acceleration(self.monthly_centroid_velocities)
 
 
@@ -93,6 +101,10 @@ class HypothesisTest(BaseModel):
     n_nan_dropped: int = Field(default=0, ge=0)
     skipped_reason: str | None = None
     degenerate: bool = False
+    # M-09 — second-pass BH across authors on per-family minima (optional).
+    cross_author_corrected_p: float | None = Field(default=None)
+    # Set when cross-author BH is skipped (e.g. single contributing author).
+    cross_author_correction_reason: str | None = Field(default=None)
 
     @classmethod
     def from_legacy(cls, data: Any) -> Self:
@@ -107,6 +119,8 @@ class HypothesisTest(BaseModel):
         payload.setdefault("n_nan_dropped", 0)
         payload.setdefault("skipped_reason", None)
         payload.setdefault("degenerate", False)
+        payload.setdefault("cross_author_corrected_p", None)
+        payload.setdefault("cross_author_correction_reason", None)
         return cls.model_validate(payload)
 
 

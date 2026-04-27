@@ -97,6 +97,10 @@ def _snapshot_thresholds(settings: ForensicsSettings) -> dict[str, Any]:
         "convergence_cp_source": analysis.convergence_cp_source,
         "convergence_drift_only_pb_threshold": analysis.convergence_drift_only_pb_threshold,
         "fdr_grouping": analysis.fdr_grouping,
+        "enable_cross_author_correction": analysis.enable_cross_author_correction,
+        "hypothesis_min_segment_n": analysis.hypothesis_min_segment_n,
+        "bocpd_hazard_auto": analysis.bocpd_hazard_auto,
+        "bocpd_expected_changes_per_author": analysis.bocpd_expected_changes_per_author,
         "pipeline_b_mode": analysis.pipeline_b_mode,
         "section_residualize_features": analysis.section_residualize_features,
     }
@@ -155,7 +159,7 @@ def verify_preregistration(
             "No pre-registration lock found at "
             f"{resolved}; analysis is exploratory, not confirmatory."
         )
-        logger.info("preregistration: %s", msg)
+        logger.warning("preregistration: %s (L-06)", msg)
         return VerificationResult(status="missing", message=msg, lock_path=resolved)
 
     raw = json.loads(resolved.read_text(encoding="utf-8"))
@@ -172,7 +176,7 @@ def verify_preregistration(
             "absent); analysis is exploratory, not confirmatory. Run "
             "`uv run forensics lock-preregistration` to convert it."
         )
-        logger.info("preregistration: %s", msg)
+        logger.warning("preregistration: %s (L-06)", msg)
         return VerificationResult(status="missing", message=msg, lock_path=resolved)
 
     locked_analysis: dict[str, Any] = raw.get("analysis", {})

@@ -60,6 +60,8 @@ def test_lock_content_has_thresholds(forensics_config_path: Path, tmp_path: Path
         "pelt_penalty",
         "pelt_cost_model",
         "bocpd_hazard_rate",
+        "bocpd_hazard_auto",
+        "bocpd_expected_changes_per_author",
         # Phase 15 Unit 1 — ``bocpd_threshold`` removed; detection semantics
         # now parameterised by these knobs.
         "bocpd_detection_mode",
@@ -68,6 +70,8 @@ def test_lock_content_has_thresholds(forensics_config_path: Path, tmp_path: Path
         "bocpd_student_t",
         "convergence_cp_source",
         "fdr_grouping",
+        "enable_cross_author_correction",
+        "hypothesis_min_segment_n",
         "pipeline_b_mode",
         "section_residualize_features",
     }
@@ -168,7 +172,7 @@ def test_unfilled_template_returns_missing(forensics_config_path: Path, tmp_path
 
 
 def test_committed_template_lock_does_not_violate(
-    forensics_config_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The repo-committed template at ``data/preregistration/preregistration_lock.json``.
 
@@ -177,8 +181,14 @@ def test_committed_template_lock_does_not_violate(
     edit to the template removes ``locked_at`` or hard-codes ``analysis``
     fields that drift from current settings, this test catches it before
     the next CI run logs a false violation.
+
+    Uses the **repository** ``config.toml`` (not the minimal test fixture) so
+    the lock is compared against the same thresholds operators ship.
     """
-    settings = get_settings()
+    repo_root = Path(__file__).resolve().parents[1]
+    cfg = repo_root / "config.toml"
+    if not cfg.is_file():
+        pytest.skip("repo config.toml not present")
     repo_lock = (
         Path(__file__).resolve().parent.parent
         / "data"
@@ -188,13 +198,20 @@ def test_committed_template_lock_does_not_violate(
     if not repo_lock.is_file():
         pytest.skip("template lock not present in this checkout")
 
-    result = verify_preregistration(settings, lock_path=repo_lock)
+    try:
+        monkeypatch.setenv("FORENSICS_CONFIG_FILE", str(cfg))
+        get_settings.cache_clear()
+        settings = get_settings()
+        result = verify_preregistration(settings, lock_path=repo_lock)
 
-    # ``ok`` is acceptable too (operator may have filled it locally), but
-    # a freshly-committed template must read as ``missing``, never ``mismatch``.
-    assert result.status in {"missing", "ok"}, (
-        f"committed template should not read as mismatch: {result.message}"
-    )
+        # ``ok`` is acceptable too (operator may have filled it locally), but
+        # a freshly-committed template must read as ``missing``, never ``mismatch``.
+        assert result.status in {"missing", "ok"}, (
+            f"committed template should not read as mismatch: {result.message}"
+        )
+    finally:
+        monkeypatch.delenv("FORENSICS_CONFIG_FILE", raising=False)
+        get_settings.cache_clear()
 
 
 def test_lock_is_idempotent(forensics_config_path: Path, tmp_path: Path) -> None:

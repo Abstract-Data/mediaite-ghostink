@@ -27,6 +27,22 @@ logger = logging.getLogger(__name__)
 
 PROMPT_MODES = ("raw_generation", "style_mimicry")
 
+# Baseline templates historically asked for “article body only”; the PydanticAI
+# agent expects JSON. Append an explicit delivery contract on every cell prompt.
+_JSON_DELIVERY_SUFFIX = """
+
+---
+## Required response format
+
+Compose the article as instructed above, then respond with ONLY one JSON object
+(no markdown fences) using exactly these keys:
+- "headline": short wire-style headline string
+- "text": the full article body you wrote (must satisfy the word-count guidance)
+- "actual_word_count": integer (use 0 to let the pipeline count words from "text")
+
+Do not wrap the JSON in prose before or after it.
+"""
+
 
 def _cell_dir(
     base: Path,
@@ -171,6 +187,7 @@ async def run_generation_matrix(
                         ),
                         project_root=root,
                     )
+                    prompt_text = f"{prompt_text.rstrip()}{_JSON_DELIVERY_SUFFIX}"
                     start = datetime.now(UTC)
                     result = await agent.run(prompt_text, deps=deps)
                     elapsed_ms = int((datetime.now(UTC) - start).total_seconds() * 1000)

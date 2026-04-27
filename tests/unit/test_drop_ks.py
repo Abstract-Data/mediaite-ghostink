@@ -14,8 +14,8 @@ from forensics.config.settings import AnalysisConfig
 
 # Deterministic fixture: a clear location shift so Welch + Mann–Whitney
 # both produce finite, low p-values without relying on randomness.
-_PRE = [1.0, 1.1, 0.9, 1.2, 0.95, 1.05, 1.1, 0.9]
-_POST = [5.0, 5.1, 4.9, 5.2, 4.95, 5.05, 5.1, 4.9]
+_PRE = [1.0, 1.1, 0.9, 1.2, 0.95, 1.05, 1.1, 0.9, 1.0, 1.05]
+_POST = [5.0, 5.1, 4.9, 5.2, 4.95, 5.05, 5.1, 4.9, 5.0, 5.05]
 _FEATURE = "ttr"
 _AUTHOR = "author-x"
 

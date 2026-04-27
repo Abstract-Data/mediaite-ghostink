@@ -1,0 +1,14 @@
+{
+  "family": "pr94-review-remediation",
+  "current_version": "0.1.0",
+  "versions": [
+    {
+      "version": "0.1.0",
+      "date": "2026-04-26",
+      "status": "active",
+      "model": "claude-opus-4-7",
+      "file": "v0.1.0.md",
+      "changelog_entry": "Initial remediation prompt for PR #94 code review. 19 items across CRITICAL/HIGH/MEDIUM/LOW. Five CRITICAL: worker-exception swallowing in _run_isolated_author_jobs (parallel.py:411-417); non-atomic merge_parquet_metadata (parquet.py:73-92); per-author empty-filter fallback bug (per_author.py:322-326); NFKC simhash migration with version bump + CLI command + RUNBOOK note; incomplete _sync_patchable_globals propagation (orchestrator/__init__.py:36-46). Includes pre-flight, verification protocol, out-of-scope list, and definition-of-done."
+    }
+  ]
+}

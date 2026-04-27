@@ -12,7 +12,6 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-from scipy.spatial.distance import cosine
 
 from forensics.analysis.artifact_paths import AnalysisArtifactPaths
 from forensics.analysis.utils import pair_months_with_velocities
@@ -34,7 +33,8 @@ from forensics.utils.datetime import parse_datetime
 
 logger = logging.getLogger(__name__)
 
-AI_BASELINE_EMBEDDING_DIM = 384
+# N-03 — UMAP with fewer than four monthly centroids is not meaningful.
+_UMAP_MIN_MONTHLY_CENTROIDS: int = 4
 
 
 class EmbeddingRevisionGateError(ValueError):
@@ -206,6 +206,18 @@ def _cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
     return float(np.dot(a, b) / (na * nb))
 
 
+def _cosine_distance(a: np.ndarray, b: np.ndarray) -> float:
+    """C-03/C-04 — cosine distance matching ``scipy.spatial.distance.cosine`` for finite norms."""
+    a = np.asarray(a, dtype=np.float64).ravel()
+    b = np.asarray(b, dtype=np.float64).ravel()
+    na = float(np.linalg.norm(a))
+    nb = float(np.linalg.norm(b))
+    if na < 1e-12 or nb < 1e-12:
+        return 0.0
+    d = 1.0 - float(np.dot(a, b) / (na * nb))
+    return float(d) if np.isfinite(d) else 0.0
+
+
 def compute_monthly_centroids(
     article_embeddings: Sequence[ArticleEmbedding],
 ) -> list[tuple[str, np.ndarray]]:
@@ -228,9 +240,7 @@ def track_centroid_velocity(centroids: list[tuple[str, np.ndarray]]) -> list[flo
     for i in range(1, len(centroids)):
         prev_v = np.asarray(centroids[i - 1][1], dtype=np.float64).ravel()
         cur_v = np.asarray(centroids[i][1], dtype=np.float64).ravel()
-        d = float(cosine(prev_v, cur_v))
-        if not np.isfinite(d):
-            d = 0.0
+        d = _cosine_distance(prev_v, cur_v)
         velocities.append(d)
     return velocities
 
@@ -260,7 +270,7 @@ def _pairwise_mean_cosine_distance(vecs: list[np.ndarray]) -> float:
     dists: list[float] = []
     for i in range(len(vecs)):
         for j in range(i + 1, len(vecs)):
-            d = float(cosine(vecs[i].ravel(), vecs[j].ravel()))
+            d = _cosine_distance(vecs[i].ravel(), vecs[j].ravel())
             if np.isfinite(d):
                 dists.append(d)
     return float(np.mean(dists)) if dists else 0.0
@@ -271,7 +281,7 @@ def _mean_cosine_to_centroid(vecs: list[np.ndarray]) -> float:
     centroid = stacked.mean(axis=0)
     dists_c: list[float] = []
     for v in vecs:
-        d = float(cosine(v.ravel(), centroid))
+        d = _cosine_distance(v.ravel(), centroid)
         if np.isfinite(d):
             dists_c.append(d)
     return float(np.mean(dists_c)) if dists_c else 0.0
@@ -489,32 +499,37 @@ def _iter_ai_baseline_embedding_paths(author_slug: str, paths: AnalysisArtifactP
     return sorted(candidates)
 
 
-def _load_ai_baseline_vector(path: Path) -> np.ndarray | None:
+def _load_ai_baseline_vector(path: Path, *, expected_dim: int) -> np.ndarray | None:
     """Load and validate one AI baseline embedding vector."""
     try:
         vec = np.asarray(np.load(path), dtype=np.float32).ravel()
     except (OSError, ValueError) as exc:
         logger.warning("Could not read AI baseline embedding %s: %s", path, exc)
         return None
-    if vec.shape != (AI_BASELINE_EMBEDDING_DIM,):
+    if vec.shape != (expected_dim,):
         logger.warning(
             "Skipping AI baseline embedding with unexpected dimension: %s shape=%s expected=(%d,)",
             path,
             vec.shape,
-            AI_BASELINE_EMBEDDING_DIM,
+            expected_dim,
         )
         return None
     return vec
 
 
-def load_ai_baseline_embeddings(author_slug: str, paths: AnalysisArtifactPaths) -> list[np.ndarray]:
+def load_ai_baseline_embeddings(
+    author_slug: str,
+    paths: AnalysisArtifactPaths,
+    *,
+    expected_dim: int = 384,
+) -> list[np.ndarray]:
     """Load generated AI baseline embeddings from legacy or nested Phase 10 layouts."""
     embedding_paths = _iter_ai_baseline_embedding_paths(author_slug, paths)
     if not embedding_paths:
         return []
     out: list[np.ndarray] = []
     for path in embedding_paths:
-        vec = _load_ai_baseline_vector(path)
+        vec = _load_ai_baseline_vector(path, expected_dim=expected_dim)
         if vec is not None:
             out.append(vec)
     return out
@@ -696,7 +711,23 @@ def compute_author_drift_pipeline(
         period="month",
         max_pairwise=settings.analysis.intra_variance_pairwise_max,
     )
-    ai_vecs = load_ai_baseline_embeddings(slug, paths)
+    ai_vecs = load_ai_baseline_embeddings(
+        slug,
+        paths,
+        expected_dim=int(settings.analysis.embedding_vector_dim),
+    )
+    if not ai_vecs and len(article_embs) >= 2:
+        baseline_root = paths.ai_baseline_dir(slug)
+        legacy_emb = paths.ai_baseline_embeddings_dir(slug)
+        manifest = baseline_root / "generation_manifest.json"
+        has_legacy = legacy_emb.is_dir() and any(legacy_emb.glob("*.npy"))
+        if (baseline_root.is_dir() and manifest.is_file()) or has_legacy:
+            logger.warning(
+                "drift: AI baseline layout present for slug=%s but no vectors loaded "
+                "(re-run `forensics baseline` or inspect paths); "
+                "ai_baseline_similarity will be absent (L-03)",
+                slug,
+            )
     ai_conv = compute_ai_convergence(monthly, ai_vecs) if ai_vecs else None
     ai_centroid_plot: np.ndarray | None = None
     if ai_vecs:
@@ -709,7 +740,28 @@ def compute_author_drift_pipeline(
         velocities,
         intra,
     )
-    umap_one = generate_umap_projection({slug: monthly}, ai_centroid=ai_centroid_plot)
+    n_months = len(monthly)
+    if n_months >= _UMAP_MIN_MONTHLY_CENTROIDS:
+        umap_one = generate_umap_projection(
+            {slug: monthly},
+            ai_centroid=ai_centroid_plot,
+            random_state=int(settings.analysis.drift_umap_random_state),
+        )
+    else:
+        logger.warning(
+            "drift: skipping UMAP for slug=%s — %d monthly centroid(s) "
+            "(<%d); projection would be unstable (N-03)",
+            slug,
+            n_months,
+            _UMAP_MIN_MONTHLY_CENTROIDS,
+        )
+        umap_one = {
+            "projections": {},
+            "ai_projection": None,
+            "skipped": True,
+            "reason": "insufficient_monthly_centroids",
+            "n_monthly_centroids": n_months,
+        }
     write_drift_artifacts(
         slug,
         author_id,
@@ -770,8 +822,24 @@ def run_drift_analysis(
             logger.info("drift: wrote analysis artifacts for %s", author.slug)
 
     if len(centroids_by_author) > 1:
-        combined = generate_umap_projection(
-            centroids_by_author,
-            ai_centroid=None,
-        )
+        total_monthly = sum(len(v) for v in centroids_by_author.values())
+        if total_monthly >= _UMAP_MIN_MONTHLY_CENTROIDS:
+            combined = generate_umap_projection(
+                centroids_by_author,
+                ai_centroid=None,
+                random_state=int(settings.analysis.drift_umap_random_state),
+            )
+        else:
+            logger.warning(
+                "drift: skipping combined UMAP — %d monthly centroid(s) across authors (<%d; N-03)",
+                total_monthly,
+                _UMAP_MIN_MONTHLY_CENTROIDS,
+            )
+            combined = {
+                "projections": {},
+                "ai_projection": None,
+                "skipped": True,
+                "reason": "insufficient_monthly_centroids",
+                "n_monthly_centroids": total_monthly,
+            }
         write_json_artifact(paths.combined_umap_json(), combined)

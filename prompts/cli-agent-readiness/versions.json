@@ -1,0 +1,14 @@
+{
+  "family": "cli-agent-readiness",
+  "current_version": "0.1.0",
+  "versions": [
+    {
+      "version": "0.1.0",
+      "date": "2026-04-26",
+      "status": "active",
+      "model": "claude-opus-4-7",
+      "file": "v0.1.0.md",
+      "changelog_entry": "Initial CLI agent-readiness retrofit prompt. 10 items derived from scorecard audit against 'CLI Best Practices for AI Agents'. CRITICAL ordered foundation: JSON envelope helpers + global --output plumbing (item 1); stdout=data/stderr=logs sweep (item 2); semantic exit codes 0/1/2/3/4/5 with docs/EXIT_CODES.md (item 3). HIGH: commands --json self-discovery (item 4); Examples: blocks on every command (item 5); structured error envelope with code + suggestion (item 6); project SKILL.md at .claude/skills/forensics-cli/ mirrored to .cursor/skills/ (item 7). MEDIUM: --yes / --non-interactive enforcement on TUI and destructive commands (item 8); HTTP transient classification routed to exit 4 (item 9); existing-test updates (item 10). All changes are additive; text remains the default --output; no top-level command renamed."
+    }
+  ]
+}

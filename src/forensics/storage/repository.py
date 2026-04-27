@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 import threading
 from collections.abc import Iterable, Iterator
@@ -18,6 +19,9 @@ from forensics.models.author import Author
 from forensics.storage.json_io import ensure_parent
 from forensics.storage.migrations import apply_migrations as _apply_sqlite_migrations
 from forensics.utils.datetime import parse_datetime
+from forensics.utils.hashing import SIMHASH_FINGERPRINT_VERSION
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "Repository",
@@ -176,7 +180,14 @@ def _validate_batch_size(batch_size: int) -> None:
 
 def _row_to_article(row: sqlite3.Row) -> Article:
     metadata_raw = row["metadata"]
-    metadata: dict[str, object] = json.loads(metadata_raw) if metadata_raw else {}
+    if metadata_raw:
+        try:
+            metadata = json.loads(metadata_raw)
+        except json.JSONDecodeError:
+            logger.warning("Skipping malformed article metadata JSON for id=%s", row["id"])
+            metadata = {}
+    else:
+        metadata = {}
     modified_raw = row["modified_date"] if row["modified_date"] is not None else None
     mod_dt = parse_datetime(modified_raw) if modified_raw else None
     scraped_raw = row["scraped_at"] if row["scraped_at"] is not None else None
@@ -327,6 +338,100 @@ class RepositoryReader:
                     str(row["title"]),
                     str(row["clean_text"]),
                 )
+
+    def iter_dedup_source_rows_with_fp_meta(
+        self, *, batch_size: int = 500
+    ) -> Iterator[tuple[str, datetime, str, str, str | None, str | None]]:
+        """Like :meth:`iter_dedup_source_rows` but includes optional simhash cache columns."""
+        _validate_batch_size(batch_size)
+        conn = self._require_conn()
+        keys = {str(r[1]) for r in conn.execute("PRAGMA table_info(articles)").fetchall()}
+        has_fp = "dedup_simhash" in keys and "dedup_simhash_version" in keys
+        fp_sel = (
+            "a.dedup_simhash AS dedup_simhash, a.dedup_simhash_version AS dedup_simhash_version"
+        )
+        if not has_fp:
+            fp_sel = "NULL AS dedup_simhash, NULL AS dedup_simhash_version"
+        sql = f"""
+            SELECT a.id, a.published_date, a.title, a.clean_text, {fp_sel}
+            FROM articles a
+            WHERE a.clean_text IS NOT NULL
+              AND a.clean_text != ''
+              AND (length(a.clean_text) < 10 OR substr(a.clean_text, 1, 10) != '[REDIRECT:')
+            ORDER BY a.published_date
+        """
+        cursor = conn.execute(sql)
+        while True:
+            rows = cursor.fetchmany(batch_size)
+            if not rows:
+                break
+            for row in rows:
+                fp = row["dedup_simhash"]
+                ver = row["dedup_simhash_version"]
+                yield (
+                    str(row["id"]),
+                    parse_datetime(row["published_date"]),
+                    str(row["title"]),
+                    str(row["clean_text"]),
+                    str(fp) if fp is not None else None,
+                    str(ver) if ver is not None else None,
+                )
+
+    def load_dedup_simhashes(self) -> list[tuple[str, int]]:
+        """Return article ids whose persisted simhash matches the current fingerprint version.
+
+        Rows with missing columns, NULL fingerprints, or a version other than
+        :data:`forensics.utils.hashing.SIMHASH_FINGERPRINT_VERSION` are excluded
+        from the returned list (they remain eligible for
+        :meth:`Repository.recompute_stale_dedup_simhashes`). Emits a single
+        warning summarising how many in-corpus rows carry stale or missing
+        version stamps while still having a non-empty dedup body.
+        """
+        conn = self._require_conn()
+        keys = {str(r[1]) for r in conn.execute("PRAGMA table_info(articles)").fetchall()}
+        if "dedup_simhash" not in keys or "dedup_simhash_version" not in keys:
+            return []
+        stale_sql = """
+            SELECT COUNT(*) FROM articles
+            WHERE clean_text IS NOT NULL
+              AND clean_text != ''
+              AND (length(clean_text) < 10 OR substr(clean_text, 1, 10) != '[REDIRECT:')
+              AND dedup_simhash IS NOT NULL
+              AND (
+                    dedup_simhash_version IS NULL
+                 OR dedup_simhash_version != ?
+              )
+        """
+        stale_row = conn.execute(stale_sql, (SIMHASH_FINGERPRINT_VERSION,)).fetchone()
+        stale_n = int(stale_row[0]) if stale_row else 0
+        if stale_n:
+            logger.warning(
+                "dedup_simhash: excluding %d article(s) with stale or NULL fingerprint version "
+                "from the cached simhash set; run `forensics dedup recompute-fingerprints`",
+                stale_n,
+            )
+        rows = conn.execute(
+            """
+            SELECT id, dedup_simhash FROM articles
+            WHERE clean_text IS NOT NULL
+              AND clean_text != ''
+              AND (length(clean_text) < 10 OR substr(clean_text, 1, 10) != '[REDIRECT:')
+              AND dedup_simhash IS NOT NULL
+              AND dedup_simhash_version = ?
+            ORDER BY published_date
+            """,
+            (SIMHASH_FINGERPRINT_VERSION,),
+        ).fetchall()
+        out: list[tuple[str, int]] = []
+        for row in rows:
+            raw = row["dedup_simhash"]
+            if raw is None:
+                continue
+            try:
+                out.append((str(row["id"]), int(str(raw), 16)))
+            except ValueError:
+                logger.warning("dedup_simhash: skipping malformed hex for id=%s", row["id"])
+        return out
 
     def get_unfetched_urls(self) -> list[UnfetchedUrl]:
         """Return rows where body text has not been fetched yet."""
@@ -530,6 +635,124 @@ class Repository(RepositoryReader):
         """
         return self._bulk_set_is_duplicate(article_ids, 1, chunk_size=chunk_size)
 
+    def recompute_stale_dedup_simhashes(self, *, limit: int | None = None) -> dict[str, int]:
+        """Recompute simhash + version for articles not stamped at the current version.
+
+        Runs inside a single ``BEGIN IMMEDIATE`` transaction (mirrors duplicate
+        flag updates). Returns counts ``recomputed``, ``skipped``, ``errors``.
+        """
+        from forensics.utils.hashing import simhash
+
+        conn = self._require_conn()
+        keys = {str(r[1]) for r in conn.execute("PRAGMA table_info(articles)").fetchall()}
+        if "dedup_simhash" not in keys or "dedup_simhash_version" not in keys:
+            return {"recomputed": 0, "skipped": 0, "errors": 0}
+
+        sql = """
+            SELECT id, clean_text FROM articles
+            WHERE clean_text IS NOT NULL
+              AND clean_text != ''
+              AND (length(clean_text) < 10 OR substr(clean_text, 1, 10) != '[REDIRECT:')
+              AND (
+                    dedup_simhash_version IS NULL
+                 OR dedup_simhash_version != ?
+              )
+            ORDER BY published_date
+        """
+        params: tuple[object, ...] = (SIMHASH_FINGERPRINT_VERSION,)
+        if limit is not None:
+            sql = f"{sql}\nLIMIT ?"
+            params = (SIMHASH_FINGERPRINT_VERSION, int(limit))
+
+        recomputed = 0
+        errors = 0
+        with self._lock:
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                rows = conn.execute(sql, params).fetchall()
+                for row in rows:
+                    aid = str(row["id"])
+                    text = str(row["clean_text"])
+                    try:
+                        fp = simhash(text)
+                    except Exception:
+                        logger.exception("dedup recompute: simhash failed for id=%s", aid)
+                        errors += 1
+                        continue
+                    conn.execute(
+                        """
+                        UPDATE articles
+                        SET dedup_simhash = ?, dedup_simhash_version = ?
+                        WHERE id = ?
+                        """,
+                        (format(fp, "x"), SIMHASH_FINGERPRINT_VERSION, aid),
+                    )
+                    recomputed += 1
+            except Exception:
+                conn.rollback()
+                raise
+            else:
+                conn.commit()
+        return {"recomputed": recomputed, "skipped": 0, "errors": errors}
+
+    def apply_duplicate_flags_transaction(
+        self,
+        clear_ids: Iterable[str],
+        mark_duplicate_ids: Iterable[str],
+        *,
+        chunk_size: int = 500,
+    ) -> tuple[int, int]:
+        """C-05 — atomically reset then mark duplicate flags (single ``BEGIN IMMEDIATE``).
+
+        Use for simhash dedup so a crash cannot leave ``is_duplicate`` cleared
+        without the subsequent mark pass completing.
+        """
+        clear_list = list(clear_ids)
+        mark_list = list(mark_duplicate_ids)
+        if chunk_size < 1:
+            msg = f"chunk_size must be >= 1, got {chunk_size}"
+            raise ValueError(msg)
+        conn = self._require_conn()
+        cleared = 0
+        marked = 0
+        with self._lock:
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                cleared = self._bulk_set_is_duplicate_on_conn(
+                    conn, clear_list, 0, chunk_size=chunk_size
+                )
+                marked = self._bulk_set_is_duplicate_on_conn(
+                    conn, mark_list, 1, chunk_size=chunk_size
+                )
+            except Exception:
+                conn.rollback()
+                raise
+            else:
+                conn.commit()
+        return cleared, marked
+
+    @staticmethod
+    def _bulk_set_is_duplicate_on_conn(
+        conn: sqlite3.Connection,
+        article_ids: list[str],
+        value: int,
+        *,
+        chunk_size: int,
+    ) -> int:
+        if not article_ids:
+            return 0
+        total = 0
+        for i in range(0, len(article_ids), chunk_size):
+            chunk = article_ids[i : i + chunk_size]
+            placeholders = ",".join("?" * len(chunk))
+            cur = conn.execute(
+                f"UPDATE articles SET is_duplicate = ? WHERE id IN ({placeholders})",
+                (value, *chunk),
+            )
+            if cur.rowcount >= 0:
+                total += cur.rowcount
+        return total
+
     def _bulk_set_is_duplicate(
         self, article_ids: Iterable[str], value: int, *, chunk_size: int
     ) -> int:
@@ -542,15 +765,7 @@ class Repository(RepositoryReader):
         conn = self._require_conn()
         total = 0
         with self._lock:
-            for i in range(0, len(ids), chunk_size):
-                chunk = ids[i : i + chunk_size]
-                placeholders = ",".join("?" * len(chunk))
-                cur = conn.execute(
-                    f"UPDATE articles SET is_duplicate = ? WHERE id IN ({placeholders})",
-                    (value, *chunk),
-                )
-                if cur.rowcount >= 0:
-                    total += cur.rowcount
+            total = self._bulk_set_is_duplicate_on_conn(conn, ids, value, chunk_size=chunk_size)
         return total
 
     def rewrite_raw_paths_after_archive(self, year: int) -> int:

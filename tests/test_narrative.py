@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
@@ -45,18 +45,33 @@ def _strong_result(slug: str = "jane-doe") -> AnalysisResult:
     # With 2 windows at 0.9 ratio => conv = 1.0; composite = 0.4 * 1.0 +
     # 0.3 * pa + 0.3 * pb. pa comes from unique-cp-feature count relative
     # to 35 * 0.3 = 10.5 — we push it to 1.0 via 11 distinct features.
-    features = [f"feature_{i}" for i in range(11)]
+    # Real feature names so ``family_for`` + admissible-CP gating in
+    # ``compute_composite_score`` match production semantics (passes_via must
+    # include ``ratio`` / ``ab`` for windows to count toward convergence).
+    features = [
+        "ai_marker_frequency",
+        "formula_opening_score",
+        "hedging_frequency",
+        "first_person_ratio",
+        "ttr",
+        "mattr",
+        "sent_length_mean",
+        "flesch_kincaid",
+        "bigram_entropy",
+        "passive_voice_ratio",
+        "conjunction_freq",
+    ]
     cps = [
         ChangePoint(
             feature_name=f,
             author_id=slug,
-            timestamp=datetime(2023, 3, 15, tzinfo=UTC),
+            timestamp=datetime(2023, 3, 15, tzinfo=UTC) + timedelta(days=i),
             confidence=0.95,
             method="pelt",
             effect_size_cohens_d=0.9,
             direction="increase",
         )
-        for f in features
+        for i, f in enumerate(features)
     ]
     windows = [
         ConvergenceWindow(
@@ -67,15 +82,17 @@ def _strong_result(slug: str = "jane-doe") -> AnalysisResult:
             pipeline_a_score=0.9,
             pipeline_b_score=0.9,
             pipeline_c_score=None,
+            passes_via=["ratio"],
         ),
         ConvergenceWindow(
             start_date=date(2023, 7, 1),
             end_date=date(2023, 10, 1),
-            features_converging=features[5:10],
+            features_converging=["ai_marker_frequency", *features[5:9]],
             convergence_ratio=0.85,
             pipeline_a_score=0.85,
             pipeline_b_score=0.85,
             pipeline_c_score=None,
+            passes_via=["ratio"],
         ),
     ]
     drift = DriftScores(
@@ -88,7 +105,7 @@ def _strong_result(slug: str = "jane-doe") -> AnalysisResult:
     tests = [
         HypothesisTest(
             test_name="mann_whitney",
-            feature_name="ttr",
+            feature_name="ai_marker_frequency",
             author_id=slug,
             raw_p_value=0.0001,
             corrected_p_value=0.001,
@@ -162,7 +179,7 @@ def test_narrative_strong_signal() -> None:
     assert "STRONG" in text
     # Effect sizes appear in "d=..." form for at least one feature.
     assert "d=" in text
-    assert "ttr" in text  # largest |d| = 1.2
+    assert "ai_marker_frequency" in text  # largest |d| = 1.2
     # Convergence window appears.
     assert "convergence window" in text.lower()
 

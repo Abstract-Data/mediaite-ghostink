@@ -1,4 +1,9 @@
-"""Content and topic feature extractors (Phase 4)."""
+"""Content and topic feature extractors (Phase 4).
+
+C-11 — TF-IDF self-similarity uses a process-local LRU (``_SELF_SIM_CACHE_MAX``).
+It speeds repeated peer sets but is not shared across workers; parallel extract
+paths may re-fit vectorizers independently.
+"""
 
 from __future__ import annotations
 
@@ -133,19 +138,15 @@ def _discrete_distribution_entropy(dist: np.ndarray) -> float:
     return float(-sum(float(x) * math.log2(float(x)) for x in p if x > 0))
 
 
+# M-21 — keep patterns that are less ubiquitous in wire-style ledes / sign-offs.
+FORMULA_PATTERN_LIST_VERSION = "0.2.0"
+
 _OPENING_PATTERNS = (
     re.compile(r"\bin a recent\b", re.I),
-    re.compile(r"\bas .{1,40}? reported\b", re.I),
-    re.compile(r"\btime will tell\b", re.I),
-    re.compile(r"\baccording to reports\b", re.I),
     re.compile(r"\bit remains to be seen\b", re.I),
 )
 
-_CLOSING_PATTERNS = (
-    re.compile(r"\bonly time will tell\b", re.I),
-    re.compile(r"\bwe will keep you updated\b", re.I),
-    re.compile(r"\bstay tuned\b", re.I),
-)
+_CLOSING_PATTERNS = (re.compile(r"\bonly time will tell\b", re.I),)
 
 _FIRST_PERSON = re.compile(
     r"\b(i|me|my|mine|we|us|our|ours)\b",
@@ -204,7 +205,7 @@ def _topic_entropy_lda(
             n_components=k_eff,
             max_iter=analysis.content_lda_max_iter,
             learning_method="online",
-            random_state=42,
+            random_state=int(analysis.content_lda_random_state),
         )
         dist = lda.fit_transform(X)
         if topic_row >= dist.shape[0]:
@@ -220,10 +221,10 @@ def extract_content_features(
     recent_texts_30d: list[str],
     recent_texts_90d: list[str],
     *,
-    analysis: AnalysisConfig | None = None,
+    analysis: AnalysisConfig,
 ) -> dict[str, Any]:
-    """Content, repetition, and light topic features."""
-    cfg = analysis or AnalysisConfig()
+    """Content, repetition, and light topic features (C-10 — ``analysis`` is required)."""
+    cfg = analysis
     words = [t.text.lower() for t in doc if t.is_alpha]
     bi, tri = _shannon_bigrams_trigrams(words)
 

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import functools
 import importlib.metadata
+import json
 import logging
 import sys
 from pathlib import Path
@@ -12,6 +14,7 @@ import httpx
 import typer
 
 from forensics.cli.state import ForensicsCliState, get_cli_state
+from forensics.preflight import PreflightReport
 
 app = typer.Typer(
     name="forensics",
@@ -87,6 +90,7 @@ def _root(
 # --- Register subcommands ---
 from forensics.cli.analyze import analyze_app  # noqa: E402
 from forensics.cli.calibrate import calibrate_app  # noqa: E402
+from forensics.cli.dedup import dedup_app  # noqa: E402
 from forensics.cli.extract import extract  # noqa: E402
 from forensics.cli.migrate import features_app, migrate  # noqa: E402
 from forensics.cli.report import report  # noqa: E402
@@ -98,35 +102,55 @@ app.add_typer(survey_app, name="survey")
 app.add_typer(calibrate_app, name="calibrate")
 app.add_typer(features_app, name="features")
 app.add_typer(analyze_app, name="analyze")
+app.add_typer(dedup_app, name="dedup")
 app.command(name="extract")(extract)
 app.command(name="report")(report)
 app.command(name="migrate")(migrate)
 
 
-_SETTINGS_LOAD_ERRORS: tuple[type[BaseException], ...] | None = None
+def _preflight_json_envelope(
+    report: PreflightReport,
+    *,
+    strict: bool,
+) -> dict[str, object]:
+    """Build the stable JSON object for ``forensics preflight --output json``."""
+    if report.has_failures:
+        status = "fail"
+    elif report.has_warnings:
+        status = "warn"
+    else:
+        status = "ok"
+    checks: list[dict[str, str]] = [
+        {"name": c.name, "status": c.status, "message": c.message} for c in report.checks
+    ]
+    return {
+        "checks": checks,
+        "has_failures": report.has_failures,
+        "has_warnings": report.has_warnings,
+        "status": status,
+        "strict": strict,
+    }
 
 
+@functools.lru_cache(maxsize=1)
 def _settings_load_errors() -> tuple[type[BaseException], ...]:
     """Return the narrow exception tuple covering ``get_settings()`` failures.
 
-    Cached after first call so repeated CLI entry points (``preflight``,
-    ``validate``, and any future command) don't re-import ``tomllib`` /
-    ``pydantic`` on every invocation.
+    Cached so repeated CLI entry points (``preflight``, ``validate``, and any
+    future command) don't re-import ``tomllib`` / ``pydantic`` on every
+    invocation.
     """
-    global _SETTINGS_LOAD_ERRORS
-    if _SETTINGS_LOAD_ERRORS is None:
-        import tomllib
+    import tomllib
 
-        from pydantic import ValidationError
+    from pydantic import ValidationError
 
-        _SETTINGS_LOAD_ERRORS = (
-            ValidationError,
-            FileNotFoundError,
-            tomllib.TOMLDecodeError,
-            ValueError,
-            OSError,
-        )
-    return _SETTINGS_LOAD_ERRORS
+    return (
+        ValidationError,
+        FileNotFoundError,
+        tomllib.TOMLDecodeError,
+        ValueError,
+        OSError,
+    )
 
 
 @app.command(name="preflight")
@@ -138,6 +162,13 @@ def preflight(
             help="Promote warnings to failures (useful in CI).",
         ),
     ] = False,
+    output: Annotated[
+        Literal["text", "json"],
+        typer.Option(
+            "--output",
+            help="text: human-readable lines; json: one JSON object on stdout (sort_keys=True).",
+        ),
+    ] = "text",
 ) -> None:
     """Run preflight checks and report pass/warn/fail for each boundary."""
     from forensics.config import get_settings
@@ -151,17 +182,23 @@ def preflight(
         settings = None
     report = run_all_preflight_checks(settings, strict=strict)
 
-    icons = {"pass": "PASS", "warn": "WARN", "fail": "FAIL"}
-    for check in report.checks:
-        typer.echo(f"  [{icons[check.status]}] {check.name}: {check.message}")
+    if output == "json":
+        payload = _preflight_json_envelope(report, strict=strict)
+        typer.echo(json.dumps(payload, sort_keys=True))
+    else:
+        icons = {"pass": "PASS", "warn": "WARN", "fail": "FAIL"}
+        for check in report.checks:
+            typer.echo(f"  [{icons[check.status]}] {check.name}: {check.message}")
+
+        if report.has_failures:
+            typer.echo("\nSome required checks failed. Fix issues before running the pipeline.")
+        elif report.has_warnings:
+            typer.echo("\nAll required checks passed (some warnings).")
+        else:
+            typer.echo("\nAll preflight checks passed.")
 
     if report.has_failures:
-        typer.echo("\nSome required checks failed. Fix issues before running the pipeline.")
         raise typer.Exit(code=1)
-    if report.has_warnings:
-        typer.echo("\nAll required checks passed (some warnings).")
-    else:
-        typer.echo("\nAll preflight checks passed.")
     raise typer.Exit(code=0)
 
 

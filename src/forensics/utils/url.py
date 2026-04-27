@@ -25,4 +25,10 @@ def section_from_url(url: str | None) -> str:
     if not url:
         return "unknown"
     match = _SECTION_RE.match(url)
-    return match.group(1).lower() if match else "unknown"
+    if not match:
+        return "unknown"
+    seg = match.group(1).lower()
+    # D-07 — year-only first segments are not editorial sections.
+    if len(seg) == 4 and seg.isdigit():
+        return "unknown"
+    return seg

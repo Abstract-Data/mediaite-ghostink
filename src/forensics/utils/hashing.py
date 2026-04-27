@@ -3,8 +3,14 @@
 from __future__ import annotations
 
 import hashlib
+import unicodedata
+from collections.abc import Iterable, Iterator
 
 import xxhash
+
+# Monotonic fingerprint generation contract (NFKC normalization = v2).
+# See docs/RUNBOOK.md — migrating simhash fingerprints after D-01.
+SIMHASH_FINGERPRINT_VERSION: str = "v2"
 
 
 def content_hash(text: str) -> str:
@@ -37,19 +43,19 @@ def _gram_digest(gram_bytes: bytes, hashbits: int) -> int:
     return (hi << 128) | lo
 
 
-def _simhash_char_ngrams(cleaned: str) -> list[str]:
-    grams: list[str] = []
+def _simhash_char_ngrams(cleaned: str) -> Iterator[str]:
+    yielded = False
     for n in (3, 4):
         if len(cleaned) < n:
             continue
         for i in range(len(cleaned) - n + 1):
-            grams.append(cleaned[i : i + n])
-    if not grams:
-        grams = [cleaned or "\x00"]
-    return grams
+            yielded = True
+            yield cleaned[i : i + n]
+    if not yielded:
+        yield cleaned or "\x00"
 
 
-def _simhash_from_grams(grams: list[str], hashbits: int) -> int:
+def _simhash_from_grams(grams: Iterable[str], hashbits: int) -> int:
     top_bit = hashbits - 1
     vector = [0] * hashbits
     for gram in grams:
@@ -66,6 +72,16 @@ def _simhash_from_grams(grams: list[str], hashbits: int) -> int:
     return fingerprint
 
 
+def normalize_text_for_simhash(text: str) -> str:
+    """D-01 — Unicode NFKC + whitespace collapse before n-gram fingerprinting.
+
+    Recomputing simhashes after changing normalization is required for stored
+    duplicate flags to stay aligned with live ingest.
+    """
+    s = unicodedata.normalize("NFKC", text or "")
+    return " ".join(s.replace("\n", " ").split())
+
+
 def simhash(text: str, hashbits: int = 128) -> int:
     """Character n-gram simhash for near-duplicate detection (up to 256 bits).
 
@@ -76,10 +92,15 @@ def simhash(text: str, hashbits: int = 128) -> int:
     (Hamming distance preservation under near-duplicate perturbations) are
     unchanged; hash *values* are not comparable to pre-migration SHA-256
     fingerprints, so any stored ``dedup_simhash`` columns must be recomputed.
+
+    **Versioning:** fingerprints are tagged :data:`SIMHASH_FINGERPRINT_VERSION`
+    (``v2``) at persistence time. ``v2`` denotes Unicode NFKC normalization via
+    :func:`normalize_text_for_simhash` (D-01). Stale SQLite rows must be
+    excluded from the cached fingerprint set until
+    ``forensics dedup recompute-fingerprints`` is run; see RUNBOOK.
     """
     if hashbits < 1 or hashbits > 256:
         msg = "hashbits must be between 1 and 256"
         raise ValueError(msg)
-    cleaned = text.replace("\n", " ")
-    grams = _simhash_char_ngrams(cleaned)
-    return _simhash_from_grams(grams, hashbits)
+    cleaned = normalize_text_for_simhash(text)
+    return _simhash_from_grams(_simhash_char_ngrams(cleaned), hashbits)

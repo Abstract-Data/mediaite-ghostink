@@ -7,7 +7,7 @@ import html
 import json
 import logging
 import sqlite3
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from datetime import UTC, date, datetime
 from pathlib import Path
 from urllib.parse import quote
@@ -25,6 +25,7 @@ from forensics.models.article import Article
 from forensics.models.author import Author, AuthorManifest
 from forensics.progress import PipelineObserver
 from forensics.scraper.client import create_scraping_client
+from forensics.scraper.coverage import write_crawl_summary_json
 from forensics.scraper.fetcher import RateLimiter, log_scrape_error, request_with_retry
 from forensics.scraper.parser import (
     extract_article_text_from_rest,
@@ -323,8 +324,29 @@ async def _manifests_from_user_rows(
                 logger.warning("Skipping malformed user row: %s", exc)
                 return None
 
-    count_results = await asyncio.gather(*(_count_posts_for_user(u) for u in user_rows))
-    manifests = [m for m in count_results if m is not None]
+    count_results = await asyncio.gather(
+        *(_count_posts_for_user(u) for u in user_rows),
+        return_exceptions=True,
+    )
+    manifests: list[AuthorManifest] = []
+    for user, outcome in zip(user_rows, count_results, strict=True):
+        if isinstance(outcome, BaseException):
+            wp_id = user.get("id", "?")
+            logger.exception(
+                "discover_count task failed for user id=%s",
+                wp_id,
+                exc_info=outcome,
+            )
+            await log_scrape_error(
+                errors,
+                f"{MEDIAITE_REST}/posts?author={wp_id}",
+                None,
+                f"{type(outcome).__name__}: {outcome!s}",
+                "discover_count",
+            )
+            continue
+        if outcome is not None:
+            manifests.append(outcome)
     manifests.sort(key=lambda m: m.total_posts, reverse=True)
     return manifests
 
@@ -392,6 +414,32 @@ async def discover_authors(
         top = ", ".join(f"{m.name} ({m.total_posts})" for m in manifests[:10])
         logger.info("Discovered %s authors; top by posts: %s", len(manifests), top)
         return len(manifests)
+
+
+async def _aggregate_parallel_ingest_results(
+    author_cfgs: list[AuthorConfig],
+    ingest_results: Sequence[object],
+    errors: Path,
+) -> int:
+    """Sum per-author insert counts; log and continue on task-level exceptions."""
+    inserted_total = 0
+    for cfg, outcome in zip(author_cfgs, ingest_results, strict=True):
+        if isinstance(outcome, BaseException):
+            logger.exception(
+                "metadata batch task failed for author slug=%s",
+                cfg.slug,
+                exc_info=outcome,
+            )
+            await log_scrape_error(
+                errors,
+                cfg.archive_url,
+                None,
+                f"{cfg.slug}: {type(outcome).__name__}: {outcome!s}",
+                "metadata_author",
+            )
+            continue
+        inserted_total += int(outcome)
+    return inserted_total
 
 
 async def collect_article_metadata(
@@ -486,11 +534,16 @@ async def collect_article_metadata(
             return inserted_here
 
         async with create_scraping_client(scraping) as client:
-            results = await asyncio.gather(*(_ingest_one(cfg) for cfg in author_cfgs))
-        return sum(results)
+            ingest_results = await asyncio.gather(
+                *(_ingest_one(cfg) for cfg in author_cfgs),
+                return_exceptions=True,
+            )
+        return await _aggregate_parallel_ingest_results(author_cfgs, ingest_results, errors)
 
     with ensure_repo(db_path, repo) as r:
-        return await _run(r)
+        inserted = await _run(r)
+    write_crawl_summary_json(errors, errors.with_name("crawl_summary.json"))
+    return inserted
 
 
 def _ingest_single_post(post: object, author_id: str) -> Article | None:

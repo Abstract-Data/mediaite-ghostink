@@ -47,6 +47,14 @@ class AnalysisArtifactPaths:
     def convergence_json(self, author_slug: str) -> Path:
         return self.analysis_dir / f"{author_slug}_convergence.json"
 
+    def convergence_components_json(self, author_slug: str) -> Path:
+        """L-01 — per-window convergence component breakdown (JSON)."""
+        return self.analysis_dir / f"{author_slug}_convergence_components.json"
+
+    def imputation_stats_json(self, author_slug: str) -> Path:
+        """L-05 — NaN / inf imputation counts prior to changepoint detection."""
+        return self.analysis_dir / f"{author_slug}_imputation_stats.json"
+
     def result_json(self, author_slug: str) -> Path:
         return self.analysis_dir / f"{author_slug}_result.json"
 
@@ -70,6 +78,11 @@ class AnalysisArtifactPaths:
 
     def run_metadata_json(self) -> Path:
         return self.analysis_dir / "run_metadata.json"
+
+    @property
+    def scrape_errors_path(self) -> Path:
+        """Directory for ``scrape_errors.jsonl`` and auxiliary per-job error JSON."""
+        return self.project_root / "data"
 
     def combined_umap_json(self) -> Path:
         return self.analysis_dir / "combined_umap.json"

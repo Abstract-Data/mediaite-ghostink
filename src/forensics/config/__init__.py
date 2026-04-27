@@ -6,7 +6,7 @@ lazy proxy for notebook compatibility (``_SettingsProxy`` below).
 
 import warnings
 
-from forensics.config.fingerprint import config_fingerprint
+from forensics.config.fingerprint import config_fingerprint, scraper_signal_digest
 from forensics.config.settings import (
     DEFAULT_DB_RELATIVE,
     AnalysisConfig,
@@ -45,6 +45,7 @@ settings = _SettingsProxy()
 __all__ = [
     "DEFAULT_DB_RELATIVE",
     "config_fingerprint",
+    "scraper_signal_digest",
     "AnalysisConfig",
     "AuthorConfig",
     "ForensicsSettings",

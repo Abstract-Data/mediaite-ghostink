@@ -253,6 +253,39 @@ def test_resolve_parallel_refresh_workers_is_conservative_by_default(
     assert _resolve_parallel_refresh_workers(configured, None) == 6
 
 
+def test_run_full_analysis_merges_run_metadata_in_single_write(
+    pair_project: tuple[AnalysisArtifactPaths, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression (PR94 item 6): avoid multiple read/merge/write passes on ``run_metadata.json``."""
+    from forensics.analysis.orchestrator import run_full_analysis
+    from forensics.storage import json_io
+
+    counts = {"run_metadata": 0}
+    real_write = json_io.write_json_artifact
+
+    def _counting_write(path: Path, payload: object) -> None:
+        if path.name == "run_metadata.json":
+            counts["run_metadata"] += 1
+        real_write(path, payload)
+
+    monkeypatch.setattr(json_io, "write_json_artifact", _counting_write)
+    monkeypatch.setattr(
+        "forensics.analysis.orchestrator.runner.write_json_artifact",
+        _counting_write,
+    )
+    monkeypatch.setattr(
+        "forensics.analysis.orchestrator.staleness.write_json_artifact",
+        _counting_write,
+    )
+    paths, _cfg = pair_project
+    settings = get_settings()
+    for slug in ("ctrl1", "spare"):
+        _write_current_result(paths, slug, settings)
+    run_full_analysis(paths, settings, author_slug="tgt1", max_workers=1)
+    assert counts["run_metadata"] == 1
+
+
 def test_run_full_analysis_timings_out_populates_per_stage_buckets(
     pair_project: tuple[AnalysisArtifactPaths, Path],
 ) -> None:

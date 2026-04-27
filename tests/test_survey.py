@@ -779,6 +779,9 @@ def _patch_orchestrator_side_effects(
     dispatch_result: int = 0,
 ) -> dict[str, list[str]]:
     """Replace scrape/extract/analysis hooks with in-memory stubs."""
+    # ProcessPool workers do not inherit monkeypatches — force sequential survey
+    # dispatch so stubs run in-process (checkpoint + observer tests).
+    monkeypatch.setenv("SURVEY_AUTHOR_WORKERS", "1")
     calls: dict[str, list] = {
         "scrape": [],
         "extract": [],

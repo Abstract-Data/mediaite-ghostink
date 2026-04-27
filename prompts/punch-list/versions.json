@@ -1,0 +1,14 @@
+{
+  "family": "punch-list",
+  "current_version": "0.1.0",
+  "versions": [
+    {
+      "version": "0.1.0",
+      "date": "2026-04-26",
+      "status": "active",
+      "model": "claude-sonnet-4-6",
+      "file": "v0.1.0.md",
+      "changelog_entry": "Initial 92-item forensic punch list covering 9 categories (methodology, code quality, data/corpus, configuration/infrastructure, documentation/reporting, reproducibility/provenance, logging/observability, testing gaps, miscellaneous/nits). Five CRITICAL items identified: preregistration lock unfilled, ai_baseline_similarity null for all authors, comparison_report.json empty, all authors role=control, post-hoc threshold changes, HIGH confidence verdict contradicts exploratory status."
+    }
+  ]
+}

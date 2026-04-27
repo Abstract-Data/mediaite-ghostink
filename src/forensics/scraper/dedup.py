@@ -8,7 +8,7 @@ from pathlib import Path
 
 from forensics.config.settings import get_settings
 from forensics.storage.repository import Repository
-from forensics.utils.hashing import simhash, simhash_hamming
+from forensics.utils.hashing import SIMHASH_FINGERPRINT_VERSION, simhash, simhash_hamming
 
 logger = logging.getLogger(__name__)
 
@@ -60,10 +60,16 @@ def _load_dedup_pool(
     pool_dates: list = []
     pool_titles: list[str] = []
     fingerprints: list[int] = []
-    for aid, pub_date, title, clean_text in repo.iter_dedup_source_rows():
+    for aid, pub_date, title, clean_text, fp_hex, ver in repo.iter_dedup_source_rows_with_fp_meta():
         pool_ids.append(aid)
         pool_dates.append(pub_date)
         pool_titles.append(title)
+        if ver == SIMHASH_FINGERPRINT_VERSION and fp_hex:
+            try:
+                fingerprints.append(int(fp_hex, 16))
+                continue
+            except ValueError:
+                logger.warning("dedup: malformed cached simhash for id=%s; recomputing", aid)
         fingerprints.append(simhash(clean_text))
     return pool_ids, pool_dates, pool_titles, fingerprints
 
@@ -159,9 +165,7 @@ def deduplicate_articles(db_path: Path, *, hamming_threshold: int | None = None)
             )
 
         parent = _dedup_union_find(fingerprints, hamming_threshold)
-        repo.clear_duplicate_flags(pool_ids)
         duplicate_ids = _duplicate_ids_from_components(parent, pool_ids, pool_dates, pool_titles)
-        if duplicate_ids:
-            repo.mark_duplicates(duplicate_ids)
+        repo.apply_duplicate_flags_transaction(pool_ids, duplicate_ids)
 
         return duplicate_ids

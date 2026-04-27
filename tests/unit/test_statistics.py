@@ -9,6 +9,7 @@ import pytest
 
 from forensics.analysis.statistics import (
     apply_correction,
+    apply_cross_author_correction,
     bootstrap_ci,
     cohens_d,
     filter_by_effect_size,
@@ -116,8 +117,8 @@ def test_run_hypothesis_tests_short_series_returns_skipped_battery() -> None:
 def test_run_hypothesis_tests_emits_welch_and_mw_by_default() -> None:
     # Phase 15 C1: KS dropped from default battery. Welch + Mann–Whitney
     # already cover the location shifts the forensic analysis cares about.
-    pre = [1.0, 1.1, 0.9, 1.2, 0.95, 1.05, 1.1, 0.9]
-    post = [5.0, 5.1, 4.9, 5.2, 4.95, 5.05, 5.1, 4.9]
+    pre = [1.0, 1.1, 0.9, 1.2, 0.95, 1.05, 1.1, 0.9, 1.0, 1.05]
+    post = [5.0, 5.1, 4.9, 5.2, 4.95, 5.05, 5.1, 4.9, 5.0, 5.05]
     tests = run_hypothesis_tests(pre + post, len(pre), "ttr", "author-x", n_bootstrap=50)
     names = {t.test_name for t in tests}
     assert any(n.startswith("welch_t") for n in names)
@@ -193,6 +194,66 @@ def test_apply_correction_benjamini_hochberg() -> None:
 def test_apply_correction_rejects_unknown_method() -> None:
     with pytest.raises(ValueError, match="Unknown correction method"):
         apply_correction([_make_test(0.1)], method="holm")
+
+
+def test_hypothesis_min_segment_n_skips_small_segments() -> None:
+    pre = [1.0] * 9
+    post = [5.0] * 9
+    out = run_hypothesis_tests(pre + post, len(pre), "f", "a", hypothesis_min_segment_n=10)
+    assert len(out) == 2
+    assert all(t.skipped_reason and "insufficient_n_pre_or_post" in t.skipped_reason for t in out)
+
+
+def test_apply_cross_author_correction_two_slugs() -> None:
+    t_a = HypothesisTest(
+        test_name="welch_t_ttr",
+        feature_name="ttr",
+        author_id="1",
+        raw_p_value=0.01,
+        corrected_p_value=0.01,
+        effect_size_cohens_d=0.5,
+        confidence_interval_95=(0.0, 1.0),
+        significant=False,
+        n_pre=10,
+        n_post=10,
+    )
+    t_b = HypothesisTest(
+        test_name="welch_t_ttr",
+        feature_name="ttr",
+        author_id="2",
+        raw_p_value=0.04,
+        corrected_p_value=0.04,
+        effect_size_cohens_d=0.5,
+        confidence_interval_95=(0.0, 1.0),
+        significant=False,
+        n_pre=10,
+        n_post=10,
+    )
+    out = apply_cross_author_correction({"alice": [t_a], "bob": [t_b]})
+    # Across-author BH on minima (0.01, 0.04) with stable slug tie-break:
+    # adjusted = (0.01*2/1, 0.04*2/2) then backward pass → (0.02, 0.04).
+    assert out["alice"][0].cross_author_corrected_p == pytest.approx(0.02, abs=1e-12)
+    assert out["bob"][0].cross_author_corrected_p == pytest.approx(0.04, abs=1e-12)
+    assert out["alice"][0].cross_author_correction_reason is None
+    assert out["bob"][0].cross_author_correction_reason is None
+
+
+def test_apply_cross_author_correction_single_author_no_pmin_substitution() -> None:
+    lone = HypothesisTest(
+        test_name="welch_t_ttr",
+        feature_name="ttr",
+        author_id="1",
+        raw_p_value=0.02,
+        corrected_p_value=0.02,
+        effect_size_cohens_d=0.5,
+        confidence_interval_95=(0.0, 1.0),
+        significant=False,
+        n_pre=10,
+        n_post=10,
+    )
+    out = apply_cross_author_correction({"solo": [lone]})
+    assert out["solo"][0].cross_author_corrected_p is None
+    assert out["solo"][0].cross_author_correction_reason == "single-author-no-cross-correction"
 
 
 # ---------------------------------------------------------------------------

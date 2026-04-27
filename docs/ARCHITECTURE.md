@@ -39,8 +39,12 @@ Illustrative mapping from “stage” to production modules (names are for navig
 
 - **Scrape** — `forensics.cli.scrape.dispatch_scrape` → `crawler.discover_authors` / `collect_article_metadata` / `fetcher.fetch_articles`, `dedup.deduplicate_articles`, `export.export_articles_jsonl`, persistence via `storage.repository.Repository`.
 - **Extract** — `forensics.cli.extract` / `features.pipeline.extract_all_features` → Parquet under `data/features/`, embeddings under `data/embeddings/` as implemented by the feature pipeline.
-- **Analyze** — `forensics.cli.analyze.run_analyze` → `analysis.timeseries`, `analysis.changepoint`, `analysis.drift`, `analysis.orchestrator`, etc., depending on CLI flags; writes JSON artifacts under `data/analysis/`.
+- **Analyze** — `forensics.cli.analyze.run_analyze` → `analysis.timeseries`, `analysis.changepoint`, `analysis.drift`, `analysis.orchestrator`, etc., depending on CLI flags; writes JSON artifacts under `data/analysis/`. Per [**ADR-009**](adr/ADR-009-analyze-stage-sqlite-reads.md) (**Option A**, accepted), analyze **may** open `storage.repository.Repository` on `data/articles.db` for **author identity only** (mapping configured `slug` values to stable `author_id`, roster helpers, comparison entrypoints). Feature timelines, embeddings, and hypothesis inputs are read from Parquet / NPZ / JSONL artifacts produced by extract and prior stages—not from ad hoc SQL over article bodies for those tensors.
 - **Report** — `forensics.reporting.run_report` → subprocess to `quarto render`, output under `data/reports/` per `quarto.yml`.
+
+### Analyze stage and SQLite (ADR-009)
+
+The punch-list hygiene item **C-06** asked whether analyze should avoid SQLite entirely. **Accepted answer:** **no**—analyze keeps the current pattern and the contract is documented here and in `docs/RUNBOOK.md`. Rationale: embedding `manifest.jsonl` and per-author feature Parquet use integer `author_id` keys; the canonical join to human-facing slugs remains the authors table in SQLite. Operators should treat **`articles.db` as the identity index** co-shipped with artifacts for a given workspace, not run analyze against a mismatched or partially replaced DB without re-running extract.
 
 ## Data Models
 
