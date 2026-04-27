@@ -40,6 +40,13 @@ class EmbeddingRevisionGateError(ValueError):
     """Raised when stored ``model_revision`` disagrees with the configured HF pin."""
 
 
+class EmbeddingDriftInputsError(RuntimeError):
+    """Raised when confirmatory analysis cannot load enough embeddings for drift.
+
+    Exploratory runs log and continue with empty drift signals instead.
+    """
+
+
 @dataclass(frozen=True, slots=True)
 class DriftPipelineResult:
     """Outputs of :func:`compute_author_drift_pipeline` (RF-SMELL-002).
@@ -611,8 +618,9 @@ def load_drift_summary(
 
     Prefers cached artifacts (``*_drift.json``, ``*_centroids.npz``, ``*_baseline_curve.json``)
     written by :func:`run_drift_analysis`. Falls back to recomputing from raw embeddings
-    when cached velocities are missing. Missing embeddings produce empty fields rather than
-    raising.
+    when cached velocities are missing. With ``exploratory=False`` (confirmatory),
+    missing or insufficient embeddings (fewer than two usable vectors) raise
+    :class:`EmbeddingDriftInputsError` instead of returning empty fields.
 
     Phase 15 E2: when one of the cached artifacts is missing but the author
     has embeddings on disk, emit a WARNING per missing artifact so silent
@@ -639,11 +647,20 @@ def load_drift_summary(
     except EmbeddingRevisionGateError:
         raise
     except (ValueError, OSError) as exc:
-        logger.debug("drift summary: no embeddings for %s (%s)", slug, exc)
-        return DriftSummary(velocities=velocities, baseline_curve=baseline_curve)
+        if exploratory:
+            logger.debug("drift summary: no embeddings for %s (%s)", slug, exc)
+            return DriftSummary(velocities=velocities, baseline_curve=baseline_curve)
+        raise EmbeddingDriftInputsError(
+            f"Cannot load article embeddings for drift summary (slug={slug!r})."
+        ) from exc
 
     if len(pairs) < 2:
-        return DriftSummary(velocities=velocities, baseline_curve=baseline_curve)
+        if exploratory:
+            return DriftSummary(velocities=velocities, baseline_curve=baseline_curve)
+        raise EmbeddingDriftInputsError(
+            "Insufficient article embeddings for drift summary "
+            f"(slug={slug!r}): need at least 2 usable vectors, got {len(pairs)}."
+        )
 
     monthly = compute_monthly_centroids(pairs)
     vels = track_centroid_velocity(monthly)
@@ -804,9 +821,19 @@ def run_drift_analysis(
                 )
             except EmbeddingRevisionGateError:
                 raise
-            except ValueError as exc:
-                logger.warning("drift: skip slug=%s (%s)", author.slug, exc)
-                continue
+            except (ValueError, OSError) as exc:
+                if exploratory:
+                    logger.warning("drift: skip slug=%s (%s)", author.slug, exc)
+                    continue
+                raise EmbeddingDriftInputsError(
+                    f"Cannot load article embeddings for drift analysis (author={author.slug!r})."
+                ) from exc
+            if not exploratory and len(article_embs) < 2:
+                raise EmbeddingDriftInputsError(
+                    "Insufficient article embeddings for drift analysis "
+                    f"(author={author.slug!r}): need at least 2 usable vectors, "
+                    f"got {len(article_embs)}."
+                )
             res = compute_author_drift_pipeline(
                 author.slug,
                 author.id,
@@ -815,8 +842,14 @@ def run_drift_analysis(
                 paths=paths,
             )
             if res is None:
-                logger.warning("drift: insufficient embeddings for %s", author.slug)
-                continue
+                if exploratory:
+                    logger.warning("drift: insufficient embeddings for %s", author.slug)
+                    continue
+                raise EmbeddingDriftInputsError(
+                    "Insufficient article embeddings for drift analysis "
+                    f"(author={author.slug!r}): pipeline returned no result "
+                    f"(loaded {len(article_embs)} vector(s))."
+                )
             centroids_by_author[author.slug] = res.monthly_centroids
             logger.info("drift: wrote analysis artifacts for %s", author.slug)
 

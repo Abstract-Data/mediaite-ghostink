@@ -6076,3 +6076,37 @@ uv run pytest tests/unit/test_config_hash.py -v --no-cov   # 45 passed
 #### Risks & Next Steps
 
 - None; optional full `uv run pytest tests/` if you want repo-wide regression signal beyond `test_config_hash`.
+
+---
+
+### TASK-1 — Strict embedding drift inputs (non-exploratory)
+
+**Status:** Complete  
+**Date:** 2026-04-27
+
+#### What Was Done
+
+- Added `EmbeddingDriftInputsError`; confirmatory `load_drift_summary`, `_load_drift_signals`, and `run_drift_analysis` fail fast on missing/insufficient embeddings instead of empty drift.
+- Parallel workers re-raise the same errors when `exploratory=False`; refactored `_finalize_parallel_author_results` / `_run_isolated_author_serial_jobs` to satisfy McCabe limits.
+- CLI maps `EmbeddingDriftInputsError` → exit `3` (`AUTH_OR_RESOURCE`), `EmbeddingRevisionGateError` → exit `5` (`CONFLICT`).
+- `compare_target_to_controls` / `run_compare_only` / `_run_target_control_comparisons` / `run_parallel_author_refresh` accept `exploratory` and pass it to `load_drift_summary`; `_run_compare_only_flow` passes `ctx.exploratory` into `run_compare_only`.
+
+#### Files Modified
+
+- `src/forensics/analysis/drift.py`, `src/forensics/analysis/comparison.py`, `src/forensics/analysis/orchestrator/per_author.py`, `src/forensics/analysis/orchestrator/parallel.py`, `src/forensics/analysis/orchestrator/runner.py`, `src/forensics/analysis/orchestrator/comparison.py`, `src/forensics/cli/analyze.py`
+- `tests/integration/test_strict_embedding_drift_inputs.py`, `tests/unit/test_drift_summary.py`, `tests/unit/test_pipeline_b_diagnostics.py`, `tests/unit/test_comparison_target_controls.py`, `tests/unit/test_analyze_compare.py`, `tests/integration/test_parallel_parity.py`
+
+#### Verification Evidence
+
+```
+uv run ruff check src/forensics/analysis/drift.py src/forensics/analysis/orchestrator/parallel.py src/forensics/cli/analyze.py src/forensics/analysis/comparison.py
+uv run pytest tests/ -q --tb=line   # 1021 passed; same 2 pre-existing failures as HANDOFF (e2e quarto.yml path, html fuzz)
+```
+
+#### GitNexus
+
+- MCP tool descriptors not present in workspace `mcps/user-gitnexus/` this session; impact/detect_changes not run.
+
+#### Risks & Next Steps
+
+- Confirmatory `run_compare_only` still defaults to `exploratory=False`; toy fixtures without embeddings must pass `exploratory=True` or ship drift/embedding artifacts.

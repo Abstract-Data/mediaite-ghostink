@@ -10,6 +10,7 @@ from typing import Annotated
 
 import typer
 
+from forensics.analysis.drift import EmbeddingDriftInputsError, EmbeddingRevisionGateError
 from forensics.cli._decorators import examples_epilog, forensics_examples, with_examples
 from forensics.cli._envelope import status
 from forensics.cli._errors import fail
@@ -175,6 +176,7 @@ def _run_compare_only_flow(ctx: AnalyzeContext) -> None:
         paths=ctx.paths,
         author_slug=ctx.author_slug,
         compare_pair=ctx.compare_pair,
+        exploratory=ctx.exploratory,
     )
     logger.info("analyze: compare-only complete author=%s", ctx.author_slug or "all")
 
@@ -234,6 +236,37 @@ def _run_full_analysis_stage(ctx: AnalyzeContext) -> None:
         exploratory=ctx.exploratory,
         allow_pre_phase16_embeddings=ctx.allow_pre_phase16_embeddings,
     )
+
+
+def _raise_analyze_embedding_failure(
+    typer_context: typer.Context | None,
+    *,
+    cmd: str,
+    exc: BaseException,
+) -> typer.Exit:
+    """Map embedding drift failures to stable CLI exit codes."""
+    if isinstance(exc, EmbeddingRevisionGateError):
+        return fail(
+            typer_context,
+            cmd,
+            "embedding_revision_gate",
+            str(exc),
+            exit_code=ExitCode.CONFLICT,
+        )
+    if isinstance(exc, EmbeddingDriftInputsError):
+        return fail(
+            typer_context,
+            cmd,
+            "embedding_drift_inputs",
+            str(exc),
+            exit_code=ExitCode.AUTH_OR_RESOURCE,
+            suggestion=(
+                "Run feature extraction with embeddings, pass --exploratory for permissive mode, "
+                "or use --allow-pre-phase16-embeddings only when intentionally matching legacy "
+                "vectors."
+            ),
+        )
+    raise RuntimeError(f"unexpected embedding failure: {exc!r}") from exc
 
 
 def _run_parallel_author_refresh_stage(ctx: AnalyzeContext) -> None:
@@ -501,7 +534,14 @@ def run_analyze(request: AnalyzeRequest) -> None:  # noqa: C901
         return
 
     if parallel_authors:
-        _run_parallel_author_refresh_stage(ctx)
+        try:
+            _run_parallel_author_refresh_stage(ctx)
+        except (EmbeddingDriftInputsError, EmbeddingRevisionGateError) as exc:
+            raise _raise_analyze_embedding_failure(
+                request.typer_context,
+                cmd="analyze.parallel_refresh",
+                exc=exc,
+            ) from exc
         return
 
     do_changepoint, do_timeseries, do_drift, do_full_analysis = _resolve_mode_flags(
@@ -538,9 +578,23 @@ def run_analyze(request: AnalyzeRequest) -> None:  # noqa: C901
     if do_timeseries:
         _run_timeseries_stage(ctx)
     if do_drift:
-        _run_drift_stage(ctx)
+        try:
+            _run_drift_stage(ctx)
+        except (EmbeddingDriftInputsError, EmbeddingRevisionGateError) as exc:
+            raise _raise_analyze_embedding_failure(
+                request.typer_context,
+                cmd="analyze.drift",
+                exc=exc,
+            ) from exc
     if do_full_analysis:
-        _run_full_analysis_stage(ctx)
+        try:
+            _run_full_analysis_stage(ctx)
+        except (EmbeddingDriftInputsError, EmbeddingRevisionGateError) as exc:
+            raise _raise_analyze_embedding_failure(
+                request.typer_context,
+                cmd="analyze.full",
+                exc=exc,
+            ) from exc
     if ai_baseline:
         _run_ai_baseline_stage(
             ctx,

@@ -1,0 +1,14 @@
+{
+  "family": "phase17-classifier-direction-volume-diagnostics",
+  "current_version": "0.1.0",
+  "versions": [
+    {
+      "version": "0.1.0",
+      "date": "2026-04-27",
+      "status": "active",
+      "model": "claude-opus-4-7",
+      "file": "v0.1.0.md",
+      "changelog_entry": "Phase 17 initial prompt: AI-direction concordance + volume-ramp diagnostic columns added to the §11.3 finding-strength table without changing existing FindingStrength semantics. Lands AI_TYPICAL_DIRECTION priors registry, DirectionConcordance and VolumeRampFlag enums, classify_direction_concordance and compute_volume_ramp_flag library functions, notebook §11.3.1 markdown explaining the diagnostic, and a pre-reg lock recommendation. Motivated by Apr 27 2026 review showing 8 MODERATE authors with anti-AI direction + 12x-276x volume ramps confounding the classifier verdict."
+    }
+  ]
+}

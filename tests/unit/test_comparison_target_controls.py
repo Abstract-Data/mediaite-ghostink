@@ -146,6 +146,7 @@ def test_compare_target_to_controls_returns_stable_shape(
         paths,
         settings=settings,
         changepoints_memory=memory,
+        exploratory=True,
     )
     assert set(out) == {
         "feature_comparisons",
@@ -176,7 +177,7 @@ def test_run_compare_only_writes_comparison_report_json(
     report_path = paths.comparison_report_json()
     assert not report_path.is_file()
 
-    out = run_compare_only(settings, paths=paths, author_slug=None)
+    out = run_compare_only(settings, paths=paths, author_slug=None, exploratory=True)
     assert report_path.is_file()
     disk = json.loads(report_path.read_text(encoding="utf-8"))
     assert disk == out
@@ -194,7 +195,7 @@ def test_comparison_report_non_empty_when_configured_target_exists(
         paths.changepoints_json(slug).write_text("[]", encoding="utf-8")
     _write_current_result_hashes(paths, ("t1", "c1", "c2"))
 
-    out = run_compare_only(settings, paths=paths, author_slug=None)
+    out = run_compare_only(settings, paths=paths, author_slug=None, exploratory=True)
     t1 = out["targets"]["t1"]
     fc = t1["feature_comparisons"]
     assert fc, "feature_comparisons must not be empty when target parquet has rows"
@@ -222,7 +223,7 @@ def test_run_compare_only_forces_slug_with_warning(
     _write_current_result_hashes(paths, ("orph", "c1", "c2"))
 
     caplog.set_level("WARNING", logger="forensics.analysis.orchestrator")
-    out = run_compare_only(settings, paths=paths, author_slug="orph")
+    out = run_compare_only(settings, paths=paths, author_slug="orph", exploratory=True)
     assert "orph" in out["targets"]
     assert any("compare-only" in r.message for r in caplog.records)
 
@@ -260,6 +261,7 @@ def test_compare_target_to_controls_filters_nan_values(
         paths,
         settings=get_settings(),
         changepoints_memory={"t1": [], "c1": [], "c2": []},
+        exploratory=True,
     )
     fc = out["feature_comparisons"]["ttr"]["all"]
     assert fc["p_value"] == pytest.approx(fc["p_value"])

@@ -22,6 +22,7 @@ from forensics.analysis.convergence import (
     compute_convergence_scores,
 )
 from forensics.analysis.drift import (
+    EmbeddingDriftInputsError,
     EmbeddingRevisionGateError,
     compute_author_drift_pipeline,
     load_article_embeddings,
@@ -230,7 +231,8 @@ def _load_drift_signals(
     timing brackets and the early-out ``return None`` paths are factored
     in. Returns ``(drift, baseline_curve, vel_tuples, ai_conv)`` with
     permissive defaults (empty lists / ``None``) when embeddings are
-    unavailable.
+    unavailable and ``exploratory`` is true; confirmatory runs raise
+    ``EmbeddingDriftInputsError`` instead.
     """
     baseline_curve: list[tuple[datetime, float]] = []
     vel_tuples: list[tuple[str, float]] = []
@@ -248,8 +250,19 @@ def _load_drift_signals(
     except EmbeddingRevisionGateError:
         raise
     except (ValueError, OSError) as exc:
-        logger.info("analysis: no embeddings for %s (%s)", slug, exc)
-        pairs = []
+        if exploratory:
+            logger.info("analysis: no embeddings for %s (%s)", slug, exc)
+            pairs = []
+        else:
+            raise EmbeddingDriftInputsError(
+                f"Cannot load article embeddings for analysis (author={slug!r})."
+            ) from exc
+
+    if not exploratory and len(pairs) < 2:
+        raise EmbeddingDriftInputsError(
+            "Insufficient article embeddings for drift in analysis "
+            f"(author={slug!r}): need at least 2 usable vectors, got {len(pairs)}."
+        )
 
     drift_res = compute_author_drift_pipeline(
         slug,

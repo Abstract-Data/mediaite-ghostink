@@ -35,7 +35,25 @@ def classify_finding_strength(
     *,
     probability_features_available: bool = False,
 ) -> FindingStrength:
-    """Map statistical evidence to a coarse strength label for reporting."""
+    """Map statistical evidence to a coarse strength label for reporting.
+
+    Tier definitions (callers SHOULD pass window-scoped ``hypothesis_tests``,
+    i.e. tests whose ``feature_name`` appears in
+    ``convergence_window.features_converging``):
+
+    - **STRONG**: ≥3 strong significant tests (corrected p < 0.01 AND
+      |Cohen's d| ≥ 0.8) AND controls clean (editorial_vs_author_signal > 0.7)
+      AND Pipeline C OK when probability features are available.
+    - **MODERATE**: ≥3 significant tests AND ≥1 strong significant test.
+      The ``≥1 strong`` floor is what separates MODERATE from WEAK — without
+      it, a window with three marginally-significant tests (e.g. p ≈ 0.04,
+      |d| ≈ 0.3) would be classified the same as one with three large-effect
+      tests at p < 10⁻⁵. The ``≥3 sig`` count keeps the MODERATE bar above
+      the trivial 2-test threshold that previously bucketed authors with
+      vastly different evidence strength into the same tier.
+    - **WEAK**: ≥1 significant test (no effect-size requirement).
+    - **NONE**: no significant tests.
+    """
     significant_tests = [t for t in hypothesis_tests if t.significant]
     strong_tests = [
         t
@@ -50,7 +68,7 @@ def classify_finding_strength(
 
     if len(strong_tests) >= 3 and controls_negative and pipeline_c_ok:
         return FindingStrength.STRONG
-    if len(significant_tests) >= 2:
+    if len(significant_tests) >= 3 and len(strong_tests) >= 1:
         return FindingStrength.MODERATE
     if len(significant_tests) >= 1:
         return FindingStrength.WEAK

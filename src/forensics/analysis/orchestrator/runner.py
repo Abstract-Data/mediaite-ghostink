@@ -94,6 +94,7 @@ def run_full_analysis(
         results,
         paths=paths,
         config=config,
+        exploratory=exploratory,
     )
     compare_seconds = time.perf_counter() - t_compare
 

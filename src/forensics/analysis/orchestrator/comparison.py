@@ -53,11 +53,17 @@ def _iter_compare_targets(
     *,
     changepoints_memory: dict[str, list[ChangePoint]] | None,
     log_prefix: str,
+    exploratory: bool = False,
 ) -> Iterator[tuple[str, dict[str, Any]]]:
     for tid in targets:
         try:
             report = compare_target_to_controls(
-                tid, controls, paths, settings=config, changepoints_memory=changepoints_memory
+                tid,
+                controls,
+                paths,
+                settings=config,
+                changepoints_memory=changepoints_memory,
+                exploratory=exploratory,
             )
         except (ValueError, OSError) as exc:
             logger.warning("%s failed for %s (%s)", log_prefix, tid, exc)
@@ -72,6 +78,7 @@ def _run_target_control_comparisons(
     *,
     paths: AnalysisArtifactPaths,
     config: ForensicsSettings,
+    exploratory: bool = False,
 ) -> dict[str, Any]:
     comparison_payload: dict[str, Any] = {"targets": {}}
     active_targets = [target for target in targets if target in results]
@@ -85,6 +92,7 @@ def _run_target_control_comparisons(
         config,
         changepoints_memory=changepoints_memory,
         log_prefix="analysis: comparison",
+        exploratory=exploratory,
     ):
         comparison_payload["targets"][tid] = report
     return comparison_payload
@@ -96,6 +104,7 @@ def run_compare_only(
     paths: AnalysisArtifactPaths,
     author_slug: str | None = None,
     compare_pair: tuple[str, str] | None = None,
+    exploratory: bool = False,
 ) -> dict[str, Any]:
     """Rebuild ``comparison_report.json`` from on-disk artifacts.
 
@@ -125,6 +134,7 @@ def run_compare_only(
         config,
         changepoints_memory=None,
         log_prefix="compare-only",
+        exploratory=exploratory,
     ):
         out["targets"][tid] = report
     if not out.get("targets"):
