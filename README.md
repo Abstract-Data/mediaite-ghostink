@@ -103,7 +103,7 @@ flowchart LR
 
 ## Models, measurements, and algorithms
 
-Settings below default from [`config.toml`](config.toml) and [`src/forensics/config/settings.py`](src/forensics/config/settings.py); override with **`FORENSICS_`** environment variables (nested keys use `__`, for example `FORENSICS_ANALYSIS__SIGNIFICANCE_THRESHOLD`).
+Settings below default from [`config.toml`](config.toml) and [`src/forensics/config/settings.py`](src/forensics/config/settings.py); override with **`FORENSICS_`** environment variables. Nested analysis knobs use one `__` segment per model level (for example `FORENSICS_ANALYSIS__HYPOTHESIS__SIGNIFICANCE_THRESHOLD` or `FORENSICS_ANALYSIS__CONVERGENCE__CONVERGENCE_USE_PERMUTATION`). See ADR-016 in [`docs/adr/016-analysis-config-nesting.md`](docs/adr/016-analysis-config-nesting.md).
 
 ### NLP and embeddings
 

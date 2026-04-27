@@ -32,7 +32,7 @@ def test_from_settings_pulls_permutation_knobs_from_analysis() -> None:
         settings,
     )
 
-    ac = settings.analysis
+    ac = settings.analysis.convergence
     assert input_.use_permutation is ac.convergence_use_permutation
     assert input_.n_permutations == ac.convergence_permutation_iterations
     assert input_.permutation_seed == ac.convergence_permutation_seed

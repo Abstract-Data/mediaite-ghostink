@@ -438,7 +438,7 @@ def load_article_embeddings(
     a non-zero ``.npy`` count indicates legacy artifacts that predate the
     packed-batch migration and is informational only — readers handle both.
 
-    Pass ``expected_revision=settings.analysis.embedding_model_revision`` in
+    Pass ``expected_revision=settings.analysis.embedding.embedding_model_revision`` in
     production so vectors from a different HF commit fail fast. Use
     ``expected_revision=\"\"`` only in tests that intentionally omit revision
     metadata. Mismatches respect ``exploratory`` and
@@ -633,7 +633,7 @@ def load_drift_summary(
         pairs = load_article_embeddings(
             slug,
             paths,
-            expected_revision=settings.analysis.embedding_model_revision,
+            expected_revision=settings.analysis.embedding.embedding_model_revision,
             exploratory=exploratory,
             allow_pre_phase16_embeddings=allow_pre_phase16_embeddings,
         )
@@ -652,7 +652,7 @@ def load_drift_summary(
     if not baseline_curve:
         baseline_curve = compute_baseline_similarity_curve(
             pairs,
-            baseline_count=settings.analysis.baseline_embedding_count,
+            baseline_count=settings.analysis.embedding.baseline_embedding_count,
         )
     return DriftSummary(velocities=velocities, baseline_curve=baseline_curve)
 
@@ -704,7 +704,7 @@ def compute_author_drift_pipeline(
     velocities = track_centroid_velocity(monthly)
     baseline_curve = compute_baseline_similarity_curve(
         article_embs,
-        baseline_count=settings.analysis.baseline_embedding_count,
+        baseline_count=settings.analysis.embedding.baseline_embedding_count,
     )
     intra = compute_intra_period_variance(
         article_embs,
@@ -714,7 +714,7 @@ def compute_author_drift_pipeline(
     ai_vecs = load_ai_baseline_embeddings(
         slug,
         paths,
-        expected_dim=int(settings.analysis.embedding_vector_dim),
+        expected_dim=int(settings.analysis.embedding.embedding_vector_dim),
     )
     if not ai_vecs and len(article_embs) >= 2:
         baseline_root = paths.ai_baseline_dir(slug)
@@ -745,7 +745,7 @@ def compute_author_drift_pipeline(
         umap_one = generate_umap_projection(
             {slug: monthly},
             ai_centroid=ai_centroid_plot,
-            random_state=int(settings.analysis.drift_umap_random_state),
+            random_state=int(settings.analysis.embedding.drift_umap_random_state),
         )
     else:
         logger.warning(
@@ -799,7 +799,7 @@ def run_drift_analysis(
                 article_embs = load_article_embeddings(
                     author.slug,
                     paths,
-                    expected_revision=settings.analysis.embedding_model_revision,
+                    expected_revision=settings.analysis.embedding.embedding_model_revision,
                     exploratory=exploratory,
                     allow_pre_phase16_embeddings=allow_pre_phase16_embeddings,
                 )
@@ -827,7 +827,7 @@ def run_drift_analysis(
             combined = generate_umap_projection(
                 centroids_by_author,
                 ai_centroid=None,
-                random_state=int(settings.analysis.drift_umap_random_state),
+                random_state=int(settings.analysis.embedding.drift_umap_random_state),
             )
         else:
             logger.warning(

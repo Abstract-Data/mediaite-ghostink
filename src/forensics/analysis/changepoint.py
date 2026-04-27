@@ -109,7 +109,7 @@ def write_imputation_stats_artifact(
     payload = collect_imputation_stats_for_changepoint_frame(
         df,
         author_id=author_id,
-        section_residualize_applies=settings.analysis.section_residualize_features,
+        section_residualize_applies=settings.analysis.hypothesis.section_residualize_features,
     )
     write_json_artifact(path, payload)
 
@@ -621,11 +621,11 @@ def _changepoints_for_feature(
                 hazard_rate=hazard,
                 mode=bocpd_mode,
                 threshold=bocpd_legacy_threshold,
-                map_drop_ratio=settings.analysis.bocpd_map_drop_ratio,
-                min_run_length=settings.analysis.bocpd_min_run_length,
-                reset_cooldown=settings.analysis.bocpd_reset_cooldown,
-                merge_window=settings.analysis.bocpd_merge_window,
-                student_t=settings.analysis.bocpd_student_t,
+                map_drop_ratio=settings.analysis.bocpd.bocpd_map_drop_ratio,
+                min_run_length=settings.analysis.bocpd.bocpd_min_run_length,
+                reset_cooldown=settings.analysis.bocpd.bocpd_reset_cooldown,
+                merge_window=settings.analysis.bocpd.bocpd_merge_window,
+                student_t=settings.analysis.bocpd.bocpd_student_t,
             )
         )
     return found
@@ -652,26 +652,26 @@ def analyze_author_feature_changepoints(
     ``PELT_FEATURE_COLUMNS`` order, which is identical to the serial
     iteration order.
     """
-    if settings.analysis.section_residualize_features:
+    if settings.analysis.hypothesis.section_residualize_features:
         df = residualize_features_by_section(
             df,
             feature_columns=list(PELT_FEATURE_COLUMNS),
             min_articles_per_section=settings.analysis.min_articles_per_section_for_residualize,
         )
-    methods = {m.lower() for m in settings.analysis.changepoint_methods}
-    pen = settings.analysis.pelt_penalty
-    pelt_cost_model = settings.analysis.pelt_cost_model
+    methods = {m.lower() for m in settings.analysis.pelt.changepoint_methods}
+    pen = settings.analysis.pelt.pelt_penalty
+    pelt_cost_model = settings.analysis.pelt.pelt_cost_model
     n_articles = int(df.height)
-    hazard = float(settings.analysis.bocpd_hazard_rate)
-    if settings.analysis.bocpd_hazard_auto:
-        exp = max(1, int(settings.analysis.bocpd_expected_changes_per_author))
+    hazard = float(settings.analysis.bocpd.bocpd_hazard_rate)
+    if settings.analysis.bocpd.bocpd_hazard_auto:
+        exp = max(1, int(settings.analysis.bocpd.bocpd_expected_changes_per_author))
         hazard = float(exp) / float(max(1, n_articles))
         hazard = max(1e-6, min(1.0, hazard))
     # Phase 15 Phase A — read all six BOCPD knobs from settings. The legacy
     # ``bocpd_threshold`` field is gone (see GUARDRAILS Sign + Unit 1 notes);
     # only ``mode="p_r0_legacy"`` consults ``threshold`` and we hard-code the
     # historical default there so a one-line config flip restores prior runs.
-    bocpd_mode: BocpdMode = settings.analysis.bocpd_detection_mode
+    bocpd_mode: BocpdMode = settings.analysis.bocpd.bocpd_detection_mode
     bocpd_legacy_threshold = 0.5
 
     timestamps = timestamps_from_frame(df)
@@ -734,7 +734,7 @@ def _retag_section_adjusted(
     # against section-residualized signals. Tag them so downstream consumers
     # (convergence dispatch, K4 twin-panel renderer) can distinguish them
     # from raw PELT/BOCPD output.
-    if not settings.analysis.section_residualize_features:
+    if not settings.analysis.hypothesis.section_residualize_features:
         return change_points
     return [
         cp.model_copy(update={"method": _SECTION_ADJUSTED_METHOD_MAP[cp.method]})

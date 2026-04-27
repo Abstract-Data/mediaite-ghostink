@@ -341,7 +341,7 @@ def test_feature_pipeline_isolation(
     # the point of this test is that one bad article is *isolated*, not that
     # the guard fires. The guard itself is exercised by
     # ``test_feature_pipeline_aborts_when_failure_ratio_exceeded``.
-    monkeypatch.setenv("FORENSICS_ANALYSIS__FEATURE_EXTRACTION_MAX_FAILURE_RATIO", "0.5")
+    monkeypatch.setenv("FORENSICS_ANALYSIS__EMBEDDING__FEATURE_EXTRACTION_MAX_FAILURE_RATIO", "0.5")
     get_settings.cache_clear()
     db_path = tmp_path / "articles.db"
     init_db(db_path)

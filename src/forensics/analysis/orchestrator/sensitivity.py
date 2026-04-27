@@ -22,7 +22,13 @@ _SECTION_SENSITIVITY_PRIORITY_SLUGS: frozenset[str] = frozenset(
 
 
 def _section_residualized_settings(config: ForensicsSettings) -> ForensicsSettings:
-    analysis = config.analysis.model_copy(update={"section_residualize_features": True})
+    analysis = config.analysis.model_copy(
+        update={
+            "hypothesis": config.analysis.hypothesis.model_copy(
+                update={"section_residualize_features": True}
+            ),
+        },
+    )
     return config.model_copy(update={"analysis": analysis})
 
 
@@ -36,7 +42,7 @@ def _run_section_residualized_sensitivity(
     exploratory: bool = False,
     allow_pre_phase16_embeddings: bool = False,
 ) -> dict[str, Any]:
-    if config.analysis.section_residualize_features:
+    if config.analysis.hypothesis.section_residualize_features:
         return {}
     flagged = [
         slug

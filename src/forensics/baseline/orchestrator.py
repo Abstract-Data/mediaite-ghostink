@@ -211,8 +211,8 @@ async def run_generation_matrix(
                     )
                     _embed_article(
                         record,
-                        settings.analysis.embedding_model,
-                        settings.analysis.embedding_model_revision,
+                        settings.analysis.embedding.embedding_model,
+                        settings.analysis.embedding.embedding_model_revision,
                         emb_dir,
                     )
                     articles.append(record)
@@ -251,8 +251,8 @@ def reembed_existing_baseline(
     base = root / "data" / "ai_baseline" / author_slug
     if not base.is_dir():
         raise ValueError(f"No existing baseline at {base}")
-    model_name = settings.analysis.embedding_model
-    model_revision = settings.analysis.embedding_model_revision
+    model_name = settings.analysis.embedding.embedding_model
+    model_revision = settings.analysis.embedding.embedding_model_revision
     n = 0
     for json_path in base.rglob("*.json"):
         if json_path.name == "generation_manifest.json":

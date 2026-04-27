@@ -94,7 +94,7 @@ def test_focused_row_has_low_entropy(analysis_cfg: AnalysisConfig) -> None:
     assert entropy >= 0.0
     # Max possible entropy for k=3 topics is log2(3) ≈ 1.585. A document
     # anchored to one topic should land well below that ceiling.
-    assert entropy < math.log2(analysis_cfg.content_lda_n_components)
+    assert entropy < math.log2(analysis_cfg.content_lda.content_lda_n_components)
 
 
 def test_scattered_row_has_higher_entropy_than_focused_row(
@@ -146,7 +146,7 @@ def test_identical_documents_yield_low_entropy(analysis_cfg: AnalysisConfig) -> 
     assert entropy >= 0.0
     # Identical docs can't disambiguate topics, so the mixture should stay
     # well under the uniform ceiling of log2(k).
-    assert entropy < math.log2(analysis_cfg.content_lda_n_components)
+    assert entropy < math.log2(analysis_cfg.content_lda.content_lda_n_components)
 
 
 def test_topic_row_out_of_range_returns_nan(analysis_cfg: AnalysisConfig) -> None:

@@ -5920,3 +5920,39 @@ uv run pytest tests/ -q --tb=no   # coverage 79.2% (passes fail-under); 2 failed
 #### Risks & Next Steps
 
 - External code importing `run_analyze` with keyword arguments must switch to `run_analyze(AnalyzeRequest(...))` (repo-internal callers updated).
+
+---
+
+### Refactoring Run 11 — TASK-4 nested `AnalysisConfig` + stable hash
+
+**Status:** Complete  
+**Date:** 2026-04-27
+
+#### What Was Done
+
+- Split `AnalysisConfig` into nested sub-models (`PeltConfig`, `BocpdConfig`, `ConvergenceConfig`, `ContentLdaConfig`, `HypothesisConfig`, `EmbeddingStackConfig`) in `src/forensics/config/analysis_settings.py` with `model_validator(mode="before")` lifting flat `[analysis]` TOML keys.
+- Preserved `compute_model_config_hash(settings.analysis)` via `_build_recursive_hash_payload` in `src/forensics/utils/provenance.py` (flat JSON leaf keys unchanged); added `analysis_config_hash_field_names()` for tests.
+- Updated all production accessors and tests to nested paths; `apply_flat_analysis_overrides` for flat test overrides; `ConvergenceInput.from_settings` reads permutation knobs from `settings.analysis.convergence`.
+- Documented ADR-016; README env-var example updated for nested `FORENSICS_ANALYSIS__…` keys; golden hash test in `tests/unit/test_config_hash.py`.
+
+#### Files Modified (high level)
+
+- `src/forensics/config/analysis_settings.py` (new), `src/forensics/config/settings.py`, `src/forensics/config/__init__.py`
+- `src/forensics/utils/provenance.py`, `src/forensics/preregistration.py`, analysis/features/baseline/cli modules and tests as needed for nested access / env strings
+
+#### Verification Evidence
+
+```
+uv run ruff check .
+uv run ruff format --check .
+uv run pytest tests/ -q --tb=no --no-cov   # 1015 passed; 1 xfail; 2 failed (e2e missing repo quarto copy path; hypothesis fuzz — pre-existing class)
+```
+
+#### GitNexus
+
+- MCP `user-gitnexus` not available in this session; impact not run.
+
+#### Risks & Next Steps
+
+- **Env overrides:** flat `FORENSICS_ANALYSIS__CONVERGENCE_USE_PERMUTATION` must become `FORENSICS_ANALYSIS__CONVERGENCE__CONVERGENCE_USE_PERMUTATION` (and similar for other nested fields). ADR-016 + README document this.
+- Re-run `npx gitnexus analyze` after merge if graph consumers need a fresh index.

@@ -13,7 +13,7 @@ todos:
     status: completed
   - id: task-4-analysis-config
     content: "TASK-4: Split AnalysisConfig into nested sub-models with flat TOML compat + stable config hash; update all accessors; ADR + golden hash test"
-    status: pending
+    status: completed
   - id: task-5-imports
     content: "TASK-5: Standardize AnalysisArtifactPaths imports to forensics.paths across src/tests/scripts; deprecate or thin artifact_paths shim"
     status: pending

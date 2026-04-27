@@ -301,7 +301,7 @@ def _verify_requested_ai_baseline_vectors(
         if not load_ai_baseline_embeddings(
             slug,
             ctx.paths,
-            expected_dim=int(ctx.settings.analysis.embedding_vector_dim),
+            expected_dim=int(ctx.settings.analysis.embedding.embedding_vector_dim),
         ):
             missing.append(slug)
     if missing:
@@ -381,7 +381,11 @@ def _apply_per_run_overrides(
         settings = settings.model_copy(
             update={
                 "analysis": settings.analysis.model_copy(
-                    update={"section_residualize_features": True}
+                    update={
+                        "hypothesis": settings.analysis.hypothesis.model_copy(
+                            update={"section_residualize_features": True}
+                        ),
+                    },
                 ),
             }
         )
@@ -744,8 +748,8 @@ def section_contrast_cmd(
             author_id=author_row.id,
             author_slug=author_row.slug,
             analysis_dir=analysis_dir,
-            alpha=settings.analysis.significance_threshold,
-            bh_method=settings.analysis.multiple_comparison_method,
+            alpha=settings.analysis.hypothesis.significance_threshold,
+            bh_method=settings.analysis.hypothesis.multiple_comparison_method,
         )
         written += 1
         if result.disposition == "insufficient_section_volume":

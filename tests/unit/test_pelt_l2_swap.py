@@ -114,7 +114,7 @@ def test_l2_regression_pin_single_mean_shift() -> None:
 
 def test_analysis_config_default_is_l1() -> None:
     """``AnalysisConfig`` defaults to ``l1`` (Phase 15 J6 std-scaled PELT path)."""
-    assert AnalysisConfig().pelt_cost_model == "l1"
+    assert AnalysisConfig().pelt.pelt_cost_model == "l1"
 
 
 def _settings_with_cost_model(cost_model: str) -> ForensicsSettings:

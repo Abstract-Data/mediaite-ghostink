@@ -278,10 +278,10 @@ def _process_author_batch(
     processed_before_batch: int,
 ) -> _AuthorBatchResult:
     """Extract features (and optional embeddings) for one author's article list."""
-    model_name = settings.analysis.embedding_model
-    model_version = settings.analysis.embedding_model_version
-    model_revision = settings.analysis.embedding_model_revision
-    max_fail_ratio = settings.analysis.feature_extraction_max_failure_ratio
+    model_name = settings.analysis.embedding.embedding_model
+    model_version = settings.analysis.embedding.embedding_model_version
+    model_revision = settings.analysis.embedding.embedding_model_revision
+    max_fail_ratio = settings.analysis.embedding.feature_extraction_max_failure_ratio
 
     result = _AuthorBatchResult()
     embed_batch: list[tuple[str, datetime, np.ndarray]] = []
@@ -486,9 +486,9 @@ def extract_all_features(
     if not skip_embeddings:
         _archive_embeddings_if_mismatch(
             paths.embeddings_dir,
-            settings.analysis.embedding_model,
-            settings.analysis.embedding_model_version,
-            settings.analysis.embedding_model_revision,
+            settings.analysis.embedding.embedding_model,
+            settings.analysis.embedding.embedding_model_version,
+            settings.analysis.embedding.embedding_model_revision,
         )
 
     with Repository(db_path) as repo:

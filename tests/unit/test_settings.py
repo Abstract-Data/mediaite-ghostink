@@ -10,8 +10,8 @@ import pytest
 from pydantic import ValidationError
 
 from forensics.config import get_settings
+from forensics.config.analysis_settings import AnalysisConfig, apply_flat_analysis_overrides
 from forensics.config.settings import (
-    AnalysisConfig,
     AuthorConfig,
     FeaturesConfig,
     ForensicsSettings,
@@ -72,7 +72,7 @@ def test_compute_analysis_config_hash_changes_for_hash_knob(
 ) -> None:
     """Each listed analysis field must invalidate :func:`compute_analysis_config_hash`."""
     base_hash = compute_analysis_config_hash(settings)
-    new_analysis = settings.analysis.model_copy(update={field: alt})
+    new_analysis = apply_flat_analysis_overrides(settings.analysis, **{field: alt})
     tweaked = settings.model_copy(update={"analysis": new_analysis})
     assert compute_analysis_config_hash(tweaked) != base_hash
 

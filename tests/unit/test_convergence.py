@@ -25,6 +25,7 @@ from forensics.analysis.convergence import (
     ConvergenceInput,
     compute_convergence_scores,
 )
+from forensics.config.analysis_settings import apply_flat_analysis_overrides
 from forensics.config.settings import ForensicsSettings
 from forensics.models.analysis import ChangePoint
 
@@ -53,7 +54,7 @@ def _cp(
 def _settings_with(**analysis_overrides: object) -> ForensicsSettings:
     """Build a ``ForensicsSettings`` with ``AnalysisConfig`` overrides."""
     base = ForensicsSettings(authors=[])
-    new_analysis = base.analysis.model_copy(update=analysis_overrides)
+    new_analysis = apply_flat_analysis_overrides(base.analysis, **analysis_overrides)
     return base.model_copy(update={"analysis": new_analysis})
 
 

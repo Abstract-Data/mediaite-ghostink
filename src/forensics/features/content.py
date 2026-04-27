@@ -189,22 +189,23 @@ def _topic_entropy_lda(
     """Fit LDA on ``docs`` and return Shannon entropy of the topic mixture for row ``topic_row``."""
     if len(docs) < 3:
         return float("nan")
-    k = analysis.content_lda_n_components
+    lda_cfg = analysis.content_lda
+    k = lda_cfg.content_lda_n_components
     k_eff = min(k, max(2, len(docs) - 1))
     try:
         vec = CountVectorizer(
-            max_features=analysis.content_lda_max_features,
+            max_features=lda_cfg.content_lda_max_features,
             min_df=1,
-            max_df=analysis.content_lda_max_df,
+            max_df=lda_cfg.content_lda_max_df,
         )
         X = vec.fit_transform(docs)
         if X.shape[0] < 2 or X.shape[1] < 2:
             return float("nan")
         lda = LatentDirichletAllocation(
             n_components=k_eff,
-            max_iter=analysis.content_lda_max_iter,
+            max_iter=lda_cfg.content_lda_max_iter,
             learning_method="online",
-            random_state=int(analysis.content_lda_random_state),
+            random_state=int(lda_cfg.content_lda_random_state),
         )
         dist = lda.fit_transform(X)
         if topic_row >= dist.shape[0]:
@@ -234,8 +235,8 @@ def extract_content_features(
     lda_docs = _lda_document_corpus(
         text,
         recent_texts_90d,
-        max_peer_documents=cfg.content_lda_max_peer_documents,
-        max_chars_per_document=cfg.content_lda_max_chars_per_document,
+        max_peer_documents=cfg.content_lda.content_lda_max_peer_documents,
+        max_chars_per_document=cfg.content_lda.content_lda_max_chars_per_document,
     )
     topic_div = _topic_entropy_lda(lda_docs, topic_row=0, analysis=cfg)
 

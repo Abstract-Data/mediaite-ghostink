@@ -27,16 +27,17 @@ def resolve_effective_convergence_window_days(
     article_timestamps: list[datetime],
 ) -> int:
     """I-02 — bounded convergence window from median inter-article spacing (days)."""
-    if not analysis.convergence_window_adaptive or len(article_timestamps) < 2:
-        return int(analysis.convergence_window_days)
+    conv = analysis.convergence
+    if not conv.convergence_window_adaptive or len(article_timestamps) < 2:
+        return int(conv.convergence_window_days)
     ts = sorted(article_timestamps)
     deltas = [max(0.0, (ts[i] - ts[i - 1]).total_seconds() / 86400.0) for i in range(1, len(ts))]
     if not deltas:
-        return int(analysis.convergence_window_days)
+        return int(conv.convergence_window_days)
     deltas.sort()
     med = float(deltas[len(deltas) // 2])
     adaptive = int(round(max(14.0, med * 6.0)))
-    lo, hi = int(analysis.convergence_window_days_min), int(analysis.convergence_window_days_max)
+    lo, hi = int(conv.convergence_window_days_min), int(conv.convergence_window_days_max)
     return max(lo, min(hi, adaptive))
 
 
@@ -123,12 +124,17 @@ def compute_probability_pipeline_score(
     parts: list[float] = []
 
     ppx = _monthly_values_in_window(window_start, window_end, prob.monthly_perplexity)
-    ppx_drop = 0.92 if settings is None else settings.analysis.convergence_perplexity_drop_ratio
+    if settings is None:
+        ppx_drop = 0.92
+        br_drop = 0.94
+    else:
+        conv = settings.analysis.convergence
+        ppx_drop = conv.convergence_perplexity_drop_ratio
+        br_drop = conv.convergence_burstiness_drop_ratio
     if len(ppx) >= 2:
         parts.append(_two_halves_drop_score(ppx, ppx_drop))
 
     br = _monthly_values_in_window(window_start, window_end, prob.monthly_burstiness)
-    br_drop = 0.94 if settings is None else settings.analysis.convergence_burstiness_drop_ratio
     if len(br) >= 2:
         parts.append(_two_halves_drop_score(br, br_drop))
 
@@ -360,15 +366,16 @@ class ConvergenceInput:
     ) -> ConvergenceInput:
         """Resolve defaults from ``settings`` and from ``PELT_FEATURE_COLUMNS``."""
         if settings is not None:
-            window_days = settings.analysis.convergence_window_days
+            conv = settings.analysis.convergence
+            window_days = conv.convergence_window_days
             if article_timestamps is not None:
                 window_days = resolve_effective_convergence_window_days(
                     settings.analysis,
                     list(article_timestamps),
                 )
-            min_feature_ratio = settings.analysis.convergence_min_feature_ratio
+            min_feature_ratio = conv.convergence_min_feature_ratio
             if drift_only_pb_threshold is None:
-                drift_only_pb_threshold = settings.analysis.convergence_drift_only_pb_threshold
+                drift_only_pb_threshold = conv.convergence_drift_only_pb_threshold
         if drift_only_pb_threshold is None:
             drift_only_pb_threshold = DRIFT_ONLY_PB_THRESHOLD
         total = (
@@ -414,7 +421,7 @@ class ConvergenceInput:
         from ``settings.analysis`` instead of forcing every call site to re-thread
         those three attributes.
         """
-        ac = settings.analysis
+        ac = settings.analysis.convergence
         return cls.build(
             change_points,
             centroid_velocities,
@@ -486,9 +493,9 @@ def _score_single_window(
         input_.n_rankable_per_family,
     )
 
-    pipeline_b_mode = (
-        input_.settings.analysis.pipeline_b_mode if input_.settings is not None else "legacy"
-    )
+    pipeline_b_mode = "legacy"
+    if input_.settings is not None:
+        pipeline_b_mode = input_.settings.analysis.hypothesis.pipeline_b_mode
 
     peak_signal, months_in = _velocity_peak_and_months(
         start_d,
@@ -702,11 +709,11 @@ def compute_convergence_scores(
         return []
 
     # Phase 15 J5 — choose raw vs section-adjusted CPs before any scoring runs.
-    cp_source = (
-        input_.settings.analysis.convergence_cp_source if input_.settings is not None else "raw"
-    )
+    cp_source = "raw"
+    if input_.settings is not None:
+        cp_source = input_.settings.analysis.convergence.convergence_cp_source
     residualization_enabled = (
-        input_.settings.analysis.section_residualize_features
+        input_.settings.analysis.hypothesis.section_residualize_features
         if input_.settings is not None
         else False
     )

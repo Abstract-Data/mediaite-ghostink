@@ -74,8 +74,8 @@ def test_lock_content_has_thresholds(forensics_config_path: Path, tmp_path: Path
         "section_residualize_features",
     }
     assert expected_keys.issubset(analysis.keys())
-    assert analysis["significance_threshold"] == settings.analysis.significance_threshold
-    assert analysis["effect_size_threshold"] == settings.analysis.effect_size_threshold
+    assert analysis["significance_threshold"] == settings.analysis.hypothesis.significance_threshold
+    assert analysis["effect_size_threshold"] == settings.analysis.hypothesis.effect_size_threshold
     assert analysis["confirmatory_split_date"] == "2022-11-01"
     assert analysis["multiple_comparison_scope"] == "global_across_authors"
 
@@ -103,7 +103,7 @@ def test_verify_fails_when_significance_changed(
 
     lock_preregistration(settings, output_path=out)
     # Mutate in-place — pydantic v2 models permit attribute assignment by default.
-    settings.analysis.significance_threshold = 0.01
+    settings.analysis.hypothesis.significance_threshold = 0.01
 
     result = verify_preregistration(settings, lock_path=out)
 
@@ -118,7 +118,7 @@ def test_verify_fails_when_methods_changed(forensics_config_path: Path, tmp_path
     out = tmp_path / "lock.json"
 
     lock_preregistration(settings, output_path=out)
-    settings.analysis.changepoint_methods = ["pelt"]
+    settings.analysis.pelt.changepoint_methods = ["pelt"]
 
     result = verify_preregistration(settings, lock_path=out)
 
