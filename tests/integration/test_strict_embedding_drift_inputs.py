@@ -100,7 +100,8 @@ def test_analyze_cli_maps_embedding_drift_inputs_exit_code(
         'archive_url = "https://www.mediaite.com/author/a1/"\n'
         "baseline_start = 2020-01-01\n"
         "baseline_end = 2023-12-31\n"
-        "[scraping]\n[analysis]\n[report]\n",
+        "[scraping]\n[analysis]\n"
+        "[chain_of_custody]\nverify_corpus_hash = false\n[report]\n",
         encoding="utf-8",
     )
     monkeypatch.setenv("FORENSICS_CONFIG_FILE", str(cfg))

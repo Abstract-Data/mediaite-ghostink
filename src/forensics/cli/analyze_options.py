@@ -41,10 +41,13 @@ AnalyzeSkipGenerationFlag = Annotated[
     ),
 ]
 AnalyzeVerifyCorpusFlag = Annotated[
-    bool,
+    bool | None,
     typer.Option(
-        "--verify-corpus",
-        help="Verify corpus hash against data/analysis/corpus_custody.json",
+        "--verify-corpus/--no-verify-corpus",
+        help=(
+            "Verify corpus fingerprint against data/analysis/corpus_custody.json. "
+            "When omitted, use [chain_of_custody] verify_corpus_hash from config.toml."
+        ),
     ),
 ]
 AnalyzeBaselineModelOption = Annotated[

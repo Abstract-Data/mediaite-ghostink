@@ -16,6 +16,19 @@ from forensics.utils.provenance import validate_analysis_result_config_hashes
 logger = logging.getLogger(__name__)
 
 
+def warn_comparison_report_empty_targets(*, compare_only: bool = False) -> None:
+    """Emit the L-02 operator hint when ``comparison_report.json`` would list no targets."""
+    if compare_only:
+        logger.warning(
+            "comparison_report: empty targets after compare-only — no comparisons written (L-02)"
+        )
+    else:
+        logger.warning(
+            "comparison_report: empty targets — no target-vs-control comparisons produced; "
+            "check target role in config, on-disk result artifacts, and --author scope (L-02)"
+        )
+
+
 def _resolve_targets_and_controls(
     config: ForensicsSettings,
     author_slug: str | None,
@@ -138,8 +151,6 @@ def run_compare_only(
     ):
         out["targets"][tid] = report
     if not out.get("targets"):
-        logger.warning(
-            "comparison_report: empty targets after compare-only — no comparisons written (L-02)"
-        )
+        warn_comparison_report_empty_targets(compare_only=True)
     write_json_artifact(paths.comparison_report_json(), out)
     return out

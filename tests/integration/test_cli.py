@@ -61,9 +61,9 @@ def test_extract_help_lists_flags() -> None:
 
 
 def test_analyze_help_lists_flags() -> None:
-    result = runner.invoke(app, ["analyze", "--help"])
+    result = runner.invoke(app, ["analyze", "--help"], color=False)
     assert result.exit_code == 0
-    text = _plain_help(result.output)
+    text = _plain_help((result.stdout or "") + (result.stderr or ""))
     for flag in (
         "--changepoint",
         "--timeseries",
@@ -73,12 +73,13 @@ def test_analyze_help_lists_flags() -> None:
         "--ai-baseline",
         "--skip-generation",
         "--verify-corpus",
+        "no-verify-cor",
         "--author",
         "--exploratory",
         "--max-workers",
         "--parallel-authors",
     ):
-        assert flag in text, f"missing {flag} in analyze help"
+        assert flag in text, f"missing {flag!r} in analyze help"
 
 
 def test_report_help_lists_flags() -> None:
@@ -147,6 +148,57 @@ def test_analyze_verify_corpus_passes_on_matching_custody(
         ],
     )
     assert result.exit_code == 0, result.output
+
+
+def test_analyze_omit_verify_corpus_uses_config_when_custody_present(
+    tmp_path, forensics_config_path, monkeypatch
+) -> None:
+    """With ``verify_corpus_hash`` true in config, omitting CLI flags still runs verify."""
+    import importlib
+
+    from forensics.analysis import orchestrator as orch_mod
+
+    analyze_mod = importlib.import_module("forensics.cli.analyze")
+    from forensics.storage.repository import init_db
+    from forensics.utils.provenance import write_corpus_custody
+
+    cfg_text = forensics_config_path.read_text(encoding="utf-8")
+    forensics_config_path.write_text(
+        cfg_text.replace(
+            "verify_corpus_hash = false",
+            "verify_corpus_hash = true",
+        ),
+        encoding="utf-8",
+    )
+    from forensics.config import get_settings
+
+    get_settings.cache_clear()
+
+    db_path = tmp_path / "data" / "articles.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    init_db(db_path)
+    analysis_dir = tmp_path / "data" / "analysis"
+    analysis_dir.mkdir(parents=True, exist_ok=True)
+    write_corpus_custody(db_path, analysis_dir)
+    monkeypatch.setattr(analyze_mod, "get_project_root", lambda: tmp_path)
+    monkeypatch.setattr(
+        "forensics.pipeline_context.insert_analysis_run",
+        lambda *a, **kw: "run-id",
+    )
+    monkeypatch.setattr(orch_mod, "run_compare_only", lambda *a, **kw: None)
+
+    result = runner.invoke(
+        app,
+        [
+            "analyze",
+            "--compare",
+            "--author",
+            "fixture-author",
+            "--exploratory",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    get_settings.cache_clear()
 
 
 def test_validate_help() -> None:

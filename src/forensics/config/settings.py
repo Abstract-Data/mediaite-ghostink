@@ -17,6 +17,7 @@ from pydantic_settings import (
 )
 
 from forensics.config.analysis_settings import AnalysisConfig
+from forensics.config.constants import DEFAULT_EXCLUDED_SECTIONS
 
 # Canonical relative location of the SQLite corpus under the project root.
 # Single source of truth for all modules that resolve the DB path.
@@ -109,9 +110,7 @@ class SurveyConfig(BaseModel):
     # Drop shared byline accounts from survey cohort by default (D).
     exclude_shared_bylines: bool = True
     # Sections excluded from survey baselines (J2); mirror ``FeaturesConfig``.
-    excluded_sections: frozenset[str] = Field(
-        default_factory=lambda: frozenset({"sponsored", "partner-content", "crosspost"})
-    )
+    excluded_sections: frozenset[str] = Field(default=DEFAULT_EXCLUDED_SECTIONS)
 
 
 class FeaturesConfig(BaseModel):
@@ -122,9 +121,7 @@ class FeaturesConfig(BaseModel):
         2, ge=1, json_schema_extra={"include_in_config_hash": True}
     )
     # Sections dropped at extract time; keep aligned with ``SurveyConfig`` (J2).
-    excluded_sections: frozenset[str] = Field(
-        default_factory=lambda: frozenset({"sponsored", "partner-content", "crosspost"})
-    )
+    excluded_sections: frozenset[str] = Field(default=DEFAULT_EXCLUDED_SECTIONS)
 
 
 class ProbabilityConfig(BaseModel):

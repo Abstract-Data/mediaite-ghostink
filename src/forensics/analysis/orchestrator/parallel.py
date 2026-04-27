@@ -17,6 +17,7 @@ from forensics.analysis.drift import EmbeddingDriftInputsError, EmbeddingRevisio
 from forensics.analysis.orchestrator.comparison import (
     _resolve_targets_and_controls,
     _run_target_control_comparisons,
+    warn_comparison_report_empty_targets,
 )
 from forensics.analysis.orchestrator.per_author import (
     _apply_global_test_gates,
@@ -31,7 +32,7 @@ from forensics.paths import AnalysisArtifactPaths
 from forensics.storage.json_io import write_json_artifact
 from forensics.storage.repository import Repository
 from forensics.utils.provenance import (
-    compute_model_config_hash,
+    compute_analysis_config_hash,
     write_corpus_custody,
 )
 
@@ -348,7 +349,7 @@ def _validate_isolated_author_output(
     isolated: IsolatedAuthorAnalysis,
     config: ForensicsSettings,
 ) -> None:
-    expected = compute_model_config_hash(config.analysis, length=16, round_trip=True)
+    expected = compute_analysis_config_hash(config)
     result_path = isolated.analysis_dir / f"{isolated.slug}_result.json"
     if not result_path.is_file():
         msg = f"missing isolated result artifact: {result_path}"
@@ -398,7 +399,7 @@ def _validate_and_promote_isolated_outputs(
         marker,
         {
             "validated_slugs": sorted(item.slug for item in isolated_outputs),
-            "config_hash": compute_model_config_hash(config.analysis, length=16, round_trip=True),
+            "config_hash": compute_analysis_config_hash(config),
         },
     )
 
@@ -587,10 +588,7 @@ def run_parallel_author_refresh(
         exploratory=exploratory,
     )
     if not comparison_payload.get("targets"):
-        logger.warning(
-            "comparison_report: empty targets — no target-vs-control comparisons produced; "
-            "check target role in config, on-disk result artifacts, and --author scope (L-02)"
-        )
+        warn_comparison_report_empty_targets()
     write_json_artifact(paths.comparison_report_json(), comparison_payload)
     _merge_run_metadata(paths, results, comparison_payload)
     meta_path = paths.run_metadata_json()

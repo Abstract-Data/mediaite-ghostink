@@ -4,10 +4,10 @@ overview: Implement every actionable item from the Apr 27, 2026 Run 12 Code Revi
 todos:
   - id: task-1-phase17-dry
     content: Complete Phase 17 (fixtures, test_phase17_classification, RUNBOOK, HANDOFF, nbconvert); RF-DRY-001 compute_analysis_config_hash routing; RF-DRY-002 empty-targets helper; RF-DRY-003 shared excluded_sections; partial run_analyze unpack removal
-    status: pending
+    status: completed
   - id: task-2-p1-coc-sec
     content: "P1-ARCH-001: wire ChainOfCustodyConfig to verify_corpus default, verify_raw_archives, log_all_generations + tests; P1-SEC-003 narrow _METADATA_INGEST_RECOVERABLE"
-    status: pending
+    status: completed
   - id: task-3-analysis-mode
     content: Introduce AnalysisMode dataclass; thread through CLI/orchestrator/drift/embeddings (~11 files); preserve JSON boundaries
     status: pending

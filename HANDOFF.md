@@ -6288,3 +6288,37 @@ uv run pytest tests/ -v --no-cov
 #### GitNexus
 
 - `gitnexus_detect_changes({ "scope": "all" })` was invoked via MCP; **server `user-gitnexus` is not registered** in this Cursor workspace (available MCP list has no GitNexus entry). Re-run detect_changes when the GitNexus MCP is enabled before merge.
+
+---
+
+### Run 12 — TASK-1 Phase17+DRY + TASK-2 CoC/SEC
+
+**Status:** Complete  
+**Date:** 2026-04-27
+
+#### What was done
+
+- **Phase 17 (plan closure):** Confirmed committed `tests/fixtures/phase17/golden_cases.json`, `tests/integration/test_phase17_classification.py`, and RUNBOOK §Phase 17; corrected RUNBOOK path note for `direction_priors`; extended corpus-custody RUNBOOK bullets for analyze tri-state, raw-archive verify, and baseline generation logging.
+- **RF-DRY-001:** Routed analysis compatibility digest through `compute_analysis_config_hash(settings)` in `staleness.py`, `parallel.py`, and `assemble_analysis_result` / `per_author.py` (settings-based hash aligned with other writers).
+- **RF-DRY-002:** Centralized empty `comparison_report` warnings in `warn_comparison_report_empty_targets` (`comparison.py`); `runner.py` and `parallel.py` call the helper.
+- **RF-DRY-003:** Added `src/forensics/config/constants.py` with `DEFAULT_EXCLUDED_SECTIONS`; `SurveyConfig` / `FeaturesConfig` use the shared constant.
+- **RF partial:** Removed unpack-to-locals in `run_analyze`; use `request.<field>` and resolve `verify_corpus` after settings load.
+- **P1-ARCH-001:** `verify_corpus` tri-state (`--verify-corpus` / `--no-verify-corpus`, default from `[chain_of_custody] verify_corpus_hash`); `archive_raw_year_dirs(..., settings=...)` optional verify/logging when `verify_raw_archives`; baseline `_log_generation_custody` when `log_all_generations`. Minimal test configs set `verify_corpus_hash = false` so suites without custody keep passing; repo `config.toml` unchanged (`true`).
+- **P1-SEC-003:** Dropped `KeyError` / `TypeError` from `_METADATA_INGEST_RECOVERABLE` (per-post parsing still narrows those in `_ingest_single_post`).
+
+#### Files touched
+
+- `src/forensics/config/constants.py`, `settings.py`, `comparison.py`, `runner.py`, `parallel.py`, `staleness.py`, `per_author.py`, `fetcher.py`, `scrape.py`, `crawler.py`, `baseline/orchestrator.py`, `cli/analyze.py`, `cli/analyze_options.py`, `tests/conftest.py`, `tests/unit/test_analyze_survey_gate.py`, `tests/test_orchestrator_assemble.py`, `tests/test_baseline.py`, `tests/unit/test_fetcher_archive_custody.py`, `tests/integration/test_cli.py`, `tests/integration/test_cli_scrape_dispatch.py`, `docs/RUNBOOK.md`, `HANDOFF.md`
+
+#### Verification
+
+```
+uv run ruff check . && uv run ruff format .
+uv run pytest tests/ -v --no-cov
+```
+
+Full suite: **1076 passed**, 3 deselected, 1 xfailed (known section_residualize), 3 warnings. **Notebook:** `jupyter nbconvert` is not installed in the default `uv` env (`jupyter-nbconvert` missing); install Jupyter/nbconvert in the dev env to run the Phase 17 nbconvert smoke locally.
+
+#### GitNexus
+
+Impact/detect_changes not invoked: GitNexus MCP path not verified in this workspace; re-run when available before merge.

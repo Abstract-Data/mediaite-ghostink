@@ -51,7 +51,7 @@ from forensics.storage.json_io import stable_sort_artifact_list, write_json_arti
 from forensics.storage.parquet import load_feature_frame_sorted
 from forensics.storage.repository import Repository
 from forensics.utils.datetime import timestamps_from_frame
-from forensics.utils.provenance import compute_model_config_hash
+from forensics.utils.provenance import compute_analysis_config_hash
 
 logger = logging.getLogger(__name__)
 
@@ -285,10 +285,10 @@ def assemble_analysis_result(
     convergence_windows: list,
     drift_scores: DriftScores | None,
     hypothesis_tests: list,
-    config: AnalysisConfig,
+    settings: ForensicsSettings,
 ) -> AnalysisResult:
     """Build ``AnalysisResult`` with a short deterministic hash of analysis settings."""
-    config_hash = compute_model_config_hash(config, length=16, round_trip=True)
+    config_hash = compute_analysis_config_hash(settings)
     return AnalysisResult(
         author_id=author_id,
         run_id=str(uuid4()),
@@ -420,6 +420,6 @@ def _run_per_author_analysis(
             convergence_windows,
             drift,
             all_tests,
-            config.analysis,
+            config,
         )
         return assembled, change_points, convergence_windows, all_tests

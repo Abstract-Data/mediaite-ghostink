@@ -38,7 +38,7 @@ async def test_scrape_archive_only(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    def fake_archive(root: Path, db_path: Path) -> int:
+    def fake_archive(root: Path, db_path: Path, *, settings=None) -> int:
         assert db_path == tmp_path / "data/articles.db"
         return 2
 

@@ -116,7 +116,7 @@ class AnalyzeRequest:
     compare: bool = False
     ai_baseline: bool = False
     skip_generation: bool = False
-    verify_corpus: bool = False
+    verify_corpus: bool | None = None
     baseline_model: str | None = None
     articles_per_cell: int | None = None
     author: str | None = None
@@ -427,52 +427,35 @@ def _apply_per_run_overrides(
 
 def run_analyze(request: AnalyzeRequest) -> None:  # noqa: C901
     """Run analyze stages (callable from Typer and from ``forensics all``)."""
-    changepoint = request.changepoint
-    timeseries = request.timeseries
-    drift = request.drift
-    convergence = request.convergence
-    compare = request.compare
-    ai_baseline = request.ai_baseline
-    skip_generation = request.skip_generation
-    verify_corpus = request.verify_corpus
-    baseline_model = request.baseline_model
-    articles_per_cell = request.articles_per_cell
-    author = request.author
-    exploratory = request.exploratory
-    include_advertorial = request.include_advertorial
-    residualize_sections = request.residualize_sections
-    include_shared_bylines = request.include_shared_bylines
-    max_workers = request.max_workers
-    compare_pair = request.compare_pair
-    parallel_authors = request.parallel_authors
-    allow_pre_phase16_embeddings = request.allow_pre_phase16_embeddings
-    typer_context = request.typer_context
-
     settings = _apply_per_run_overrides(
         get_settings(),
-        include_advertorial=include_advertorial,
-        residualize_sections=residualize_sections,
+        include_advertorial=request.include_advertorial,
+        residualize_sections=request.residualize_sections,
     )
     root = get_project_root()
     db_path = root / DEFAULT_DB_RELATIVE
-    if author is not None:
+    if request.author is not None:
         _enforce_shared_byline_gate(
             db_path,
             settings,
-            author_slug=author,
-            include_shared_bylines=include_shared_bylines,
+            author_slug=request.author,
+            include_shared_bylines=request.include_shared_bylines,
         )
     ctx = AnalyzeContext.build(
         db_path,
         settings,
         root=root,
-        author=author,
-        max_workers=max_workers,
-        compare_pair=compare_pair,
-        exploratory=exploratory,
-        allow_pre_phase16_embeddings=allow_pre_phase16_embeddings,
+        author=request.author,
+        max_workers=request.max_workers,
+        compare_pair=request.compare_pair,
+        exploratory=request.exploratory,
+        allow_pre_phase16_embeddings=request.allow_pre_phase16_embeddings,
     )
     analysis_dir = ctx.paths.analysis_dir
+
+    verify_corpus = request.verify_corpus
+    if verify_corpus is None:
+        verify_corpus = settings.chain_of_custody.verify_corpus_hash
 
     if verify_corpus:
         from forensics.utils.provenance import verify_corpus_hash
@@ -481,7 +464,7 @@ def run_analyze(request: AnalyzeRequest) -> None:  # noqa: C901
         if not ok:
             if "Corpus hash mismatch" in message:
                 raise fail(
-                    typer_context,
+                    request.typer_context,
                     "analyze",
                     "corpus_hash_mismatch",
                     message,
@@ -489,14 +472,14 @@ def run_analyze(request: AnalyzeRequest) -> None:  # noqa: C901
                 )
             if "No custody record" in message:
                 raise fail(
-                    typer_context,
+                    request.typer_context,
                     "analyze",
                     "corpus_custody_missing",
                     message,
                     exit_code=ExitCode.AUTH_OR_RESOURCE,
                 )
             raise fail(
-                typer_context,
+                request.typer_context,
                 "analyze",
                 "corpus_hash_error",
                 message,
@@ -505,19 +488,19 @@ def run_analyze(request: AnalyzeRequest) -> None:  # noqa: C901
         logger.info("corpus hash verified (%s)", message)
 
     preregistration = verify_preregistration(settings)
-    if preregistration.status != "ok" and not exploratory:
+    if preregistration.status != "ok" and not request.exploratory:
         meta = {
             "run_timestamp": datetime.now(UTC).isoformat(),
-            "last_processed_author": author,
-            "authors_in_run": ([author] if author else []),
+            "last_processed_author": request.author,
+            "authors_in_run": ([request.author] if request.author else []),
             "preregistration_status": preregistration.status,
             "preregistration_message": preregistration.message,
             "exploratory": False,
-            "allow_pre_phase16_embeddings": allow_pre_phase16_embeddings,
+            "allow_pre_phase16_embeddings": request.allow_pre_phase16_embeddings,
         }
         _write_run_metadata(analysis_dir, rid="preregistration-blocked", meta=meta)
         raise fail(
-            typer_context,
+            request.typer_context,
             "analyze",
             "preregistration_not_locked",
             preregistration.message,
@@ -527,13 +510,18 @@ def run_analyze(request: AnalyzeRequest) -> None:  # noqa: C901
             ),
         )
 
-    if compare and not (
-        parallel_authors or changepoint or timeseries or drift or ai_baseline or convergence
+    if request.compare and not (
+        request.parallel_authors
+        or request.changepoint
+        or request.timeseries
+        or request.drift
+        or request.ai_baseline
+        or request.convergence
     ):
         _run_compare_only_flow(ctx)
         return
 
-    if parallel_authors:
+    if request.parallel_authors:
         try:
             _run_parallel_author_refresh_stage(ctx)
         except (EmbeddingDriftInputsError, EmbeddingRevisionGateError) as exc:
@@ -545,12 +533,12 @@ def run_analyze(request: AnalyzeRequest) -> None:  # noqa: C901
         return
 
     do_changepoint, do_timeseries, do_drift, do_full_analysis = _resolve_mode_flags(
-        changepoint=changepoint,
-        timeseries=timeseries,
-        drift=drift,
-        convergence=convergence,
-        compare=compare,
-        ai_baseline=ai_baseline,
+        changepoint=request.changepoint,
+        timeseries=request.timeseries,
+        drift=request.drift,
+        convergence=request.convergence,
+        compare=request.compare,
+        ai_baseline=request.ai_baseline,
     )
 
     pipeline_ctx = PipelineContext.resolve()
@@ -564,12 +552,12 @@ def run_analyze(request: AnalyzeRequest) -> None:  # noqa: C901
         "timeseries": do_timeseries,
         "drift": do_drift,
         "convergence_full": do_full_analysis,
-        "last_processed_author": author,
-        "authors_in_run": ([author] if author else []),
+        "last_processed_author": request.author,
+        "authors_in_run": ([request.author] if request.author else []),
         "preregistration_status": preregistration.status,
         "preregistration_message": preregistration.message,
-        "exploratory": exploratory,
-        "allow_pre_phase16_embeddings": allow_pre_phase16_embeddings,
+        "exploratory": request.exploratory,
+        "allow_pre_phase16_embeddings": request.allow_pre_phase16_embeddings,
     }
     _write_run_metadata(analysis_dir, rid=rid, meta=meta)
 
@@ -595,15 +583,15 @@ def run_analyze(request: AnalyzeRequest) -> None:  # noqa: C901
                 cmd="analyze.full",
                 exc=exc,
             ) from exc
-    if ai_baseline:
+    if request.ai_baseline:
         _run_ai_baseline_stage(
             ctx,
-            skip_generation=skip_generation,
-            articles_per_cell=articles_per_cell,
-            baseline_model=baseline_model,
-            typer_context=typer_context,
+            skip_generation=request.skip_generation,
+            articles_per_cell=request.articles_per_cell,
+            baseline_model=request.baseline_model,
+            typer_context=request.typer_context,
         )
-        _verify_requested_ai_baseline_vectors(ctx, typer_context=typer_context)
+        _verify_requested_ai_baseline_vectors(ctx, typer_context=request.typer_context)
     logger.info(
         "analyze: completed (changepoint=%s, timeseries=%s, drift=%s, "
         "full_analysis=%s, ai_baseline=%s, author=%s)",
@@ -611,8 +599,8 @@ def run_analyze(request: AnalyzeRequest) -> None:  # noqa: C901
         do_timeseries,
         do_drift,
         do_full_analysis,
-        ai_baseline,
-        author or "all",
+        request.ai_baseline,
+        request.author or "all",
     )
 
 
@@ -627,7 +615,7 @@ def analyze(
     compare: AnalyzeCompareFlag = False,
     ai_baseline: AnalyzeAiBaselineFlag = False,
     skip_generation: AnalyzeSkipGenerationFlag = False,
-    verify_corpus: AnalyzeVerifyCorpusFlag = False,
+    verify_corpus: AnalyzeVerifyCorpusFlag = None,
     baseline_model: AnalyzeBaselineModelOption = None,
     articles_per_cell: AnalyzeArticlesPerCellOption = None,
     author: AnalyzeAuthorOption = None,

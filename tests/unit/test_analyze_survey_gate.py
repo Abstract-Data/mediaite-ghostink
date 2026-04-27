@@ -75,7 +75,11 @@ def _config_with_authors(slugs: list[str], *, with_shared: bool = False) -> str:
             "baseline_end = 2023-12-31\n"
             + ("# is_shared_byline reflected in DB row, not config\n" if is_shared else "")
         )
-    return "\n".join(blocks) + "\n[scraping]\n[analysis]\n[report]\n"
+    return (
+        "\n".join(blocks)
+        + "\n[scraping]\n[analysis]\n"
+        + "[chain_of_custody]\nverify_corpus_hash = false\n[report]\n"
+    )
 
 
 @pytest.fixture

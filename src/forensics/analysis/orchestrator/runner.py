@@ -9,6 +9,7 @@ from forensics.analysis.convergence import ProbabilityTrajectory
 from forensics.analysis.orchestrator.comparison import (
     _resolve_targets_and_controls,
     _run_target_control_comparisons,
+    warn_comparison_report_empty_targets,
 )
 from forensics.analysis.orchestrator.parallel import (
     _resolve_max_workers,
@@ -108,10 +109,7 @@ def run_full_analysis(
     compare_seconds = time.perf_counter() - t_compare
 
     if not comparison_payload.get("targets"):
-        logger.warning(
-            "comparison_report: empty targets — no target-vs-control comparisons produced; "
-            "check target role in config, on-disk result artifacts, and --author scope (L-02)"
-        )
+        warn_comparison_report_empty_targets()
 
     write_json_artifact(paths.comparison_report_json(), comparison_payload)
 

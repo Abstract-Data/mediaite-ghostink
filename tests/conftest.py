@@ -25,6 +25,10 @@ baseline_end = 2023-12-31
 
 [analysis]
 
+[chain_of_custody]
+# Tests omit corpus_custody.json unless a case exercises verify explicitly.
+verify_corpus_hash = false
+
 [report]
 """
 

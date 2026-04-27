@@ -46,7 +46,7 @@ After large refactors or merges, refresh the local graph so impact/context tools
 
 ## Phase 17 diagnostic columns (§11.3 notebook)
 
-Phase 17 adds **exploratory** report-side diagnostics alongside `FindingStrength` (which is unchanged). They are implemented in `src/forensics/models/report.py` and `src/forensics/models/direction_priors.py` and surfaced in `notebooks/09_full_report.ipynb` §11.3.
+Phase 17 adds **exploratory** report-side diagnostics alongside `FindingStrength` (which is unchanged). They are implemented in `src/forensics/models/report.py` and `src/forensics/models/direction_priors.py` (re-exported from `forensics.models`) and surfaced in `notebooks/09_full_report.ipynb` §11.3.
 
 | Column / symbol | Meaning |
 |-----------------|--------|
@@ -118,6 +118,9 @@ Use this before treating any analysis drop as **publication-ready** (client deli
 - **`schema_version: 2`:** `corpus_hash` fingerprints the **analyzable** corpus: non-duplicates only, ordered by `content_hash` (stable under insert order).
 - **`corpus_hash_v1`:** legacy fingerprint (`ORDER BY id`, all rows) kept for one transition cycle so older verification semantics can be compared; see GUARDRAILS for removal timing (Phase 17).
 - **`verify_corpus_hash`:** dispatches on `schema_version` (missing field → treat as v1).
+- **`forensics analyze` corpus gate:** `--verify-corpus` / `--no-verify-corpus` are explicit overrides. If **neither** is passed, analyze uses `[chain_of_custody] verify_corpus_hash` from `config.toml` (repo default `true`; CI/minimal fixtures often set `false` so tests do not require a pre-seeded `corpus_custody.json`).
+- **`[chain_of_custody] verify_raw_archives`:** when `true`, `scrape --archive` logs a post-condition check after each `data/raw/{YYYY}.tar.gz` is written and SQLite paths are rewritten (non-empty archive on disk + rewrite row count).
+- **`[chain_of_custody] log_all_generations`:** when `true`, each baseline article write emits a single `INFO` line (`custody {…}` JSON) from `forensics.baseline.orchestrator` for audit trails.
 
 ### Quick E2E spot-check (single author, exploratory)
 

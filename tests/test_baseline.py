@@ -6,6 +6,7 @@ Tests never touch a live Ollama instance.
 from __future__ import annotations
 
 import json
+import logging
 from datetime import UTC, date, datetime
 from pathlib import Path
 
@@ -242,6 +243,52 @@ def test_chain_of_custody_config_defaults() -> None:
     coc = ChainOfCustodyConfig()
     assert coc.verify_corpus_hash is True
     assert coc.verify_raw_archives is True
+    assert coc.log_all_generations is True
+
+
+def test_log_generation_custody_emits_when_enabled(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    from forensics.baseline.orchestrator import _log_generation_custody
+    from forensics.config.settings import AuthorConfig, ForensicsSettings
+
+    author = AuthorConfig(
+        name="Fixture",
+        slug="fixture-author",
+        outlet="mediaite.com",
+        role="target",
+        archive_url="https://www.mediaite.com/author/fixture-author/",
+        baseline_start=date(2020, 1, 1),
+        baseline_end=date(2021, 1, 1),
+    )
+    settings = ForensicsSettings(
+        authors=[author],
+        chain_of_custody=ChainOfCustodyConfig(log_all_generations=False),
+    )
+    with caplog.at_level(logging.INFO, logger="forensics.baseline.orchestrator"):
+        _log_generation_custody(settings, {"article_id": "x"})
+    assert "custody" not in caplog.text
+
+    settings_on = ForensicsSettings(
+        authors=[author],
+        chain_of_custody=ChainOfCustodyConfig(log_all_generations=True),
+    )
+    with caplog.at_level(logging.INFO, logger="forensics.baseline.orchestrator"):
+        _log_generation_custody(
+            settings_on,
+            {
+                "article_id": "baseline_test_001",
+                "model": "llama3.1:8b",
+                "model_digest": "abc",
+                "temperature": 0.0,
+                "prompt_template": "raw_generation",
+                "target_word_count": 400,
+                "generated_at": "2026-01-01T00:00:00+00:00",
+            },
+        )
+    assert "custody" in caplog.text
+    assert "baseline_generation" in caplog.text
+    assert "baseline_test_001" in caplog.text
 
 
 # --- chain of custody --------------------------------------------------------

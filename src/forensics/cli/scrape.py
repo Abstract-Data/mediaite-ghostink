@@ -335,10 +335,14 @@ async def _full_pipeline(
 
 
 async def _archive_only(
-    root: Path, db_path: Path, *, observer: PipelineObserver | None = None
+    root: Path,
+    db_path: Path,
+    settings: ForensicsSettings,
+    *,
+    observer: PipelineObserver | None = None,
 ) -> int:
     async def _work() -> int:
-        n = archive_raw_year_dirs(root, db_path)
+        n = archive_raw_year_dirs(root, db_path, settings=settings)
         logger.info("archive: compressed %d year directory(ies) under data/raw/", n)
         return 0
 
@@ -382,7 +386,7 @@ async def _run_scrape_mode(
     py_min, py_max = post_year_min, post_year_max
     obs = observer
     dispatch: dict[ScrapeMode, Callable[[], Awaitable[int]]] = {
-        ScrapeMode.ARCHIVE_ONLY: lambda: _archive_only(root, db_path, observer=obs),
+        ScrapeMode.ARCHIVE_ONLY: lambda: _archive_only(root, db_path, settings, observer=obs),
         ScrapeMode.DEDUP_ONLY: lambda: _dedup_only(db_path, settings, observer=obs),
         ScrapeMode.FETCH_ONLY: lambda: _fetch_only(
             db_path, settings, dry_run=dry_run, observer=obs
