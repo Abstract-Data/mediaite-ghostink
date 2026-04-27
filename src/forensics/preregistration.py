@@ -1,14 +1,7 @@
-"""Pre-registration locking — freeze analysis thresholds before looking at data.
+"""Pre-registration lock: snapshot analysis thresholds + SHA256 for drift checks.
 
-The lock file captures the state of every analysis threshold that affects
-downstream significance decisions, together with a SHA256 content hash for
-tamper detection. The analysis pipeline (and operators) can later verify
-that thresholds have not silently drifted between lock and analysis time.
-
-This is a methodological guardrail: a locked pre-registration converts an
-otherwise exploratory run into a confirmatory one. A missing lock is not a
-hard failure — it is simply exploratory mode — but a *mismatched* lock is
-reported as a violation so humans can decide how to proceed.
+Missing lock → exploratory; mismatch → :func:`verify_preregistration` reports
+``mismatch`` so operators can reconcile thresholds vs. the lock file.
 """
 
 from __future__ import annotations
@@ -43,16 +36,7 @@ PREREGISTERED_TEST_PREFIXES: tuple[str, ...] = ("welch_t", "mann_whitney")
 
 @dataclass(frozen=True)
 class VerificationResult:
-    """Outcome of ``verify_preregistration``.
-
-    ``status`` is one of:
-
-    - ``ok`` — a lock file exists and the current thresholds match it.
-    - ``missing`` — no lock file was found at the expected path.
-    - ``mismatch`` — a lock file exists but one or more thresholds differ
-      from the locked snapshot. ``diffs`` lists human-readable descriptions
-      of each drifted field.
-    """
+    """``verify_preregistration`` outcome: ``ok`` | ``missing`` | ``mismatch`` (+ ``diffs``)."""
 
     status: VerificationStatus
     message: str
@@ -65,7 +49,7 @@ def _default_lock_path() -> Path:
 
 
 def _snapshot_thresholds(settings: ForensicsSettings) -> dict[str, Any]:
-    """Return the canonical dict of locked analysis thresholds."""
+    """Locked analysis-threshold map (preregistered fields)."""
     analysis = settings.analysis
     return {
         "confirmatory_split_date": PREREGISTERED_SPLIT_DATE.isoformat(),
@@ -88,8 +72,7 @@ def _snapshot_thresholds(settings: ForensicsSettings) -> dict[str, Any]:
         "pelt_penalty": analysis.pelt_penalty,
         "pelt_cost_model": analysis.pelt_cost_model,
         "bocpd_hazard_rate": analysis.bocpd_hazard_rate,
-        # Phase 15 Unit 1 — ``bocpd_threshold`` removed; the detection rule is
-        # now parameterised by ``bocpd_detection_mode`` + map_reset knobs.
+        # BOCPD: ``bocpd_threshold`` removed (Phase 15 U1); mode + map_reset knobs apply.
         "bocpd_detection_mode": analysis.bocpd_detection_mode,
         "bocpd_map_drop_ratio": analysis.bocpd_map_drop_ratio,
         "bocpd_min_run_length": analysis.bocpd_min_run_length,
@@ -107,7 +90,7 @@ def _snapshot_thresholds(settings: ForensicsSettings) -> dict[str, Any]:
 
 
 def _canonical_hash(analysis: dict[str, Any]) -> str:
-    """SHA256 of the sorted, canonical JSON form of ``analysis``."""
+    """SHA256 of sorted canonical JSON for ``analysis``."""
     canonical = json.dumps(analysis, sort_keys=True, separators=(",", ":"), default=str)
     return content_hash(canonical)
 
@@ -116,15 +99,7 @@ def lock_preregistration(
     settings: ForensicsSettings,
     output_path: Path | None = None,
 ) -> Path:
-    """Snapshot current analysis thresholds into a timestamped lock file.
-
-    The payload contains:
-
-    - ``locked_at`` — ISO-8601 UTC timestamp.
-    - ``analysis`` — map of every threshold that influences significance decisions.
-    - ``content_hash`` — SHA256 of the canonical JSON form of ``analysis``
-      for tamper detection.
-    """
+    """Write ``locked_at``, ``analysis`` thresholds, and ``content_hash`` to ``lock_path``."""
     lock_path = output_path if output_path is not None else _default_lock_path()
 
     analysis = _snapshot_thresholds(settings)
@@ -146,13 +121,7 @@ def verify_preregistration(
     settings: ForensicsSettings,
     lock_path: Path | None = None,
 ) -> VerificationResult:
-    """Compare current thresholds against a previously written lock file.
-
-    Returns a :class:`VerificationResult` describing whether the lock is
-    present and whether it still matches. Never raises for a missing lock
-    — that is reported as ``status="missing"`` so callers can distinguish
-    exploratory mode from a true violation.
-    """
+    """Compare live settings to ``lock_path``; missing file → ``missing`` (no raise)."""
     resolved = lock_path if lock_path is not None else _default_lock_path()
     if not resolved.is_file():
         msg = (
@@ -164,11 +133,7 @@ def verify_preregistration(
 
     raw = json.loads(resolved.read_text(encoding="utf-8"))
 
-    # Operator-facing template state: the lock file exists but ``locked_at``
-    # is null and ``analysis`` is absent. Treat it as "missing" (exploratory)
-    # rather than "mismatch" so committing the template alone does not
-    # trip a false-violation warning. Operators must lift ``locked_at`` (and
-    # the ``analysis`` snapshot) before the file becomes a confirmatory lock.
+    # Unfilled template (``locked_at`` null, no ``analysis``) → ``missing``, not ``mismatch``.
     if raw.get("locked_at") is None and not raw.get("analysis"):
         msg = (
             "Pre-registration lock at "
@@ -194,8 +159,7 @@ def verify_preregistration(
             )
 
     if locked_hash is not None and locked_hash != current_hash and not diffs:
-        # Rare: payload was edited in a way that keeps field equality but
-        # changes canonical hash (e.g. reordering). Still a tamper signal.
+        # Field-equal payload but hash drift (e.g. reorder) — still report.
         diffs.append(f"content_hash: locked={locked_hash}, current={current_hash}")
 
     if diffs:

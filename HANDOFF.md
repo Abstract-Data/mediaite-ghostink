@@ -5652,3 +5652,18 @@ Global churn is dominated by `src/forensics/analysis/` (3394); that maps to **Ph
 **GitNexus:** `npx gitnexus impact get_cli_state -r mediaite-ghostink -d upstream --depth 2` → **CRITICAL** blast radius (expected); edits are typing/docs only, behavior unchanged.
 
 **Next:** Phase 2 deslop per plan (config/paths/preflight) or merge Phase 1 PR.
+
+---
+
+### 2026-04-27 — Phase 2 config / paths / preflight / preregistration deslop (completed)
+
+**Status:** Complete  
+**Scope:** `src/forensics/config/` (`__init__.py`, `fingerprint.py`, `settings.py`), `src/forensics/paths.py`, `src/forensics/preflight.py`, `src/forensics/preregistration.py`, `tests/test_preregistration.py`, `tests/unit/test_config_hash.py`
+
+**Changes:** Shortened module/class/function docstrings; removed preflight section banners; condensed `AnalysisConfig` / survey / features inline comments to single-line forensic notes (no defaults or `json_schema_extra` changes); trimmed related test module/docstrings. User-facing preregistration messages and lock payload keys unchanged.
+
+**Verification:** `uv run ruff check` + `ruff format --check` on paths above; `uv run pytest tests/test_preflight.py tests/test_preregistration.py tests/unit/test_settings.py tests/unit/test_config_hash.py -q --no-cov` — passed.
+
+**GitNexus:** MCP server not connected in this session — impact/detect_changes not run here; run before merge per `AGENTS.md` if available.
+
+**Next:** Phase 3 storage deslop per plan, or proceed with PR merge train.

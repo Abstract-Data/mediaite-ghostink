@@ -1,8 +1,4 @@
-"""Configuration: TOML + environment-backed settings.
-
-``__all__`` is the supported import surface; ``settings`` remains a deprecated
-lazy proxy for notebook compatibility (``_SettingsProxy`` below).
-"""
+"""TOML + ``FORENSICS_*`` settings. Prefer ``get_settings()`` over ``settings`` proxy."""
 
 import warnings
 

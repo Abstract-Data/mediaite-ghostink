@@ -1,10 +1,4 @@
-"""Phase 15 Step 0.4 — analysis config-hash enumeration guard.
-
-Each field decorated with ``json_schema_extra={"include_in_config_hash": True}``
-MUST contribute to the hash; any field without the annotation must NOT change
-the hash when flipped. This test enforces both directions so accidental
-inclusion / exclusion fails fast.
-"""
+"""Guard: ``include_in_config_hash`` fields match the analysis config hash enumerator."""
 
 from __future__ import annotations
 
@@ -20,8 +14,7 @@ from forensics.utils.provenance import (
     compute_model_config_hash,
 )
 
-# Fields that MUST invalidate the cache when they change (authoritative list —
-# mirror of the ``json_schema_extra`` annotations in ``settings.py``).
+# Mirror ``json_schema_extra`` on ``AnalysisConfig`` (must match provenance enumerator).
 _EXPECTED_HASH_FIELDS_ANALYSIS: set[str] = {
     "pelt_penalty",
     "pelt_cost_model",

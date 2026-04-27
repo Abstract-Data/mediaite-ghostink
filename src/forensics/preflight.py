@@ -1,11 +1,8 @@
-"""Preflight checks — validate environment before pipeline runs.
+"""Environment checks before pipeline runs.
 
-Exposes :func:`run_all_preflight_checks` returning a structured
-:class:`PreflightReport` with per-check status (``pass``/``warn``/``fail``).
-Hard-failures (``fail``) are reserved for issues that will block the pipeline:
-Python version, spaCy model, disk space, config parsing, placeholder authors.
-Other issues (Quarto, Ollama, sentence-transformers download) degrade to
-``warn`` so users can proceed with partial capability.
+:class:`PreflightReport` aggregates ``pass`` / ``warn`` / ``fail`` per check.
+``fail`` blocks the pipeline (Python, spaCy, disk, config, placeholders); optional
+tools (Quarto, Ollama, embedding cache) surface as ``warn`` unless ``strict``.
 """
 
 from __future__ import annotations
@@ -27,7 +24,7 @@ _PLACEHOLDER_SLUGS: frozenset[str] = frozenset({"placeholder-target", "placehold
 
 
 class _SettingsLike(Protocol):
-    """Minimal protocol so callers may pass any object exposing ``authors`` / ``analysis``."""
+    """Duck-typed settings (``authors``, ``analysis``, optional ``baseline``)."""
 
     authors: list  # noqa: UP006  - runtime duck-type only
     analysis: object
@@ -36,7 +33,7 @@ class _SettingsLike(Protocol):
 
 @dataclass(frozen=True)
 class PreflightCheck:
-    """Single preflight outcome — structured for logging and rendering."""
+    """One named check outcome."""
 
     name: str
     status: CheckStatus
@@ -45,13 +42,13 @@ class PreflightCheck:
 
 @dataclass(frozen=True)
 class PreflightReport:
-    """Aggregate preflight outcome produced by :func:`run_all_preflight_checks`."""
+    """All checks from :func:`run_all_preflight_checks`."""
 
     checks: tuple[PreflightCheck, ...] = field(default_factory=tuple)
 
     @property
     def ok(self) -> bool:
-        """True when no check reported ``fail``."""
+        """No ``fail`` checks."""
         return not self.has_failures
 
     @property
@@ -69,13 +66,8 @@ class PreflightReport:
         return tuple(c for c in self.checks if c.status == "warn")
 
 
-# -----------------------------
-# Individual checks
-# -----------------------------
-
-
 def check_python_version(minimum: tuple[int, int] = _MIN_PYTHON) -> PreflightCheck:
-    """Hard-fail if the running interpreter is older than ``minimum``."""
+    """Fail when the interpreter is below ``minimum``."""
     current = sys.version_info[:2]
     detail = f"Python {current[0]}.{current[1]} (need >= {minimum[0]}.{minimum[1]})"
     if current >= minimum:
@@ -84,7 +76,7 @@ def check_python_version(minimum: tuple[int, int] = _MIN_PYTHON) -> PreflightChe
 
 
 def check_spacy_model(model_name: str = "en_core_web_md") -> PreflightCheck:
-    """Hard-fail when the required spaCy model cannot be loaded."""
+    """Fail when ``model_name`` cannot be loaded."""
     try:
         import spacy
     except ImportError as exc:
@@ -101,7 +93,7 @@ def check_spacy_model(model_name: str = "en_core_web_md") -> PreflightCheck:
 def check_sentence_transformer(
     model_name: str = "sentence-transformers/all-MiniLM-L6-v2",
 ) -> PreflightCheck:
-    """Warn when the pinned embedding model is not yet cached locally."""
+    """Warn if the embedding model is not importable or not cached yet."""
     try:
         from sentence_transformers import SentenceTransformer
     except ImportError as exc:
@@ -123,7 +115,7 @@ def check_sentence_transformer(
 
 
 def check_quarto() -> PreflightCheck:
-    """Warn when the ``quarto`` binary is absent — reports cannot render without it."""
+    """Warn when ``quarto`` is not on ``PATH``."""
     binary = shutil.which("quarto")
     if binary:
         return PreflightCheck("Quarto", "pass", f"Found at {binary}")
@@ -135,7 +127,7 @@ def check_quarto() -> PreflightCheck:
 
 
 def check_ollama(settings: _SettingsLike) -> PreflightCheck:
-    """Warn when Ollama is required but not reachable; skip when baseline is unused."""
+    """Warn when baseline is configured but ``ollama`` is missing."""
     baseline = getattr(settings, "baseline", None)
     if baseline is None:
         return PreflightCheck("Ollama", "pass", "Baseline not configured, skipping")
@@ -150,7 +142,7 @@ def check_ollama(settings: _SettingsLike) -> PreflightCheck:
 
 
 def check_disk_space(data_dir: Path, minimum_gb: float = _MIN_FREE_GB) -> PreflightCheck:
-    """Hard-fail when the filesystem hosting ``data_dir`` has less than ``minimum_gb`` free."""
+    """Fail when free space under ``data_dir``'s filesystem is below ``minimum_gb``."""
     probe = data_dir if data_dir.exists() else data_dir.parent
     try:
         usage = shutil.disk_usage(probe)
@@ -164,7 +156,7 @@ def check_disk_space(data_dir: Path, minimum_gb: float = _MIN_FREE_GB) -> Prefli
 
 
 def check_no_placeholder_authors(settings: _SettingsLike) -> PreflightCheck:
-    """Hard-fail if config.toml still carries the template placeholder slugs."""
+    """Fail when placeholder author slugs are still present."""
     authors = list(getattr(settings, "authors", []) or [])
     bad = [a for a in authors if getattr(a, "slug", "") in _PLACEHOLDER_SLUGS]
     if bad:
@@ -181,7 +173,7 @@ def check_no_placeholder_authors(settings: _SettingsLike) -> PreflightCheck:
 
 
 def check_config_parses() -> PreflightCheck:
-    """Hard-fail when ``config.toml`` is missing or fails to parse."""
+    """Fail when settings cannot be loaded (missing/invalid TOML or validation)."""
     import tomllib
 
     import pydantic
@@ -195,22 +187,12 @@ def check_config_parses() -> PreflightCheck:
     return PreflightCheck("Config file", "pass", "config.toml parses successfully")
 
 
-# -----------------------------
-# Orchestrator
-# -----------------------------
-
-
 def run_all_preflight_checks(
     settings: _SettingsLike | None = None,
     *,
     strict: bool = False,
 ) -> PreflightReport:
-    """Run the full preflight suite and return a structured :class:`PreflightReport`.
-
-    When ``strict`` is True every warn is promoted to a fail — useful for CI
-    preflight lanes that should refuse to proceed on *any* missing optional
-    dependency.
-    """
+    """Run all checks. With ``strict``, promote every ``warn`` to ``fail`` (CI lanes)."""
     from forensics.config import get_project_root
 
     resolved = settings

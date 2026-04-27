@@ -16,7 +16,7 @@ todos:
     status: completed
   - id: deslop-phase-2-config
     content: Phase 2 — Deslop config, paths, preflight, preregistration + related tests
-    status: in_progress
+    status: completed
   - id: deslop-phase-3-storage
     content: Phase 3 — Deslop storage/repository (comments + dead code only; no schema edits)
     status: pending

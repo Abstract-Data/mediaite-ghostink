@@ -61,21 +61,17 @@ class ScrapingConfig(BaseModel):
     user_agent: str = "AI-Writing-Forensics/1.0 (research)"
     max_concurrent: int = 3
     max_retries: int = 3
-    # When True, the metadata phase also pulls `content.rendered` (100 posts per
-    # request) and writes body text inline, so `fetch_articles` no-ops. Trades
-    # per-article OG/ld+json metadata for ~100× fewer requests.
+    # Bulk metadata: pull ``content.rendered`` (100 posts/request); ``fetch_articles`` no-ops.
     bulk_fetch_mode: bool = Field(False, json_schema_extra={"include_in_config_hash": True})
     retry_backoff_seconds: float = 5.0
-    # Hamming-distance threshold passed to ``deduplicate_articles``.
-    # Lower is stricter; 0 disables near-duplicate collapsing entirely.
+    # ``deduplicate_articles`` Hamming threshold (0 = disable near-dup collapse).
     simhash_threshold: int = Field(
         default=3,
         ge=0,
         le=64,
         json_schema_extra={"include_in_config_hash": True},
     )
-    # Inclusive calendar-year window for WordPress ``wp/v2/posts`` queries
-    # (``after`` / ``before``). Both unset = no date filter (full history).
+    # Inclusive calendar years for ``wp/v2/posts``; both unset = full history.
     post_year_min: int | None = Field(
         default=None,
         ge=1900,
@@ -109,26 +105,22 @@ class AnalysisConfig(BaseModel):
         "benjamini_hochberg",
         json_schema_extra={"include_in_config_hash": True},
     )
-    # Operational: bootstrap resampling count for uncertainty; affects runtime only
-    # insofar as larger N tightens Monte Carlo error — still preregistered for
-    # confirmatory reproducibility.
+    # Bootstrap replicates (preregistered; larger N tightens Monte Carlo error).
     bootstrap_iterations: int = Field(
         1000,
         ge=1,
         json_schema_extra={"include_in_config_hash": True},
     )
-    # Signal-bearing: minimum articles required to label a pre/post segment around
-    # a change-point credible for hypothesis tests.
+    # Min articles per pre/post segment around a CP for hypothesis tests.
     min_articles_for_period: int = Field(
         5,
         ge=1,
         json_schema_extra={"include_in_config_hash": True},
     )
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
-    # Operational: human-readable bundle label (not HF revision).
+    # Human-readable bundle label (not HF revision).
     embedding_model_version: str = "v2.0"
-    # Signal-bearing: Hugging Face model revision (commit SHA or branch) passed to
-    # ``SentenceTransformer(..., revision=...)`` — must match locked embeddings.
+    # HF ``revision=`` for ``SentenceTransformer``; must match locked embeddings.
     embedding_model_revision: str = Field(
         "main",
         json_schema_extra={"include_in_config_hash": True},
@@ -138,30 +130,17 @@ class AnalysisConfig(BaseModel):
         json_schema_extra={"include_in_config_hash": True},
     )
     effect_size_threshold: float = Field(0.2, json_schema_extra={"include_in_config_hash": True})
-    # Signal-bearing: PELT penalty λ scales segmentation density.
-    # Phase 15 J6 calibration — λ is multiplied by per-feature std in
-    # ``_changepoints_for_feature`` so a single value behaves consistently
-    # across features whose raw scales span 3 orders of magnitude. With
-    # ``cost_model="l1"`` and the std-scaling, λ=5.0 gives ~3-8 breaks per
-    # continuous feature per author (sensible density). PELT cannot fire on
-    # the sparse-binary AI-marker features at any practical penalty; BOCPD
-    # handles those.
+    # PELT λ × per-feature std (J6). L1 + λ≈5 → ~3–8 breaks/continuous feature; sparse AI → BOCPD.
     pelt_penalty: float = Field(
         5.0,
         gt=0.0,
         json_schema_extra={"include_in_config_hash": True},
     )
-    # Phase 15 F0 — swap RBF (O(n²)) for L2 mean-shift cost.
-    # Phase 15 J6 calibration — L2 produced zero CPs on sparse-binary AI-marker
-    # features even at pen=0.1 (the per-segment squared-deviation cost is below
-    # the penalty floor). L1 is outlier-robust and fires at low penalty on the
-    # same data, restoring PELT's contribution to the change-point ensemble
-    # without rewriting the cost model.
+    # PELT cost: L1 mean-shift (J6); L2 under-fired on sparse AI markers vs L1.
     pelt_cost_model: Literal["l2", "l1", "rbf"] = Field(
         "l1", json_schema_extra={"include_in_config_hash": True}
     )
-    # Signal-bearing: BOCPD constant hazard h ∈ (0, 1]; prior expected run length
-    # scales as 1/h.
+    # BOCPD hazard h ∈ (0,1]; expected run length ∝ 1/h.
     bocpd_hazard_rate: float = Field(
         1 / 250.0,
         gt=0.0,
@@ -173,11 +152,7 @@ class AnalysisConfig(BaseModel):
     bocpd_expected_changes_per_author: int = Field(
         3, ge=1, json_schema_extra={"include_in_config_hash": True}
     )
-    # Phase 15 A — MAP-run-length reset replaces ``P(r=0)`` thresholding as
-    # the default. ``bocpd_threshold`` was removed (algebraically pinned to
-    # the hazard rate; see docs/GUARDRAILS.md). Set ``bocpd_detection_mode``
-    # to ``"p_r0_legacy"`` to restore the pre-Phase-A behavior byte-for-byte
-    # for replication / ablation runs.
+    # BOCPD mode: default ``map_reset``; ``p_r0_legacy`` = pre–Phase 15 A ``P(r=0)`` (GUARDRAILS).
     bocpd_detection_mode: Literal["p_r0_legacy", "map_reset"] = Field(
         "map_reset", json_schema_extra={"include_in_config_hash": True}
     )
@@ -188,12 +163,10 @@ class AnalysisConfig(BaseModel):
         json_schema_extra={"include_in_config_hash": True},
     )
     bocpd_min_run_length: int = Field(5, ge=1, json_schema_extra={"include_in_config_hash": True})
-    # Phase 15 A — cooldown + merge window applied on top of MAP-reset
-    # detections. Not part of the config hash: tuning these does not change
-    # the detection semantics, only the emitted stream.
+    # Post-process MAP-reset stream only (not hashed).
     bocpd_reset_cooldown: int = Field(3, ge=0)
     bocpd_merge_window: int = Field(2, ge=0)
-    # Phase 15 A4 — Student-t posterior predictive (NIG conjugate).
+    # Student-t BOCPD likelihood (NIG).
     bocpd_student_t: bool = Field(True, json_schema_extra={"include_in_config_hash": True})
     baseline_embedding_count: int = 20
     # I-03 — optional counts for manual baseline-curve sensitivity sweeps (empty = off).
@@ -203,7 +176,7 @@ class AnalysisConfig(BaseModel):
         ge=1,
         json_schema_extra={"include_in_config_hash": True},
     )
-    # I-02 — when True, derive window length from posting cadence (bounded).
+    # Derive convergence window from cadence (bounded min/max).
     convergence_window_adaptive: bool = Field(
         False,
         json_schema_extra={"include_in_config_hash": True},
@@ -218,25 +191,19 @@ class AnalysisConfig(BaseModel):
         ge=1,
         json_schema_extra={"include_in_config_hash": True},
     )
-    # Phase 15 B3 — threshold interpreted against feature *families* (≈8 independent
-    # axes), not the 23 raw features. Default dropped 0.60 → 0.50 so 4-of-8 family
-    # shifts surface as convergence.
+    # Family-level ratio gate (B3); default 0.50 vs raw-feature count.
     convergence_min_feature_ratio: float = Field(
         0.50,
         ge=0.0,
         le=1.0,
         json_schema_extra={"include_in_config_hash": True},
     )
-    # Phase 15 J5 — pick which change-point list feeds the convergence stage.
+    # CP list for convergence: raw vs section-adjusted (J5).
     convergence_cp_source: Literal["raw", "section_adjusted"] = Field(
         "section_adjusted",
         json_schema_extra={"include_in_config_hash": True},
     )
-    # Phase 15 Fix-G — windows pass via drift-only when pipeline_b >= this threshold.
-    # Lets high embedding-drift signals surface independently of the stylometric
-    # ratio gate or the AB intersection gate (both of which require non-trivial
-    # pipeline_a). Setting this to ``1.0`` (or any value above the maximum
-    # achievable pipeline_b) disables the drift-only channel.
+    # Drift-only path when pipeline_b ≥ this (Fix-G); 1.0+ effectively disables.
     convergence_drift_only_pb_threshold: float = Field(
         0.3,
         ge=0.0,
@@ -254,7 +221,7 @@ class AnalysisConfig(BaseModel):
     feature_extraction_max_failure_ratio: float = 0.25
     lda_num_topics: int = 20
     lda_n_keywords: int = 10
-    # Phase 4 content `topic_diversity_score` (per-article LDA on a rolling window).
+    # Rolling-window LDA for topic_diversity_score.
     content_lda_n_components: int = 10
     content_lda_max_peer_documents: int = 48
     content_lda_max_iter: int = 15
@@ -265,42 +232,36 @@ class AnalysisConfig(BaseModel):
     drift_umap_random_state: int = Field(42, json_schema_extra={"include_in_config_hash": True})
     hypothesis_bootstrap_seed: int = Field(42, json_schema_extra={"include_in_config_hash": True})
     embedding_vector_dim: int = Field(384, ge=1, json_schema_extra={"include_in_config_hash": True})
-    # D-10 — drop sub-threshold articles at analyze time (0 = disabled).
+    # Analyze-time min word count (0 = off).
     analysis_min_word_count: int = Field(0, ge=0)
-    # Phase 15 C — FDR grouping dimension (author-wide vs per feature family).
+    # BH grouping: per-author vs per-feature-family (C).
     fdr_grouping: Literal["author", "family"] = Field(
         "family", json_schema_extra={"include_in_config_hash": True}
     )
-    # M-09 — optional second BH pass across authors on per-family minima.
+    # Optional second BH pass across authors (M-09).
     enable_cross_author_correction: bool = Field(
         False, json_schema_extra={"include_in_config_hash": True}
     )
-    # M-15 — minimum finite observations per pre/post segment for Welch / MW.
+    # Min finite obs per segment for Welch / MW (M-15).
     hypothesis_min_segment_n: int = Field(
         10,
         ge=2,
         json_schema_extra={"include_in_config_hash": True},
     )
-    # Phase 15 C1 — Kolmogorov–Smirnov is highly correlated with Mann–Whitney
-    # for the location shifts this analysis cares about. Default OFF drops the
-    # per-CP test count from 3 → 2 and removes a redundant inflator from the
-    # BH denominator. Re-enable for replication runs that want shape-change
-    # detection on top of location shift.
+    # KS tests (correlated with MW here); default off → fewer tests per CP (C1).
     enable_ks_test: bool = Field(False, json_schema_extra={"include_in_config_hash": True})
-    # Phase 15 E — Pipeline B scoring mode; legacy preserves the v0.14 formulas.
+    # Pipeline B scoring: legacy (v0.14) vs percentile (E).
     pipeline_b_mode: Literal["legacy", "percentile"] = Field(
         "legacy", json_schema_extra={"include_in_config_hash": True}
     )
-    # Phase 15 J5 — residualize feature series against one-hot sections before CPD.
+    # Section one-hot residualization before CPD (J5).
     section_residualize_features: bool = Field(
         False, json_schema_extra={"include_in_config_hash": True}
     )
-    # Phase 15 J — minimum article counts for section-level diagnostics. Not
-    # part of the analysis config hash: these are gating thresholds for *whether*
-    # to run the diagnostic, not changes to the detection math itself.
+    # Section diagnostic gates (not hashed).
     section_min_articles: int = Field(50, ge=1)
     min_articles_per_section_for_residualize: int = Field(10, ge=1)
-    # Phase 15 G — parallelism knobs. Wall-clock only; not part of the hash.
+    # Parallelism (wall-clock only; not hashed).
     max_workers: int | None = None
     feature_workers: int = 1
 
@@ -314,12 +275,9 @@ class SurveyConfig(BaseModel):
     min_articles_per_year: float = 12.0
     require_recent_activity: bool = True
     recent_activity_days: int = 180
-    # Phase 15 D — exclude ``mediaite-staff`` / ``mediaite`` and similar shared
-    # byline accounts from survey qualification by default. Expose via the
-    # survey CLI's ``--include-shared-bylines`` escape hatch.
+    # Drop shared byline accounts from survey cohort by default (D).
     exclude_shared_bylines: bool = True
-    # Phase 15 J2 — exclude advertorial / syndicated content from stylometry
-    # baselines. Override via the CLI's ``--include-advertorial`` flag.
+    # Sections excluded from survey baselines (J2); mirror ``FeaturesConfig``.
     excluded_sections: frozenset[str] = Field(
         default_factory=lambda: frozenset({"sponsored", "partner-content", "crosspost"})
     )
@@ -328,17 +286,11 @@ class SurveyConfig(BaseModel):
 class FeaturesConfig(BaseModel):
     """Phase 15 — feature-store schema contract."""
 
-    # Bump whenever the feature parquet schema gains a required column. The
-    # loader refuses to read parquets stamped with a lower version and demands
-    # a migration (see ``src/forensics/storage/migrations/002_*``).
+    # Bump when Parquet schema adds required columns (loader enforces ≥ this).
     feature_parquet_schema_version: int = Field(
         2, ge=1, json_schema_extra={"include_in_config_hash": True}
     )
-    # Phase 15 J2 — drop advertorial / syndicated articles from feature
-    # extraction so the per-author parquet stays free of off-style
-    # contamination. Mirrors :class:`SurveyConfig.excluded_sections`; both
-    # default to the same set so a single ``--include-advertorial`` flag at the
-    # CLI layer can flip both behaviours together.
+    # Sections dropped at extract time; keep aligned with ``SurveyConfig`` (J2).
     excluded_sections: frozenset[str] = Field(
         default_factory=lambda: frozenset({"sponsored", "partner-content", "crosspost"})
     )
@@ -410,10 +362,7 @@ class ForensicsSettings(BaseSettings):
     authors: list[AuthorConfig]
     spacy_model: str = Field(
         default="en_core_web_md",
-        description=(
-            "spaCy pipeline name used for feature extraction and preflight validation. "
-            "Keep both in sync by reading this single field."
-        ),
+        description="spaCy pipeline for extract + preflight (single source of truth).",
     )
     scraping: ScrapingConfig = Field(default_factory=ScrapingConfig)
     analysis: AnalysisConfig = Field(default_factory=AnalysisConfig)
@@ -426,7 +375,7 @@ class ForensicsSettings(BaseSettings):
 
     @model_validator(mode="after")
     def _excluded_sections_match_survey(self) -> ForensicsSettings:
-        """Survey qualification and feature extraction must agree on section drops."""
+        """``features.excluded_sections`` must equal ``survey.excluded_sections``."""
         if self.features.excluded_sections != self.survey.excluded_sections:
             msg = (
                 "features.excluded_sections must equal survey.excluded_sections "
@@ -461,13 +410,5 @@ class ForensicsSettings(BaseSettings):
 
 @lru_cache(maxsize=1)
 def get_settings() -> ForensicsSettings:
-    """Load settings from config.toml (or FORENSICS_CONFIG_FILE) with env overrides.
-
-    This is the supported global accessor. Prefer it over the deprecated
-    ``forensics.config.settings`` proxy object (``from forensics.config import settings``),
-    which exists only for backward compatibility in notebooks and scripts.
-
-    Tests may clear the cache via ``get_settings.cache_clear()`` before changing
-    ``FORENSICS_*`` environment variables or ``FORENSICS_CONFIG_FILE``.
-    """
+    """Load TOML + env (``FORENSICS_*``). Clear with ``get_settings.cache_clear()`` in tests."""
     return ForensicsSettings()

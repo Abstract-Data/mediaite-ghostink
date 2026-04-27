@@ -1,10 +1,6 @@
-"""Cross-stage filesystem helpers and author-row resolvers.
+"""Cross-stage path helpers and author resolution (RF-ARCH-001).
 
-These utilities are used by multiple pipeline stages (extract, analyze,
-report, survey) and therefore cannot live under any single stage package
-without creating a cross-stage import (see RF-ARCH-001). They previously
-lived in ``forensics.analysis.artifact_paths`` and ``forensics.analysis.utils``;
-those modules now re-export from here so existing imports continue to work.
+Re-exported from ``forensics.analysis.*`` for backward-compatible imports.
 """
 
 from __future__ import annotations
@@ -161,11 +157,7 @@ def load_feature_frame_for_author(
     slug: str,
     author_id: str,
 ) -> pl.DataFrame | None:
-    """Load sorted features for one author from ``{slug}.parquet`` if present.
-
-    Pushes the ``author_id`` predicate into the lazy scan so the Parquet
-    reader can project only the relevant row groups (P2-PERF-002).
-    """
+    """Load ``{slug}.parquet`` filtered by ``author_id`` in the scan (P2-PERF-002)."""
     path = features_dir / f"{slug}.parquet"
     if not path.is_file():
         return None
@@ -189,7 +181,7 @@ def resolve_author_rows(
     *,
     author_slug: str | None,
 ) -> list[Author]:
-    """Resolve configured authors to DB rows, optionally filtered by ``author_slug``."""
+    """DB :class:`Author` rows for config, optionally a single ``author_slug``."""
     if author_slug:
         au = repo.get_author_by_slug(author_slug)
         if au is None:

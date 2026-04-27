@@ -114,3 +114,6 @@ Thumbs.db
 .claude/worktrees/
 .cursor/hooks/state/
 .gitnexus
+
+/.quarto/
+**/*.quarto_ipynb
