@@ -7,8 +7,10 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import numpy as np
+import pytest
 
-from forensics.analysis.drift import DriftSummary, load_drift_summary
+from forensics.analysis.drift import DriftSummary, EmbeddingDriftInputsError, load_drift_summary
+from forensics.analysis.orchestrator import AnalysisMode
 from forensics.config.settings import AnalysisConfig, ForensicsSettings, ScrapingConfig
 from forensics.models.analysis import DriftScores
 from forensics.models.features import EmbeddingRecord
@@ -130,7 +132,18 @@ def test_load_drift_summary_recomputes_from_embeddings(tmp_path: Path, sample_au
         assert isinstance(sim, float)
 
 
-def test_load_drift_summary_empty_when_no_data(tmp_path: Path) -> None:
+def test_load_drift_summary_empty_when_no_data_exploratory(tmp_path: Path) -> None:
     paths = _make_paths(tmp_path)
-    summary = load_drift_summary("missing-slug", paths, settings=_make_settings())
+    summary = load_drift_summary(
+        "missing-slug",
+        paths,
+        settings=_make_settings(),
+        mode=AnalysisMode(exploratory=True),
+    )
     assert summary == DriftSummary(velocities=[], baseline_curve=[])
+
+
+def test_load_drift_summary_raises_when_unknown_slug_confirmatory(tmp_path: Path) -> None:
+    paths = _make_paths(tmp_path)
+    with pytest.raises(EmbeddingDriftInputsError, match="Cannot load article embeddings"):
+        load_drift_summary("missing-slug", paths, settings=_make_settings(), mode=AnalysisMode())

@@ -86,7 +86,7 @@ _FLIP_VALUES: dict[str, Any] = {
     "enable_cross_author_correction": True,
     "hypothesis_min_segment_n": 12,
     "enable_ks_test": True,
-    "pipeline_b_mode": "percentile",
+    "pipeline_b_mode": "legacy",
     "section_residualize_features": True,
     "changepoint_methods": ["pelt"],
     "min_articles_for_period": 12,
@@ -158,7 +158,7 @@ def test_default_analysis_config_model_hash_golden() -> None:
     this value and document in ``docs/adr/016-analysis-config-nesting.md``.
     """
     base = AnalysisConfig()
-    assert compute_model_config_hash(base, length=16, round_trip=True) == "81d550a7032fbe95"
+    assert compute_model_config_hash(base, length=16, round_trip=True) == "c91006c9b9cec525"
 
 
 def test_e2e_fixture_empty_analysis_hash_matches_default_golden(
@@ -179,7 +179,7 @@ def test_e2e_fixture_empty_analysis_hash_matches_default_golden(
         settings = get_settings()
         golden = compute_model_config_hash(AnalysisConfig(), length=16, round_trip=True)
         assert compute_analysis_config_hash(settings) == golden
-        assert golden == "81d550a7032fbe95"
+        assert golden == "c91006c9b9cec525"
     finally:
         get_settings.cache_clear()
 

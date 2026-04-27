@@ -7,6 +7,9 @@ from collections.abc import Iterator
 from typing import Any
 
 from forensics.analysis.comparison import compare_target_to_controls
+from forensics.analysis.drift import EmbeddingDriftInputsError
+from forensics.analysis.orchestrator.embedding_policy import embedding_fail_should_propagate
+from forensics.analysis.orchestrator.mode import DEFAULT_ANALYSIS_MODE, AnalysisMode
 from forensics.config.settings import ForensicsSettings
 from forensics.models.analysis import AnalysisResult, ChangePoint
 from forensics.paths import AnalysisArtifactPaths
@@ -14,6 +17,19 @@ from forensics.storage.json_io import write_json_artifact
 from forensics.utils.provenance import validate_analysis_result_config_hashes
 
 logger = logging.getLogger(__name__)
+
+
+def warn_comparison_report_empty_targets(*, compare_only: bool = False) -> None:
+    """Emit the L-02 operator hint when ``comparison_report.json`` would list no targets."""
+    if compare_only:
+        logger.warning(
+            "comparison_report: empty targets after compare-only — no comparisons written (L-02)"
+        )
+    else:
+        logger.warning(
+            "comparison_report: empty targets — no target-vs-control comparisons produced; "
+            "check target role in config, on-disk result artifacts, and --author scope (L-02)"
+        )
 
 
 def _resolve_targets_and_controls(
@@ -53,13 +69,21 @@ def _iter_compare_targets(
     *,
     changepoints_memory: dict[str, list[ChangePoint]] | None,
     log_prefix: str,
+    mode: AnalysisMode = DEFAULT_ANALYSIS_MODE,
 ) -> Iterator[tuple[str, dict[str, Any]]]:
     for tid in targets:
         try:
             report = compare_target_to_controls(
-                tid, controls, paths, settings=config, changepoints_memory=changepoints_memory
+                tid,
+                controls,
+                paths,
+                settings=config,
+                changepoints_memory=changepoints_memory,
+                mode=mode,
             )
-        except (ValueError, OSError) as exc:
+        except (ValueError, OSError, EmbeddingDriftInputsError) as exc:
+            if embedding_fail_should_propagate(mode, exc):
+                raise
             logger.warning("%s failed for %s (%s)", log_prefix, tid, exc)
             continue
         yield tid, report
@@ -72,6 +96,7 @@ def _run_target_control_comparisons(
     *,
     paths: AnalysisArtifactPaths,
     config: ForensicsSettings,
+    mode: AnalysisMode = DEFAULT_ANALYSIS_MODE,
 ) -> dict[str, Any]:
     comparison_payload: dict[str, Any] = {"targets": {}}
     active_targets = [target for target in targets if target in results]
@@ -85,6 +110,7 @@ def _run_target_control_comparisons(
         config,
         changepoints_memory=changepoints_memory,
         log_prefix="analysis: comparison",
+        mode=mode,
     ):
         comparison_payload["targets"][tid] = report
     return comparison_payload
@@ -96,6 +122,7 @@ def run_compare_only(
     paths: AnalysisArtifactPaths,
     author_slug: str | None = None,
     compare_pair: tuple[str, str] | None = None,
+    mode: AnalysisMode = DEFAULT_ANALYSIS_MODE,
 ) -> dict[str, Any]:
     """Rebuild ``comparison_report.json`` from on-disk artifacts.
 
@@ -125,11 +152,10 @@ def run_compare_only(
         config,
         changepoints_memory=None,
         log_prefix="compare-only",
+        mode=mode,
     ):
         out["targets"][tid] = report
     if not out.get("targets"):
-        logger.warning(
-            "comparison_report: empty targets after compare-only — no comparisons written (L-02)"
-        )
+        warn_comparison_report_empty_targets(compare_only=True)
     write_json_artifact(paths.comparison_report_json(), out)
     return out

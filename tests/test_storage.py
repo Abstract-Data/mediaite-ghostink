@@ -93,3 +93,18 @@ def test_text_and_hash_helpers() -> None:
     assert word_count("one two three") == 3
     assert len(content_hash("abc")) == 64
     assert isinstance(simhash("token token token"), int)
+
+
+def test_repository_projection_helpers(tmp_db: Path, sample_author, sample_article) -> None:
+    with Repository(tmp_db) as repo:
+        assert repo.count_authors() == 0
+        assert repo.get_authors_by_slugs(["test-author", "nope"]) == {}
+        assert repo.count_articles_by_author_ids([sample_author.id]) == {}
+        repo.upsert_author(sample_author)
+        assert repo.count_authors() == 1
+        by_slug = repo.get_authors_by_slugs(["test-author", "nope"])
+        assert set(by_slug) == {"test-author"}
+        assert by_slug["test-author"].id == sample_author.id
+        repo.upsert_article(sample_article)
+        counts = repo.count_articles_by_author_ids([sample_author.id, "missing"])
+        assert counts == {sample_author.id: 1}

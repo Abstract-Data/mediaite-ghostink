@@ -153,8 +153,8 @@ def test_k6_diagnostic_renders_when_drift_artifact_missing(tmp_path: Path) -> No
 
     note = pipeline_b_diagnostics_block(slug, paths)
     assert note == PIPELINE_B_DIAGNOSTIC_NOTE
-    assert "Pipeline B" in note
-    assert "partial data" in note
+    assert "embedding drift" in note.lower()
+    assert "incomplete" in note.lower()
 
 
 def test_k6_diagnostic_silent_when_all_artifacts_present(tmp_path: Path) -> None:
@@ -205,7 +205,11 @@ def test_render_author_section_includes_diagnostic_and_chart(tmp_path: Path) -> 
         pipeline_b_diagnostic_html=f"<p>{diag}</p>" if diag else "",
     )
     assert f'data-author="{slug}"' in html
-    assert "Pipeline B" in html, "K6 diagnostic should appear inside the author section"
+    assert "embedding drift" in html.lower(), (
+        "K6 diagnostic should appear inside the author section"
+    )
     assert "Adjusted vs unadjusted change-points" in html, "K4 header must appear"
     # K6 prose appears before the K4 chart (data-completeness caveat first).
-    assert html.index("Pipeline B") < html.index("Adjusted vs unadjusted change-points")
+    k6 = html.lower().index("embedding drift")
+    k4 = html.index("Adjusted vs unadjusted change-points")
+    assert k6 < k4

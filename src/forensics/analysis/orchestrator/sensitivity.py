@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from forensics.analysis.convergence import ProbabilityTrajectory
+from forensics.analysis.orchestrator.mode import DEFAULT_ANALYSIS_MODE, AnalysisMode
 from forensics.analysis.orchestrator.per_author import (
     _run_per_author_analysis,
     _write_per_author_json_artifacts,
@@ -39,8 +40,7 @@ def _run_section_residualized_sensitivity(
     primary_results: dict[str, AnalysisResult],
     *,
     probability_trajectory_by_slug: dict[str, ProbabilityTrajectory],
-    exploratory: bool = False,
-    allow_pre_phase16_embeddings: bool = False,
+    mode: AnalysisMode = DEFAULT_ANALYSIS_MODE,
 ) -> dict[str, Any]:
     if config.analysis.hypothesis.section_residualize_features:
         return {}
@@ -71,8 +71,7 @@ def _run_section_residualized_sensitivity(
                 sensitivity_paths,
                 sensitivity_config,
                 probability_trajectory_by_slug=probability_trajectory_by_slug,
-                exploratory=exploratory,
-                allow_pre_phase16_embeddings=allow_pre_phase16_embeddings,
+                mode=mode,
             )
             if per_author is None:
                 continue

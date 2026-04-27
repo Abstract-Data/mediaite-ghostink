@@ -1,0 +1,17 @@
+# Alternate coverage config: includes ``forensics/tui/*`` in measurement.
+# Use after ``uv sync --extra dev --extra tui`` so TUI tests run and the
+# aggregate denominator matches installed extras. CI keeps the default
+# ``pyproject.toml`` omit list so ``fail_under`` stays stable without Textual.
+
+[run]
+source = ["forensics"]
+branch = true
+omit = [
+  "*/forensics/baseline/orchestrator.py",
+  "*/forensics/baseline/agent.py",
+]
+
+[report]
+fail_under = 75
+show_missing = true
+skip_covered = false

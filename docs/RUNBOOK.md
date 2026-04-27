@@ -4,12 +4,29 @@ Operational quick reference. Agents: append new sections here whenever you disco
 
 ## Local Setup
 
+- **Analysis defaults:** With an empty or omitted `[analysis] pipeline_b_mode` in `config.toml`, the nested model default is **`percentile`** (cross-author comparable Pipeline B). Override with `pipeline_b_mode = "legacy"` only when you need the older absolute-cosine behavior.
+
+### `pipeline_b_mode` and per-author `config_hash` (cohort compatibility)
+
+`HypothesisConfig.pipeline_b_mode` participates in the analysis **config hash** (`include_in_config_hash: true`). Older on-disk runs that were produced when the effective default was **`legacy`** (for example, before the nested default switched to **`percentile`**) carry a different `config_hash` than current settings, even if your TOML never mentioned `pipeline_b_mode`.
+
+**Symptoms:** compare-only or full runs fail validation with messages such as `Analysis artifact compatibility failed` or `stale or mismatched analysis config hashes` (from `validate_analysis_result_config_hashes` / `_validate_compare_artifact_hashes` before `comparison_report.json` is rebuilt).
+
+**Remediation:** Re-run `uv run forensics analyze` for the full cohort so each `data/analysis/<slug>_result.json` is regenerated with the current hash, **or** set `pipeline_b_mode = "legacy"` in `config.toml` consistently when you intentionally need to reproduce the legacy Pipeline B behavior against existing artifacts. Downstream consumers (`comparison_report.json`, report hash gates) expect target and control `*_result.json` files to match the live analysis hash.
+
 1. Install dependencies: `uv sync`
 2. For Phase 10 (baseline generation): `uv sync --extra baseline`
 3. Validate environment: `uv run ruff check . && uv run ruff format --check .`
 4. Run tests: `uv run pytest tests/ -v`
 5. Run with coverage: `uv run pytest tests/ -v --cov-report=term-missing` (coverage target `forensics` is configured in [`pyproject.toml`](../pyproject.toml) `addopts`)
 6. Optional Textual TUI: `uv sync --extra tui` enables `tests/test_tui.py` and related progress tests. A plain `uv sync` skips them; coverage config **omits** `forensics/tui/*` from the aggregate denominator so `fail_under=75` still passes without the extra.
+7. **Coverage including TUI (optional):** after `uv sync --extra dev --extra tui`, measure the Textual package with the alternate RC so the denominator includes `forensics/tui/*`:
+
+   ```bash
+   uv run pytest tests/ -v --cov=forensics --cov-config=coverage-tui.toml --cov-report=term-missing
+   ```
+
+   CI keeps the default [`pyproject.toml`](../pyproject.toml) `[tool.coverage.run]` omit list for speed and stable `fail_under`.
 
 ### Automated pipeline E2E (`tests/integration/test_pipeline_end_to_end.py`)
 
@@ -42,15 +59,68 @@ After large refactors or merges, refresh the local graph so impact/context tools
 - **Default:** `npx gitnexus analyze` (from repo root).
 - **Embeddings preserved:** If `.gitnexus/meta.json` shows `stats.embeddings` greater than zero, use `npx gitnexus analyze --embeddings`. Running `analyze` without `--embeddings` **removes** any previously generated index embeddings (see `AGENTS.md` / CLAUDE GitNexus section).
 
+## Phase 17 diagnostic columns (§11.3 notebook)
+
+Phase 17 adds **exploratory** report-side diagnostics alongside `FindingStrength` (which is unchanged). They are implemented in `src/forensics/models/report.py` and `src/forensics/models/direction_priors.py` (re-exported from `forensics.models`) and surfaced in `notebooks/09_full_report.ipynb` §11.3.
+
+| Column / symbol | Meaning |
+|-----------------|--------|
+| `DirectionConcordance` (`direction_ai`, `direction_mixed`, `direction_non_ai`, `direction_na`) | After collapsing to one hypothesis test per `feature_name` (max \|Cohen's d\|), compares the sign of d to `AI_TYPICAL_DIRECTION` priors. **≥50%** of prior-backed features matching the AI-typical direction yields `direction_ai`; mixed partial agreement yields `direction_mixed`; no matches with at least one oppose yields `direction_non_ai`; no usable priors yields `direction_na`. Thresholds are exploratory until locked in `data/preregistration/preregistration_lock.json`. |
+| `DirectionBreakdown` | Counts `dir_match` / `dir_oppose` / `dir_no_prior` (and optional feature lists) for transparency tables. |
+| `VolumeRampFlag` (`volume_stable`, `volume_growth`, `volume_ramp`, `volume_decline`, `volume_unknown`) | Uses **n_post / n_pre** from the first non-degenerate hypothesis row with usable sample counts (`n_pre > 0`, neither count `-1`). Bands: stable `[0.5, 2.0]`, growth `(2, 5]`, ramp `> 5`, decline `< 0.5`. **Confound:** a large ratio often reflects corpus expansion or cadence change, not model use; pair with direction columns. The **5×** ramp cutoff is exploratory. |
+| `volume_ratio` | The ratio used for the flag (or null when unknown). |
+
+**CI fixtures:** `tests/fixtures/phase17/golden_cases.json` plus `tests/integration/test_phase17_classification.py` assert golden direction/volume/strength tuples without reading gitignored `data/analysis/`. After a local full analyze, you may copy window-scoped rows from `data/analysis/<slug>_result.json` into that fixture and update `expected` in the same commit so CI stays deterministic.
+
+**TODO (not implemented):** optional env/CLI overrides for concordance or volume bands; until then, treat diagnostics as fixed code + pre-reg lock discipline.
+
 ## Phase 16 hash-break migration
 
 Phase 16 intentionally changes the analysis-config hash, corpus fingerprint, and embedding revision contract. Treat any pre–Phase-16 `data/analysis/*_result.json` and preregistration locks as **stale** relative to a Phase-16 `config.toml` until you re-lock and re-run (see GUARDRAILS Sign: *Pre-Phase-16 locked artifacts must be re-locked*).
 
 ### Pre-registration lock (template → confirmatory)
 
+**TL;DR — confirmatory IS the default.** `uv run forensics analyze` enforces `verify_preregistration()` at line 507 of `cli/analyze.py` and **refuses to run** unless either (a) the lock matches the current `config.toml` analysis thresholds, or (b) you explicitly opt out with `--exploratory`. There is no "set it as default" knob — refusing-to-run-without-a-lock is already the wired behavior.
+
+Typical operator workflow:
+
+| Action | Command | When |
+|---|---|---|
+| Initial lock | `uv run forensics lock-preregistration` | Once, after the methodology team agrees on thresholds |
+| Confirmatory analyze | `uv run forensics analyze [--changepoint …]` | Every routine run; lock is silently checked first |
+| Methodology change | edit `config.toml`, then `uv run forensics --yes lock-preregistration`, then re-run analyze | Only when an intentional threshold change has been agreed |
+| Sensitivity / dev iteration | `uv run forensics analyze --exploratory …` | When poking at thresholds before deciding to lock |
+
+To check the live lock state at any time: `cat data/preregistration/preregistration_lock.json | jq '{locked_at, content_hash}'`. To check whether the **most recent run** was confirmatory: `jq '.preregistration_status, .exploratory' data/analysis/run_metadata.json` — `ok` and `false` (or absent) means confirmatory.
+
+### Preregistration: publication lock checklist (governance)
+
+Before treating pipeline outputs or reports as **confirmatory** for external publication:
+
+1. **Committed lock** — `data/preregistration/preregistration_lock.json` (and any amendment notes such as `data/preregistration/amendment_*.md` referenced by your process) are committed on the branch you are releasing; `locked_at` is non-null and `analysis` + `content_hash` are present.
+2. **Lock matches config** — After any intentional `config.toml` analysis-threshold change, run `uv run forensics --yes lock-preregistration` and commit the updated JSON. Local gate (same as CI): `uv run python scripts/verify_repo_preregistration_lock.py` must exit `0`.
+3. **Confirmatory runs only** — Publication runs use `uv run forensics analyze` **without** `--exploratory` (and the same rule for `forensics all` / automation unless explicitly marked exploratory).
+4. **Run metadata** — After the publication analyze, archive or cite `data/analysis/run_metadata.json`: `preregistration_status` must be `"ok"` and `exploratory` must be `false` or absent.
+
+CI enforces (2) for every push/PR via the **Preregistration lock** job in `.github/workflows/ci-quality.yml` (`verify_repo_preregistration_lock.py`).
+
+Detail / lifecycle:
+
 1. **Write or refresh the lock** from the current `config.toml` thresholds: `uv run forensics lock-preregistration` → updates `data/preregistration/preregistration_lock.json` with `locked_at` (UTC ISO), `analysis` snapshot, and `content_hash`.
 2. **Template / exploratory state:** the committed repo default is an unfilled lock (`{"locked_at": null}` only). `verify_preregistration` reports `status="missing"` — confirmatory `analyze` exits non-zero until you run `lock-preregistration` or pass `--exploratory`.
 3. **Verify after a run:** read `data/analysis/run_metadata.json` → `preregistration_status` is `ok`, `missing`, or `mismatch`. A **mismatch** means the live settings no longer match the lock; confirmatory analyze **hard-fails** (exit code 1) after writing run metadata under `rid=preregistration-blocked`.
+
+### Pre-publication checklist (confirmatory lock)
+
+Use this before treating any analysis drop as **publication-ready** (client deliverable, filing, or sworn work product). Exploratory runs (`--exploratory`) are fine for development; they must not be relabeled as confirmatory without completing the steps below.
+
+1. **Lock artifacts in version control:** commit `data/preregistration/preregistration_lock.json` and any active amendment or methodology notes under `data/preregistration/` (for example `amendment_phase15.md`) on the same branch as the analysis config you intend to ship.
+2. **Config parity:** the committed `config.toml` (or `FORENSICS_CONFIG_FILE` used in CI) must be the same file that was hashed when the lock was written. After any threshold or analysis-model change, run `uv run forensics --yes lock-preregistration` and commit the updated lock.
+3. **Confirmatory run:** execute `uv run forensics analyze` **without** `--exploratory` for the final corpus slice you are publishing. Do not hand-edit `run_metadata.json`.
+4. **Record proof in run metadata:** open `data/analysis/run_metadata.json` from that run and confirm `preregistration_status` is **`ok`**, `exploratory` is **`false`** or absent, and `preregistration_message` is empty or informational (not a mismatch explanation).
+5. **Optional sanity:** `jq '.preregistration_status, .exploratory' data/analysis/run_metadata.json` should print `ok` then `false` (or `null`).
+
+**CI automation:** the **Preregistration lock matches config.toml** job in [`.github/workflows/ci-quality.yml`](../.github/workflows/ci-quality.yml) runs [`scripts/verify_repo_preregistration_lock.py`](../scripts/verify_repo_preregistration_lock.py) on every push/PR so the committed lock cannot be a template or out of sync with repo `config.toml`. For helper-level regression coverage, run [`tests/test_preregistration.py`](../tests/test_preregistration.py) locally or via the main test job. These checks do **not** substitute for steps 1–4 above — they do not ship your production lock or run your full analyze corpus.
 
 ### Embeddings (quarantine + re-extract)
 
@@ -63,6 +133,9 @@ Phase 16 intentionally changes the analysis-config hash, corpus fingerprint, and
 - **`schema_version: 2`:** `corpus_hash` fingerprints the **analyzable** corpus: non-duplicates only, ordered by `content_hash` (stable under insert order).
 - **`corpus_hash_v1`:** legacy fingerprint (`ORDER BY id`, all rows) kept for one transition cycle so older verification semantics can be compared; see GUARDRAILS for removal timing (Phase 17).
 - **`verify_corpus_hash`:** dispatches on `schema_version` (missing field → treat as v1).
+- **`forensics analyze` corpus gate:** `--verify-corpus` / `--no-verify-corpus` are explicit overrides. If **neither** is passed, analyze uses `[chain_of_custody] verify_corpus_hash` from `config.toml` (repo default `true`; CI/minimal fixtures often set `false` so tests do not require a pre-seeded `corpus_custody.json`).
+- **`[chain_of_custody] verify_raw_archives`:** when `true`, `scrape --archive` logs a post-condition check after each `data/raw/{YYYY}.tar.gz` is written and SQLite paths are rewritten (non-empty archive on disk + rewrite row count).
+- **`[chain_of_custody] log_all_generations`:** when `true`, each baseline article write emits a single `INFO` line (`custody {…}` JSON) from `forensics.baseline.orchestrator` for audit trails.
 
 ### Quick E2E spot-check (single author, exploratory)
 

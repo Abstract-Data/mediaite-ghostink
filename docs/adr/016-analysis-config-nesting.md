@@ -43,6 +43,10 @@ a bump.
    `analysis_config_hash_field_names()` and a **golden** 16-char hash for
    default `AnalysisConfig()`.
 
+## Amendments
+
+- **2026-04-27:** `HypothesisConfig.pipeline_b_mode` default is **`percentile`** (was `legacy`). Minimal `config.toml` without an explicit `[analysis] pipeline_b_mode` now matches the shipped study default; set `pipeline_b_mode = "legacy"` only when reproducing pre-change convergence scoring. The golden digest in `tests/unit/test_config_hash.py` was bumped accordingly.
+
 ## Consequences
 
 - Call sites use explicit paths (`settings.analysis.hypothesis.significance_threshold`).
@@ -53,6 +57,8 @@ a bump.
 ## References
 
 - `src/forensics/config/analysis_settings.py`
+- `src/forensics/config/compat_analysis.py` (flat TOML lift / `_FLAT_TO_GROUP`)
+- `docs/adr/017-analysis-config-change-control.md` (field-growth governance)
 - `src/forensics/utils/provenance.py` (`_build_recursive_hash_payload`,
   `analysis_config_hash_field_names`)
 - `tests/unit/test_config_hash.py` (`test_default_analysis_config_model_hash_golden`)

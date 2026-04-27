@@ -51,8 +51,6 @@ _METADATA_INGEST_RECOVERABLE: tuple[type[BaseException], ...] = (
     httpx.HTTPError,
     OSError,
     ValueError,
-    KeyError,
-    TypeError,
     json.JSONDecodeError,
     sqlite3.Error,
 )

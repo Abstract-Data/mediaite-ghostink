@@ -19,7 +19,7 @@ import polars as pl
 import pytest
 from tests.integration.fixtures.e2e.corpus_seed import seed_two_regime_corpus
 
-from forensics.analysis.orchestrator import run_full_analysis
+from forensics.analysis.orchestrator import AnalysisMode, run_full_analysis
 from forensics.config import get_settings
 from forensics.features.pipeline import extract_all_features
 from forensics.models.analysis import AnalysisResult, HypothesisTest
@@ -42,7 +42,13 @@ def test_pipeline_extract_analyze_comparison_end_to_end(
     cfg_dest = e2e_root / "config.toml"
     shutil.copyfile(_FIXTURE_CONFIG, cfg_dest)
     shutil.copyfile(_REPO_ROOT / "index.qmd", e2e_root / "index.qmd")
-    shutil.copyfile(_REPO_ROOT / "quarto.yml", e2e_root / "quarto.yml")
+    shutil.copyfile(_REPO_ROOT / "_quarto.yml", e2e_root / "_quarto.yml")
+    shutil.copytree(
+        _REPO_ROOT / "notebooks",
+        e2e_root / "notebooks",
+        dirs_exist_ok=True,
+        ignore=shutil.ignore_patterns("__pycache__", ".ipynb_checkpoints"),
+    )
 
     db_path = e2e_root / "data" / "articles.db"
     shift = seed_two_regime_corpus(db_path)
@@ -76,7 +82,7 @@ def test_pipeline_extract_analyze_comparison_end_to_end(
         assert "flesch_kincaid" in frame.columns
         assert "ai_marker_frequency" in frame.columns
 
-    results = run_full_analysis(paths, settings, exploratory=True, max_workers=1)
+    results = run_full_analysis(paths, settings, mode=AnalysisMode(exploratory=True), max_workers=1)
     assert "fixture-target" in results
     assert "fixture-control" in results
 

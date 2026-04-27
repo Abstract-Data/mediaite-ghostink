@@ -186,7 +186,7 @@ def test_corpus_custody_verify(tmp_path: Path) -> None:
 def test_index_qmd_exists() -> None:
     text = (get_project_root() / "index.qmd").read_text(encoding="utf-8")
     assert "Mediaite" in text
-    assert "Pre-Registration" in text
+    assert "chapter" in text.lower()
 
 
 def test_resolve_notebook_path() -> None:

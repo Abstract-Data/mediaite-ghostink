@@ -26,6 +26,19 @@ jobs:
       - run: uv sync --frozen --extra dev
       - run: uv run ruff format --check .
 
+  # Committed preregistration lock must verify as *ok* vs repo config.toml (not template/mismatch).
+  preregistration-lock:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+      - run: uv sync --frozen --extra dev
+      - name: Preregistration lock matches config.toml
+        run: uv run python scripts/verify_repo_preregistration_lock.py
+
   # Policy: no new ``# type: ignore`` / ``type: ignore[...]`` lines in ``src/`` or ``tests/``
   # on pull requests (see ``docs/TESTING.md`` — Deslop checklist).
   no-new-type-ignore:

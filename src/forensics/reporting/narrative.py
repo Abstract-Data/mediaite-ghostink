@@ -24,7 +24,8 @@ if TYPE_CHECKING:
 
 # K6: stable diagnostic string (tests pin exact wording).
 PIPELINE_B_DIAGNOSTIC_NOTE: str = (
-    "Drift artifacts missing for this author; Pipeline B score reflects partial data."
+    "Embedding drift outputs were incomplete for this author; the embedding-drift "
+    "score reflects the data that were available."
 )
 
 
@@ -37,17 +38,11 @@ def _preregistration_clause(verification: VerificationResult | None) -> str:
     if verification is None:
         return ""
     if verification.status == "ok":
-        return "Analysis thresholds were pre-registered prior to outcome review."
+        return "The analysis thresholds in use match the pre-registered lock on file."
     if verification.status == "missing":
-        return (
-            "No pre-registration lock was located; this result is exploratory "
-            "rather than confirmatory."
-        )
+        return "No pre-registered threshold lock was on file when this narrative was generated."
     # mismatch
-    return (
-        "Pre-registration thresholds have drifted since lock; treat the "
-        "result as exploratory until the discrepancy is reconciled."
-    )
+    return "The analysis thresholds in use no longer match the pre-registered lock."
 
 
 def _family_representative_pairs(window: ConvergenceWindow) -> list[tuple[str, str]]:
@@ -178,28 +173,27 @@ def _control_sentences(control_count: int) -> list[str]:
         return []
     return [
         (
-            f"This pattern was not observed in {control_count} natural-control "
-            "author(s) drawn from the same corpus, supporting an "
-            "author-specific rather than an editorial explanation."
+            f"The same combined pattern was not observed among {control_count} "
+            "natural-control author(s) drawn from the same corpus."
         )
     ]
 
 
 def _score_sentences(score: SurveyScore) -> list[str]:
     """Open the paragraph with the score tier and composite magnitude."""
-    strength_label = score.strength.value.upper()
-    pipelines = [
-        f"Pipeline A = {score.pipeline_a_score:.2f}",
-        f"Pipeline B = {score.pipeline_b_score:.2f}",
+    strength_label = score.strength.value.replace("_", " ").title()
+    parts = [
+        f"stylometry and structural convergence {score.pipeline_a_score:.2f}",
+        f"embedding drift {score.pipeline_b_score:.2f}",
     ]
     if score.pipeline_c_score is not None:
-        pipelines.append(f"Pipeline C = {score.pipeline_c_score:.2f}")
-    pipelines.append(f"convergence = {score.convergence_score:.2f}")
+        parts.append(f"language-model probability trajectory {score.pipeline_c_score:.2f}")
+    parts.append(f"joint convergence index {score.convergence_score:.2f}")
     return [
         (
-            f"Signal strength: {strength_label} "
-            f"(composite = {score.composite:.3f}; "
-            f"{', '.join(pipelines)})."
+            f"Composite signal classification: {strength_label} "
+            f"(composite index {score.composite:.3f}; "
+            f"{', '.join(parts)})."
         )
     ]
 
@@ -227,8 +221,9 @@ def generate_evidence_narrative(
     resolved_score = score if score is not None else compute_composite_score(analysis_result)
 
     header = (
-        f"Author {author_slug} (analysis run {analysis_result.run_id[:8]}, "
-        f"config {analysis_result.config_hash}): "
+        f"Summary for author {author_slug} (analysis record "
+        f"{analysis_result.run_id[:8]}, configuration hash "
+        f"{analysis_result.config_hash}). "
     )
 
     sentences: list[str] = []

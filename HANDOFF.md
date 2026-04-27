@@ -6054,7 +6054,7 @@ npx gitnexus analyze --embeddings   # Repository indexed successfully (~29s); no
 #### What Was Done
 
 - **G1:** `scripts/migrate_feature_parquets.py` — default SQLite path uses `DEFAULT_DB_RELATIVE` from `forensics.config` (same as CLI); `--articles-db` help reflects the canonical relative path.
-- **G2:** `tests/unit/test_config_hash.py` — `test_e2e_fixture_empty_analysis_hash_matches_default_golden` locks empty `[analysis]` in `tests/integration/fixtures/e2e/config.toml` to the same digest as nested `AnalysisConfig()` defaults (`81d550a7032fbe95`).
+- **G2:** `tests/unit/test_config_hash.py` — `test_e2e_fixture_empty_analysis_hash_matches_default_golden` locks empty `[analysis]` in `tests/integration/fixtures/e2e/config.toml` to the same digest as nested `AnalysisConfig()` defaults (golden updated in TASK-2 below when `pipeline_b_mode` default moved to `percentile`).
 
 #### Files Modified
 
@@ -6076,3 +6076,424 @@ uv run pytest tests/unit/test_config_hash.py -v --no-cov   # 45 passed
 #### Risks & Next Steps
 
 - None; optional full `uv run pytest tests/` if you want repo-wide regression signal beyond `test_config_hash`.
+
+---
+
+### TASK-1 — Strict embedding drift inputs (non-exploratory)
+
+**Status:** Complete  
+**Date:** 2026-04-27
+
+#### What Was Done
+
+- Added `EmbeddingDriftInputsError`; confirmatory `load_drift_summary`, `_load_drift_signals`, and `run_drift_analysis` fail fast on missing/insufficient embeddings instead of empty drift.
+- Parallel workers re-raise the same errors when `exploratory=False`; refactored `_finalize_parallel_author_results` / `_run_isolated_author_serial_jobs` to satisfy McCabe limits.
+- CLI maps `EmbeddingDriftInputsError` → exit `3` (`AUTH_OR_RESOURCE`), `EmbeddingRevisionGateError` → exit `5` (`CONFLICT`).
+- `compare_target_to_controls` / `run_compare_only` / `_run_target_control_comparisons` / `run_parallel_author_refresh` accept `exploratory` and pass it to `load_drift_summary`; `_run_compare_only_flow` passes `ctx.exploratory` into `run_compare_only`.
+
+#### Files Modified
+
+- `src/forensics/analysis/drift.py`, `src/forensics/analysis/comparison.py`, `src/forensics/analysis/orchestrator/per_author.py`, `src/forensics/analysis/orchestrator/parallel.py`, `src/forensics/analysis/orchestrator/runner.py`, `src/forensics/analysis/orchestrator/comparison.py`, `src/forensics/cli/analyze.py`
+- `tests/integration/test_strict_embedding_drift_inputs.py`, `tests/unit/test_drift_summary.py`, `tests/unit/test_pipeline_b_diagnostics.py`, `tests/unit/test_comparison_target_controls.py`, `tests/unit/test_analyze_compare.py`, `tests/integration/test_parallel_parity.py`
+
+#### Verification Evidence
+
+```
+uv run ruff check src/forensics/analysis/drift.py src/forensics/analysis/orchestrator/parallel.py src/forensics/cli/analyze.py src/forensics/analysis/comparison.py
+uv run pytest tests/ -q --tb=line   # 1021 passed; same 2 pre-existing failures as HANDOFF (e2e quarto.yml path, html fuzz)
+```
+
+#### GitNexus
+
+- MCP tool descriptors not present in workspace `mcps/user-gitnexus/` this session; impact/detect_changes not run.
+
+#### Risks & Next Steps
+
+- Confirmatory `run_compare_only` still defaults to `exploratory=False`; toy fixtures without embeddings must pass `exploratory=True` or ship drift/embedding artifacts.
+
+---
+
+### TASK-2 — `pipeline_b_mode` default `percentile` (plan shard)
+
+**Status:** Complete  
+**Date:** 2026-04-27
+
+#### What Was Done
+
+- `HypothesisConfig.pipeline_b_mode` default changed from `"legacy"` to `"percentile"` in `src/forensics/config/analysis_settings.py`.
+- Golden analysis-config hash in `tests/unit/test_config_hash.py` updated to `c91006c9b9cec525`; `_FLIP_VALUES["pipeline_b_mode"]` set to `"legacy"` so the hash-flip test remains meaningful.
+- Docs: `docs/adr/016-analysis-config-nesting.md` amendment, `docs/RUNBOOK.md` Local Setup bullet, `docs/settings_phase15.md` default column aligned.
+
+#### Files Modified
+
+- `src/forensics/config/analysis_settings.py`
+- `tests/unit/test_config_hash.py`
+- `docs/adr/016-analysis-config-nesting.md`, `docs/RUNBOOK.md`, `docs/settings_phase15.md`
+- `HANDOFF.md` — this block
+
+#### Verification Evidence
+
+```
+uv run pytest tests/unit/test_config_hash.py tests/test_preregistration.py -v --no-cov -q   # 56 passed
+```
+
+#### GitNexus
+
+- MCP `user-gitnexus` not available this session; `gitnexus_impact` not run.
+
+#### Risks & Next Steps
+
+- Projects with no `pipeline_b_mode` in TOML now hash as percentile-first; explicit `pipeline_b_mode = "legacy"` preserves old behavior. `data/preregistration/preregistration_lock.json` already used `percentile`; no lock edit required.
+
+---
+
+### TASK-3 — Pipeline C probability trajectories (plan: wire-pipeline-c)
+
+**Status:** Complete  
+**Date:** 2026-04-27
+
+#### What Was Done
+
+- Added `build_probability_trajectory_by_slug` in `src/forensics/analysis/probability_trajectories.py`: monthly aggregation of `mean_perplexity`, `perplexity_variance`, optional `binoculars_score` from per-author feature parquet when those columns exist, otherwise from `data/probability/<slug>.parquet` (output of `extract --probability`).
+- `run_full_analysis` and `run_parallel_author_refresh` now default `probability_trajectory_by_slug=None` to that loader so CLI, survey, and calibration pick up Pipeline C without callers passing a map. Explicit `{}` or a custom dict still overrides.
+
+#### Files Modified
+
+- `src/forensics/analysis/probability_trajectories.py` (new)
+- `src/forensics/analysis/orchestrator/runner.py`, `src/forensics/analysis/orchestrator/parallel.py`
+- `tests/unit/test_probability_trajectories.py` (new)
+- `HANDOFF.md` — this block
+
+#### Verification Evidence
+
+```
+uv run ruff check src/forensics/analysis/probability_trajectories.py src/forensics/analysis/orchestrator/runner.py src/forensics/analysis/orchestrator/parallel.py tests/unit/test_probability_trajectories.py
+uv run pytest tests/unit/test_probability_trajectories.py tests/unit/test_analyze_compare.py tests/integration/test_parallel_parity.py -q --cov=forensics --cov-fail-under=0
+```
+
+#### GitNexus
+
+- MCP `user-gitnexus` tool descriptors not in workspace; `gitnexus_impact` not run.
+
+#### Risks & Next Steps
+
+- Optional `analysis.convergence.require_probability_inputs` flag from the plan was not added; publication runs still rely on having run `extract --probability` when Pipeline C is desired.
+
+---
+
+### TASK-4 — Preregistration publication checklist + CI (plan: prereg-ops-ci)
+
+**Status:** Complete  
+**Date:** 2026-04-27
+
+#### What Was Done
+
+- Added **Preregistration: publication lock checklist** to `docs/RUNBOOK.md` (commit lock artifacts, re-lock after config changes, no `--exploratory` for publication, `run_metadata.json` expectations).
+- Added `scripts/verify_repo_preregistration_lock.py` and a **Preregistration lock** job in `.github/workflows/ci-quality.yml` so CI fails if the committed lock is missing, unfilled, or mismatched vs `config.toml`.
+
+#### Files Modified
+
+- `docs/RUNBOOK.md`, `scripts/verify_repo_preregistration_lock.py`, `.github/workflows/ci-quality.yml`, `HANDOFF.md`
+
+#### Verification Evidence
+
+```
+uv run python scripts/verify_repo_preregistration_lock.py
+uv run ruff check scripts/verify_repo_preregistration_lock.py
+```
+
+#### GitNexus
+
+- New script only; `gitnexus_impact` not run.
+
+#### Risks & Next Steps
+
+- Any PR that changes `config.toml` analysis thresholds without updating `data/preregistration/preregistration_lock.json` will fail the new CI job until `uv run forensics --yes lock-preregistration` and commit.
+
+---
+
+### Prereg RUNBOOK checklist + client Quarto copy (session)
+
+**Status:** Complete  
+**Date:** 2026-04-27
+
+#### What was done
+
+- **Prereg (TASK-4):** Added a **Pre-publication checklist (confirmatory lock)** subsection to `docs/RUNBOOK.md` (human steps: commit `data/preregistration/*`, confirmatory `analyze`, verify `run_metadata.json`). Documented existing CI: `ci-quality.yml` job + `scripts/verify_repo_preregistration_lock.py` (no duplicate job in `ci-tests.yml`).
+- **Client Quarto (TASK-5):** Client-facing tone in `index.qmd`, `_quarto.yml` book title, `notebooks/09_full_report.ipynb`, `05`, `06`, `07`, `00_power_analysis.ipynb`; `src/forensics/reporting/narrative.py` prose; tests updated for new strings.
+- **Hardening:** `tests/integration/test_pipeline_end_to_end.py` copies `_quarto.yml` + `notebooks/` for Quarto; `.github/workflows/deploy.yml` watches `_quarto.yml`; `tests/test_report.py` index assertion; `tests/unit/test_parser_html_fuzz.py` restricts HTML fuzz alphabet so sentinels are not swallowed by malformed tags.
+
+#### Files touched (high level)
+
+- `docs/RUNBOOK.md`, `HANDOFF.md`, `_quarto.yml`, `index.qmd`, `notebooks/*.ipynb` (as above), `src/forensics/reporting/narrative.py`, `tests/test_narrative.py`, `tests/unit/test_reporting_diagnostics.py`, `tests/test_report.py`, `tests/integration/test_pipeline_end_to_end.py`, `tests/unit/test_parser_html_fuzz.py`, `.github/workflows/deploy.yml`
+
+#### Verification
+
+```
+uv run ruff check . && uv run ruff format --check .
+uv run pytest tests/ -q --no-cov
+```
+
+#### Notes
+
+- GitNexus MCP was unavailable in this environment; impact was not run for `generate_evidence_narrative`.
+
+---
+
+### Phase 17 — integration fixtures + RUNBOOK (plan: phase-d-integration-docs)
+
+**Status:** Complete  
+**Date:** 2026-04-27
+
+#### What Was Done
+
+- Added committed **Phase 17 golden fixtures** (`tests/fixtures/phase17/golden_cases.json`) with nine synthetic author cases (Colby Hall + eight MODERATE slugs from the Phase 17 prompt): window + window-scoped `HypothesisTest` rows and expected `DirectionConcordance`, `VolumeRampFlag`, `FindingStrength`, and `volume_ratio`.
+- Added **`tests/integration/test_phase17_classification.py`** (`@pytest.mark.integration`) to load fixtures, run `classify_direction_concordance`, `compute_volume_ramp_flag`, and `classify_finding_strength`, and assert golden outputs; cohort slug set is asserted explicitly.
+- Documented diagnostic meanings, confounds, CI fixture refresh, and exploratory thresholds in **`docs/RUNBOOK.md`** (new subsection *Phase 17 diagnostic columns*).
+- **GUARDRAILS:** no new Sign (no recurring footgun discovered during this slice; `-1` / unusable counts are already covered in unit tests and `compute_volume_ramp_flag` docstring).
+
+#### Files Modified
+
+- `tests/fixtures/phase17/golden_cases.json` — committed golden payloads (replaces reliance on gitignored `data/analysis/` in CI).
+- `tests/integration/test_phase17_classification.py` — integration golden tests.
+- `docs/RUNBOOK.md` — Phase 17 operator notes.
+- `HANDOFF.md` — this block.
+
+#### Verification Evidence
+
+```
+uv run pytest tests/integration/test_phase17_classification.py -v --no-cov
+# 10 passed
+
+uv run ruff check . && uv run ruff format --check .
+# All checks passed; 293 files already formatted
+
+uv run pytest tests/ -v --no-cov
+# 1073 passed, 3 deselected, 1 xfailed (known section_residualize), 3 warnings
+```
+
+#### Decisions Made
+
+- Single **`golden_cases.json`** instead of nine separate files: easier to keep the nine-author cohort and `expected` blobs in sync; module docstring documents refresh from local `*_result.json` if analysis is re-run.
+- **isaac-schorr** expected **`direction_mixed`** per plan (one AI-direction match, two opposes) with **volume_growth** (3.5×).
+
+#### Unresolved Questions
+
+- Pre-registration lock still does not encode Phase 17 priors or volume bands; publication workflow remains: exploratory columns until lock is extended (per Phase 17 prompt).
+
+#### Risks & Next Steps
+
+- If real analyzed windows change materialy, update `golden_cases.json` + `expected` in the same PR. Re-run `gitnexus_detect_changes` before merge when GitNexus MCP is available.
+
+#### GitNexus
+
+- `gitnexus_detect_changes({ "scope": "all" })` was invoked via MCP; **server `user-gitnexus` is not registered** in this Cursor workspace (available MCP list has no GitNexus entry). Re-run detect_changes when the GitNexus MCP is enabled before merge.
+
+---
+
+### Run 12 — TASK-1 Phase17+DRY + TASK-2 CoC/SEC
+
+**Status:** Complete  
+**Date:** 2026-04-27
+
+#### What was done
+
+- **Phase 17 (plan closure):** Confirmed committed `tests/fixtures/phase17/golden_cases.json`, `tests/integration/test_phase17_classification.py`, and RUNBOOK §Phase 17; corrected RUNBOOK path note for `direction_priors`; extended corpus-custody RUNBOOK bullets for analyze tri-state, raw-archive verify, and baseline generation logging.
+- **RF-DRY-001:** Routed analysis compatibility digest through `compute_analysis_config_hash(settings)` in `staleness.py`, `parallel.py`, and `assemble_analysis_result` / `per_author.py` (settings-based hash aligned with other writers).
+- **RF-DRY-002:** Centralized empty `comparison_report` warnings in `warn_comparison_report_empty_targets` (`comparison.py`); `runner.py` and `parallel.py` call the helper.
+- **RF-DRY-003:** Added `src/forensics/config/constants.py` with `DEFAULT_EXCLUDED_SECTIONS`; `SurveyConfig` / `FeaturesConfig` use the shared constant.
+- **RF partial:** Removed unpack-to-locals in `run_analyze`; use `request.<field>` and resolve `verify_corpus` after settings load.
+- **P1-ARCH-001:** `verify_corpus` tri-state (`--verify-corpus` / `--no-verify-corpus`, default from `[chain_of_custody] verify_corpus_hash`); `archive_raw_year_dirs(..., settings=...)` optional verify/logging when `verify_raw_archives`; baseline `_log_generation_custody` when `log_all_generations`. Minimal test configs set `verify_corpus_hash = false` so suites without custody keep passing; repo `config.toml` unchanged (`true`).
+- **P1-SEC-003:** Dropped `KeyError` / `TypeError` from `_METADATA_INGEST_RECOVERABLE` (per-post parsing still narrows those in `_ingest_single_post`).
+
+#### Files touched
+
+- `src/forensics/config/constants.py`, `settings.py`, `comparison.py`, `runner.py`, `parallel.py`, `staleness.py`, `per_author.py`, `fetcher.py`, `scrape.py`, `crawler.py`, `baseline/orchestrator.py`, `cli/analyze.py`, `cli/analyze_options.py`, `tests/conftest.py`, `tests/unit/test_analyze_survey_gate.py`, `tests/test_orchestrator_assemble.py`, `tests/test_baseline.py`, `tests/unit/test_fetcher_archive_custody.py`, `tests/integration/test_cli.py`, `tests/integration/test_cli_scrape_dispatch.py`, `docs/RUNBOOK.md`, `HANDOFF.md`
+
+#### Verification
+
+```
+uv run ruff check . && uv run ruff format .
+uv run pytest tests/ -v --no-cov
+```
+
+Full suite: **1076 passed**, 3 deselected, 1 xfailed (known section_residualize), 3 warnings. **Notebook:** `jupyter nbconvert` is not installed in the default `uv` env (`jupyter-nbconvert` missing); install Jupyter/nbconvert in the dev env to run the Phase 17 nbconvert smoke locally.
+
+#### GitNexus
+
+Impact/detect_changes not invoked: GitNexus MCP path not verified in this workspace; re-run when available before merge.
+
+---
+
+### Run 12 — TASK-3 AnalysisMode parameter object
+
+**Status:** Complete  
+**Date:** 2026-04-27
+
+#### What was done
+
+- Introduced frozen `AnalysisMode` (`exploratory`, `allow_pre_phase16_embeddings`) in `src/forensics/analysis/orchestrator/mode.py` with `run_metadata_subset()` for stable `run_metadata.json` keys and module-level `DEFAULT_ANALYSIS_MODE` for safe default args.
+- Replaced paired bool parameters with `mode: AnalysisMode` across CLI (`AnalyzeContext`, `AnalyzeRequest`), orchestrator (`runner`, `parallel`, `per_author`, `comparison`, `sensitivity`), `drift` (`validate_embedding_record`, `load_article_embeddings`, `load_drift_summary`, `run_drift_analysis`), and `analysis/comparison.py` (`compare_target_to_controls` and helpers).
+- Typer flags unchanged: callback builds `AnalysisMode(exploratory=..., allow_pre_phase16_embeddings=...)`. Preregistration-blocked metadata still forces `"exploratory": False` while preserving `allow_pre_phase16_embeddings` from the request.
+
+#### Files modified
+
+- `src/forensics/analysis/orchestrator/mode.py` (new), `__init__.py`, `runner.py`, `parallel.py`, `per_author.py`, `comparison.py`, `sensitivity.py`
+- `src/forensics/analysis/drift.py`, `src/forensics/analysis/comparison.py`, `src/forensics/cli/analyze.py`
+- Tests: `test_analyze_compare.py`, `test_comparison_target_controls.py`, `test_drift_summary.py`, `test_pipeline_b_diagnostics.py`, `test_per_author_empty_filter.py`, `test_isolated_refresh_resilience.py`, `test_parallel_parity.py`, `test_pipeline_end_to_end.py`, `test_preregistration.py`, `test_embedding_revision_gate.py`, `test_strict_embedding_drift_inputs.py`
+
+#### Verification
+
+```
+uv run pytest tests/ -q --no-cov
+uv run ruff check src/forensics/analysis/comparison.py src/forensics/analysis/orchestrator/per_author.py tests/integration/test_parallel_parity.py tests/unit/test_comparison_target_controls.py
+```
+
+Full suite: **1076 passed**, 1 xfailed (known), 3 deselected.
+
+#### GitNexus
+
+`gitnexus_impact` / `gitnexus_detect_changes` not run (GitNexus MCP descriptors not present in this session); run upstream impact on edited public entrypoints before merge when available.
+
+---
+
+### Run 12 — TASK-4 `run_analyze` decomposition
+
+**Status:** Complete  
+**Date:** 2026-04-27
+
+#### What was done
+
+- Extracted `_verify_corpus_stage`, `_gate_preregistration`, `_dispatch_analysis_stages` plus helpers `_compare_only_or_parallel_early_exit`, `_run_serial_analyze_stages`, `_run_analyze_stage_embedding_guarded` from monolithic `run_analyze`.
+- Removed `# noqa: C901` from `run_analyze`; Ruff C901 satisfied via split.
+- Added frozen `AnalyzeStageFlags` and `AnalyzeBaselineParams` with `AnalyzeRequest.stage_flags` / `baseline_params` properties so the Typer/programmatic flat constructor is unchanged; CLI callback still builds `AnalyzeRequest(...)` with the same fields.
+
+#### Files modified
+
+- `src/forensics/cli/analyze.py`
+- `HANDOFF.md`
+
+#### Verification
+
+```
+uv run ruff check src/forensics/cli/analyze.py && uv run ruff format --check src/forensics/cli/analyze.py
+uv run pytest tests/test_preregistration.py tests/unit/test_analyze_survey_gate.py tests/unit/test_analyze_compare.py -v --no-cov -q
+```
+
+**34 passed** (subset). GitNexus MCP not available in session; run `gitnexus_impact` on `run_analyze` / new helpers before merge when enabled.
+
+#### Risks & next steps
+
+- None beyond usual merge hygiene; behavior is refactor-only with identical control flow.
+
+---
+
+### Run 12 — TASK-5 (partial): P2-PERF-005 + P3-DRY-007 + P3-MAINT-008
+
+**Status:** Complete  
+**Date:** 2026-04-27
+
+#### What was done
+
+- **P2-PERF-005:** Added `RepositoryReader.count_authors`, `get_authors_by_slugs`, `count_articles_by_author_ids`; switched author single/list queries from `SELECT *` to an explicit `_AUTHOR_SELECT` column list. Migrated `resolve_author_rows` (batch slug load), TUI `discover_authors_summary` (count-only), and calibration `_load_author_articles` “most prolific” branch (one `GROUP BY` count pass + single article load).
+- **P3-DRY-007:** Introduced `AnalyzeSubcommandPaths` + `_resolve_analyze_subcommand_context` in `cli/analyze.py` and wired `section-profile` / `section-contrast` commands through it.
+- **P3-MAINT-008:** Documented `STRICT_DECODE_CTX` / `strict_feature_decode_confirmatory` contract in `parallel.py` module docstring; added confirmatory debug log lines at pool worker entry; `assert not STRICT_DECODE_CTX.get()` after `_run_per_author_analysis` in `_per_author_worker` and `_isolated_author_worker` to catch ContextVar leaks.
+
+#### Files modified
+
+- `src/forensics/storage/repository.py`, `src/forensics/paths.py`, `src/forensics/tui/screens/discovery.py`, `src/forensics/calibration/runner.py`, `src/forensics/cli/analyze.py`, `src/forensics/analysis/orchestrator/parallel.py`, `tests/test_storage.py`, `HANDOFF.md`
+
+#### Verification
+
+```
+uv run ruff check . && uv run ruff format --check .
+uv run pytest tests/ -q --no-cov
+```
+
+**Full suite:** all passed; 1 xfail (known section_residualize); 3 warnings (scipy/umap).
+
+#### GitNexus
+
+`gitnexus_impact` / `detect_changes` not run (no GitNexus tool descriptors under workspace `mcps/user-gitnexus/tools` this session).
+
+---
+
+### Run 12 — TASK-6 / TASK-7 / TASK-8 (patch surface, config compat, parallel dedup + coverage)
+
+**Status:** Complete  
+**Date:** 2026-04-27
+
+#### What was done
+
+- **TASK-6:** Expanded `forensics.analysis.orchestrator` module docstring with maintainer rules for `_PATCH_TARGETS` vs `__all__`; added `test_patch_targets_subset_of_all_exports`, `test_patch_surface_tests_track_patch_targets`, `test_patch_targets_modules_nonempty` in `tests/unit/test_orchestrator_patch_surface.py`.
+- **TASK-7:** Added ADR-017 (AnalysisConfig change control; no `HashableField` — governance + compat split); moved flat TOML lift / `_FLAT_TO_GROUP` / `_GROUP_ATTRS` into `src/forensics/config/compat_analysis.py` with `analysis_settings` importing from it; amended ADR-016 references.
+- **TASK-8:** Factored `_run_repo_per_author_pipeline_with_artifacts` in `parallel.py` for `_per_author_worker` and `_isolated_author_worker` (isolated path keeps `emit_success_log=False` for log parity); added root `coverage-tui.toml` and RUNBOOK § item 7 for `pytest --cov-config=coverage-tui.toml` when TUI extra is installed.
+
+#### Files modified
+
+- `src/forensics/analysis/orchestrator/__init__.py`, `parallel.py`
+- `src/forensics/config/compat_analysis.py` (new), `analysis_settings.py`
+- `docs/adr/017-analysis-config-change-control.md` (new), `docs/adr/016-analysis-config-nesting.md`, `docs/RUNBOOK.md`
+- `tests/unit/test_orchestrator_patch_surface.py`, `coverage-tui.toml` (new), `HANDOFF.md`
+
+#### Verification
+
+```
+uv run ruff check . && uv run ruff format --check .
+uv run pytest tests/ -q
+uv run pytest tests/integration/test_parallel_parity.py -v --no-cov -q
+uv run pytest tests/unit/test_config_hash.py -v --no-cov -q
+```
+
+Full suite: **passed** (1 known xfail); parallel parity: **3 passed**. GitNexus MCP server not available in this Cursor session; run upstream `impact` on edited symbols before merge when enabled.
+
+#### Unresolved / next steps
+
+- None for this slice.
+
+---
+
+### Pipeline B default, config_hash gate, direction concordance scoping, embedding compare parity
+
+**Status:** Complete  
+**Date:** 2026-04-27  
+**Agent/Session:** Cursor agent (plan slice: doc-hash-migration, integration-hash-test, direction-concordance-filter, comparison-embedding-propagate, probability-trajectory-verify)
+
+#### What was done
+
+- **RUNBOOK:** Documented why `pipeline_b_mode` participates in `config_hash`, symptoms (`Analysis artifact compatibility failed` / stale hashes), and remediation (full `forensics analyze` cohort vs `pipeline_b_mode = "legacy"` to match old artifacts).
+- **Integration:** `tests/integration/test_analysis_config_hash_gate.py` asserts `validate_analysis_result_config_hashes` returns failure and `_validate_compare_artifact_hashes` raises `ValueError` on mismatched `*_result.json` `config_hash`.
+- **Direction concordance:** `classify_direction_concordance` filters hypothesis rows to `convergence_window.features_converging` when that list is non-empty; unit tests updated + new scoping test; Phase 17 golden fixtures already align feature names with `features_converging` (no golden JSON edit).
+- **Compare path:** Introduced `orchestrator/embedding_policy.py` with `embedding_fail_should_propagate` (avoids `parallel` ↔ `comparison` import cycle); `_iter_compare_targets` re-raises embedding drift/revision errors in confirmatory mode; `parallel.py` uses the shared helper; unit tests in `test_comparison_target_controls.py`.
+- **Pipeline C:** Comment on equal-weight monthly means and sparse Binoculars months in `probability_trajectories.py`; unit test `test_sparse_binoculars_months_pipeline_c_score_finite` for length inequality + finite score.
+
+#### Files modified
+
+- `docs/RUNBOOK.md` — `pipeline_b_mode` / `config_hash` operator subsection
+- `HANDOFF.md` — this block
+- `src/forensics/analysis/orchestrator/embedding_policy.py` — new shared policy
+- `src/forensics/analysis/orchestrator/parallel.py`, `comparison.py` — embedding propagation
+- `src/forensics/models/report.py` — concordance scoping
+- `src/forensics/analysis/probability_trajectories.py` — comments
+- `tests/integration/test_analysis_config_hash_gate.py` — new
+- `tests/unit/test_direction_concordance.py`, `test_comparison_target_controls.py`, `test_probability_trajectories.py` — tests
+
+#### Verification evidence
+
+```
+uv run ruff check . && uv run ruff format --check .
+uv run pytest tests/integration/test_analysis_config_hash_gate.py tests/unit/test_direction_concordance.py tests/unit/test_comparison_target_controls.py tests/unit/test_probability_trajectories.py tests/integration/test_phase17_classification.py -v --no-cov
+```
+
+#### Decisions made
+
+- **Embedding policy module:** `comparison.py` cannot import `parallel.py` (existing `parallel` → `comparison` edge); policy lives in `embedding_policy.py` instead of duplicating logic.
+
+#### Unresolved questions
+
+- None.
+
+#### Risks & next steps
+
+- **GitNexus:** `gitnexus_impact` / `gitnexus_detect_changes` were not run (GitNexus MCP server not available in this Cursor session). Run on `classify_direction_concordance`, `_iter_compare_targets`, and `embedding_fail_should_propagate` before merge when enabled.
+- Operators with pre–percentile-default `*_result.json` should follow the new RUNBOOK subsection before compare/report.

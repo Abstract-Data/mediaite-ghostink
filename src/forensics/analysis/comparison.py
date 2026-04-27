@@ -14,6 +14,7 @@ from forensics.analysis.changepoint import PELT_FEATURE_COLUMNS, analyze_author_
 from forensics.analysis.convergence import ConvergenceInput, compute_convergence_scores
 from forensics.analysis.drift import load_drift_summary
 from forensics.analysis.evidence import filter_evidence_change_points
+from forensics.analysis.orchestrator.mode import DEFAULT_ANALYSIS_MODE, AnalysisMode
 from forensics.config.settings import ForensicsSettings
 from forensics.models.analysis import ChangePoint, ConvergenceWindow, DriftScores
 from forensics.models.author import Author
@@ -209,6 +210,7 @@ def _summarize_control_authors(
     control_feature_frames: dict[str, pl.DataFrame],
     *,
     changepoints_memory: dict[str, list[ChangePoint]] | None = None,
+    mode: AnalysisMode = DEFAULT_ANALYSIS_MODE,
 ) -> tuple[
     dict[str, list[ChangePoint]],
     dict[str, DriftScores | None],
@@ -235,7 +237,12 @@ def _summarize_control_authors(
         else:
             control_drift_scores[slug] = None
 
-        summary = load_drift_summary(slug, paths, settings=settings)
+        summary = load_drift_summary(
+            slug,
+            paths,
+            settings=settings,
+            mode=mode,
+        )
         cps = control_change_points[slug]
         frame = control_feature_frames.get(slug)
         ts_ctrl = timestamps_from_frame(frame) if frame is not None else None
@@ -260,6 +267,7 @@ def _editorial_signal_for_target(
     control_windows: dict[str, list[ConvergenceWindow]],
     *,
     changepoints_memory: dict[str, list[ChangePoint]] | None = None,
+    mode: AnalysisMode = DEFAULT_ANALYSIS_MODE,
 ) -> float:
     if changepoints_memory is not None and target_id in changepoints_memory:
         target_cps = filter_evidence_change_points(
@@ -276,7 +284,12 @@ def _editorial_signal_for_target(
             ),
             settings.analysis,
         )
-    summary = load_drift_summary(target_id, paths, settings=settings)
+    summary = load_drift_summary(
+        target_id,
+        paths,
+        settings=settings,
+        mode=mode,
+    )
 
     target_windows = compute_convergence_scores(
         ConvergenceInput.from_settings(
@@ -315,6 +328,7 @@ def compare_target_to_controls(
     *,
     settings: ForensicsSettings,
     changepoints_memory: dict[str, list[ChangePoint]] | None = None,
+    mode: AnalysisMode = DEFAULT_ANALYSIS_MODE,
 ) -> dict[str, Any]:
     """Two-sample tests (target vs pooled controls) plus cached change-point / drift summaries."""
     with Repository(paths.db_path) as repo:
@@ -329,6 +343,7 @@ def compare_target_to_controls(
             settings,
             control_feature_frames,
             changepoints_memory=changepoints_memory,
+            mode=mode,
         )
         editorial_vs_author_signal = _editorial_signal_for_target(
             target_id,
@@ -338,6 +353,7 @@ def compare_target_to_controls(
             settings,
             control_windows,
             changepoints_memory=changepoints_memory,
+            mode=mode,
         )
 
         ccp_out = {

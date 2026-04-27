@@ -25,6 +25,24 @@ from forensics.storage.parquet import save_numpy_atomic
 
 logger = logging.getLogger(__name__)
 
+
+def _log_generation_custody(settings: ForensicsSettings, record: dict[str, Any]) -> None:
+    """Emit one structured log line per generated baseline article when configured."""
+    if not settings.chain_of_custody.log_all_generations:
+        return
+    payload = {
+        "event": "baseline_generation",
+        "article_id": record.get("article_id"),
+        "model": record.get("model"),
+        "model_digest": record.get("model_digest"),
+        "temperature": record.get("temperature"),
+        "prompt_template": record.get("prompt_template"),
+        "target_word_count": record.get("target_word_count"),
+        "generated_at": record.get("generated_at"),
+    }
+    logger.info("custody %s", json.dumps(payload, sort_keys=True))
+
+
 PROMPT_MODES = ("raw_generation", "style_mimicry")
 
 # Baseline prompts must end with a JSON delivery contract for the PydanticAI agent.
@@ -209,6 +227,7 @@ async def run_generation_matrix(
                         cell_dir / f"{article_id}.json",
                         json.dumps(record, indent=2),
                     )
+                    _log_generation_custody(settings, record)
                     _embed_article(
                         record,
                         settings.analysis.embedding.embedding_model,

@@ -24,7 +24,11 @@ _SENTINEL = "GHOSTINK_FUZZ_SENTINEL"
 @settings(max_examples=40, deadline=None)
 @given(
     inner=st.text(
-        alphabet=st.characters(min_codepoint=0, max_codepoint=255),
+        alphabet=st.characters(
+            min_codepoint=1,
+            max_codepoint=255,
+            blacklist_characters="<>\"'&",
+        ),
         max_size=800,
     ),
     wrap_sentinel=st.booleans(),

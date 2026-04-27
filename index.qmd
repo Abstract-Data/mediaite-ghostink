@@ -1,10 +1,7 @@
 ---
-title: "AI Writing Forensics: Mediaite Investigation"
+title: "Mediaite writing analysis — technical report"
 ---
 
-This report presents a forensic analysis of writing style evolution at Mediaite.com,
-investigating potential AI writing adoption through stylometric analysis, embedding drift
-detection, and probability-based language model scoring.
+This Quarto book summarizes a structured review of writing-style change at Mediaite.com. It combines stylometric features, embedding-space drift, statistical tests, and natural-author comparisons. Chapters build from data collection through methods, quantitative results, and the executive summary.
 
-Navigate to **Chapter 1: Pre-Registration** to begin, or jump directly to
-**Chapter 10: Full Report** for the executive summary and conclusions.
+Open **chapter 1** for design and power context, or **the full report chapter** for the consolidated summary and provenance table.

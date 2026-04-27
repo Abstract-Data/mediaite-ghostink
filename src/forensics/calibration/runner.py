@@ -141,14 +141,11 @@ def _load_author_articles(db_path: Path, slug: str | None) -> tuple[Author, list
                 raise ValueError(f"author slug {slug!r} not found in {db_path}")
             target = candidates[0]
             return target, repo.get_articles_by_author(target.id)
-        best: tuple[Author, list[Article]] | None = None
-        for author in authors:
-            articles = repo.get_articles_by_author(author.id)
-            if best is None or len(articles) > len(best[1]):
-                best = (author, articles)
-        if best is None:
+        if not authors:
             raise ValueError(f"no authors found in {db_path}")
-        return best
+        counts = repo.count_articles_by_author_ids(a.id for a in authors)
+        best_author = max(authors, key=lambda a: counts.get(a.id, 0))
+        return best_author, repo.get_articles_by_author(best_author.id)
 
 
 def _load_ai_articles(project_root: Path, author: Author) -> list[Article]:

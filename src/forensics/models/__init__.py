@@ -16,7 +16,15 @@ from forensics.models.analysis import (
 from forensics.models.article import Article
 from forensics.models.author import Author, AuthorManifest
 from forensics.models.features import EmbeddingRecord, FeatureVector
-from forensics.models.report import FindingStrength, ReportManifest
+from forensics.models.report import (
+    DirectionBreakdown,
+    DirectionConcordance,
+    FindingStrength,
+    ReportManifest,
+    VolumeRampFlag,
+    classify_direction_concordance,
+    compute_volume_ramp_flag,
+)
 
 __all__ = [
     "AnalysisResult",
@@ -26,6 +34,8 @@ __all__ = [
     "ChangePoint",
     "ConvergenceWindow",
     "CorpusCustody",
+    "DirectionBreakdown",
+    "DirectionConcordance",
     "DriftScores",
     "EmbeddingRecord",
     "EraClassification",
@@ -33,4 +43,7 @@ __all__ = [
     "FindingStrength",
     "HypothesisTest",
     "ReportManifest",
+    "VolumeRampFlag",
+    "classify_direction_concordance",
+    "compute_volume_ramp_flag",
 ]

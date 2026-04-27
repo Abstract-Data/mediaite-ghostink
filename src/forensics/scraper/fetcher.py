@@ -756,7 +756,12 @@ async def _fetch_one_article_html(
         )
 
 
-def archive_raw_year_dirs(root: Path, db_path: Path) -> int:
+def archive_raw_year_dirs(
+    root: Path,
+    db_path: Path,
+    *,
+    settings: ForensicsSettings | None = None,
+) -> int:
     """
     Compress each ``data/raw/{YYYY}/`` directory to ``data/raw/{YYYY}.tar.gz`` and
     rewrite ``raw_html_path`` in SQLite to ``raw/{YYYY}.tar.gz:{id}.html``.
@@ -776,7 +781,28 @@ def archive_raw_year_dirs(root: Path, db_path: Path) -> int:
             for html_file in sorted(child.glob("*.html")):
                 archive.add(html_file, arcname=html_file.name)
         with Repository(db_path) as repo:
-            repo.rewrite_raw_paths_after_archive(year)
+            rewritten = repo.rewrite_raw_paths_after_archive(year)
+        if settings is not None and settings.chain_of_custody.verify_raw_archives:
+            if not tgz.is_file():
+                logger.error(
+                    "chain_of_custody: raw archive missing after archive year=%s path=%s",
+                    year,
+                    tgz,
+                )
+            elif tgz.stat().st_size == 0:
+                logger.error(
+                    "chain_of_custody: raw archive empty after archive year=%s path=%s",
+                    year,
+                    tgz,
+                )
+            else:
+                logger.info(
+                    "chain_of_custody: verified raw archive year=%s path=%s bytes=%s rows=%s",
+                    year,
+                    tgz,
+                    tgz.stat().st_size,
+                    rewritten,
+                )
         shutil.rmtree(child)
         processed += 1
     return processed

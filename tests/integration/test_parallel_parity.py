@@ -34,7 +34,7 @@ from typing import Literal
 import polars as pl
 import pytest
 
-from forensics.analysis.orchestrator import run_full_analysis
+from forensics.analysis.orchestrator import AnalysisMode, run_full_analysis
 from forensics.config import get_settings
 from forensics.models import Author
 from forensics.paths import AnalysisArtifactPaths
@@ -229,8 +229,8 @@ def test_serial_run_produces_byte_identical_artifacts_across_invocations(
 
     _pin_nondeterminism(monkeypatch)
     settings = get_settings()
-    run_full_analysis(serial_paths, settings, max_workers=1)
-    run_full_analysis(parallel_paths, settings, max_workers=1)
+    run_full_analysis(serial_paths, settings, max_workers=1, mode=AnalysisMode(exploratory=True))
+    run_full_analysis(parallel_paths, settings, max_workers=1, mode=AnalysisMode(exploratory=True))
 
     a = _hash_artifact_dir(serial_paths.analysis_dir)
     b = _hash_artifact_dir(parallel_paths.analysis_dir)
@@ -248,7 +248,12 @@ def test_run_metadata_top_level_lists_sort_alphabetically(
     """Spec lines 1614-1615: ``full_analysis_authors`` + ``comparison_targets`` are sorted."""
     serial_paths, _ = parity_corpus
     _pin_nondeterminism(monkeypatch)
-    run_full_analysis(serial_paths, get_settings(), max_workers=1)
+    run_full_analysis(
+        serial_paths,
+        get_settings(),
+        max_workers=1,
+        mode=AnalysisMode(exploratory=True),
+    )
 
     meta = json.loads(serial_paths.run_metadata_json().read_text(encoding="utf-8"))
     assert meta["full_analysis_authors"] == sorted(meta["full_analysis_authors"])
@@ -278,7 +283,9 @@ def test_parallel_dispatch_emits_same_per_author_artifacts(
     _serial_paths, parallel_paths = parity_corpus
     settings = get_settings()
     workers = max(2, min(os.cpu_count() or 2, 4))
-    results = run_full_analysis(parallel_paths, settings, max_workers=workers)
+    results = run_full_analysis(
+        parallel_paths, settings, max_workers=workers, mode=AnalysisMode(exploratory=True)
+    )
 
     assert set(results) == {"alpha", "bravo", "charlie"}, results
 

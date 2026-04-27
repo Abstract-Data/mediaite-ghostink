@@ -22,12 +22,14 @@ from forensics.analysis.convergence import (
     compute_convergence_scores,
 )
 from forensics.analysis.drift import (
+    EmbeddingDriftInputsError,
     EmbeddingRevisionGateError,
     compute_author_drift_pipeline,
     load_article_embeddings,
 )
 from forensics.analysis.era import classify_ai_marker_era
 from forensics.analysis.evidence import filter_evidence_change_points
+from forensics.analysis.orchestrator.mode import DEFAULT_ANALYSIS_MODE, AnalysisMode
 from forensics.analysis.orchestrator.timings import _StageTimer
 from forensics.analysis.statistics import (
     apply_correction,
@@ -50,7 +52,7 @@ from forensics.storage.json_io import stable_sort_artifact_list, write_json_arti
 from forensics.storage.parquet import load_feature_frame_sorted
 from forensics.storage.repository import Repository
 from forensics.utils.datetime import timestamps_from_frame
-from forensics.utils.provenance import compute_model_config_hash
+from forensics.utils.provenance import compute_analysis_config_hash
 
 logger = logging.getLogger(__name__)
 
@@ -215,8 +217,7 @@ def _load_drift_signals(
     paths: AnalysisArtifactPaths,
     config: ForensicsSettings,
     *,
-    exploratory: bool = False,
-    allow_pre_phase16_embeddings: bool = False,
+    mode: AnalysisMode = DEFAULT_ANALYSIS_MODE,
 ) -> tuple[
     DriftScores | None,
     list[tuple[datetime, float]],
@@ -230,7 +231,8 @@ def _load_drift_signals(
     timing brackets and the early-out ``return None`` paths are factored
     in. Returns ``(drift, baseline_curve, vel_tuples, ai_conv)`` with
     permissive defaults (empty lists / ``None``) when embeddings are
-    unavailable.
+    unavailable and ``mode.exploratory`` is true; confirmatory runs raise
+    ``EmbeddingDriftInputsError`` instead.
     """
     baseline_curve: list[tuple[datetime, float]] = []
     vel_tuples: list[tuple[str, float]] = []
@@ -242,14 +244,24 @@ def _load_drift_signals(
             slug,
             paths,
             expected_revision=config.analysis.embedding.embedding_model_revision,
-            exploratory=exploratory,
-            allow_pre_phase16_embeddings=allow_pre_phase16_embeddings,
+            mode=mode,
         )
     except EmbeddingRevisionGateError:
         raise
     except (ValueError, OSError) as exc:
-        logger.info("analysis: no embeddings for %s (%s)", slug, exc)
-        pairs = []
+        if mode.exploratory:
+            logger.info("analysis: no embeddings for %s (%s)", slug, exc)
+            pairs = []
+        else:
+            raise EmbeddingDriftInputsError(
+                f"Cannot load article embeddings for analysis (author={slug!r})."
+            ) from exc
+
+    if not mode.exploratory and len(pairs) < 2:
+        raise EmbeddingDriftInputsError(
+            "Insufficient article embeddings for drift in analysis "
+            f"(author={slug!r}): need at least 2 usable vectors, got {len(pairs)}."
+        )
 
     drift_res = compute_author_drift_pipeline(
         slug,
@@ -272,10 +284,10 @@ def assemble_analysis_result(
     convergence_windows: list,
     drift_scores: DriftScores | None,
     hypothesis_tests: list,
-    config: AnalysisConfig,
+    settings: ForensicsSettings,
 ) -> AnalysisResult:
     """Build ``AnalysisResult`` with a short deterministic hash of analysis settings."""
-    config_hash = compute_model_config_hash(config, length=16, round_trip=True)
+    config_hash = compute_analysis_config_hash(settings)
     return AnalysisResult(
         author_id=author_id,
         run_id=str(uuid4()),
@@ -297,8 +309,7 @@ def _run_per_author_analysis(
     *,
     probability_trajectory_by_slug: dict[str, ProbabilityTrajectory],
     stage_timings: dict[str, float] | None = None,
-    exploratory: bool = False,
-    allow_pre_phase16_embeddings: bool = False,
+    mode: AnalysisMode = DEFAULT_ANALYSIS_MODE,
 ) -> tuple[AnalysisResult, list[ChangePoint], list, list] | None:
     """Changepoint, drift, convergence, and hypothesis testing for one author slug.
 
@@ -307,7 +318,7 @@ def _run_per_author_analysis(
     ``convergence``, ``hypothesis_tests``) so the bench script can emit
     non-zero per-stage measurements instead of only the grand ``total``.
     """
-    with strict_feature_decode_confirmatory(exploratory):
+    with strict_feature_decode_confirmatory(mode.exploratory):
         author = repo.get_author_by_slug(slug)
         if author is None:
             logger.warning("analysis: unknown slug=%s", slug)
@@ -360,8 +371,7 @@ def _run_per_author_analysis(
             author.id,
             paths,
             config,
-            exploratory=exploratory,
-            allow_pre_phase16_embeddings=allow_pre_phase16_embeddings,
+            mode=mode,
         )
         timer.record("drift")
 
@@ -407,6 +417,6 @@ def _run_per_author_analysis(
             convergence_windows,
             drift,
             all_tests,
-            config.analysis,
+            config,
         )
         return assembled, change_points, convergence_windows, all_tests

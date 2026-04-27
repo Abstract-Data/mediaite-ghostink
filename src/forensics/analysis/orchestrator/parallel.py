@@ -1,4 +1,14 @@
-"""Parallel/isolated author execution for analysis orchestration."""
+"""Parallel/isolated author execution for analysis orchestration.
+
+Confirmatory analysis (``AnalysisMode.exploratory`` false) relies on
+:data:`forensics.models.features.STRICT_DECODE_CTX` so nested feature JSON
+decodes fail closed instead of coercing to ``{}``. That ContextVar defaults to
+``False`` in each new process-pool worker; :func:`_run_per_author_analysis`
+wraps its body in :func:`forensics.models.features.strict_feature_decode_confirmatory`
+so strict mode is enabled only for the duration of that call. Do not invoke
+feature decode paths from parallel workers outside that wrapper, or hashes and
+downstream gates may diverge from the in-process CLI path.
+"""
 
 from __future__ import annotations
 
@@ -10,30 +20,90 @@ import shutil
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
 from uuid import uuid4
 
 from forensics.analysis.convergence import ProbabilityTrajectory
 from forensics.analysis.orchestrator.comparison import (
     _resolve_targets_and_controls,
     _run_target_control_comparisons,
+    warn_comparison_report_empty_targets,
 )
+from forensics.analysis.orchestrator.embedding_policy import embedding_fail_should_propagate
+from forensics.analysis.orchestrator.mode import DEFAULT_ANALYSIS_MODE, AnalysisMode
 from forensics.analysis.orchestrator.per_author import (
     _apply_global_test_gates,
     _run_per_author_analysis,
     _write_per_author_json_artifacts,
 )
 from forensics.analysis.orchestrator.staleness import _merge_run_metadata, _stale_author_slugs
+from forensics.analysis.probability_trajectories import build_probability_trajectory_by_slug
 from forensics.config.settings import ForensicsSettings
 from forensics.models.analysis import AnalysisResult, ChangePoint
+from forensics.models.features import STRICT_DECODE_CTX
 from forensics.paths import AnalysisArtifactPaths
 from forensics.storage.json_io import write_json_artifact
 from forensics.storage.repository import Repository
 from forensics.utils.provenance import (
-    compute_model_config_hash,
+    compute_analysis_config_hash,
     write_corpus_custody,
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _run_repo_per_author_pipeline_with_artifacts(
+    slug: str,
+    repo: Repository,
+    paths: AnalysisArtifactPaths,
+    config: ForensicsSettings,
+    prob_map: dict[str, ProbabilityTrajectory],
+    mode: AnalysisMode,
+    stage_timings: dict[str, float],
+    *,
+    job_kind: Literal["analysis", "analysis-refresh"],
+    emit_success_log: bool,
+) -> AnalysisResult | None:
+    """Shared path: analyze, assert strict-decode reset, write per-author JSON.
+
+    ``job_kind`` selects log prefixes and assert diagnostics. Isolated refresh
+    workers omit the per-author success log line to match historical behavior.
+    """
+    per_author = _run_per_author_analysis(
+        slug,
+        repo,
+        paths,
+        config,
+        probability_trajectory_by_slug=prob_map,
+        stage_timings=stage_timings,
+        mode=mode,
+    )
+    assert not STRICT_DECODE_CTX.get(), (
+        f"STRICT_DECODE_CTX must be reset after _run_per_author_analysis ({job_kind} slug={slug!r})"
+    )
+    if per_author is None:
+        logger.info("%s: slug=%s skipped (missing author or features)", job_kind, slug)
+        return None
+    assembled, change_points, convergence_windows, all_tests = per_author
+    _write_per_author_json_artifacts(
+        slug,
+        paths,
+        change_points,
+        convergence_windows,
+        assembled,
+        all_tests,
+    )
+    if emit_success_log:
+        logger.info(
+            "%s: slug=%s change_points=%d windows=%d tests=%d",
+            job_kind,
+            slug,
+            len(change_points),
+            len(convergence_windows),
+            len(all_tests),
+        )
+    return assembled
+
 
 _REQUIRED_AUTHOR_ARTIFACT_SUFFIXES = (
     "_result.json",
@@ -76,8 +146,7 @@ def _per_author_worker(
     paths: AnalysisArtifactPaths,
     config: ForensicsSettings,
     prob_map: dict[str, ProbabilityTrajectory],
-    exploratory: bool,
-    allow_pre_phase16_embeddings: bool,
+    mode: AnalysisMode,
 ) -> tuple[str, AnalysisResult | None, dict[str, float]]:
     """ProcessPool worker: opens its own ``Repository`` (SQLite is not fork-safe).
 
@@ -90,37 +159,27 @@ def _per_author_worker(
     Log lines are tagged with ``slug=%s`` so concurrent worker output can be
     disambiguated when grepping the run log.
     """
+    if not mode.exploratory:
+        logger.debug(
+            "analysis worker: confirmatory mode slug=%s "
+            "(strict feature JSON decode is scoped inside _run_per_author_analysis)",
+            slug,
+        )
     stage_timings: dict[str, float] = {}
     with Repository(db_path) as repo:
-        per_author = _run_per_author_analysis(
+        assembled = _run_repo_per_author_pipeline_with_artifacts(
             slug,
             repo,
             paths,
             config,
-            probability_trajectory_by_slug=prob_map,
-            stage_timings=stage_timings,
-            exploratory=exploratory,
-            allow_pre_phase16_embeddings=allow_pre_phase16_embeddings,
+            prob_map,
+            mode,
+            stage_timings,
+            job_kind="analysis",
+            emit_success_log=True,
         )
-    if per_author is None:
-        logger.info("analysis: slug=%s skipped (missing author or features)", slug)
+    if assembled is None:
         return slug, None, stage_timings
-    assembled, change_points, convergence_windows, all_tests = per_author
-    _write_per_author_json_artifacts(
-        slug,
-        paths,
-        change_points,
-        convergence_windows,
-        assembled,
-        all_tests,
-    )
-    logger.info(
-        "analysis: slug=%s change_points=%d windows=%d tests=%d",
-        slug,
-        len(change_points),
-        len(convergence_windows),
-        len(all_tests),
-    )
     return slug, assembled, stage_timings
 
 
@@ -138,35 +197,31 @@ def _isolated_author_worker(
     config: ForensicsSettings,
     prob_map: dict[str, ProbabilityTrajectory],
     run_id: str,
-    exploratory: bool,
-    allow_pre_phase16_embeddings: bool,
+    mode: AnalysisMode,
 ) -> IsolatedAuthorAnalysis | None:
     """Run one author into ``data/analysis/parallel/<run_id>/<slug>/``."""
+    if not mode.exploratory:
+        logger.debug(
+            "analysis-refresh worker: confirmatory mode slug=%s "
+            "(strict feature JSON decode is scoped inside _run_per_author_analysis)",
+            slug,
+        )
     isolated_paths = _isolated_author_paths(paths, run_id, slug)
     stage_timings: dict[str, float] = {}
     with Repository(paths.db_path) as repo:
-        per_author = _run_per_author_analysis(
+        assembled = _run_repo_per_author_pipeline_with_artifacts(
             slug,
             repo,
             isolated_paths,
             config,
-            probability_trajectory_by_slug=prob_map,
-            stage_timings=stage_timings,
-            exploratory=exploratory,
-            allow_pre_phase16_embeddings=allow_pre_phase16_embeddings,
+            prob_map,
+            mode,
+            stage_timings,
+            job_kind="analysis-refresh",
+            emit_success_log=False,
         )
-    if per_author is None:
-        logger.info("analysis-refresh: slug=%s skipped (missing author or features)", slug)
+    if assembled is None:
         return None
-    assembled, change_points, convergence_windows, all_tests = per_author
-    _write_per_author_json_artifacts(
-        slug,
-        isolated_paths,
-        change_points,
-        convergence_windows,
-        assembled,
-        all_tests,
-    )
     return IsolatedAuthorAnalysis(
         slug=slug,
         analysis_dir=isolated_paths.analysis_dir,
@@ -198,6 +253,32 @@ def _resolve_parallel_refresh_workers(config: ForensicsSettings, override: int |
     return min(3, max(1, cpu - 1))
 
 
+def _finalize_parallel_author_results(
+    paths: AnalysisArtifactPaths,
+    config: ForensicsSettings,
+    results: dict[str, AnalysisResult],
+) -> None:
+    """Apply global hypothesis gates and write per-author JSON after parallel workers."""
+    if not results:
+        return
+    gated_tests_by_slug = _apply_global_test_gates(
+        {slug: res.hypothesis_tests for slug, res in results.items()},
+        config.analysis,
+    )
+    for slug, res in list(results.items()):
+        all_tests = gated_tests_by_slug.get(slug, [])
+        assembled = res.model_copy(update={"hypothesis_tests": all_tests})
+        results[slug] = assembled
+        _write_per_author_json_artifacts(
+            slug,
+            paths,
+            assembled.change_points,
+            assembled.convergence_windows,
+            assembled,
+            all_tests,
+        )
+
+
 def _run_full_analysis_per_authors(
     slugs: list[str],
     paths: AnalysisArtifactPaths,
@@ -206,8 +287,7 @@ def _run_full_analysis_per_authors(
     workers: int,
     mp_context: str | None,
     *,
-    exploratory: bool,
-    allow_pre_phase16_embeddings: bool,
+    mode: AnalysisMode,
 ) -> tuple[dict[str, AnalysisResult], dict[str, dict[str, float]]]:
     """Serial or parallel per-author analysis, global test gating, artifact writes."""
     results: dict[str, AnalysisResult] = {}
@@ -225,8 +305,7 @@ def _run_full_analysis_per_authors(
                     config,
                     probability_trajectory_by_slug=prob_map,
                     stage_timings=stage_timings,
-                    exploratory=exploratory,
-                    allow_pre_phase16_embeddings=allow_pre_phase16_embeddings,
+                    mode=mode,
                 )
                 per_author_timings[slug] = stage_timings
                 if per_author is None:
@@ -278,8 +357,7 @@ def _run_full_analysis_per_authors(
                     paths,
                     config,
                     prob_map,
-                    exploratory,
-                    allow_pre_phase16_embeddings,
+                    mode,
                 ): slug
                 for slug in slugs
             }
@@ -288,6 +366,8 @@ def _run_full_analysis_per_authors(
                 try:
                     returned_slug, assembled, stage_timings = future.result()
                 except Exception as exc:  # noqa: BLE001 - log + continue per-author
+                    if embedding_fail_should_propagate(mode, exc):
+                        raise
                     logger.error(
                         "analysis: worker crashed for slug=%s (%s)",
                         slug,
@@ -300,23 +380,7 @@ def _run_full_analysis_per_authors(
                 if assembled is not None:
                     results[returned_slug] = assembled
 
-        if results:
-            gated_tests_by_slug = _apply_global_test_gates(
-                {slug: res.hypothesis_tests for slug, res in results.items()},
-                config.analysis,
-            )
-            for slug, res in list(results.items()):
-                all_tests = gated_tests_by_slug.get(slug, [])
-                assembled = res.model_copy(update={"hypothesis_tests": all_tests})
-                results[slug] = assembled
-                _write_per_author_json_artifacts(
-                    slug,
-                    paths,
-                    assembled.change_points,
-                    assembled.convergence_windows,
-                    assembled,
-                    all_tests,
-                )
+        _finalize_parallel_author_results(paths, config, results)
 
     return results, per_author_timings
 
@@ -325,7 +389,7 @@ def _validate_isolated_author_output(
     isolated: IsolatedAuthorAnalysis,
     config: ForensicsSettings,
 ) -> None:
-    expected = compute_model_config_hash(config.analysis, length=16, round_trip=True)
+    expected = compute_analysis_config_hash(config)
     result_path = isolated.analysis_dir / f"{isolated.slug}_result.json"
     if not result_path.is_file():
         msg = f"missing isolated result artifact: {result_path}"
@@ -375,9 +439,45 @@ def _validate_and_promote_isolated_outputs(
         marker,
         {
             "validated_slugs": sorted(item.slug for item in isolated_outputs),
-            "config_hash": compute_model_config_hash(config.analysis, length=16, round_trip=True),
+            "config_hash": compute_analysis_config_hash(config),
         },
     )
+
+
+def _run_isolated_author_serial_jobs(
+    paths: AnalysisArtifactPaths,
+    config: ForensicsSettings,
+    slugs: list[str],
+    *,
+    run_id: str,
+    probability_trajectory_by_slug: dict[str, ProbabilityTrajectory],
+    mode: AnalysisMode,
+) -> list[IsolatedAuthorAnalysis]:
+    isolated_outputs: list[IsolatedAuthorAnalysis] = []
+    for slug in slugs:
+        try:
+            isolated = _isolated_author_worker(
+                slug,
+                paths,
+                config,
+                probability_trajectory_by_slug,
+                run_id,
+                mode,
+            )
+        except Exception as exc:  # noqa: BLE001 — mirror full-analysis worker policy
+            if embedding_fail_should_propagate(mode, exc):
+                raise
+            logger.exception(
+                "isolated refresh worker failed",
+                extra={"author_slug": slug, "job_kind": "isolated_refresh", "error": repr(exc)},
+            )
+            _persist_isolated_refresh_error(paths, slug, exc)
+            continue
+        if isolated is None:
+            logger.warning("analysis-refresh: skipped %s", slug)
+            continue
+        isolated_outputs.append(isolated)
+    return isolated_outputs
 
 
 def _run_isolated_author_jobs(
@@ -388,37 +488,20 @@ def _run_isolated_author_jobs(
     run_id: str,
     max_workers: int,
     probability_trajectory_by_slug: dict[str, ProbabilityTrajectory],
-    exploratory: bool,
-    allow_pre_phase16_embeddings: bool,
+    mode: AnalysisMode,
 ) -> list[IsolatedAuthorAnalysis]:
     if not slugs:
         return []
     worker_count = min(max(1, max_workers), len(slugs))
     if worker_count <= 1:
-        isolated_outputs = []
-        for slug in slugs:
-            try:
-                isolated = _isolated_author_worker(
-                    slug,
-                    paths,
-                    config,
-                    probability_trajectory_by_slug,
-                    run_id,
-                    exploratory,
-                    allow_pre_phase16_embeddings,
-                )
-            except Exception as exc:  # noqa: BLE001 — mirror full-analysis worker policy
-                logger.exception(
-                    "isolated refresh worker failed",
-                    extra={"author_slug": slug, "job_kind": "isolated_refresh", "error": repr(exc)},
-                )
-                _persist_isolated_refresh_error(paths, slug, exc)
-                continue
-            if isolated is None:
-                logger.warning("analysis-refresh: skipped %s", slug)
-                continue
-            isolated_outputs.append(isolated)
-        return isolated_outputs
+        return _run_isolated_author_serial_jobs(
+            paths,
+            config,
+            slugs,
+            run_id=run_id,
+            probability_trajectory_by_slug=probability_trajectory_by_slug,
+            mode=mode,
+        )
     isolated_outputs: list[IsolatedAuthorAnalysis] = []
     ctx = multiprocessing.get_context("spawn")
     with ProcessPoolExecutor(max_workers=worker_count, mp_context=ctx) as executor:
@@ -430,8 +513,7 @@ def _run_isolated_author_jobs(
                 config,
                 probability_trajectory_by_slug,
                 run_id,
-                exploratory,
-                allow_pre_phase16_embeddings,
+                mode,
             ): slug
             for slug in slugs
         }
@@ -440,6 +522,8 @@ def _run_isolated_author_jobs(
             try:
                 isolated = fut.result()
             except Exception as exc:  # noqa: BLE001 — mirror full-analysis worker policy
+                if embedding_fail_should_propagate(mode, exc):
+                    raise
                 logger.exception(
                     "isolated refresh worker failed",
                     extra={
@@ -464,10 +548,14 @@ def run_parallel_author_refresh(
     author_slug: str | None = None,
     max_workers: int | None = None,
     probability_trajectory_by_slug: dict[str, ProbabilityTrajectory] | None = None,
-    exploratory: bool = False,
-    allow_pre_phase16_embeddings: bool = False,
+    mode: AnalysisMode = DEFAULT_ANALYSIS_MODE,
 ) -> dict[str, AnalysisResult]:
-    """Refresh stale configured authors through isolated parallel author directories."""
+    """Refresh stale configured authors through isolated parallel author directories.
+
+    When ``probability_trajectory_by_slug`` is ``None``, trajectories are loaded
+    the same way as :func:`run_full_analysis` (feature parquet or
+    ``data/probability/<slug>.parquet``).
+    """
     run_id = str(uuid4())
     slugs = _stale_author_slugs(paths, config, author_slug)
     workers = _resolve_parallel_refresh_workers(config, max_workers)
@@ -476,7 +564,11 @@ def run_parallel_author_refresh(
         len(slugs),
         workers,
     )
-    prob_map = probability_trajectory_by_slug or {}
+    if probability_trajectory_by_slug is None:
+        all_slugs = [a.slug for a in config.authors]
+        prob_map = build_probability_trajectory_by_slug(paths, all_slugs)
+    else:
+        prob_map = probability_trajectory_by_slug
     isolated_outputs = _run_isolated_author_jobs(
         paths,
         config,
@@ -484,8 +576,7 @@ def run_parallel_author_refresh(
         run_id=run_id,
         max_workers=workers,
         probability_trajectory_by_slug=prob_map,
-        exploratory=exploratory,
-        allow_pre_phase16_embeddings=allow_pre_phase16_embeddings,
+        mode=mode,
     )
     if not isolated_outputs:
         logger.info("analysis-refresh: no stale author artifacts to refresh")
@@ -527,12 +618,10 @@ def run_parallel_author_refresh(
         results,
         paths=paths,
         config=config,
+        mode=mode,
     )
     if not comparison_payload.get("targets"):
-        logger.warning(
-            "comparison_report: empty targets — no target-vs-control comparisons produced; "
-            "check target role in config, on-disk result artifacts, and --author scope (L-02)"
-        )
+        warn_comparison_report_empty_targets()
     write_json_artifact(paths.comparison_report_json(), comparison_payload)
     _merge_run_metadata(paths, results, comparison_payload)
     meta_path = paths.run_metadata_json()

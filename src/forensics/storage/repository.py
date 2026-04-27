@@ -51,6 +51,11 @@ class UnfetchedArticle(NamedTuple):
     published_date: datetime
 
 
+# Hot-path reads: avoid ``SELECT *`` so SQLite/WAL paths only materialize needed columns.
+_AUTHOR_SELECT = (
+    "id, name, slug, outlet, role, baseline_start, baseline_end, archive_url, is_shared_byline"
+)
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS authors (
     id TEXT PRIMARY KEY,
@@ -203,17 +208,65 @@ class RepositoryReader:
 
     def get_author(self, author_id: str) -> Author | None:
         conn = self._require_conn()
-        row = conn.execute("SELECT * FROM authors WHERE id = ?", (author_id,)).fetchone()
+        row = conn.execute(
+            f"SELECT {_AUTHOR_SELECT} FROM authors WHERE id = ?", (author_id,)
+        ).fetchone()
         if row is None:
             return None
         return _author_row_to_model(row)
 
     def get_author_by_slug(self, slug: str) -> Author | None:
         conn = self._require_conn()
-        row = conn.execute("SELECT * FROM authors WHERE slug = ?", (slug,)).fetchone()
+        row = conn.execute(
+            f"SELECT {_AUTHOR_SELECT} FROM authors WHERE slug = ?", (slug,)
+        ).fetchone()
         if row is None:
             return None
         return _author_row_to_model(row)
+
+    def count_authors(self) -> int:
+        """Return ``COUNT(*)`` from ``authors`` (no row hydration)."""
+        conn = self._require_conn()
+        row = conn.execute("SELECT COUNT(*) AS n FROM authors").fetchone()
+        return int(row["n"]) if row is not None else 0
+
+    def get_authors_by_slugs(self, slugs: Iterable[str]) -> dict[str, Author]:
+        """Batch-load authors keyed by slug (order not preserved; missing slugs omitted)."""
+        uniq = list(dict.fromkeys(s for s in slugs if s))
+        if not uniq:
+            return {}
+        conn = self._require_conn()
+        out: dict[str, Author] = {}
+        chunk = 400
+        for i in range(0, len(uniq), chunk):
+            part = uniq[i : i + chunk]
+            placeholders = ",".join("?" * len(part))
+            sql = f"SELECT {_AUTHOR_SELECT} FROM authors WHERE slug IN ({placeholders})"
+            rows = conn.execute(sql, part).fetchall()
+            for row in rows:
+                au = _author_row_to_model(row)
+                out[au.slug] = au
+        return out
+
+    def count_articles_by_author_ids(self, author_ids: Iterable[str]) -> dict[str, int]:
+        """Return ``author_id -> row count`` for the given ids (missing ids absent from map)."""
+        ids = list(dict.fromkeys(author_ids))
+        if not ids:
+            return {}
+        conn = self._require_conn()
+        counts: dict[str, int] = {}
+        chunk = 400
+        for i in range(0, len(ids), chunk):
+            part = ids[i : i + chunk]
+            placeholders = ",".join("?" * len(part))
+            sql = (
+                f"SELECT author_id, COUNT(*) AS n FROM articles "
+                f"WHERE author_id IN ({placeholders}) GROUP BY author_id"
+            )
+            rows = conn.execute(sql, part).fetchall()
+            for row in rows:
+                counts[str(row["author_id"])] = int(row["n"])
+        return counts
 
     def all_authors(self) -> list[Author]:
         """Return every author in the database ordered by slug.
@@ -221,7 +274,7 @@ class RepositoryReader:
         Use inside an active ``with Repository(...)`` context (ADR-005).
         """
         conn = self._require_conn()
-        rows = conn.execute("SELECT * FROM authors ORDER BY slug").fetchall()
+        rows = conn.execute(f"SELECT {_AUTHOR_SELECT} FROM authors ORDER BY slug").fetchall()
         return [_author_row_to_model(row) for row in rows]
 
     def list_articles_for_extraction(self, *, author_id: str | None = None) -> list[Article]:

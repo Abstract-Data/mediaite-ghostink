@@ -10,7 +10,7 @@ from forensics.config.settings import ForensicsSettings
 from forensics.models.analysis import AnalysisResult
 from forensics.paths import AnalysisArtifactPaths
 from forensics.storage.json_io import write_json_artifact
-from forensics.utils.provenance import compute_model_config_hash
+from forensics.utils.provenance import compute_analysis_config_hash
 
 
 def _author_result_current(
@@ -23,7 +23,7 @@ def _author_result_current(
         payload = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         return False
-    expected = compute_model_config_hash(config.analysis, length=16, round_trip=True)
+    expected = compute_analysis_config_hash(config)
     return payload.get("config_hash") == expected
 
 

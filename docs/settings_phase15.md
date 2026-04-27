@@ -25,7 +25,7 @@ inclusion/exclusion boundary.
 | `analysis.convergence_min_feature_ratio` | B3 | `0.50` | yes | Reinterpreted against the 8-family registry; drop from `0.60` (23 raw features) to `0.50` (4-of-8 independent axes). |
 | `analysis.convergence_cp_source` | J5 | `"section_adjusted"` | yes | Which CP list feeds convergence. `"raw"` reverts to pooled-section CPs. |
 | `analysis.fdr_grouping` | C | `"family"` | yes | Apply BH per feature family rather than per author. `"author"` reverts to pre-Phase-15. |
-| `analysis.pipeline_b_mode` | E | `"legacy"` | yes | Pipeline B scoring. `"percentile"` becomes default only if E1 confirms a math-floor; until then `"legacy"` preserves v0.14 output. |
+| `analysis.pipeline_b_mode` | E | `"percentile"` | yes | Pipeline B scoring. `"percentile"` is the code default (cross-author comparable). Set `"legacy"` to reproduce pre-2026-04 absolute-cosine behavior. |
 | `analysis.section_residualize_features` | J5 | `false` | yes | OLS residualization against one-hot sections before CPD. Gated behind the J3 diagnostic. |
 | `analysis.section_min_articles` | J | `50` | no | Minimum article count for section-level descriptive. Threshold only. |
 | `analysis.min_articles_per_section_for_residualize` | J5 | `10` | no | Degenerate-OLS guard. Threshold only. |
