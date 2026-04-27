@@ -14,8 +14,17 @@ Operational quick reference. Agents: append new sections here whenever you disco
 ### Automated pipeline E2E (`tests/integration/test_pipeline_end_to_end.py`)
 
 - **What it covers:** Seeded `articles.db` (two authors: `fixture-target` + `fixture-control`), `FORENSICS_CONFIG_FILE` pointing at `tests/integration/fixtures/e2e/config.toml`, and `importlib.import_module("forensics.config.settings")` + `monkeypatch` on that module’s `_project_root` so `get_settings().db_path` and artifact paths resolve under a disposable workspace (avoids the `forensics.config.settings` name shadowing the real settings submodule). **Scrape is not run** (DB is populated in-process). Stages: `extract_all_features(..., skip_embeddings=True)` → `run_full_analysis(..., exploratory=True)` → optional Quarto `run_report(ReportArgs(notebook="index.qmd", report_format="html"))` when `quarto` is on `PATH` (copies repo `index.qmd` + `quarto.yml` into the temp root first).
-- **Regression gate:** `data/analysis/comparison_report.json` must contain a **non-empty** `targets["fixture-target"]` entry (guards the “no configured target → empty comparison” failure mode).
-- **Markers:** `@pytest.mark.integration` + `@pytest.mark.slow` — default `addopts` includes `-m 'not slow'`, so CI’s full `pytest tests/` run **deselects** this test. Run it explicitly, e.g. `uv run pytest tests/integration/test_pipeline_end_to_end.py -v --override-ini "addopts=-ra -q --strict-markers"`, or `uv run pytest -m integration -v --no-cov tests/integration/test_pipeline_end_to_end.py` (pass `--no-cov` when selecting only integration tests: otherwise `fail_under` is measured on a tiny slice and fails).
+- **Regression gate:** `data/analysis/comparison_report.json` must contain a **non-empty** `targets["fixture-target"]` entry (guards the “no configured target → empty comparison” failure mode). The seeded corpus asserts changepoint / convergence signal vs control (see `tests/integration/fixtures/e2e/corpus_seed.py`).
+- **Markers:** `@pytest.mark.integration` only (not `slow`). Default `uv run pytest tests/` still runs this file as part of the unit job; **CI** also runs a dedicated **`integration`** workflow job (`pytest tests/ -m integration -v --no-cov` after `uv run python -m spacy download en_core_web_md`). For a local slice matching CI: `uv run pytest tests/ -m integration -v --no-cov` (always pass `--no-cov` when selecting only integration tests so `fail_under` is not measured on a tiny denominator).
+
+### Running integration tests locally
+
+1. Sync deps: `uv sync` (and extras your branch’s CI uses — the integration job installs spaCy `en_core_web_md`).
+2. Install the model CI uses: `uv run python -m spacy download en_core_web_md`.
+3. Run the integration-marked suite: `uv run pytest tests/ -m integration -v --no-cov`.
+4. Single-file E2E only: `uv run pytest tests/integration/test_pipeline_end_to_end.py -m integration -v --no-cov`.
+
+If you need the default `addopts` out of the way for a one-off: `uv run pytest tests/integration/test_pipeline_end_to_end.py -v --override-ini "addopts=-ra -q --strict-markers" --no-cov`.
 
 ## Phase 16 hash-break migration
 
@@ -46,6 +55,13 @@ When `data/articles.db` already has rows for a slug (skip live scrape if you pre
 ### Dedup performance cliff above `hamming_threshold = 3`
 
 Near-duplicate detection (`forensics.scraper.dedup`) compares 128-bit simhashes with Hamming distance. The default `scraping.simhash_threshold` is **3** (aligned with the four 32-bit LSH banding guarantee). Raising the threshold widens the “near duplicate” neighborhood: each increment increases pairwise comparisons and union-find work superlinearly on large corpora. If you need a looser dedup, prefer bounded batches or profiling first — do not raise the threshold on full-site runs without measuring wall time and duplicate-review cost.
+
+### Migrating simhash fingerprints after D-01 (NFKC normalization)
+
+Fingerprint values are versioned (`dedup_simhash_version`, current = `v2` in code as `SIMHASH_FINGERPRINT_VERSION`). Rows with a missing version or a version other than `v2` are excluded from the cached fingerprint set until recomputed; running dedup **without** migrating first can admit historical near-duplicates that no longer match stored bands.
+
+- Recompute all stale rows: `uv run forensics dedup recompute-fingerprints` (optional `--db PATH`, `--limit N` for tests).
+- stdout is one JSON object: `recomputed`, `skipped`, `errors`.
 
 ## Pipeline Operations
 

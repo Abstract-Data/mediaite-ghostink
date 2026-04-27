@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import time
 
@@ -43,39 +42,26 @@ def run_full_analysis(
     exploratory: bool = False,
     allow_pre_phase16_embeddings: bool = False,
 ) -> dict[str, AnalysisResult]:
-    """Run changepoint + drift + convergence + hypothesis tests; write JSON artifacts.
+    """Run changepoint, drift, convergence, and hypothesis stages; persist analysis artifacts.
 
-    Previously declared ``async`` for historical reasons — the body is entirely
-    synchronous (Repository / Polars / NumPy) so the coroutine wrapper was dead
-    weight. Callers now invoke the function directly instead of via
-    ``asyncio.run(...)``.
-
-    Phase 15 G1: when ``max_workers`` (or ``settings.analysis.max_workers``)
-    resolves to ``> 1`` the per-author loop dispatches via
-    :class:`concurrent.futures.ProcessPoolExecutor`. Each worker opens its own
-    :class:`Repository` (SQLite handles are not safe to fork), writes its own
-    per-author JSON artifacts (atomic via ``write_json_artifact``), and
-    returns the assembled :class:`AnalysisResult` plus per-stage timings to
-    the main process for aggregation. The main process owns the newsroom-wide
+    Loads per-author feature data, runs the configured detectors and statistical
+    battery, writes per-author JSON under ``paths.analysis_dir``, then builds the
+    pooled target-vs-control comparison report. The main process owns shared
     artifacts (``comparison_report.json``, ``run_metadata.json``,
-    ``corpus_custody.json``) so there is no shared mutable state.
+    ``corpus_custody.json``); when ``max_workers > 1``, workers return
+    :class:`AnalysisResult` payloads only and write their own per-slug files
+    atomically so SQLite handles are never shared across processes.
 
-    ``compare_pair`` overrides the ``settings.authors`` target/control roles
-    for the explicit ``(target_slug, control_slug)`` pair so the
-    ``forensics analyze --compare TARGET,CONTROL`` flag can drive a one-off
-    comparison without editing ``config.toml``.
+    Invariants: stage ordering inside each author matches the timings buckets;
+    ``run_metadata.json`` is merged in one read/write pass after comparisons and
+    optional provenance fields; preregistration and config-hash gates enforced
+    upstream of this entry point.
 
-    ``timings_out`` (when provided) is populated in-place with per-author
-    stage wall-clock seconds plus the newsroom-wide ``compare`` and ``total``
-    buckets so the bench script can emit non-zero per-stage measurements.
-
-    ``mp_context`` selects the ``multiprocessing`` start method for the
-    worker pool (e.g. ``"fork"`` / ``"spawn"`` / ``"forkserver"``). When
-    omitted, the orchestrator uses ``"spawn"`` (C-09 / macOS-safe). The
-    ``"fork"`` context inherits the parent process' module state — pass
-    ``mp_context="fork"`` in ``tests/integration/test_parallel_parity.py``-style
-    fixtures so monkeypatched ``uuid4`` / ``datetime`` pinning propagates into
-    workers; do not use ``fork`` in production after native libs load.
+    ``compare_pair`` forces ``(target_slug, control_slug)`` for a one-off CLI
+    comparison. ``timings_out`` receives per-author stage seconds plus aggregate
+    ``compare`` and ``total``. ``mp_context`` overrides the process pool start
+    method (default ``spawn``); tests may pass ``fork`` so module-level patches
+    propagate to workers, which is unsafe once native libraries are loaded.
     """
     # Parent dirs for analysis outputs are created inside the write helpers
     # (``write_json_artifact`` / ``write_corpus_custody``); no explicit mkdir
@@ -134,18 +120,14 @@ def run_full_analysis(
 
     write_json_artifact(paths.comparison_report_json(), comparison_payload)
 
-    _merge_run_metadata(paths, results, comparison_payload)
     scraped = read_latest_scraped_at_iso(paths.db_path)
-    if scraped:
-        meta_path = paths.run_metadata_json()
-        meta = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.is_file() else {}
-        meta["last_scraped_at"] = scraped
-        write_json_artifact(meta_path, meta)
-    if sensitivity_summary:
-        meta_path = paths.run_metadata_json()
-        meta = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.is_file() else {}
-        meta["section_residualized_sensitivity"] = sensitivity_summary
-        write_json_artifact(meta_path, meta)
+    _merge_run_metadata(
+        paths,
+        results,
+        comparison_payload,
+        last_scraped_at=scraped,
+        section_residualized_sensitivity=sensitivity_summary if sensitivity_summary else None,
+    )
 
     write_corpus_custody(paths.db_path, paths.analysis_dir)
 

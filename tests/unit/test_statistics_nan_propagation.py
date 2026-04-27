@@ -118,6 +118,7 @@ def test_hypothesis_test_from_legacy_defaults_sample_fields() -> None:
     assert t.skipped_reason is None
     assert t.degenerate is False
     assert t.cross_author_corrected_p is None
+    assert t.cross_author_correction_reason is None
 
 
 def test_compute_n_rankable_features_per_family_counts_distinct_features() -> None:

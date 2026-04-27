@@ -45,3 +45,22 @@ jobs:
             test-results.xml
             coverage.json
           retention-days: 5
+
+  integration:
+    name: Integration tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: tests
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+      - run: uv python install 3.13
+      - run: uv sync --frozen --extra dev --extra tui
+
+      - name: Install spaCy English model (feature extraction)
+        run: uv run python -m spacy download en_core_web_md
+
+      - name: Run integration-marked tests
+        run: uv run pytest tests/ -m integration -v --no-cov

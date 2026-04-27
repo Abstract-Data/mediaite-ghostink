@@ -436,10 +436,25 @@ def apply_correction(
     ]
 
 
-def _bh_adjusted_pvalues(p_values: list[float]) -> list[float]:
-    """Benjamini–Hochberg adjusted *p* in the same index order as ``p_values``."""
+def _bh_adjusted_pvalues(
+    p_values: list[float],
+    *,
+    slugs: list[str] | None = None,
+) -> list[float]:
+    """Benjamini–Hochberg adjusted *p* in the same index order as ``p_values``.
+
+    When ``slugs`` is provided (same length as ``p_values``), ties on *p* are
+    broken lexicographically by slug so ordering is stable across dict/input
+    permutations.
+    """
     n_r = len(p_values)
-    order = sorted(range(n_r), key=lambda i: p_values[i])
+    if slugs is not None and len(slugs) != n_r:
+        msg = "slugs length must match p_values"
+        raise ValueError(msg)
+    if slugs is None:
+        order = sorted(range(n_r), key=lambda i: (p_values[i], str(i)))
+    else:
+        order = sorted(range(n_r), key=lambda i: (p_values[i], slugs[i]))
     bh = [0.0] * n_r
     for rank, oi in enumerate(order, start=1):
         bh[oi] = min(float(p_values[oi]) * n_r / rank, 1.0)
@@ -462,26 +477,30 @@ def _min_rankable_corrected_p(tests: list[HypothesisTest]) -> float | None:
 def _cross_author_adjustments_for_family(
     fam: str,
     slug_map: dict[str, list[HypothesisTest]],
-) -> dict[tuple[str, str], float]:
+) -> tuple[dict[tuple[str, str], float | None], dict[tuple[str, str], str | None]]:
     entries: list[tuple[str, float]] = []
     for slug, ts in slug_map.items():
         m = _min_rankable_corrected_p(ts)
         if m is not None:
             entries.append((slug, m))
-    out: dict[tuple[str, str], float] = {}
+    out_p: dict[tuple[str, str], float | None] = {}
+    out_r: dict[tuple[str, str], str | None] = {}
     n_r = len(entries)
     if n_r == 0:
-        return out
+        return out_p, out_r
     if n_r < 2:
-        for slug, pmin in entries:
-            out[(slug, fam)] = pmin
-        return out
-    slugs_order = [e[0] for e in entries]
-    pvals = [e[1] for e in entries]
-    bh_vals = _bh_adjusted_pvalues(pvals)
+        for slug, _pmin in entries:
+            key = (slug, fam)
+            out_p[key] = None
+            out_r[key] = "single-author-no-cross-correction"
+        return out_p, out_r
+    entries_sorted = sorted(entries, key=lambda e: (e[1], e[0]))
+    slugs_order = [e[0] for e in entries_sorted]
+    pvals = [e[1] for e in entries_sorted]
+    bh_vals = _bh_adjusted_pvalues(pvals, slugs=slugs_order)
     for i, slug in enumerate(slugs_order):
-        out[(slug, fam)] = bh_vals[i]
-    return out
+        out_p[(slug, fam)] = bh_vals[i]
+    return out_p, out_r
 
 
 def apply_cross_author_correction(
@@ -495,8 +514,9 @@ def apply_cross_author_correction(
     author-level minima, then stamps ``cross_author_corrected_p`` on *all*
     hypothesis rows for that author × family with the adjusted value.
 
-    Families with fewer than two contributing authors copy the lone minimum
-    through unchanged (no cross-author inflation).
+    Families with fewer than two contributing authors leave
+    ``cross_author_corrected_p`` unset (``None``) and set
+    ``cross_author_correction_reason`` to ``single-author-no-cross-correction``.
     """
     from forensics.analysis.feature_families import family_for
 
@@ -508,17 +528,28 @@ def apply_cross_author_correction(
                 continue
             inv_family[fam][slug].append(t)
 
-    adjustments: dict[tuple[str, str], float] = {}
+    adjustments_p: dict[tuple[str, str], float | None] = {}
+    adjustments_r: dict[tuple[str, str], str | None] = {}
     for fam, slug_map in inv_family.items():
-        adjustments.update(_cross_author_adjustments_for_family(fam, slug_map))
+        p_part, r_part = _cross_author_adjustments_for_family(fam, slug_map)
+        adjustments_p.update(p_part)
+        adjustments_r.update(r_part)
 
     out: dict[str, list[HypothesisTest]] = {}
     for slug, tests in tests_by_slug.items():
         new_tests: list[HypothesisTest] = []
         for t in tests:
             fam = family_for(t.feature_name)
-            q = adjustments.get((slug, fam))
-            new_tests.append(t.model_copy(update={"cross_author_corrected_p": q}))
+            q = adjustments_p.get((slug, fam))
+            reason = adjustments_r.get((slug, fam))
+            new_tests.append(
+                t.model_copy(
+                    update={
+                        "cross_author_corrected_p": q,
+                        "cross_author_correction_reason": reason,
+                    }
+                )
+            )
         out[slug] = new_tests
     return out
 

@@ -230,8 +230,30 @@ def test_apply_cross_author_correction_two_slugs() -> None:
         n_post=10,
     )
     out = apply_cross_author_correction({"alice": [t_a], "bob": [t_b]})
-    assert out["alice"][0].cross_author_corrected_p is not None
-    assert out["bob"][0].cross_author_corrected_p is not None
+    # Across-author BH on minima (0.01, 0.04) with stable slug tie-break:
+    # adjusted = (0.01*2/1, 0.04*2/2) then backward pass → (0.02, 0.04).
+    assert out["alice"][0].cross_author_corrected_p == pytest.approx(0.02, abs=1e-12)
+    assert out["bob"][0].cross_author_corrected_p == pytest.approx(0.04, abs=1e-12)
+    assert out["alice"][0].cross_author_correction_reason is None
+    assert out["bob"][0].cross_author_correction_reason is None
+
+
+def test_apply_cross_author_correction_single_author_no_pmin_substitution() -> None:
+    lone = HypothesisTest(
+        test_name="welch_t_ttr",
+        feature_name="ttr",
+        author_id="1",
+        raw_p_value=0.02,
+        corrected_p_value=0.02,
+        effect_size_cohens_d=0.5,
+        confidence_interval_95=(0.0, 1.0),
+        significant=False,
+        n_pre=10,
+        n_post=10,
+    )
+    out = apply_cross_author_correction({"solo": [lone]})
+    assert out["solo"][0].cross_author_corrected_p is None
+    assert out["solo"][0].cross_author_correction_reason == "single-author-no-cross-correction"
 
 
 # ---------------------------------------------------------------------------

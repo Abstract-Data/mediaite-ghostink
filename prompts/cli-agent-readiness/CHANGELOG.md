@@ -1,0 +1,9 @@
+# Changelog — cli-agent-readiness
+
+## v0.1.0 — 2026-04-26
+
+- **Model:** claude-opus-4-7
+- **Status:** active
+- **Source audit:** `/Users/johneakin/Downloads/CLI Best Practices for AI Agents.md` (10 principles), scored against the current `forensics` Typer CLI.
+- **Summary:** Initial CLI retrofit prompt covering 10 items derived from a scorecard audit against "CLI Best Practices for AI Agents". Closes the 7 highest-leverage gaps (of 10 principles): #1 machine-readable output, #2 stdout/stderr separation, #3 semantic exit codes, #5 self-discovery + help examples + project SKILL.md, #7 structured error envelope, #2/#9 non-interactive enforcement, transient/HTTP error classification. CRITICAL ordered foundation (items 1–3): JSON envelope helpers + global `--output` plumbing; stdout=data/stderr=logs sweep; semantic exit code schema (0/1/2/3/4/5) with new `docs/EXIT_CODES.md`. HIGH (items 4–7): `commands --json` self-discovery; `Examples:` blocks on every command; structured error envelope helper with `code` + `suggestion`; project `.claude/skills/forensics-cli/SKILL.md` mirrored to `.cursor/skills/`. MEDIUM (items 8–10): `--yes` / `--non-interactive` enforcement on TUI and destructive commands; HTTP transient classification → exit 4; existing-test updates for the new contract. Includes pre-flight, exit-code mapping table, verification protocol with stream-separation check, out-of-scope list, and a definition-of-done checklist. All changes are additive — `text` remains the default output, no top-level command is renamed, no `pyproject.toml` script entry is touched.
+- **Eval impact:** not yet measured. Will be tracked against (a) `uv run pytest tests/ -v --cov=src` baseline, (b) the additive-only `forensics --help` diff, (c) the stream-separation check that every `--output json` invocation produces exactly one JSON line on stdout.

@@ -43,6 +43,23 @@ _REQUIRED_AUTHOR_ARTIFACT_SUFFIXES = (
 )
 
 
+def _persist_isolated_refresh_error(
+    paths: AnalysisArtifactPaths,
+    author_slug: str,
+    exc: BaseException,
+) -> None:
+    """Write a JSON sidecar next to scrape error logs when an isolated worker fails."""
+    err_path = paths.scrape_errors_path / f"isolated_refresh_{author_slug}.json"
+    write_json_artifact(
+        err_path,
+        {
+            "author_slug": author_slug,
+            "job_kind": "isolated_refresh",
+            "error": repr(exc),
+        },
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class IsolatedAuthorAnalysis:
     """One author result produced in a private analysis directory."""
@@ -380,17 +397,27 @@ def _run_isolated_author_jobs(
     if worker_count <= 1:
         isolated_outputs = []
         for slug in slugs:
-            isolated = _isolated_author_worker(
-                slug,
-                paths,
-                config,
-                probability_trajectory_by_slug,
-                run_id,
-                exploratory,
-                allow_pre_phase16_embeddings,
-            )
-            if isolated is not None:
-                isolated_outputs.append(isolated)
+            try:
+                isolated = _isolated_author_worker(
+                    slug,
+                    paths,
+                    config,
+                    probability_trajectory_by_slug,
+                    run_id,
+                    exploratory,
+                    allow_pre_phase16_embeddings,
+                )
+            except Exception as exc:  # noqa: BLE001 — mirror full-analysis worker policy
+                logger.exception(
+                    "isolated refresh worker failed",
+                    extra={"author_slug": slug, "job_kind": "isolated_refresh", "error": repr(exc)},
+                )
+                _persist_isolated_refresh_error(paths, slug, exc)
+                continue
+            if isolated is None:
+                logger.warning("analysis-refresh: skipped %s", slug)
+                continue
+            isolated_outputs.append(isolated)
         return isolated_outputs
     isolated_outputs: list[IsolatedAuthorAnalysis] = []
     ctx = multiprocessing.get_context("spawn")
@@ -408,11 +435,23 @@ def _run_isolated_author_jobs(
             ): slug
             for slug in slugs
         }
-        for future in as_completed(future_to_slug):
-            slug = future_to_slug[future]
-            isolated = future.result()
+        for fut in as_completed(future_to_slug):
+            author_slug = future_to_slug[fut]
+            try:
+                isolated = fut.result()
+            except Exception as exc:  # noqa: BLE001 — mirror full-analysis worker policy
+                logger.exception(
+                    "isolated refresh worker failed",
+                    extra={
+                        "author_slug": author_slug,
+                        "job_kind": "isolated_refresh",
+                        "error": repr(exc),
+                    },
+                )
+                _persist_isolated_refresh_error(paths, author_slug, exc)
+                continue
             if isolated is None:
-                logger.warning("analysis-refresh: skipped %s", slug)
+                logger.warning("analysis-refresh: skipped %s", author_slug)
                 continue
             isolated_outputs.append(isolated)
     return sorted(isolated_outputs, key=lambda item: item.slug)

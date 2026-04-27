@@ -8,6 +8,10 @@ from collections.abc import Iterable, Iterator
 
 import xxhash
 
+# Monotonic fingerprint generation contract (NFKC normalization = v2).
+# See docs/RUNBOOK.md — migrating simhash fingerprints after D-01.
+SIMHASH_FINGERPRINT_VERSION: str = "v2"
+
 
 def content_hash(text: str) -> str:
     """SHA-256 hex digest of the normalized string."""
@@ -88,6 +92,12 @@ def simhash(text: str, hashbits: int = 128) -> int:
     (Hamming distance preservation under near-duplicate perturbations) are
     unchanged; hash *values* are not comparable to pre-migration SHA-256
     fingerprints, so any stored ``dedup_simhash`` columns must be recomputed.
+
+    **Versioning:** fingerprints are tagged :data:`SIMHASH_FINGERPRINT_VERSION`
+    (``v2``) at persistence time. ``v2`` denotes Unicode NFKC normalization via
+    :func:`normalize_text_for_simhash` (D-01). Stale SQLite rows must be
+    excluded from the cached fingerprint set until
+    ``forensics dedup recompute-fingerprints`` is run; see RUNBOOK.
     """
     if hashbits < 1 or hashbits > 256:
         msg = "hashbits must be between 1 and 256"

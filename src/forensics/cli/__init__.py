@@ -90,6 +90,7 @@ def _root(
 # --- Register subcommands ---
 from forensics.cli.analyze import analyze_app  # noqa: E402
 from forensics.cli.calibrate import calibrate_app  # noqa: E402
+from forensics.cli.dedup import dedup_app  # noqa: E402
 from forensics.cli.extract import extract  # noqa: E402
 from forensics.cli.migrate import features_app, migrate  # noqa: E402
 from forensics.cli.report import report  # noqa: E402
@@ -101,6 +102,7 @@ app.add_typer(survey_app, name="survey")
 app.add_typer(calibrate_app, name="calibrate")
 app.add_typer(features_app, name="features")
 app.add_typer(analyze_app, name="analyze")
+app.add_typer(dedup_app, name="dedup")
 app.command(name="extract")(extract)
 app.command(name="report")(report)
 app.command(name="migrate")(migrate)

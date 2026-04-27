@@ -165,6 +165,34 @@ This document maps each punch **ID** to the **primary deliverable** (code path, 
 
 ---
 
+## PR #94 code-review remediation (GitHub PR #94 / branch `notion-review-refactor-run10`)
+
+Closure ledger for [prompts/pr94-review-remediation/current.md](../prompts/pr94-review-remediation/current.md) items 1–19. Status **`closed`** at repo HEAD when this section was added (see **Commit** column; amend if you cherry-pick onto another SHA).
+
+| ID | Status | Commit | Primary evidence |
+|----|--------|--------|-------------------|
+| PR94-01 | closed | `ada924881c4967fc429e1905ed07fac6ec2b2d64` | `parallel.py` — `_run_isolated_author_jobs` catches worker failures; `tests/unit/test_isolated_refresh_resilience.py` |
+| PR94-02 | closed | `ada924881c4967fc429e1905ed07fac6ec2b2d64` | `storage/parquet.py` — `merge_parquet_metadata` tmp + `os.replace`; `tests/unit/test_storage_parquet.py` |
+| PR94-03 | closed | `ada924881c4967fc429e1905ed07fac6ec2b2d64` | `orchestrator/per_author.py` — empty per-author frame → `None` + warning; `tests/unit/test_per_author_empty_filter.py`; GUARDRAILS Sign |
+| PR94-04 | closed | `ada924881c4967fc429e1905ed07fac6ec2b2d64` | `utils/hashing.py` `SIMHASH_FINGERPRINT_VERSION`, `repository` load gate, `cli/dedup.py` `recompute-fingerprints`, migration `004_*`, RUNBOOK simhash section; `tests/unit/test_simhash_migration.py` |
+| PR94-05 | closed | `ada924881c4967fc429e1905ed07fac6ec2b2d64` | `orchestrator/__init__.py` `_PATCH_TARGETS` / `_sync_patchable_globals`; `tests/unit/test_orchestrator_patch_surface.py` |
+| PR94-06 | closed | `ada924881c4967fc429e1905ed07fac6ec2b2d64` | `orchestrator/runner.py` `_merge_run_metadata` single write path |
+| PR94-07 | closed | `ada924881c4967fc429e1905ed07fac6ec2b2d64` | `orchestrator/comparison.py` `_iter_compare_targets` |
+| PR94-08 | closed | `ada924881c4967fc429e1905ed07fac6ec2b2d64` | `runner.py` docstring trimmed to invariants |
+| PR94-09 | closed | `ada924881c4967fc429e1905ed07fac6ec2b2d64` | `statistics.py` BH tie key `(pmin, slug)`; `tests/unit/test_bh_tie_stability.py` |
+| PR94-10 | closed | `ada924881c4967fc429e1905ed07fac6ec2b2d64` | `statistics.py` / `HypothesisTest` single-author cross-author correction reason; `tests/unit/test_statistics.py` |
+| PR94-11 | closed | `ada924881c4967fc429e1905ed07fac6ec2b2d64` | `changepoint.py` + callers imputation; `tests/unit/test_detect_pelt_input_guard.py` |
+| PR94-12 | closed | `ada924881c4967fc429e1905ed07fac6ec2b2d64` | E2E markers + `.github/workflows/ci-tests.yml` `integration` job |
+| PR94-13 | closed | `ada924881c4967fc429e1905ed07fac6ec2b2d64` | `tests/unit/test_scraper_gather_resilience.py` — `collect_article_metadata` path |
+| PR94-14 | closed | `ada924881c4967fc429e1905ed07fac6ec2b2d64` | `corpus_seed.py` + signal assertions in `test_pipeline_end_to_end.py` |
+| PR94-15 | closed | `ada924881c4967fc429e1905ed07fac6ec2b2d64` | `tests/integration/conftest.py` settings cache fixture + follow-on test |
+| PR94-16 | closed | `ada924881c4967fc429e1905ed07fac6ec2b2d64` | `tests/unit/test_simhash_generator.py` |
+| PR94-17 | closed | `ada924881c4967fc429e1905ed07fac6ec2b2d64` | `tests/unit/test_statistics.py` exact BH numeric asserts |
+| PR94-18 | closed | `ada924881c4967fc429e1905ed07fac6ec2b2d64` | `tests/unit/test_parser_html_fuzz.py` sentinel invariant |
+| PR94-19 | closed | `ada924881c4967fc429e1905ed07fac6ec2b2d64` | `tests/unit/test_ai_marker_pre2020_hypothesis.py` expanded strategies |
+
+---
+
 ## Maintenance
 
 When a punch item’s remediation changes materially, update this file **and** append a short note to [HANDOFF.md](../HANDOFF.md). After merges that touch `src/`, refresh the GitNexus graph: `npx gitnexus analyze` (use `npx gitnexus analyze --embeddings` only if `.gitnexus/meta.json` already tracks embeddings; see `AGENTS.md` / `CLAUDE.md`).

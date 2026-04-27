@@ -79,6 +79,11 @@ class AnalysisArtifactPaths:
     def run_metadata_json(self) -> Path:
         return self.analysis_dir / "run_metadata.json"
 
+    @property
+    def scrape_errors_path(self) -> Path:
+        """Directory for ``scrape_errors.jsonl`` and auxiliary per-job error JSON."""
+        return self.project_root / "data"
+
     def combined_umap_json(self) -> Path:
         return self.analysis_dir / "combined_umap.json"
 

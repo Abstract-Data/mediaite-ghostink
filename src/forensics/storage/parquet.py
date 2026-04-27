@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import warnings
 from collections.abc import Sequence
 from pathlib import Path
@@ -88,8 +89,14 @@ def merge_parquet_metadata(path: Path, extra: dict[str, str]) -> None:
     meta = dict(table.schema.metadata or {})
     for k, v in extra.items():
         meta[k.encode("utf-8")] = str(v).encode("utf-8")
-    table = table.replace_schema_metadata(meta)
-    pq.write_table(table, path)
+    new_table = table.replace_schema_metadata(meta)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    try:
+        pq.write_table(new_table, tmp)
+        os.replace(tmp, path)
+    except Exception:
+        tmp.unlink(missing_ok=True)
+        raise
 
 
 def _stamp_parquet_schema_version(path: Path, version: int) -> None:

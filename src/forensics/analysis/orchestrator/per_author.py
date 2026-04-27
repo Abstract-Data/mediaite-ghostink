@@ -323,7 +323,11 @@ def _run_per_author_analysis(
         lf_author = lf_all.filter(pl.col("author_id") == author.id)
         df_author = lf_author.collect()
         if df_author.is_empty():
-            df_author = lf_all.collect()
+            logger.warning(
+                "per_author frame empty after filter; skipping author",
+                extra={"author_slug": author.slug, "author_id": author.id},
+            )
+            return None
         min_w = int(config.analysis.analysis_min_word_count)
         if min_w > 0 and "word_count" in df_author.columns:
             before = int(df_author.height)

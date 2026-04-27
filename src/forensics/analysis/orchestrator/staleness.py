@@ -46,7 +46,11 @@ def _merge_run_metadata(
     paths: AnalysisArtifactPaths,
     results: dict[str, AnalysisResult],
     comparison_payload: dict[str, Any],
+    *,
+    last_scraped_at: str | None = None,
+    section_residualized_sensitivity: dict[str, Any] | None = None,
 ) -> None:
+    """Merge analysis run fields into ``run_metadata.json`` with a single read/write pair."""
     meta_path = paths.run_metadata_json()
     if meta_path.is_file():
         try:
@@ -64,4 +68,8 @@ def _merge_run_metadata(
             "completed_at": datetime.now(UTC).isoformat(),
         }
     )
+    if last_scraped_at:
+        prev["last_scraped_at"] = last_scraped_at
+    if section_residualized_sensitivity:
+        prev["section_residualized_sensitivity"] = section_residualized_sensitivity
     write_json_artifact(meta_path, prev)

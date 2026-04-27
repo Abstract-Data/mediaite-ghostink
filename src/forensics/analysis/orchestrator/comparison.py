@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterator
 from typing import Any
 
 from forensics.analysis.artifact_paths import AnalysisArtifactPaths
 from forensics.analysis.comparison import compare_target_to_controls
 from forensics.config.settings import ForensicsSettings
-from forensics.models.analysis import AnalysisResult
+from forensics.models.analysis import AnalysisResult, ChangePoint
 from forensics.storage.json_io import write_json_artifact
 from forensics.utils.provenance import validate_analysis_result_config_hashes
 
@@ -21,12 +22,7 @@ def _resolve_targets_and_controls(
     *,
     compare_pair: tuple[str, str] | None = None,
 ) -> tuple[list[str], list[str]]:
-    """Resolve the target and control slug lists for the comparison stage.
-
-    When ``compare_pair`` is provided as ``(target_slug, control_slug)`` the
-    explicit pair takes precedence over ``settings.authors`` role assignments
-    so operators can pin a one-off comparison without editing ``config.toml``.
-    """
+    """Resolve target/control slug lists; ``compare_pair`` overrides role-based targets."""
     if compare_pair is not None:
         target_slug, control_slug = compare_pair
         return [target_slug], [control_slug]
@@ -49,6 +45,26 @@ def _validate_compare_artifact_hashes(
         raise ValueError(msg)
 
 
+def _iter_compare_targets(
+    targets: list[str],
+    controls: list[str],
+    paths: AnalysisArtifactPaths,
+    config: ForensicsSettings,
+    *,
+    changepoints_memory: dict[str, list[ChangePoint]] | None,
+    log_prefix: str,
+) -> Iterator[tuple[str, dict[str, Any]]]:
+    for tid in targets:
+        try:
+            report = compare_target_to_controls(
+                tid, controls, paths, settings=config, changepoints_memory=changepoints_memory
+            )
+        except (ValueError, OSError) as exc:
+            logger.warning("%s failed for %s (%s)", log_prefix, tid, exc)
+            continue
+        yield tid, report
+
+
 def _run_target_control_comparisons(
     targets: list[str],
     controls: list[str],
@@ -62,18 +78,15 @@ def _run_target_control_comparisons(
     if active_targets:
         _validate_compare_artifact_hashes(active_targets, controls, paths, config)
     changepoints_memory = {slug: list(res.change_points) for slug, res in results.items()}
-    for tid in active_targets:
-        try:
-            report = compare_target_to_controls(
-                tid,
-                controls,
-                paths,
-                settings=config,
-                changepoints_memory=changepoints_memory,
-            )
-            comparison_payload["targets"][tid] = report
-        except (ValueError, OSError) as exc:
-            logger.warning("analysis: comparison failed for %s (%s)", tid, exc)
+    for tid, report in _iter_compare_targets(
+        active_targets,
+        controls,
+        paths,
+        config,
+        changepoints_memory=changepoints_memory,
+        log_prefix="analysis: comparison",
+    ):
+        comparison_payload["targets"][tid] = report
     return comparison_payload
 
 
@@ -84,17 +97,9 @@ def run_compare_only(
     author_slug: str | None = None,
     compare_pair: tuple[str, str] | None = None,
 ) -> dict[str, Any]:
-    """Regenerate ``comparison_report.json`` from on-disk artifacts.
+    """Rebuild ``comparison_report.json`` from on-disk artifacts.
 
-    When ``compare_pair`` is supplied as ``(target_slug, control_slug)`` the
-    explicit pair takes precedence over both ``author_slug`` and the
-    configured author roles, so operators can pin a one-off comparison
-    without editing ``config.toml``.
-
-    When ``author_slug`` is provided (and ``compare_pair`` is not), the
-    caller always wants that single author compared even if it isn't in the
-    configured target list (matches the pre-Phase-13 CLI contract). A warning
-    is logged so the ambiguity surfaces in the operator's logs.
+    ``compare_pair`` or ``author_slug`` may override configured author roles.
     """
     if compare_pair is not None:
         targets, controls = _resolve_targets_and_controls(
@@ -113,16 +118,15 @@ def run_compare_only(
             targets = [author_slug]
     _validate_compare_artifact_hashes(targets, controls, paths, config)
     out: dict[str, Any] = {"targets": {}}
-    for tid in targets:
-        try:
-            out["targets"][tid] = compare_target_to_controls(
-                tid,
-                controls,
-                paths,
-                settings=config,
-            )
-        except (ValueError, OSError) as exc:
-            logger.warning("compare-only: failed for %s (%s)", tid, exc)
+    for tid, report in _iter_compare_targets(
+        targets,
+        controls,
+        paths,
+        config,
+        changepoints_memory=None,
+        log_prefix="compare-only",
+    ):
+        out["targets"][tid] = report
     if not out.get("targets"):
         logger.warning(
             "comparison_report: empty targets after compare-only — no comparisons written (L-02)"

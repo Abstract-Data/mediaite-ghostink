@@ -103,6 +103,8 @@ class HypothesisTest(BaseModel):
     degenerate: bool = False
     # M-09 — second-pass BH across authors on per-family minima (optional).
     cross_author_corrected_p: float | None = Field(default=None)
+    # Set when cross-author BH is skipped (e.g. single contributing author).
+    cross_author_correction_reason: str | None = Field(default=None)
 
     @classmethod
     def from_legacy(cls, data: Any) -> Self:
@@ -118,6 +120,7 @@ class HypothesisTest(BaseModel):
         payload.setdefault("skipped_reason", None)
         payload.setdefault("degenerate", False)
         payload.setdefault("cross_author_corrected_p", None)
+        payload.setdefault("cross_author_correction_reason", None)
         return cls.model_validate(payload)
 
 

@@ -507,11 +507,12 @@ def changepoints_from_pelt(
     *,
     cost_model: PeltCostModel = "l2",
 ) -> list[ChangePoint]:
-    breaks = detect_pelt(values, pen=pen, cost_model=cost_model)
+    y = _impute_finite_feature_series(np.asarray(values, dtype=float).ravel())
+    breaks = detect_pelt(y, pen=pen, cost_model=cost_model)
     return _changepoints_from_breaks(
         feature_name,
         author_id,
-        values,
+        y,
         timestamps,
         breaks,
         method="pelt",

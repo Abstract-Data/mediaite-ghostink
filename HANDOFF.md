@@ -5200,3 +5200,136 @@ Documentation-only; no code or tests changed.
 
 #### Risks & Next Steps
 - If future work needs artifact-only analyze, open a new ADR revision rather than treating C-06 as “open.”
+
+---
+
+### PR #94 remediation — HIGH items 6–11 (`task-3-high-fixes`)
+**Status:** Complete  
+**Date:** 2026-04-26  
+**Agent/Session:** Cursor agent
+
+#### What Was Done
+- **Item 6:** Extended `_merge_run_metadata` to accept optional `last_scraped_at` and `section_residualized_sensitivity`; `runner.run_full_analysis` performs one merge/write instead of three separate reads/writes.
+- **Item 7:** Added `_iter_compare_targets` in `orchestrator/comparison.py` and routed both comparison loops through it.
+- **Item 8:** Replaced historical runner docstring with invariant-focused description.
+- **Item 9:** `_bh_adjusted_pvalues` accepts optional `slugs` for tie-stable ordering; cross-author path sorts entries by `(pmin, slug)` before BH.
+- **Item 10:** Single-author cross-author path sets `cross_author_corrected_p=None` and stamps `cross_author_correction_reason`; added `HypothesisTest.cross_author_correction_reason` + `from_legacy` default.
+- **Item 11:** `changepoints_from_pelt` imputes via `_impute_finite_feature_series` before `detect_pelt`; regression tests for `detect_pelt` / `changepoints_from_pelt` / `analyze_author_feature_changepoints`.
+
+#### Files Modified
+- `src/forensics/analysis/orchestrator/staleness.py`, `runner.py`, `comparison.py`
+- `src/forensics/analysis/statistics.py`, `changepoint.py`
+- `src/forensics/models/analysis.py`
+- `tests/unit/test_analyze_compare.py`, `test_bh_tie_stability.py`, `test_detect_pelt_input_guard.py`, `test_statistics.py`, `test_statistics_nan_propagation.py`
+
+#### Verification Evidence
+```
+uv run ruff check … (touched paths) && uv run ruff format --check …
+  -> All checks passed
+uv run pytest tests/unit/test_statistics.py tests/unit/test_bh_tie_stability.py \
+  tests/unit/test_detect_pelt_input_guard.py tests/unit/test_analyze_compare.py \
+  tests/unit/test_pelt_l2_swap.py tests/unit/test_section_residualize.py tests/test_analysis.py -q --no-cov
+  -> pass (section_residualize xfail strict as expected)
+```
+
+#### Decisions Made
+- GitNexus MCP unavailable in this session; impact checked via repo grep/call-site review only.
+
+#### Unresolved Questions
+- `parallel.py` isolated-refresh path still performs a second `run_metadata.json` write after `_merge_run_metadata` (out of PR94 item 6 scope, which targeted `runner.py` only).
+
+#### Risks & Next Steps
+- None for this slice; optional follow-up to fold parallel refresh metadata into `_merge_run_metadata` for parity.
+
+---
+
+### PR #94 remediation — MEDIUM/LOW items 12–19 (`task-4-medium-low-tests`)
+**Status:** Complete  
+**Date:** 2026-04-26  
+**Agent/Session:** Cursor agent
+
+#### What Was Done
+- **12:** Removed `@pytest.mark.slow` from E2E; added `integration` job to `.github/workflows/ci-tests.yml` (`needs: tests`, `pytest -m integration`, `en_core_web_md`).
+- **13:** Replaced gather-only unit tests with `collect_article_metadata` + monkeypatched `_ingest_author_posts` (one slug raises; errors JSONL + successful author upserts).
+- **14:** Added `tests/integration/fixtures/e2e/corpus_seed.py` (`seed_two_regime_corpus`) and signal assertions (changepoint near shift, no control CPs, convergence window mass vs control).
+- **15:** `tests/integration/conftest.py` autouse `get_settings.cache_clear()` around integration tests; added `test_get_settings_reflects_env_after_cache_clear` (integration-marked).
+- **16:** New `tests/unit/test_simhash_generator.py` (iterator vs public `simhash`, Hamming after 1-char edit, NFKC digits, empty stability).
+- **17:** `test_apply_cross_author_correction_two_slugs` asserts exact BH-adjusted values `0.02` / `0.04` to `1e-12`.
+- **18:** HTML REST fuzz strategy optionally injects `GHOSTINK_FUZZ_SENTINEL` and asserts it appears in parsed text.
+- **19:** Expanded curated snippets to 35+ and Hypothesis strategy `sampled_from` + generated word lists.
+
+#### Files Modified
+- `.github/workflows/ci-tests.yml`
+- `tests/integration/conftest.py`, `test_pipeline_end_to_end.py`
+- `tests/integration/fixtures/e2e/corpus_seed.py`
+- `tests/unit/test_scraper_gather_resilience.py`, `test_simhash_generator.py`, `test_statistics.py`, `test_parser_html_fuzz.py`, `test_ai_marker_pre2020_hypothesis.py`
+
+#### Verification Evidence
+```
+uv run pytest tests/ -q --no-cov
+  -> all passed (known xfail section_residualize)
+uv run pytest tests/integration/test_pipeline_end_to_end.py -m integration -v --no-cov
+  -> 2 passed
+uv run ruff check / format on touched paths
+  -> clean
+```
+
+#### Decisions Made
+- E2E compares summed `convergence_ratio` across windows plus `compute_composite_score().convergence_score >=` control, because J6 gates often yield `0.0` for both on small fixtures while window-level signal still differs (target 0.8 vs control 0).
+
+#### Unresolved Questions
+- None.
+
+#### Risks & Next Steps
+- CI: confirm reusable workflow surfaces both `tests` and `integration` job results on the GitHub Checks tab for PRs.
+
+---
+
+### PR #94 review remediation — docs closure + full verification (`task-5-docs-verify`)
+**Status:** Complete  
+**Date:** 2026-04-26  
+**Agent/Session:** Cursor agent  
+
+#### What Was Done
+- **Mandatory docs (remediation prompt):** Appended **Agent-learned Sign** for per-author empty Polars filter / no unfiltered fallback (`docs/GUARDRAILS.md`). Updated **E2E + integration** operator guidance: removed stale `@pytest.mark.slow` / default-deselect narrative, documented CI `integration` job alignment, added **“Running integration tests locally”** (`docs/RUNBOOK.md`). Appended **PR94-01 … PR94-19** closure table with evidence pointers (`docs/punch-list-closure-index.md`); simhash migration subsection was already present under RUNBOOK D-01.
+- **Verification gate:** `ruff format --check` initially failed on `src/forensics/storage/repository.py`; ran `uv run ruff format src/forensics/storage/repository.py` so format check passes (style / maintainability only).
+- **PR #94 items 1–19:** Implementation evidence remains in prior Completion Log entries and the touched `src/` / `tests/` paths; this block records **definition-of-done verification** and doc ledger updates only.
+
+#### Files Modified (this task)
+- `docs/GUARDRAILS.md` — Sign: per-author empty frame must not fall back to full multi-author `LazyFrame` / corpus.
+- `docs/RUNBOOK.md` — E2E marker/CI story + “Running integration tests locally”.
+- `docs/punch-list-closure-index.md` — PR #94 remediation closure index (PR94-01–19).
+- `HANDOFF.md` — this block.
+- `src/forensics/storage/repository.py` — Ruff auto-format only (no logic change).
+
+#### Verification Evidence
+```
+uv run ruff check .
+  -> All checks passed!
+
+uv run ruff format --check .
+  -> pass (after formatting repository.py)
+
+uv run pytest tests/ -v --cov=src --cov-report=term-missing
+  -> 968 passed, 3 deselected, 1 xfailed (section_residualize), 3 warnings; coverage total 79.30% (fail_under 75%)
+
+uv run pytest tests/ -m integration -v --no-cov
+  -> 2 passed, 970 deselected, 1 warning (scipy near-identical sample precision)
+
+uv run forensics preflight --output json
+  -> single JSON object on stdout; status "ok"; has_failures false; checks include Config, Python 3.13, spaCy en_core_web_md, disk, embedding model, authors, Quarto (environment-specific paths/messages)
+```
+
+#### GitNexus `detect_changes`
+- **MCP:** `user-gitnexus` / `gitnexus_detect_changes` was **not available** in this Cursor session (server not registered). Re-run when the GitNexus MCP server is enabled: `gitnexus_detect_changes({ "scope": "all" })` (or `staged` before commit) and confirm the reported symbol/file scope matches PR94 intent (`prompts/pr94-review-remediation/current.md` §Verification protocol).
+- **CLI:** `npx gitnexus` vended commands include `analyze`, `impact`, `query`, etc.; there is **no** `detect-changes` subcommand in the local CLI help output — scope review is MCP-driven per project docs.
+
+#### Decisions Made
+- Punch-list **Commit** column uses `ada924881c4967fc429e1905ed07fac6ec2b2d64` as the workspace **HEAD at ledger write time** for the combined PR94 changeset; update the table’s SHA column after the merge commit if it differs from local HEAD.
+
+#### Unresolved Questions
+- None for this task slice.
+
+#### Risks & Next Steps
+- Before merge: enable GitNexus MCP and attach `detect_changes` output to the PR (or paste `git diff --stat origin/main...HEAD` if MCP stays disabled).
+- Commit docs + any pending `src/` changes together or in dependency order per team GitButler / branch policy.
