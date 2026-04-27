@@ -1,11 +1,8 @@
-"""Configuration: TOML + environment-backed settings.
-
-``__all__`` is the supported import surface; ``settings`` remains a deprecated
-lazy proxy for notebook compatibility (``_SettingsProxy`` below).
-"""
+"""TOML + ``FORENSICS_*`` settings. Prefer ``get_settings()`` over ``settings`` proxy."""
 
 import warnings
 
+from forensics.config.analysis_settings import ChangepointMethod, apply_flat_analysis_overrides
 from forensics.config.fingerprint import config_fingerprint, scraper_signal_digest
 from forensics.config.settings import (
     DEFAULT_DB_RELATIVE,
@@ -44,6 +41,8 @@ settings = _SettingsProxy()
 
 __all__ = [
     "DEFAULT_DB_RELATIVE",
+    "ChangepointMethod",
+    "apply_flat_analysis_overrides",
     "config_fingerprint",
     "scraper_signal_digest",
     "AnalysisConfig",

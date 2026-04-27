@@ -12,12 +12,70 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from forensics.config.analysis_settings import AnalysisConfig
 from forensics.config.settings import ForensicsSettings
 from forensics.models.analysis import CorpusCustody
 from forensics.storage.json_io import write_json_artifact
 from forensics.storage.repository import open_repository_connection
 
 CUSTODY_FILENAME = "corpus_custody.json"
+
+
+def _build_recursive_hash_payload(model: BaseModel) -> dict[str, Any]:
+    """Collect hash-flagged fields from nested ``BaseModel`` trees into one flat dict.
+
+    Leaf keys match the legacy flat ``AnalysisConfig`` field names so
+    ``compute_model_config_hash(settings.analysis)`` stays stable across the
+    nested refactor (ADR-0xx).
+    """
+    out: dict[str, Any] = {}
+    for name, info in model.__class__.model_fields.items():
+        val = getattr(model, name)
+        extra = info.json_schema_extra
+        if isinstance(extra, dict) and extra.get("include_in_config_hash") is True:
+            out[name] = val
+        elif isinstance(val, BaseModel):
+            out.update(_build_recursive_hash_payload(val))
+    return out
+
+
+def analysis_config_hash_field_names() -> frozenset[str]:
+    """All leaf field names that participate in :func:`compute_model_config_hash` for analysis."""
+    names: set[str] = set()
+
+    def walk(model_cls: type[BaseModel]) -> None:
+        for field_name, finfo in model_cls.model_fields.items():
+            extra = finfo.json_schema_extra
+            if isinstance(extra, dict) and extra.get("include_in_config_hash") is True:
+                names.add(field_name)
+            ann = finfo.annotation
+            inner = _unwrap_nested_basemodel(ann)
+            if inner is not None:
+                walk(inner)
+
+    walk(AnalysisConfig)
+    return frozenset(names)
+
+
+def _unwrap_nested_basemodel(annotation: Any) -> type[BaseModel] | None:
+    """Resolve ``X``, ``X | None``, etc. to a ``BaseModel`` subclass when present."""
+    from typing import get_args, get_origin
+
+    origin = get_origin(annotation)
+    if origin is not None:
+        for arg in get_args(annotation):
+            if arg is type(None):
+                continue
+            inner = _unwrap_nested_basemodel(arg)
+            if inner is not None:
+                return inner
+        return None
+    try:
+        if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+            return annotation
+    except TypeError:
+        return None
+    return None
 
 
 def _collect_hash_enumerated_fields(model: BaseModel) -> set[str] | None:
@@ -61,6 +119,13 @@ def compute_model_config_hash(
         dump_kw["exclude"] = set(exclude)
     if round_trip:
         dump_kw["round_trip"] = True
+
+    if isinstance(config, AnalysisConfig):
+        raw = _build_recursive_hash_payload(config)
+        payload = json.loads(json.dumps(raw, default=str))
+        config_str = json.dumps(payload, sort_keys=True, default=str)
+        return hashlib.sha256(config_str.encode()).hexdigest()[:length]
+
     enumerated = _collect_hash_enumerated_fields(config)
     if enumerated is not None:
         dump_kw["include"] = enumerated

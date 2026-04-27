@@ -1,4 +1,4 @@
-"""Assemble ``FeatureVector`` from extractor dict outputs (DRY for baseline vs main pipeline)."""
+"""Assemble ``FeatureVector`` from per-family extractor dict outputs."""
 
 from __future__ import annotations
 
@@ -21,11 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 def _derive_section(article: Article) -> str:
-    """Derive ``section`` from ``article.url`` (Phase 15 Step J1).
-
-    Logs a WARNING when the regex falls through to ``"unknown"`` so future
-    URL-shape changes surface in routine pipeline runs (per the J1 spec).
-    """
+    """Derive ``section`` from ``article.url``; log WARNING when it is unknown."""
     url_str = str(article.url)
     section = section_from_url(url_str)
     if section == "unknown":

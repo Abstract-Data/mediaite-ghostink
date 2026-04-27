@@ -1,14 +1,7 @@
-"""Pre-registration locking — freeze analysis thresholds before looking at data.
+"""Pre-registration lock: snapshot analysis thresholds + SHA256 for drift checks.
 
-The lock file captures the state of every analysis threshold that affects
-downstream significance decisions, together with a SHA256 content hash for
-tamper detection. The analysis pipeline (and operators) can later verify
-that thresholds have not silently drifted between lock and analysis time.
-
-This is a methodological guardrail: a locked pre-registration converts an
-otherwise exploratory run into a confirmatory one. A missing lock is not a
-hard failure — it is simply exploratory mode — but a *mismatched* lock is
-reported as a violation so humans can decide how to proceed.
+Missing lock → exploratory; mismatch → :func:`verify_preregistration` reports
+``mismatch`` so operators can reconcile thresholds vs. the lock file.
 """
 
 from __future__ import annotations
@@ -43,16 +36,7 @@ PREREGISTERED_TEST_PREFIXES: tuple[str, ...] = ("welch_t", "mann_whitney")
 
 @dataclass(frozen=True)
 class VerificationResult:
-    """Outcome of ``verify_preregistration``.
-
-    ``status`` is one of:
-
-    - ``ok`` — a lock file exists and the current thresholds match it.
-    - ``missing`` — no lock file was found at the expected path.
-    - ``mismatch`` — a lock file exists but one or more thresholds differ
-      from the locked snapshot. ``diffs`` lists human-readable descriptions
-      of each drifted field.
-    """
+    """``verify_preregistration`` outcome: ``ok`` | ``missing`` | ``mismatch`` (+ ``diffs``)."""
 
     status: VerificationStatus
     message: str
@@ -65,49 +49,50 @@ def _default_lock_path() -> Path:
 
 
 def _snapshot_thresholds(settings: ForensicsSettings) -> dict[str, Any]:
-    """Return the canonical dict of locked analysis thresholds."""
+    """Locked analysis-threshold map (preregistered fields)."""
     analysis = settings.analysis
     return {
         "confirmatory_split_date": PREREGISTERED_SPLIT_DATE.isoformat(),
         "confirmatory_features": list(PREREGISTERED_FEATURES),
         "confirmatory_test_prefixes": list(PREREGISTERED_TEST_PREFIXES),
         "multiple_comparison_scope": "global_across_authors",
-        "significance_threshold": analysis.significance_threshold,
-        "effect_size_threshold": analysis.effect_size_threshold,
-        "multiple_comparison_method": analysis.multiple_comparison_method,
-        "bootstrap_iterations": analysis.bootstrap_iterations,
-        "min_articles_for_period": analysis.min_articles_for_period,
-        "embedding_model_revision": analysis.embedding_model_revision,
-        "enable_ks_test": analysis.enable_ks_test,
-        "changepoint_methods": list(analysis.changepoint_methods),
+        "significance_threshold": analysis.hypothesis.significance_threshold,
+        "effect_size_threshold": analysis.hypothesis.effect_size_threshold,
+        "multiple_comparison_method": analysis.hypothesis.multiple_comparison_method,
+        "bootstrap_iterations": analysis.hypothesis.bootstrap_iterations,
+        "min_articles_for_period": analysis.pelt.min_articles_for_period,
+        "embedding_model_revision": analysis.embedding.embedding_model_revision,
+        "enable_ks_test": analysis.hypothesis.enable_ks_test,
+        "changepoint_methods": list(analysis.pelt.changepoint_methods),
         "rolling_windows": list(analysis.rolling_windows),
-        "convergence_window_days": analysis.convergence_window_days,
-        "convergence_min_feature_ratio": analysis.convergence_min_feature_ratio,
-        "convergence_perplexity_drop_ratio": analysis.convergence_perplexity_drop_ratio,
-        "convergence_burstiness_drop_ratio": analysis.convergence_burstiness_drop_ratio,
-        "pelt_penalty": analysis.pelt_penalty,
-        "pelt_cost_model": analysis.pelt_cost_model,
-        "bocpd_hazard_rate": analysis.bocpd_hazard_rate,
-        # Phase 15 Unit 1 — ``bocpd_threshold`` removed; the detection rule is
-        # now parameterised by ``bocpd_detection_mode`` + map_reset knobs.
-        "bocpd_detection_mode": analysis.bocpd_detection_mode,
-        "bocpd_map_drop_ratio": analysis.bocpd_map_drop_ratio,
-        "bocpd_min_run_length": analysis.bocpd_min_run_length,
-        "bocpd_student_t": analysis.bocpd_student_t,
-        "convergence_cp_source": analysis.convergence_cp_source,
-        "convergence_drift_only_pb_threshold": analysis.convergence_drift_only_pb_threshold,
-        "fdr_grouping": analysis.fdr_grouping,
-        "enable_cross_author_correction": analysis.enable_cross_author_correction,
-        "hypothesis_min_segment_n": analysis.hypothesis_min_segment_n,
-        "bocpd_hazard_auto": analysis.bocpd_hazard_auto,
-        "bocpd_expected_changes_per_author": analysis.bocpd_expected_changes_per_author,
-        "pipeline_b_mode": analysis.pipeline_b_mode,
-        "section_residualize_features": analysis.section_residualize_features,
+        "convergence_window_days": analysis.convergence.convergence_window_days,
+        "convergence_min_feature_ratio": analysis.convergence.convergence_min_feature_ratio,
+        "convergence_perplexity_drop_ratio": analysis.convergence.convergence_perplexity_drop_ratio,
+        "convergence_burstiness_drop_ratio": analysis.convergence.convergence_burstiness_drop_ratio,
+        "pelt_penalty": analysis.pelt.pelt_penalty,
+        "pelt_cost_model": analysis.pelt.pelt_cost_model,
+        "bocpd_hazard_rate": analysis.bocpd.bocpd_hazard_rate,
+        # BOCPD: ``bocpd_threshold`` removed (Phase 15 U1); mode + map_reset knobs apply.
+        "bocpd_detection_mode": analysis.bocpd.bocpd_detection_mode,
+        "bocpd_map_drop_ratio": analysis.bocpd.bocpd_map_drop_ratio,
+        "bocpd_min_run_length": analysis.bocpd.bocpd_min_run_length,
+        "bocpd_student_t": analysis.bocpd.bocpd_student_t,
+        "convergence_cp_source": analysis.convergence.convergence_cp_source,
+        "convergence_drift_only_pb_threshold": (
+            analysis.convergence.convergence_drift_only_pb_threshold
+        ),
+        "fdr_grouping": analysis.hypothesis.fdr_grouping,
+        "enable_cross_author_correction": analysis.hypothesis.enable_cross_author_correction,
+        "hypothesis_min_segment_n": analysis.hypothesis.hypothesis_min_segment_n,
+        "bocpd_hazard_auto": analysis.bocpd.bocpd_hazard_auto,
+        "bocpd_expected_changes_per_author": analysis.bocpd.bocpd_expected_changes_per_author,
+        "pipeline_b_mode": analysis.hypothesis.pipeline_b_mode,
+        "section_residualize_features": analysis.hypothesis.section_residualize_features,
     }
 
 
 def _canonical_hash(analysis: dict[str, Any]) -> str:
-    """SHA256 of the sorted, canonical JSON form of ``analysis``."""
+    """SHA256 of sorted canonical JSON for ``analysis``."""
     canonical = json.dumps(analysis, sort_keys=True, separators=(",", ":"), default=str)
     return content_hash(canonical)
 
@@ -116,15 +101,7 @@ def lock_preregistration(
     settings: ForensicsSettings,
     output_path: Path | None = None,
 ) -> Path:
-    """Snapshot current analysis thresholds into a timestamped lock file.
-
-    The payload contains:
-
-    - ``locked_at`` — ISO-8601 UTC timestamp.
-    - ``analysis`` — map of every threshold that influences significance decisions.
-    - ``content_hash`` — SHA256 of the canonical JSON form of ``analysis``
-      for tamper detection.
-    """
+    """Write ``locked_at``, ``analysis`` thresholds, and ``content_hash`` to ``lock_path``."""
     lock_path = output_path if output_path is not None else _default_lock_path()
 
     analysis = _snapshot_thresholds(settings)
@@ -146,13 +123,7 @@ def verify_preregistration(
     settings: ForensicsSettings,
     lock_path: Path | None = None,
 ) -> VerificationResult:
-    """Compare current thresholds against a previously written lock file.
-
-    Returns a :class:`VerificationResult` describing whether the lock is
-    present and whether it still matches. Never raises for a missing lock
-    — that is reported as ``status="missing"`` so callers can distinguish
-    exploratory mode from a true violation.
-    """
+    """Compare live settings to ``lock_path``; missing file → ``missing`` (no raise)."""
     resolved = lock_path if lock_path is not None else _default_lock_path()
     if not resolved.is_file():
         msg = (
@@ -164,11 +135,7 @@ def verify_preregistration(
 
     raw = json.loads(resolved.read_text(encoding="utf-8"))
 
-    # Operator-facing template state: the lock file exists but ``locked_at``
-    # is null and ``analysis`` is absent. Treat it as "missing" (exploratory)
-    # rather than "mismatch" so committing the template alone does not
-    # trip a false-violation warning. Operators must lift ``locked_at`` (and
-    # the ``analysis`` snapshot) before the file becomes a confirmatory lock.
+    # Unfilled template (``locked_at`` null, no ``analysis``) → ``missing``, not ``mismatch``.
     if raw.get("locked_at") is None and not raw.get("analysis"):
         msg = (
             "Pre-registration lock at "
@@ -194,8 +161,7 @@ def verify_preregistration(
             )
 
     if locked_hash is not None and locked_hash != current_hash and not diffs:
-        # Rare: payload was edited in a way that keeps field equality but
-        # changes canonical hash (e.g. reordering). Still a tamper signal.
+        # Field-equal payload but hash drift (e.g. reorder) — still report.
         diffs.append(f"content_hash: locked={locked_hash}, current={current_hash}")
 
     if diffs:

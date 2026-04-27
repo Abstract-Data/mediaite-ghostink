@@ -1,17 +1,4 @@
-"""Build synthetic corpora with known AI splice points for calibration (Phase 12 §4c).
-
-Two corpus variants are produced:
-
-- **Spliced positive** — the first half of an author's real timeline is preserved,
-  the second half is replaced with AI-generated content drawn from the Phase 10
-  baseline. Dates and URLs are kept so the rest of the pipeline still sees a
-  coherent chronology; only ``clean_text`` and ``word_count`` change.
-- **Negative control** — an unmodified copy of the author's archive. The detector
-  should *not* flag these.
-
-The builders are deterministic given a seed: they do not hit the filesystem and
-never mutate input lists.
-"""
+"""Spliced and negative-control corpora (deterministic; no filesystem; inputs unmutated)."""
 
 from __future__ import annotations
 

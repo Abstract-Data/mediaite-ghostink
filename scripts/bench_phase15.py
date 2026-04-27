@@ -166,8 +166,8 @@ def _main() -> int:
 
     # Deferred imports keep the script fast to ``--help`` and avoid costing
     # the full settings / DB stack when the DB is absent.
-    from forensics.analysis.artifact_paths import AnalysisArtifactPaths
     from forensics.config import get_project_root, get_settings
+    from forensics.paths import AnalysisArtifactPaths
     from forensics.utils.provenance import compute_model_config_hash
 
     project_root = get_project_root()

@@ -1,4 +1,4 @@
-"""Target vs control author comparisons and editorial attribution (Phase 7)."""
+"""Target vs control author comparisons and editorial attribution."""
 
 from __future__ import annotations
 
@@ -10,7 +10,6 @@ import numpy as np
 import polars as pl
 from scipy import stats
 
-from forensics.analysis.artifact_paths import AnalysisArtifactPaths
 from forensics.analysis.changepoint import PELT_FEATURE_COLUMNS, analyze_author_feature_changepoints
 from forensics.analysis.convergence import ConvergenceInput, compute_convergence_scores
 from forensics.analysis.drift import load_drift_summary
@@ -18,7 +17,7 @@ from forensics.analysis.evidence import filter_evidence_change_points
 from forensics.config.settings import ForensicsSettings
 from forensics.models.analysis import ChangePoint, ConvergenceWindow, DriftScores
 from forensics.models.author import Author
-from forensics.paths import intervals_overlap, load_feature_frame_for_author
+from forensics.paths import AnalysisArtifactPaths, intervals_overlap, load_feature_frame_for_author
 from forensics.storage.repository import Repository
 from forensics.utils.datetime import timestamps_from_frame
 

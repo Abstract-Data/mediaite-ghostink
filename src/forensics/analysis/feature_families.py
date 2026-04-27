@@ -1,27 +1,9 @@
-"""Feature-family registry for convergence-ratio computation (Phase 15 B1).
+"""Feature-family registry for convergence-ratio over PELT axes (not raw columns).
 
-Groups the 23 features in PELT_FEATURE_COLUMNS (analysis/changepoint.py) into
-6 independent axes. Computing convergence ratio over families rather than
-raw features prevents double-counting the 3 correlated readability features
-and the 5 correlated lexical-richness features.
-
-Phase 15 B-followup (issue #5): the original v0.4.0 design carried two
-single-member families — ``voice`` (``first_person_ratio``) and
-``paragraph_shape`` (``paragraph_length_variance``) — that almost never
-co-fired with the other six. Empirically those two families capped 89.8 %
-of windows at a 6/8 = 0.75 convergence ratio, so no real-world window
-could ever clear 7/8. We fold each single-member feature into its closest
-multi-member relative:
-
-* ``first_person_ratio`` → ``ai_markers`` — first-person suppression is
-  one of the register markers AI tools systematically affect (alongside
-  hedging and formula openings).
-* ``paragraph_length_variance`` → ``sentence_structure`` — paragraph
-  shape is structural variance at the same syntactic level the rest of
-  the family already measures (sentence length, clause depth).
-
-The new family count is 6, so the theoretical ceiling for
-``convergence_ratio`` becomes 1.00 (6/6) instead of 0.75 (6/8).
+Six families avoid double-counting correlated readability/lexical blocks.
+Issue #5: former single-member ``voice`` and ``paragraph_shape`` capped windows
+at 6/8 (~89.8% of windows); ``first_person_ratio`` merges into ``ai_markers``,
+``paragraph_length_variance`` into ``sentence_structure``, for a 6/6 ceiling.
 """
 
 from __future__ import annotations

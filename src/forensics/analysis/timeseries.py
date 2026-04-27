@@ -1,4 +1,4 @@
-"""Rolling statistics, STL-style decomposition, Chow, CUSUM, burst heuristics (Phase 5)."""
+"""Rolling statistics, STL-style decomposition, Chow, CUSUM, burst heuristics."""
 
 from __future__ import annotations
 
@@ -11,10 +11,13 @@ from typing import Any
 import numpy as np
 import polars as pl
 
-from forensics.analysis.artifact_paths import AnalysisArtifactPaths
 from forensics.analysis.changepoint import PELT_FEATURE_COLUMNS
 from forensics.config.settings import ForensicsSettings
-from forensics.paths import load_feature_frame_for_author, resolve_author_rows
+from forensics.paths import (
+    AnalysisArtifactPaths,
+    load_feature_frame_for_author,
+    resolve_author_rows,
+)
 from forensics.storage.json_io import write_text_atomic
 from forensics.storage.parquet import write_parquet_atomic
 from forensics.storage.repository import Repository

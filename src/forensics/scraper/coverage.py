@@ -1,4 +1,4 @@
-"""D-03 — scrape coverage summary from ``scrape_errors.jsonl``."""
+"""Summaries derived from ``scrape_errors.jsonl``."""
 
 from __future__ import annotations
 
@@ -53,7 +53,7 @@ def write_crawl_summary_json(
     errors_path: Path,
     output_path: Path,
 ) -> Path | None:
-    """L-04 — per-author error counts + global totals; written next to ``scrape_errors.jsonl``."""
+    """Per-author error counts and global totals next to ``scrape_errors.jsonl``."""
     if not errors_path.is_file():
         return None
     by_author: Counter[str] = Counter()

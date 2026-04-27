@@ -1,4 +1,4 @@
-"""Productivity-style temporal features (Phase 4)."""
+"""Productivity-style temporal features."""
 
 from __future__ import annotations
 

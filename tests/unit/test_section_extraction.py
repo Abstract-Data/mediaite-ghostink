@@ -71,11 +71,6 @@ def test_section_from_url_regression_pins(url: str, expected: str) -> None:
     assert section_from_url(url) == expected
 
 
-# ---------------------------------------------------------------------------
-# Assembler / parquet integration
-# ---------------------------------------------------------------------------
-
-
 def _empty_extractor_dicts() -> dict[str, dict[str, object]]:
     """Build per-family extractor dicts with default scalars (one place to maintain)."""
     return {
@@ -150,11 +145,6 @@ def test_feature_vector_default_section_is_unknown() -> None:
         timestamp=datetime(2024, 1, 1, tzinfo=UTC),
     )
     assert fv.section == "unknown"
-
-
-# ---------------------------------------------------------------------------
-# Migration script verification — legacy v1 parquet → v2 with section column
-# ---------------------------------------------------------------------------
 
 
 def test_migration_derives_section_from_legacy_url_column(tmp_path: Path) -> None:

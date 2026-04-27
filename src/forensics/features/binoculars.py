@@ -1,9 +1,4 @@
-"""Phase 9 — Binoculars score (Hans et al. 2024).
-
-The Binoculars method compares perplexity of a text under a base model to the
-cross-perplexity between the base and an instruct-tuned companion. Low ratios
-(< ~0.9) indicate AI-generated text.
-"""
+"""Binoculars score (Hans et al. 2024): base vs instruct cross-perplexity; low ratio → AI-like."""
 
 from __future__ import annotations
 

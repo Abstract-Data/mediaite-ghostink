@@ -1,9 +1,4 @@
-"""Dependency check screen (Phase 12 §2e).
-
-Surfaces environment readiness: Python version, spaCy model, sentence-
-transformers, Quarto, Ollama. Core logic lives in :func:`check_dependencies`
-so the data model is unit-testable without a running Textual app.
-"""
+"""Dependency check screen; probes live in :func:`check_dependencies` for unit tests."""
 
 from __future__ import annotations
 
@@ -44,11 +39,6 @@ class DependencyCheckResult:
     def is_blocker(self) -> bool:
         """True when the dependency is required and did not pass."""
         return self.required and self.status == "fail"
-
-
-# ---------------------------------------------------------------------------
-# Individual probes — each returns a :class:`DependencyCheckResult`.
-# ---------------------------------------------------------------------------
 
 
 def _check_python() -> DependencyCheckResult:
@@ -105,8 +95,7 @@ def _check_sentence_transformers() -> DependencyCheckResult:
             version="not importable",
             install_hint="uv sync",
         )
-    # Cache present? Not strictly required — model auto-downloads on first
-    # use, so treat missing cache as ``warn``.
+    # Missing cache is warn-only (model auto-downloads on first use).
     cache_dir = Path.home() / ".cache" / "torch" / "sentence_transformers"
     cached = cache_dir.exists() and any(cache_dir.glob("*MiniLM*"))
     return DependencyCheckResult(
@@ -189,11 +178,6 @@ def check_dependencies() -> list[DependencyCheckResult]:
 def has_blocking_failures(results: list[DependencyCheckResult]) -> bool:
     """True when any required dependency failed (cannot proceed)."""
     return any(r.is_blocker for r in results)
-
-
-# ---------------------------------------------------------------------------
-# Textual Screen — assembles the table view and Next button.
-# ---------------------------------------------------------------------------
 
 
 class DependencyCheckScreen(Screen):

@@ -8,11 +8,11 @@ from pathlib import Path
 
 import numpy as np
 
-from forensics.analysis.artifact_paths import AnalysisArtifactPaths
 from forensics.analysis.drift import DriftSummary, load_drift_summary
 from forensics.config.settings import AnalysisConfig, ForensicsSettings, ScrapingConfig
 from forensics.models.analysis import DriftScores
 from forensics.models.features import EmbeddingRecord
+from forensics.paths import AnalysisArtifactPaths
 from forensics.storage.parquet import write_embeddings_manifest
 from forensics.storage.repository import Repository, init_db
 

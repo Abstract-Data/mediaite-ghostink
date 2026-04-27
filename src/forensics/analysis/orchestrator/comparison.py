@@ -6,10 +6,10 @@ import logging
 from collections.abc import Iterator
 from typing import Any
 
-from forensics.analysis.artifact_paths import AnalysisArtifactPaths
 from forensics.analysis.comparison import compare_target_to_controls
 from forensics.config.settings import ForensicsSettings
 from forensics.models.analysis import AnalysisResult, ChangePoint
+from forensics.paths import AnalysisArtifactPaths
 from forensics.storage.json_io import write_json_artifact
 from forensics.utils.provenance import validate_analysis_result_config_hashes
 

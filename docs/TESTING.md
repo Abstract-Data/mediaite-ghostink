@@ -48,6 +48,23 @@ uv run pytest tests/unit -x
 - Test suite must pass before merging.
 - Coverage target: 72% (enforced in `pyproject.toml` via `fail_under = 72` on the `forensics` package). Raise this threshold only when the omitted modules are brought under test.
 
+## Deslop and hygiene PR checklist
+
+Use this when trimming AI-generated cruft (comments, nesting, defensive noise) or tightening tests—**correctness and contracts beat cleanliness** (see repository deslop guidance: slice PRs, preserve stage boundaries, avoid silent behavior changes).
+
+- **Diff-first:** Scope edits to churn or explicitly flagged modules; prefer one mergeable slice (directory or theme) with a green targeted test run before widening scope.
+- **Comments:** Remove redundant restatements of Typer/Pydantic mechanics or duplicate config prose; keep or replace with a short factual line anything needed for forensic traceability, preregistration, or non-obvious invariants.
+- **Typing:** Do not add new `# type: ignore` (or `type: ignore[...]`) in `src/` or `tests/` on touched lines without an ADR-tracked exception—CI fails on new ignores in pull requests (see below). Prefer narrowing types, `Protocol`, or a one-line `noqa` with rationale where Ruff applies.
+- **Exceptions:** Narrow `except` to expected types only where tests cover failure modes; do not broaden handlers for readability alone.
+- **Tests:** Do not weaken assertions, shrink parametrization, or replace precise checks with “smoke only” to land a deslop PR—refactor fixtures and constants for clarity without changing the assertion surface.
+
+**Local check (same rule as CI):** after fetching your PR base (e.g. `main`), run:
+
+```bash
+git fetch origin main   # or your PR base branch
+uv run python scripts/check_no_new_type_ignore.py origin/main
+```
+
 ## Known low-coverage hotspots (triage)
 
 After a full `uv run pytest` coverage report, these areas often remain thin until dedicated work lands. Use them as a backlog hint, not a blocker for unrelated PRs:

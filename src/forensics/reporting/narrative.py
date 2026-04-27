@@ -1,23 +1,7 @@
-"""Evidence-chain narrative generation for flagged authors (Phase 12 §6d).
+"""Deterministic evidence-chain prose from :class:`AnalysisResult` (Phase 12 §6d).
 
-Given an :class:`AnalysisResult`, produce a short, factual prose paragraph
-(~200-400 words) summarising what the detector found for a single author.
-The output is designed to be pasted verbatim into a published report, so
-the function is deterministic: the same inputs always yield the same bytes.
-
-The narrative covers:
-
-- Which detectors fired (stylometric change-points, embedding drift,
-  probability convergence).
-- The strongest signals with quantitative effect sizes.
-- Convergence windows and their feature overlap.
-- Embedding-drift acceleration relative to baseline, when computable.
-- Optional natural-control comparison.
-- Pre-registration lock status, when verifiable against disk.
-
-The tone is deliberately conservative — no hype language, no speculation
-about intent. Calibrated hedges (``"no evidence"``, ``"consistent with"``)
-mirror the language used in the preregistration document.
+Same inputs yield identical bytes for paste-in reports. Tone matches
+preregistered hedges; no intent speculation.
 """
 
 from __future__ import annotations
@@ -34,20 +18,14 @@ from forensics.survey.scoring import (
 )
 
 if TYPE_CHECKING:
-    from forensics.analysis.artifact_paths import AnalysisArtifactPaths
+    from forensics.paths import AnalysisArtifactPaths
     from forensics.preregistration import VerificationResult
 
 
-# Phase 15 K6 — stable diagnostic prose. Tests pin the exact wording so the
-# reader-facing message survives prose churn elsewhere in this file.
+# K6: stable diagnostic string (tests pin exact wording).
 PIPELINE_B_DIAGNOSTIC_NOTE: str = (
     "Drift artifacts missing for this author; Pipeline B score reflects partial data."
 )
-
-
-# ---------------------------------------------------------------------------
-# Preregistration helper — deterministic, never raises
-# ---------------------------------------------------------------------------
 
 
 def _preregistration_clause(verification: VerificationResult | None) -> str:
@@ -70,11 +48,6 @@ def _preregistration_clause(verification: VerificationResult | None) -> str:
         "Pre-registration thresholds have drifted since lock; treat the "
         "result as exploratory until the discrepancy is reconciled."
     )
-
-
-# ---------------------------------------------------------------------------
-# Per-signal paragraph builders — each returns a list of sentences
-# ---------------------------------------------------------------------------
 
 
 def _family_representative_pairs(window: ConvergenceWindow) -> list[tuple[str, str]]:
@@ -239,11 +212,6 @@ def _caveat_sentence() -> str:
     )
 
 
-# ---------------------------------------------------------------------------
-# Public entry point
-# ---------------------------------------------------------------------------
-
-
 def generate_evidence_narrative(
     analysis_result: AnalysisResult,
     author_slug: str,
@@ -252,28 +220,9 @@ def generate_evidence_narrative(
     control_count: int = 0,
     preregistration: VerificationResult | None = None,
 ) -> str:
-    """Produce a structured, factual evidence paragraph for a flagged author.
+    """Deterministic evidence paragraph.
 
-    The output is deterministic: identical inputs produce byte-identical
-    output. This makes the function safe to include verbatim in reports
-    under a pre-registration regime.
-
-    Args:
-        analysis_result: The per-author :class:`AnalysisResult` produced by
-            the full analysis pipeline.
-        author_slug: Author slug (e.g. ``"jane-doe"``) — appears verbatim in
-            the opening sentence so the paragraph can be attributed.
-        score: Optional :class:`SurveyScore`; if ``None``, it is computed
-            from ``analysis_result`` on the fly. Supplying the score keeps
-            the narrative consistent with an already-rendered ranking table.
-        control_count: Number of natural-control authors whose scores were
-            below threshold. ``0`` suppresses the controls sentence.
-        preregistration: Optional outcome from
-            :func:`forensics.preregistration.verify_preregistration`. When
-            supplied, the narrative cites lock status.
-
-    Returns:
-        A single paragraph suitable for inclusion in a published report.
+    Optional ``score`` / ``preregistration`` keep copy aligned with tables and lock checks.
     """
     resolved_score = score if score is not None else compute_composite_score(analysis_result)
 
@@ -306,11 +255,6 @@ def generate_evidence_narrative(
     return header + " ".join(sentences)
 
 
-# ---------------------------------------------------------------------------
-# Phase 15 K6 — Pipeline B diagnostic block
-# ---------------------------------------------------------------------------
-
-
 def _author_has_embeddings(slug: str, paths: AnalysisArtifactPaths) -> bool:
     """Mirror ``drift._author_has_embeddings_on_disk`` without importing it.
 
@@ -337,18 +281,7 @@ def pipeline_b_diagnostics_block(
     author_slug: str,
     paths: AnalysisArtifactPaths,
 ) -> str:
-    """Phase 15 K6: emit a one-line diagnostic when drift artifacts are incomplete.
-
-    Mirrors the disk-presence logic that ``load_drift_summary`` uses to emit
-    its WARNING (Phase 15 E2). When embeddings exist on disk but at least
-    one of ``drift.json`` / ``baseline_curve.json`` / ``centroids.npz`` is
-    missing, the reader sees the diagnostic alongside the per-author
-    narrative; otherwise the function returns an empty string and adds
-    nothing to the narrative.
-
-    Returns plain prose (no HTML) so callers can splice it into either the
-    HTML report or a plain-text aggregate without re-stripping markup.
-    """
+    """Plain-text note when embeddings exist but a drift artifact is missing; otherwise empty."""
     if not _author_has_embeddings(author_slug, paths):
         return ""
     if not _has_missing_drift_artifact(author_slug, paths):

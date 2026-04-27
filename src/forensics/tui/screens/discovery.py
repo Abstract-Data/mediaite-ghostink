@@ -1,10 +1,4 @@
-"""Author discovery screen (Phase 12 §2f).
-
-Shows how many authors are already in ``articles.db`` (via
-:meth:`Repository.all_authors`) and lets the user pick between
-blind-survey and hand-pick modes. Writes the choice into
-``app.wizard_state`` so the config generation screen can use it.
-"""
+"""Author discovery: DB count, survey vs hand-pick mode, stores choice on ``app.wizard_state``."""
 
 from __future__ import annotations
 
@@ -79,9 +73,9 @@ class AuthorDiscoveryScreen(Screen):
         yield Button("Continue (n)", id="next-btn", variant="success")
 
     def on_mount(self) -> None:
-        from forensics.config import get_project_root
+        from forensics.config import DEFAULT_DB_RELATIVE, get_project_root
 
-        db_path = get_project_root() / "data" / "articles.db"
+        db_path = get_project_root() / DEFAULT_DB_RELATIVE
         summary = discover_authors_summary(db_path)
 
         status = self.query_one("#status", Static)

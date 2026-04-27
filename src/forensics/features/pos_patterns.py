@@ -1,4 +1,4 @@
-"""POS bigram and dependency-shape features (Phase 4)."""
+"""POS bigram and dependency-shape features."""
 
 from __future__ import annotations
 

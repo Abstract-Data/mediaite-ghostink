@@ -1,19 +1,13 @@
-"""Phase 15 D — shared-byline heuristic.
+"""Heuristic for shared/newsroom bylines.
 
-Detects newsroom-wide / shared accounts (e.g. ``mediaite-staff``,
-``mediaite``, ``the-daily-staff``, multi-author bylines) that should be
-excluded from the survey ranking because they are not single human authors.
-
-Used both at ingest (to stamp :attr:`forensics.models.author.Author.is_shared_byline`)
-and during ``forensics survey`` qualification (post-hoc audit / gate).
+Sets :attr:`~forensics.models.author.Author.is_shared_byline` and survey qualification gates.
 """
 
 from __future__ import annotations
 
 from typing import Final
 
-# Tokens that, when appearing as a hyphen-separated component of the slug,
-# strongly indicate a shared/newsroom account rather than a person.
+# Hyphenated slug components implying a shared account.
 _SHARED_TOKENS: Final[frozenset[str]] = frozenset(
     {
         "staff",

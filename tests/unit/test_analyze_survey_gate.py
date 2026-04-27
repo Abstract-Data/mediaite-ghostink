@@ -29,17 +29,12 @@ from unittest.mock import MagicMock
 import pytest
 import typer
 
-from forensics.cli.analyze import run_analyze
+from forensics.cli.analyze import AnalyzeRequest, run_analyze
 from forensics.config import get_settings
 from forensics.models import Author
 from forensics.storage.repository import Repository
 
 OUTLET = "mediaite.com"
-
-
-# ---------------------------------------------------------------------------
-# fixtures / helpers
-# ---------------------------------------------------------------------------
 
 
 def _make_author(slug: str, *, name: str | None = None, shared: bool = False) -> Author:
@@ -151,11 +146,6 @@ def _stub_stages(monkeypatch: pytest.MonkeyPatch) -> dict[str, MagicMock]:
     }
 
 
-# ---------------------------------------------------------------------------
-# happy path: real single-author slug
-# ---------------------------------------------------------------------------
-
-
 def test_analyze_runs_for_non_shared_author(
     isolated_project: dict[str, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -166,17 +156,12 @@ def test_analyze_runs_for_non_shared_author(
     stages = _stub_stages(monkeypatch)
 
     # Should not raise; convergence + timeseries are the implicit defaults.
-    run_analyze(author="isaac-schorr")
+    run_analyze(AnalyzeRequest(author="isaac-schorr"))
 
     # Sanity check: the orchestrator was actually called for this author.
     stages["full"].assert_called_once()
     _, kwargs = stages["full"].call_args
     assert kwargs.get("author_slug") == "isaac-schorr"
-
-
-# ---------------------------------------------------------------------------
-# edge case: shared byline without flag → gate trips
-# ---------------------------------------------------------------------------
 
 
 def test_analyze_refuses_shared_byline_without_flag(
@@ -189,18 +174,13 @@ def test_analyze_refuses_shared_byline_without_flag(
     stages = _stub_stages(monkeypatch)
 
     with pytest.raises(typer.BadParameter) as excinfo:
-        run_analyze(author="mediaite-staff")
+        run_analyze(AnalyzeRequest(author="mediaite-staff"))
 
     msg = str(excinfo.value)
     assert "shared byline" in msg.lower()
     assert "--include-shared-bylines" in msg
     # No analysis stage should have run when the gate fires.
     stages["full"].assert_not_called()
-
-
-# ---------------------------------------------------------------------------
-# edge case: shared byline WITH flag → gate is bypassed
-# ---------------------------------------------------------------------------
 
 
 def test_analyze_allows_shared_byline_with_flag(
@@ -213,16 +193,11 @@ def test_analyze_allows_shared_byline_with_flag(
     stages = _stub_stages(monkeypatch)
 
     # No exception; full analysis runs for the shared byline.
-    run_analyze(author="mediaite-staff", include_shared_bylines=True)
+    run_analyze(AnalyzeRequest(author="mediaite-staff", include_shared_bylines=True))
 
     stages["full"].assert_called_once()
     _, kwargs = stages["full"].call_args
     assert kwargs.get("author_slug") == "mediaite-staff"
-
-
-# ---------------------------------------------------------------------------
-# edge case: heuristic fallback fires when DB flag is missing
-# ---------------------------------------------------------------------------
 
 
 def test_analyze_refuses_unflagged_shared_via_heuristic(
@@ -239,14 +214,9 @@ def test_analyze_refuses_unflagged_shared_via_heuristic(
     stages = _stub_stages(monkeypatch)
 
     with pytest.raises(typer.BadParameter):
-        run_analyze(author="mediaite-staff")
+        run_analyze(AnalyzeRequest(author="mediaite-staff"))
 
     stages["full"].assert_not_called()
-
-
-# ---------------------------------------------------------------------------
-# happy path: author=None bypasses gate (newsroom-wide invocation)
-# ---------------------------------------------------------------------------
 
 
 def test_analyze_without_author_bypasses_gate(
@@ -263,7 +233,7 @@ def test_analyze_without_author_bypasses_gate(
     stages = _stub_stages(monkeypatch)
 
     # No ``author=`` kwarg — gate must not fire.
-    run_analyze()
+    run_analyze(AnalyzeRequest())
 
     # The orchestrator runs once with author_slug=None (newsroom-wide).
     stages["full"].assert_called_once()
@@ -271,18 +241,7 @@ def test_analyze_without_author_bypasses_gate(
     assert kwargs.get("author_slug") is None
 
 
-# ---------------------------------------------------------------------------
-# extra: explicit signature contract
-# ---------------------------------------------------------------------------
-
-
-def test_run_analyze_accepts_include_shared_bylines_kwarg() -> None:
-    """``run_analyze`` exposes ``include_shared_bylines`` for the typer wrapper."""
-    import inspect
-
-    sig = inspect.signature(run_analyze)
-    assert "include_shared_bylines" in sig.parameters
-    param = sig.parameters["include_shared_bylines"]
-    assert param.default is False
-    # Keyword-only — matches the rest of the signature.
-    assert param.kind == inspect.Parameter.KEYWORD_ONLY
+def test_analyze_request_include_shared_bylines_default() -> None:
+    """``AnalyzeRequest`` carries ``include_shared_bylines`` for CLI and programmatic use."""
+    assert AnalyzeRequest().include_shared_bylines is False
+    assert AnalyzeRequest(include_shared_bylines=True).include_shared_bylines is True

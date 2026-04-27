@@ -12,7 +12,7 @@ from forensics.cli._decorators import forensics_examples
 from forensics.cli._envelope import status
 from forensics.cli._exit import ExitCode
 from forensics.cli.state import get_cli_state
-from forensics.config import get_project_root, get_settings
+from forensics.config import DEFAULT_DB_RELATIVE, get_project_root, get_settings
 from forensics.progress import managed_rich_observer
 from forensics.survey.qualification import QualificationCriteria, qualify_authors
 
@@ -190,7 +190,7 @@ def survey(
     """Run a blind newsroom survey — analyze all qualified authors."""
     settings = get_settings()
     root = get_project_root()
-    db_path = root / "data" / "articles.db"
+    db_path = root / DEFAULT_DB_RELATIVE
 
     overrides: dict[str, object] = {}
     if min_articles is not None:

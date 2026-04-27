@@ -1,35 +1,10 @@
-"""Section-level descriptive report — newsroom-wide diagnostic (Phase 15 J3).
+"""Newsroom-wide section stylometry (centroids, distances, Kruskal–Wallis ranks).
 
-Produces the empirical evidence used to gate Phase 15 J5 (section-residualized
-change-points). For each section that meets the retention thresholds, computes:
-
-1. Centroid: mean vector of numeric stylometric features across every article
-   in the section, newsroom-wide. Persisted as
-   ``data/analysis/section_centroids.json``.
-2. Inter-section cosine distance matrix: N×N matrix of cosine distances
-   between section centroids. Persisted as
-   ``data/analysis/section_distance_matrix.json`` plus a CSV mirror.
-3. Per-feature Kruskal–Wallis ranking: omnibus test for whether the section
-   grouping explains variance in each feature. ``statsmodels.MANOVA`` would
-   be the textbook tool here but ``statsmodels`` is not in
-   ``pyproject.toml``; per-feature Kruskal–Wallis (non-parametric, no
-   distributional assumption) is the documented fallback. Persisted as
-   ``data/analysis/section_feature_ranking.json``.
-
-The human-readable summary lands at ``data/analysis/section_profile_report.md``
-and includes the **J5 gate verdict** (PASS/FAIL/BORDERLINE) computed from:
-
-* gate criterion 1: ≥ 3 feature families with omnibus p < 0.01
-* gate criterion 2: max off-diagonal cosine distance > 0.3
-
-Both criteria must hold for PASS. Exactly one → BORDERLINE (default-disable
-J5 with the borderline note). Neither → FAIL (skip J5 entirely).
-
-Retention thresholds (per section):
-
-* ≥ ``settings.analysis.section_min_articles`` (default 50)
-* ≥ 30 articles authored by ≥ 2 distinct authors (prevents one prolific
-  author from defining a "section")
+Artifacts under ``data/analysis/``: ``section_centroids.json``,
+``section_distance_matrix.json`` (+ CSV), ``section_feature_ranking.json``,
+``section_profile_report.md`` with J5 PASS/FAIL/BORDERLINE (see
+``GATE_MIN_SIGNIFICANT_FAMILIES`` / ``GATE_MIN_MAX_OFF_DIAGONAL_DISTANCE``). Per-section
+retention uses ``section_min_articles`` and a multi-author floor in-module.
 """
 
 from __future__ import annotations

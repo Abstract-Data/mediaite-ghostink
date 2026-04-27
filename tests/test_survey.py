@@ -37,10 +37,6 @@ from forensics.survey.scoring import (
     validate_against_controls,
 )
 
-# ---------------------------------------------------------------------------
-# helpers
-# ---------------------------------------------------------------------------
-
 
 def _make_author(slug: str, name: str | None = None) -> Author:
     return Author(
@@ -84,11 +80,6 @@ def _seed(
         repo.upsert_author(author)
         for a in articles:
             repo.upsert_article(a)
-
-
-# ---------------------------------------------------------------------------
-# qualification
-# ---------------------------------------------------------------------------
 
 
 def test_qualification_filters_by_volume(tmp_db: Path) -> None:
@@ -246,11 +237,6 @@ def test_qualification_include_shared_bylines_escape_hatch(tmp_db: Path) -> None
     assert disqualified == []
     assert len(qualified) == 1
     assert qualified[0].author.slug == "mediaite-staff"
-
-
-# ---------------------------------------------------------------------------
-# scoring
-# ---------------------------------------------------------------------------
 
 
 def _make_analysis(
@@ -440,11 +426,6 @@ def test_pipeline_a_targeted_path_admits_two_ai_marker_hits() -> None:
     # Targeted-effect escape hatch promotes despite Pipeline B silence and zero
     # convergence windows — d=2.13 on AI-markers is unambiguous.
     assert score.strength in {SignalStrength.MODERATE, SignalStrength.STRONG}
-
-
-# ---------------------------------------------------------------------------
-# Phase 15 J6 calibration filters: era + direction + tail trim, drift-only windows
-# ---------------------------------------------------------------------------
 
 
 def _ai_marker_cp(
@@ -752,11 +733,6 @@ def test_natural_controls_identified_from_mixed_results() -> None:
     assert validation.num_controls == 2
     assert validation.mean_composite == pytest.approx((0.05 + 0.08) / 2, rel=1e-4)
     assert validation.max_composite == pytest.approx(0.08)
-
-
-# ---------------------------------------------------------------------------
-# orchestrator (checkpoint / resume / dry-run)
-# ---------------------------------------------------------------------------
 
 
 def _seed_qualified_corpus(tmp_db: Path, slugs: list[str]) -> None:

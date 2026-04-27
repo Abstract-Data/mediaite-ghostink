@@ -1,4 +1,4 @@
-"""Feature extraction pipeline wiring (Phase 4)."""
+"""Feature extraction pipeline wiring."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import logging
 import shutil
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -43,6 +43,7 @@ from forensics.storage.parquet import (
     write_features,
 )
 from forensics.storage.repository import Repository
+from forensics.utils.datetime import utc_archive_stamp
 from forensics.utils.model_cache import KeyedModelCache
 from forensics.utils.url import section_from_url
 
@@ -119,7 +120,7 @@ def _archive_embeddings_if_mismatch(
     expected = (model_name, model_version, str(model_revision or ""))
     triples = {(r.model_name, r.model_version, str(r.model_revision or "")) for r in records}
     if len(triples) > 1:
-        ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+        ts = utc_archive_stamp()
         dest = embed_root.parent / f"embeddings_archive_{ts}"
         logger.warning(
             "Embedding manifest mixes multiple model tuples %s; archiving to %s",
@@ -133,7 +134,7 @@ def _archive_embeddings_if_mismatch(
     got = triples.pop()
     if got == expected:
         return
-    ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    ts = utc_archive_stamp()
     dest = embed_root.parent / f"embeddings_archive_{ts}"
     logger.warning(
         "Embedding model mismatch (manifest=%s/%s@%s, config=%s/%s@%s). Archiving to %s",
@@ -192,15 +193,10 @@ def _extract_features_for_article(
     *,
     peer_windows: _PeerDequeWindows,
 ) -> FeatureVector:
-    """Compute the per-article :class:`FeatureVector`.
+    """Compute one :class:`FeatureVector` (extractors + assembler; no I/O).
 
-    Pure feature computation: runs all six extractors and the assembler, with no
-    DB access, no logging ceremony, and no author-level bookkeeping. Any extractor
-    error propagates to the caller, which owns failure accounting.
-
-    If ``doc`` is provided, it is used directly (enabling bulk spaCy pipelining
-    via :meth:`spacy.Language.pipe` in the caller). Otherwise the document is
-    parsed on demand, preserving the legacy per-article call path.
+    If ``doc`` is omitted, parses ``article.clean_text`` with ``nlp``; if set,
+    uses the caller's pipelined doc (e.g. ``nlp.pipe``).
     """
     if doc is None:
         doc = nlp(article.clean_text)
@@ -281,17 +277,11 @@ def _process_author_batch(
     progress: Progress | None,
     processed_before_batch: int,
 ) -> _AuthorBatchResult:
-    """Run feature extraction for every article of a single author.
-
-    Invokes :func:`_extract_features_for_article` per article, computes and buffers
-    embeddings, writes the per-author NPZ batch, and enforces the per-batch failure
-    ratio. Feature vectors and manifest records are returned for the orchestrator
-    to persist.
-    """
-    model_name = settings.analysis.embedding_model
-    model_version = settings.analysis.embedding_model_version
-    model_revision = settings.analysis.embedding_model_revision
-    max_fail_ratio = settings.analysis.feature_extraction_max_failure_ratio
+    """Extract features (and optional embeddings) for one author's article list."""
+    model_name = settings.analysis.embedding.embedding_model
+    model_version = settings.analysis.embedding.embedding_model_version
+    model_revision = settings.analysis.embedding.embedding_model_revision
+    max_fail_ratio = settings.analysis.embedding.feature_extraction_max_failure_ratio
 
     result = _AuthorBatchResult()
     embed_batch: list[tuple[str, datetime, np.ndarray]] = []
@@ -389,12 +379,9 @@ def _filter_excluded_sections(
     articles: list[Article],
     excluded: frozenset[str],
 ) -> list[Article]:
-    """Drop articles whose URL-derived section is in ``excluded`` (Phase 15 J2).
+    """Drop articles whose URL-derived ``section`` is in ``excluded``.
 
-    A DEBUG line is emitted per dropped article so reviewers can audit
-    contamination after the fact via log capture; the canonical artifact for
-    end-users is the ``excluded_articles.csv`` written by the survey
-    qualification step.
+    Logs DEBUG per dropped row; survey writes ``excluded_articles.csv`` for audits.
     """
     if not excluded:
         return articles
@@ -486,12 +473,10 @@ def extract_all_features(
     project_root: Path | None = None,
     show_rich_progress: bool = True,
 ) -> int:
-    """
-    Run feature extraction for all eligible articles (optionally one author).
+    """Extract features for eligible articles (optional ``author_slug`` filter).
 
-    Writes ``data/features/{slug}.parquet`` and ``data/embeddings/{slug}/batch.npz``
-    (one compressed matrix per author; legacy per-article ``.npy`` files are still read
-    by analysis code).
+    Writes per-slug Parquet under ``paths.features_dir`` and embedding batches under
+    ``paths.embeddings_dir``; analysis may still read legacy per-article ``.npy``.
     """
     root = _resolve_project_root(db_path, project_root)
     paths = AnalysisArtifactPaths.from_project(root, db_path)
@@ -501,9 +486,9 @@ def extract_all_features(
     if not skip_embeddings:
         _archive_embeddings_if_mismatch(
             paths.embeddings_dir,
-            settings.analysis.embedding_model,
-            settings.analysis.embedding_model_version,
-            settings.analysis.embedding_model_revision,
+            settings.analysis.embedding.embedding_model,
+            settings.analysis.embedding.embedding_model_version,
+            settings.analysis.embedding.embedding_model_revision,
         )
 
     with Repository(db_path) as repo:

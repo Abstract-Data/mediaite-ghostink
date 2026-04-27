@@ -1,4 +1,4 @@
-"""Sentence-transformer embeddings (Phase 4)."""
+"""Sentence-transformer embeddings."""
 
 from __future__ import annotations
 

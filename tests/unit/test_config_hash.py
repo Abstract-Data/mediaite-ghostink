@@ -1,27 +1,23 @@
-"""Phase 15 Step 0.4 — analysis config-hash enumeration guard.
-
-Each field decorated with ``json_schema_extra={"include_in_config_hash": True}``
-MUST contribute to the hash; any field without the annotation must NOT change
-the hash when flipped. This test enforces both directions so accidental
-inclusion / exclusion fails fast.
-"""
+"""Guard: ``include_in_config_hash`` fields match the analysis config hash enumerator."""
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import pytest
 
-from forensics.config.settings import AnalysisConfig, FeaturesConfig, ForensicsSettings
+from forensics.config import get_settings
+from forensics.config.analysis_settings import AnalysisConfig, apply_flat_analysis_overrides
+from forensics.config.settings import FeaturesConfig, ForensicsSettings
 from forensics.utils.provenance import (
-    _collect_hash_enumerated_fields,
+    analysis_config_hash_field_names,
     compute_analysis_config_hash,
     compute_config_hash,
     compute_model_config_hash,
 )
 
-# Fields that MUST invalidate the cache when they change (authoritative list —
-# mirror of the ``json_schema_extra`` annotations in ``settings.py``).
+# Mirror ``json_schema_extra`` on ``AnalysisConfig`` (must match provenance enumerator).
 _EXPECTED_HASH_FIELDS_ANALYSIS: set[str] = {
     "pelt_penalty",
     "pelt_cost_model",
@@ -113,16 +109,15 @@ _FLIP_VALUES: dict[str, Any] = {
 
 
 def test_enumerated_fields_match_expected() -> None:
-    enumerated = _collect_hash_enumerated_fields(AnalysisConfig())
-    assert enumerated is not None
-    assert enumerated == _EXPECTED_HASH_FIELDS_ANALYSIS
+    names = analysis_config_hash_field_names()
+    assert names == _EXPECTED_HASH_FIELDS_ANALYSIS
 
 
 @pytest.mark.parametrize("field", sorted(_EXPECTED_HASH_FIELDS_ANALYSIS))
 def test_flipping_hash_field_changes_hash(field: str) -> None:
     base = AnalysisConfig()
     base_hash = compute_model_config_hash(base)
-    flipped = base.model_copy(update={field: _FLIP_VALUES[field]})
+    flipped = apply_flat_analysis_overrides(base, **{field: _FLIP_VALUES[field]})
     assert compute_model_config_hash(flipped) != base_hash, (
         f"flipping {field!r} must change the analysis config hash"
     )
@@ -132,7 +127,7 @@ def test_flipping_hash_field_changes_hash(field: str) -> None:
 def test_flipping_non_hash_field_does_not_change_hash(field: str) -> None:
     base = AnalysisConfig()
     base_hash = compute_model_config_hash(base)
-    flipped = base.model_copy(update={field: _FLIP_VALUES[field]})
+    flipped = apply_flat_analysis_overrides(base, **{field: _FLIP_VALUES[field]})
     assert compute_model_config_hash(flipped) == base_hash, (
         f"flipping {field!r} must NOT change the analysis config hash"
     )
@@ -154,6 +149,39 @@ def test_compute_analysis_config_hash_matches_nested_model_dump() -> None:
         length=16,
         round_trip=True,
     )
+
+
+def test_default_analysis_config_model_hash_golden() -> None:
+    """Golden ``compute_model_config_hash`` for nested defaults (Run 11 / ADR-016).
+
+    If hash-participating defaults or serialization change intentionally, bump
+    this value and document in ``docs/adr/016-analysis-config-nesting.md``.
+    """
+    base = AnalysisConfig()
+    assert compute_model_config_hash(base, length=16, round_trip=True) == "81d550a7032fbe95"
+
+
+def test_e2e_fixture_empty_analysis_hash_matches_default_golden(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Flat TOML with empty ``[analysis]`` must match nested ``AnalysisConfig()`` hash."""
+    fixture = (
+        Path(__file__).resolve().parents[2]
+        / "tests"
+        / "integration"
+        / "fixtures"
+        / "e2e"
+        / "config.toml"
+    )
+    monkeypatch.setenv("FORENSICS_CONFIG_FILE", str(fixture))
+    get_settings.cache_clear()
+    try:
+        settings = get_settings()
+        golden = compute_model_config_hash(AnalysisConfig(), length=16, round_trip=True)
+        assert compute_analysis_config_hash(settings) == golden
+        assert golden == "81d550a7032fbe95"
+    finally:
+        get_settings.cache_clear()
 
 
 def test_pipeline_config_hash_invalidates_when_scraping_hash_field_changes() -> None:

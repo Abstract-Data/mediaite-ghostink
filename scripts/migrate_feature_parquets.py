@@ -22,7 +22,7 @@ import logging
 import sys
 from pathlib import Path
 
-from forensics.config import get_project_root
+from forensics.config import DEFAULT_DB_RELATIVE, get_project_root
 
 # Module names starting with a digit are not importable via ``import``; use
 # ``importlib`` to load the numbered migration module.
@@ -44,7 +44,7 @@ def _main() -> int:
         default=None,
         help=(
             "Path to the SQLite DB used for the article_id -> url JOIN "
-            "(default: <project_root>/data/articles.db)."
+            f"(default: <project_root>/{DEFAULT_DB_RELATIVE.as_posix()})."
         ),
     )
     parser.add_argument(
@@ -59,7 +59,7 @@ def _main() -> int:
     if not root.is_dir():
         logging.warning("features directory not found: %s", root)
         return 0
-    db = args.articles_db or (project_root / "data" / "articles.db")
+    db = args.articles_db or (project_root / DEFAULT_DB_RELATIVE)
     migrated, skipped = _mig.migrate_all(root, dry_run=args.dry_run, articles_db=db)
     logging.info(
         "migrate_feature_parquets: migrated=%d skipped=%d root=%s",

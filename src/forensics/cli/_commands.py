@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 import click
 import typer
@@ -16,18 +16,18 @@ from forensics.cli.state import get_cli_state
 def _serialize_click_param(p: click.Parameter) -> dict[str, Any]:
     typ = p.type
     type_name = getattr(typ, "name", None) or str(typ)
-    choices: list[Any] = []
+    choices: list[object] = []
     raw_choices = getattr(typ, "choices", None)
     if raw_choices is not None:
         try:
             choices = list(raw_choices)
         except TypeError:
             choices = []
-    default: Any = p.default
-    if callable(default):
-        default = None
+    default_raw: object = p.default
+    if callable(default_raw):
+        default: object | None = None
     else:
-        default = jsonable_param_default(default)
+        default = jsonable_param_default(default_raw)
     return {
         "name": p.name,
         "type": type_name,
@@ -45,12 +45,12 @@ def _callback_examples(cmd: click.Command) -> list[str]:
     if cb is None:
         return []
     seen: set[int] = set()
-    cur: Any = cb
+    cur: object | None = cb
     while cur is not None and id(cur) not in seen:
         seen.add(id(cur))
         ex = getattr(cur, "__forensics_examples__", None)
         if isinstance(ex, list) and ex:
-            return list(ex)
+            return cast(list[str], ex)
         cur = getattr(cur, "__wrapped__", None)
     return []
 

@@ -29,11 +29,7 @@ import pytest
 
 from forensics.analysis.statistics import bootstrap_ci
 
-# ---------------------------------------------------------------------------
-# Regression pin — captured once from the post-F1 vectorized implementation
-# (2026-04-24) on the spec's fixed (a, b, seed) triple. Bumping these values
-# must be a deliberate decision, not silent drift.
-# ---------------------------------------------------------------------------
+# Pinned post-F1 vectorized bootstrap reference (bump only deliberately).
 _REF_LO = 0.2601315351229742
 _REF_HI = 1.1295517416236465
 
@@ -45,11 +41,6 @@ def fixed_seed_inputs() -> tuple[list[float], list[float]]:
     a = rng.normal(0.0, 1.0, size=30).tolist()
     b = rng.normal(0.3, 1.0, size=40).tolist()
     return a, b
-
-
-# ---------------------------------------------------------------------------
-# Regression-pin
-# ---------------------------------------------------------------------------
 
 
 def test_vectorized_matches_pinned_reference(
@@ -65,22 +56,12 @@ def test_vectorized_matches_pinned_reference(
     )
 
 
-# ---------------------------------------------------------------------------
-# Edge case
-# ---------------------------------------------------------------------------
-
-
 def test_empty_group_returns_zero_zero() -> None:
     """Either side empty → ``(0.0, 0.0)``, no exception."""
     nonempty = [0.1, 0.2, 0.3, 0.4]
     assert bootstrap_ci([], nonempty) == (0.0, 0.0)
     assert bootstrap_ci(nonempty, []) == (0.0, 0.0)
     assert bootstrap_ci([], []) == (0.0, 0.0)
-
-
-# ---------------------------------------------------------------------------
-# Determinism — same seed reproduces, different seed diverges
-# ---------------------------------------------------------------------------
 
 
 def test_same_seed_is_deterministic_across_runs(

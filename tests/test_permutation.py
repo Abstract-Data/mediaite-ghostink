@@ -107,29 +107,29 @@ def test_analysis_config_convergence_permutation_defaults(
 ) -> None:
     """``AnalysisConfig`` exposes permutation knobs with safe defaults."""
     s = get_settings()
-    assert s.analysis.convergence_use_permutation is False
-    assert s.analysis.convergence_permutation_iterations == 1000
-    assert s.analysis.convergence_permutation_seed == 42
+    assert s.analysis.convergence.convergence_use_permutation is False
+    assert s.analysis.convergence.convergence_permutation_iterations == 1000
+    assert s.analysis.convergence.convergence_permutation_seed == 42
 
 
 def test_analysis_config_convergence_permutation_env_override(
     forensics_config_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Nested ``FORENSICS_ANALYSIS__*`` env vars override TOML defaults."""
-    monkeypatch.setenv("FORENSICS_ANALYSIS__CONVERGENCE_USE_PERMUTATION", "true")
-    monkeypatch.setenv("FORENSICS_ANALYSIS__CONVERGENCE_PERMUTATION_ITERATIONS", "50")
-    monkeypatch.setenv("FORENSICS_ANALYSIS__CONVERGENCE_PERMUTATION_SEED", "7")
+    monkeypatch.setenv("FORENSICS_ANALYSIS__CONVERGENCE__CONVERGENCE_USE_PERMUTATION", "true")
+    monkeypatch.setenv("FORENSICS_ANALYSIS__CONVERGENCE__CONVERGENCE_PERMUTATION_ITERATIONS", "50")
+    monkeypatch.setenv("FORENSICS_ANALYSIS__CONVERGENCE__CONVERGENCE_PERMUTATION_SEED", "7")
     get_settings.cache_clear()
     try:
         s = get_settings()
-        assert s.analysis.convergence_use_permutation is True
-        assert s.analysis.convergence_permutation_iterations == 50
-        assert s.analysis.convergence_permutation_seed == 7
+        assert s.analysis.convergence.convergence_use_permutation is True
+        assert s.analysis.convergence.convergence_permutation_iterations == 50
+        assert s.analysis.convergence.convergence_permutation_seed == 7
     finally:
         for key in (
-            "FORENSICS_ANALYSIS__CONVERGENCE_USE_PERMUTATION",
-            "FORENSICS_ANALYSIS__CONVERGENCE_PERMUTATION_ITERATIONS",
-            "FORENSICS_ANALYSIS__CONVERGENCE_PERMUTATION_SEED",
+            "FORENSICS_ANALYSIS__CONVERGENCE__CONVERGENCE_USE_PERMUTATION",
+            "FORENSICS_ANALYSIS__CONVERGENCE__CONVERGENCE_PERMUTATION_ITERATIONS",
+            "FORENSICS_ANALYSIS__CONVERGENCE__CONVERGENCE_PERMUTATION_SEED",
         ):
             monkeypatch.delenv(key, raising=False)
         get_settings.cache_clear()

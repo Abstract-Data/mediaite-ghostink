@@ -12,7 +12,6 @@ from uuid import uuid4
 import numpy as np
 import polars as pl
 
-from forensics.analysis.artifact_paths import AnalysisArtifactPaths
 from forensics.analysis.changepoint import (
     analyze_author_feature_changepoints,
     write_imputation_stats_artifact,
@@ -41,6 +40,7 @@ from forensics.analysis.utils import pair_months_with_velocities
 from forensics.config.settings import AnalysisConfig, ForensicsSettings
 from forensics.models.analysis import AnalysisResult, ChangePoint, DriftScores
 from forensics.models.features import strict_feature_decode_confirmatory
+from forensics.paths import AnalysisArtifactPaths
 from forensics.preregistration import (
     PREREGISTERED_FEATURES,
     PREREGISTERED_SPLIT_DATE,
@@ -137,10 +137,10 @@ def _run_hypothesis_tests_for_changepoints(
                 bidx,
                 cp.feature_name,
                 author_id,
-                n_bootstrap=analysis_cfg.bootstrap_iterations,
-                bootstrap_seed=analysis_cfg.hypothesis_bootstrap_seed,
-                enable_ks_test=analysis_cfg.enable_ks_test,
-                hypothesis_min_segment_n=analysis_cfg.hypothesis_min_segment_n,
+                n_bootstrap=analysis_cfg.hypothesis.bootstrap_iterations,
+                bootstrap_seed=analysis_cfg.hypothesis.hypothesis_bootstrap_seed,
+                enable_ks_test=analysis_cfg.hypothesis.enable_ks_test,
+                hypothesis_min_segment_n=analysis_cfg.hypothesis.hypothesis_min_segment_n,
             )
         )
     return all_tests
@@ -165,16 +165,15 @@ def _run_preregistered_split_tests(
         finite = raw[np.isfinite(raw)]
         if finite.size == 0:
             continue
-        fill = float(np.nanmedian(finite))
-        series = [float(x) for x in np.nan_to_num(raw, nan=fill)]
+        series = _clean_feature_series(df_author, feature)
         tests = run_hypothesis_tests(
             series,
             split_idx,
             feature,
             author_id,
-            n_bootstrap=analysis_cfg.bootstrap_iterations,
-            bootstrap_seed=analysis_cfg.hypothesis_bootstrap_seed,
-            hypothesis_min_segment_n=analysis_cfg.hypothesis_min_segment_n,
+            n_bootstrap=analysis_cfg.hypothesis.bootstrap_iterations,
+            bootstrap_seed=analysis_cfg.hypothesis.hypothesis_bootstrap_seed,
+            hypothesis_min_segment_n=analysis_cfg.hypothesis.hypothesis_min_segment_n,
         )
         all_tests.extend(test for test in tests if test.test_name.startswith(allowed_prefixes))
     return all_tests
@@ -189,20 +188,20 @@ def _apply_global_test_gates(
         return {slug: [] for slug in tests_by_slug}
     corrected = apply_correction(
         [test for _slug, test in labeled],
-        method=analysis_cfg.multiple_comparison_method,
-        alpha=analysis_cfg.significance_threshold,
+        method=analysis_cfg.hypothesis.multiple_comparison_method,
+        alpha=analysis_cfg.hypothesis.significance_threshold,
     )
     by_slug: dict[str, list] = defaultdict(list)
     for (slug, _), t in zip(labeled, corrected, strict=True):
         by_slug[slug].append(t)
-    if analysis_cfg.enable_cross_author_correction:
+    if analysis_cfg.hypothesis.enable_cross_author_correction:
         by_slug = apply_cross_author_correction(dict(by_slug))
     queues = {slug: deque(tests) for slug, tests in by_slug.items()}
     corrected_in_order = [queues[slug].popleft() for slug, _ in labeled]
     gated = filter_by_effect_size(
         corrected_in_order,
-        analysis_cfg.effect_size_threshold,
-        alpha=analysis_cfg.significance_threshold,
+        analysis_cfg.hypothesis.effect_size_threshold,
+        alpha=analysis_cfg.hypothesis.significance_threshold,
     )
     grouped: dict[str, list] = {slug: [] for slug in tests_by_slug}
     for (slug, _test), gated_test in zip(labeled, gated, strict=True):
@@ -242,7 +241,7 @@ def _load_drift_signals(
         pairs = load_article_embeddings(
             slug,
             paths,
-            expected_revision=config.analysis.embedding_model_revision,
+            expected_revision=config.analysis.embedding.embedding_model_revision,
             exploratory=exploratory,
             allow_pre_phase16_embeddings=allow_pre_phase16_embeddings,
         )

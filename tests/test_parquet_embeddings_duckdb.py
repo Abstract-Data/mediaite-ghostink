@@ -10,8 +10,8 @@ import polars as pl
 import pytest
 from pydantic import ValidationError
 
-from forensics.analysis.artifact_paths import AnalysisArtifactPaths
 from forensics.models.features import EmbeddingRecord
+from forensics.paths import AnalysisArtifactPaths
 from forensics.storage.duckdb_queries import (
     get_ai_marker_spike_detection,
     get_monthly_feature_stats,

@@ -1,11 +1,4 @@
-"""Analyze subcommand — change-point, time-series, drift, convergence, comparison.
-
-The default invocation (``forensics analyze [flags]``) preserves the legacy
-behaviour from before Phase 15 J3. New diagnostics ride on nested
-sub-commands (``forensics analyze section-profile``); the surrounding
-``analyze_app`` is registered with ``invoke_without_command=True`` so
-existing flag-only invocations continue to work unchanged.
-"""
+"""Analyze CLI: default callback plus nested commands (e.g. ``section-profile``)."""
 
 from __future__ import annotations
 
@@ -17,14 +10,35 @@ from typing import Annotated
 
 import typer
 
-from forensics.analysis.artifact_paths import AnalysisArtifactPaths
 from forensics.cli._decorators import examples_epilog, forensics_examples, with_examples
 from forensics.cli._envelope import status
 from forensics.cli._errors import fail
 from forensics.cli._exit import ExitCode
+from forensics.cli.analyze_options import (
+    AnalyzeAiBaselineFlag,
+    AnalyzeAllowPrePhase16EmbeddingsFlag,
+    AnalyzeArticlesPerCellOption,
+    AnalyzeAuthorOption,
+    AnalyzeBaselineModelOption,
+    AnalyzeChangepointFlag,
+    AnalyzeCompareFlag,
+    AnalyzeComparePairOption,
+    AnalyzeConvergenceFlag,
+    AnalyzeDriftFlag,
+    AnalyzeExploratoryFlag,
+    AnalyzeIncludeAdvertorialFlag,
+    AnalyzeIncludeSharedBylinesFlag,
+    AnalyzeMaxWorkersOption,
+    AnalyzeParallelAuthorsFlag,
+    AnalyzeResidualizeSectionsFlag,
+    AnalyzeSkipGenerationFlag,
+    AnalyzeTimeseriesFlag,
+    AnalyzeVerifyCorpusFlag,
+)
 from forensics.cli.state import get_cli_state
-from forensics.config import get_project_root, get_settings
+from forensics.config import DEFAULT_DB_RELATIVE, get_project_root, get_settings
 from forensics.config.settings import ForensicsSettings
+from forensics.paths import AnalysisArtifactPaths
 from forensics.pipeline_context import PipelineContext
 from forensics.preregistration import verify_preregistration
 from forensics.storage.json_io import write_json_artifact
@@ -50,11 +64,7 @@ analyze_app = typer.Typer(
 
 @dataclass(frozen=True, slots=True)
 class AnalyzeContext:
-    """Shared inputs threaded through ``analyze`` stage runners.
-
-    ``paths`` is pre-computed so stage runners can reach any artifact location
-    without re-deriving the project layout on each call.
-    """
+    """Shared paths/settings/slug for analyze stage runners."""
 
     db_path: Path
     settings: ForensicsSettings
@@ -78,7 +88,6 @@ class AnalyzeContext:
         exploratory: bool = False,
         allow_pre_phase16_embeddings: bool = False,
     ) -> AnalyzeContext:
-        """Construct a context from the ambient project layout."""
         return cls(
             db_path=db_path,
             settings=settings,
@@ -92,24 +101,43 @@ class AnalyzeContext:
 
     @property
     def root(self) -> Path:
-        """Project root backing the artifact layout."""
         return self.paths.project_root
 
 
-def _parse_compare_pair(raw: str | None) -> tuple[str, str] | None:
-    """Parse ``--compare TARGET,CONTROL`` into a typed pair.
+@dataclass(frozen=True, slots=True)
+class AnalyzeRequest:
+    """Parameters for :func:`run_analyze` (CLI default callback and programmatic callers)."""
 
-    Returns ``None`` when ``raw`` is ``None`` (the legacy ``--compare`` boolean
-    path). Raises :class:`typer.BadParameter` when the value is malformed so
-    operators get a clear error instead of a silent fall-through to the
-    config-driven target/control resolution.
-    """
+    changepoint: bool = False
+    timeseries: bool = False
+    drift: bool = False
+    convergence: bool = False
+    compare: bool = False
+    ai_baseline: bool = False
+    skip_generation: bool = False
+    verify_corpus: bool = False
+    baseline_model: str | None = None
+    articles_per_cell: int | None = None
+    author: str | None = None
+    exploratory: bool = False
+    include_advertorial: bool = False
+    residualize_sections: bool = False
+    include_shared_bylines: bool = False
+    max_workers: int | None = None
+    compare_pair: tuple[str, str] | None = None
+    parallel_authors: bool = False
+    allow_pre_phase16_embeddings: bool = False
+    typer_context: typer.Context | None = None
+
+
+def _parse_compare_pair(raw: str | None) -> tuple[str, str] | None:
+    """Parse ``TARGET,CONTROL`` for ``--compare-pair``; ``None`` if ``raw`` is unset."""
     if raw is None:
         return None
     parts = [p.strip() for p in raw.split(",")]
     if len(parts) != 2 or not all(parts):
         msg = (
-            f"--compare expected 'TARGET,CONTROL' (got {raw!r}); "
+            f"--compare-pair expected 'TARGET,CONTROL' (got {raw!r}); "
             "both slugs must be non-empty and separated by a single comma."
         )
         raise typer.BadParameter(msg)
@@ -131,7 +159,6 @@ def _run_compare_only_flow(ctx: AnalyzeContext) -> None:
     pipeline_ctx = PipelineContext.resolve()
     rid = pipeline_ctx.record_audit("forensics analyze --compare", optional=False, log=logger)
     assert rid is not None
-    # analysis_dir is mkdir'd inside _write_run_metadata → write_json_artifact.
     analysis_dir = ctx.paths.analysis_dir
     meta = {
         "run_id": rid,
@@ -274,7 +301,7 @@ def _verify_requested_ai_baseline_vectors(
         if not load_ai_baseline_embeddings(
             slug,
             ctx.paths,
-            expected_dim=int(ctx.settings.analysis.embedding_vector_dim),
+            expected_dim=int(ctx.settings.analysis.embedding.embedding_vector_dim),
         ):
             missing.append(slug)
     if missing:
@@ -297,14 +324,9 @@ def _enforce_shared_byline_gate(
     author_slug: str,
     include_shared_bylines: bool,
 ) -> None:
-    """Refuse to analyze a shared-byline author unless the operator opts in.
+    """Block shared-byline authors unless ``--include-shared-bylines``.
 
-    Mirrors the Phase 15 D survey-stage gate (``forensics survey``): the
-    accounts ``mediaite`` and ``mediaite-staff`` aggregate output from many
-    contributors, so single-author stylometry on them is meaningless. We
-    consult both the persisted ``Author.is_shared_byline`` flag (set at
-    ingest) AND the slug heuristic so older databases that pre-date the
-    flag still trip the gate.
+    Uses DB ``is_shared_byline`` and slug heuristic.
     """
     if include_shared_bylines:
         return
@@ -317,8 +339,6 @@ def _enforce_shared_byline_gate(
         flagged = bool(author.is_shared_byline)
         matched_name = author.name
         matched_outlet = author.outlet
-    # Fall back to the configured outlet/name when the slug isn't in the DB
-    # yet — analyze CLI may run before scrape on a fresh checkout.
     if not flagged:
         configured = next((a for a in settings.authors if a.slug == author_slug), None)
         if configured is not None:
@@ -346,15 +366,9 @@ def _apply_per_run_overrides(
     include_advertorial: bool,
     residualize_sections: bool,
 ) -> ForensicsSettings:
-    """Return ``settings`` with per-run CLI escape hatches applied.
+    """Per-run advertorial and section-residualization overrides.
 
-    - ``include_advertorial`` (Phase 15 J2): re-enable advertorial / syndicated
-      sections in features + survey config for this run only.
-    - ``residualize_sections`` (Phase 15 J7): flip the J5 toggle without
-      touching the persisted ``config.toml``.
-
-    Both escapes copy nested config models so the global ``get_settings()``
-    cache is never mutated.
+    Model copies only; does not mutate the ``get_settings()`` cache.
     """
     if include_advertorial:
         settings = settings.model_copy(
@@ -367,54 +381,47 @@ def _apply_per_run_overrides(
         settings = settings.model_copy(
             update={
                 "analysis": settings.analysis.model_copy(
-                    update={"section_residualize_features": True}
+                    update={
+                        "hypothesis": settings.analysis.hypothesis.model_copy(
+                            update={"section_residualize_features": True}
+                        ),
+                    },
                 ),
             }
         )
     return settings
 
 
-def run_analyze(  # noqa: C901
-    *,
-    changepoint: bool = False,
-    timeseries: bool = False,
-    drift: bool = False,
-    convergence: bool = False,
-    compare: bool = False,
-    ai_baseline: bool = False,
-    skip_generation: bool = False,
-    verify_corpus: bool = False,
-    baseline_model: str | None = None,
-    articles_per_cell: int | None = None,
-    author: str | None = None,
-    exploratory: bool = False,
-    include_advertorial: bool = False,
-    residualize_sections: bool = False,
-    include_shared_bylines: bool = False,
-    max_workers: int | None = None,
-    compare_pair: tuple[str, str] | None = None,
-    parallel_authors: bool = False,
-    allow_pre_phase16_embeddings: bool = False,
-    typer_context: typer.Context | None = None,
-) -> None:
-    """Execute the analyze stage as a plain Python function.
+def run_analyze(request: AnalyzeRequest) -> None:  # noqa: C901
+    """Run analyze stages (callable from Typer and from ``forensics all``)."""
+    changepoint = request.changepoint
+    timeseries = request.timeseries
+    drift = request.drift
+    convergence = request.convergence
+    compare = request.compare
+    ai_baseline = request.ai_baseline
+    skip_generation = request.skip_generation
+    verify_corpus = request.verify_corpus
+    baseline_model = request.baseline_model
+    articles_per_cell = request.articles_per_cell
+    author = request.author
+    exploratory = request.exploratory
+    include_advertorial = request.include_advertorial
+    residualize_sections = request.residualize_sections
+    include_shared_bylines = request.include_shared_bylines
+    max_workers = request.max_workers
+    compare_pair = request.compare_pair
+    parallel_authors = request.parallel_authors
+    allow_pre_phase16_embeddings = request.allow_pre_phase16_embeddings
+    typer_context = request.typer_context
 
-    Kept separate from the Typer ``analyze`` callback so the `forensics all`
-    orchestrator can call this without fighting Typer's option defaults.
-
-    ``max_workers`` overrides ``settings.analysis.max_workers`` for this run
-    only — useful when the operator wants to pin the worker count from the
-    command line without editing ``config.toml``. ``compare_pair`` flips on a
-    one-off ``(target, control)`` comparison that bypasses the configured
-    target/control role assignment for this run only.
-    """
     settings = _apply_per_run_overrides(
         get_settings(),
         include_advertorial=include_advertorial,
         residualize_sections=residualize_sections,
     )
     root = get_project_root()
-    db_path = root / "data" / "articles.db"
+    db_path = root / DEFAULT_DB_RELATIVE
     if author is not None:
         _enforce_shared_byline_gate(
             db_path,
@@ -432,7 +439,6 @@ def run_analyze(  # noqa: C901
         exploratory=exploratory,
         allow_pre_phase16_embeddings=allow_pre_phase16_embeddings,
     )
-    # analysis_dir is created by the first write helper that lands an artifact.
     analysis_dir = ctx.paths.analysis_dir
 
     if verify_corpus:
@@ -560,187 +566,53 @@ def run_analyze(  # noqa: C901
 @with_examples(*_ANALYZE_EXAMPLES)
 def analyze(
     ctx: typer.Context,
-    changepoint: Annotated[
-        bool,
-        typer.Option("--changepoint", help="Run change-point detection (PELT/BOCPD)"),
-    ] = False,
-    timeseries: Annotated[
-        bool,
-        typer.Option("--timeseries", help="Run rolling statistics + STL decomposition"),
-    ] = False,
-    drift: Annotated[
-        bool,
-        typer.Option("--drift", help="Run embedding drift analysis (Phase 6)"),
-    ] = False,
-    convergence: Annotated[
-        bool,
-        typer.Option(
-            "--convergence",
-            help="Cross-validate pipelines and run hypothesis tests (Phase 7)",
-        ),
-    ] = False,
-    compare: Annotated[
-        bool,
-        typer.Option("--compare", help="Control author comparison only (Phase 7)"),
-    ] = False,
-    ai_baseline: Annotated[
-        bool,
-        typer.Option("--ai-baseline", help="Generate or refresh synthetic AI baseline articles"),
-    ] = False,
-    skip_generation: Annotated[
-        bool,
-        typer.Option(
-            "--skip-generation",
-            help="With --ai-baseline: re-embed existing JSON articles only",
-        ),
-    ] = False,
-    verify_corpus: Annotated[
-        bool,
-        typer.Option(
-            "--verify-corpus",
-            help="Verify corpus hash against data/analysis/corpus_custody.json",
-        ),
-    ] = False,
-    baseline_model: Annotated[
-        str | None,
-        typer.Option(
-            "--baseline-model",
-            metavar="MODEL",
-            help="With --ai-baseline: restrict to one configured Ollama model",
-        ),
-    ] = None,
-    articles_per_cell: Annotated[
-        int | None,
-        typer.Option(
-            "--articles-per-cell",
-            metavar="N",
-            help="With --ai-baseline: override articles_per_cell (default from config)",
-        ),
-    ] = None,
-    author: Annotated[
-        str | None,
-        typer.Option("--author", metavar="SLUG", help="Limit to one author slug"),
-    ] = None,
-    exploratory: Annotated[
-        bool,
-        typer.Option(
-            "--exploratory",
-            help=(
-                "Allow analysis without a matching pre-registration lock "
-                "and record exploratory mode."
-            ),
-        ),
-    ] = False,
-    include_advertorial: Annotated[
-        bool,
-        typer.Option(
-            "--include-advertorial",
-            help=(
-                "Re-include advertorial / syndicated sections (sponsored, "
-                "partner-content, crosspost) in feature extraction and survey "
-                "qualification for this run; default OFF (Phase 15 J2)."
-            ),
-        ),
-    ] = False,
-    residualize_sections: Annotated[
-        bool,
-        typer.Option(
-            "--residualize-sections",
-            help=(
-                "Toggle J5 section-residualized changepoints for this run "
-                "(flips analysis.section_residualize_features). Default OFF "
-                "matches the persisted config (Phase 15 J7)."
-            ),
-        ),
-    ] = False,
-    include_shared_bylines: Annotated[
-        bool,
-        typer.Option(
-            "--include-shared-bylines",
-            help=(
-                "Re-enable analysis of shared-byline accounts (e.g. "
-                "mediaite-staff, mediaite). Default OFF — matches the Phase "
-                "15 D survey gate, which disqualifies group bylines because "
-                "single-author stylometry on aggregate accounts is "
-                "meaningless. Mirrors ``forensics survey "
-                "--include-shared-bylines``."
-            ),
-        ),
-    ] = False,
-    max_workers: Annotated[
-        int | None,
-        typer.Option(
-            "--max-workers",
-            metavar="N",
-            help=(
-                "Override analysis.max_workers for this run only. N=1 forces "
-                "the legacy serial dispatch; N>1 fans the per-author loop out "
-                "across a ProcessPoolExecutor (Phase 15 G1)."
-            ),
-        ),
-    ] = None,
-    parallel_authors: Annotated[
-        bool,
-        typer.Option(
-            "--parallel-authors",
-            help=(
-                "Refresh configured author analysis artifacts via isolated per-author "
-                "directories, then promote validated outputs and rebuild shared artifacts once."
-            ),
-        ),
-    ] = False,
-    compare_pair: Annotated[
-        str | None,
-        typer.Option(
-            "--compare-pair",
-            metavar="TARGET,CONTROL",
-            help=(
-                "Run a one-off target↔control comparison for the named slugs, "
-                "bypassing the configured author roles. Example: "
-                "'--compare-pair isaac-schorr,john-doe'."
-            ),
-        ),
-    ] = None,
-    allow_pre_phase16_embeddings: Annotated[
-        bool,
-        typer.Option(
-            "--allow-pre-phase16-embeddings",
-            help=(
-                "With --exploratory: load embedding batches whose manifest "
-                "model_revision does not match analysis.embedding_model_revision, "
-                "logging a WARNING instead of failing. Default OFF — confirmatory "
-                "runs always require a matching revision."
-            ),
-        ),
-    ] = False,
+    changepoint: AnalyzeChangepointFlag = False,
+    timeseries: AnalyzeTimeseriesFlag = False,
+    drift: AnalyzeDriftFlag = False,
+    convergence: AnalyzeConvergenceFlag = False,
+    compare: AnalyzeCompareFlag = False,
+    ai_baseline: AnalyzeAiBaselineFlag = False,
+    skip_generation: AnalyzeSkipGenerationFlag = False,
+    verify_corpus: AnalyzeVerifyCorpusFlag = False,
+    baseline_model: AnalyzeBaselineModelOption = None,
+    articles_per_cell: AnalyzeArticlesPerCellOption = None,
+    author: AnalyzeAuthorOption = None,
+    exploratory: AnalyzeExploratoryFlag = False,
+    include_advertorial: AnalyzeIncludeAdvertorialFlag = False,
+    residualize_sections: AnalyzeResidualizeSectionsFlag = False,
+    include_shared_bylines: AnalyzeIncludeSharedBylinesFlag = False,
+    max_workers: AnalyzeMaxWorkersOption = None,
+    parallel_authors: AnalyzeParallelAuthorsFlag = False,
+    compare_pair: AnalyzeComparePairOption = None,
+    allow_pre_phase16_embeddings: AnalyzeAllowPrePhase16EmbeddingsFlag = False,
 ) -> None:
     """Run analysis pipeline (change-point, drift, convergence, comparison)."""
-    # When a sub-command is invoked (e.g. ``analyze section-profile``),
-    # Typer still runs the callback first; let the sub-command own the flow.
     if ctx.invoked_subcommand is not None:
         return
     parsed_pair = _parse_compare_pair(compare_pair)
     run_analyze(
-        changepoint=changepoint,
-        timeseries=timeseries,
-        drift=drift,
-        convergence=convergence,
-        compare=compare,
-        ai_baseline=ai_baseline,
-        skip_generation=skip_generation,
-        verify_corpus=verify_corpus,
-        baseline_model=baseline_model,
-        articles_per_cell=articles_per_cell,
-        author=author,
-        exploratory=exploratory,
-        include_advertorial=include_advertorial,
-        residualize_sections=residualize_sections,
-        include_shared_bylines=include_shared_bylines,
-        max_workers=max_workers,
-        compare_pair=parsed_pair,
-        parallel_authors=parallel_authors,
-        allow_pre_phase16_embeddings=allow_pre_phase16_embeddings,
-        typer_context=ctx,
+        AnalyzeRequest(
+            changepoint=changepoint,
+            timeseries=timeseries,
+            drift=drift,
+            convergence=convergence,
+            compare=compare,
+            ai_baseline=ai_baseline,
+            skip_generation=skip_generation,
+            verify_corpus=verify_corpus,
+            baseline_model=baseline_model,
+            articles_per_cell=articles_per_cell,
+            author=author,
+            exploratory=exploratory,
+            include_advertorial=include_advertorial,
+            residualize_sections=residualize_sections,
+            include_shared_bylines=include_shared_bylines,
+            max_workers=max_workers,
+            compare_pair=parsed_pair,
+            parallel_authors=parallel_authors,
+            allow_pre_phase16_embeddings=allow_pre_phase16_embeddings,
+            typer_context=ctx,
+        )
     )
 
 
@@ -776,11 +648,10 @@ def section_profile_cmd(
 
     settings = get_settings()
     root = get_project_root()
-    db_path = root / "data" / "articles.db"
+    db_path = root / DEFAULT_DB_RELATIVE
     paths = AnalysisArtifactPaths.from_project(root, db_path)
     feat_dir = features_dir if features_dir is not None else paths.features_dir
     analysis_dir = paths.analysis_dir
-    analysis_dir.mkdir(parents=True, exist_ok=True)
 
     result = run_section_profile(
         settings,
@@ -841,11 +712,10 @@ def section_contrast_cmd(
 
     settings = get_settings()
     root = get_project_root()
-    db_path = root / "data" / "articles.db"
+    db_path = root / DEFAULT_DB_RELATIVE
     paths = AnalysisArtifactPaths.from_project(root, db_path)
     feat_dir = features_dir if features_dir is not None else paths.features_dir
     analysis_dir = paths.analysis_dir
-    analysis_dir.mkdir(parents=True, exist_ok=True)
 
     with Repository(db_path) as repo:
         author_rows = resolve_author_rows(repo, settings, author_slug=author)
@@ -878,8 +748,8 @@ def section_contrast_cmd(
             author_id=author_row.id,
             author_slug=author_row.slug,
             analysis_dir=analysis_dir,
-            alpha=settings.analysis.significance_threshold,
-            bh_method=settings.analysis.multiple_comparison_method,
+            alpha=settings.analysis.hypothesis.significance_threshold,
+            bh_method=settings.analysis.hypothesis.multiple_comparison_method,
         )
         written += 1
         if result.disposition == "insufficient_section_volume":

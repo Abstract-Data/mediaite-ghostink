@@ -80,4 +80,4 @@ def test_default_battery_count_and_order_pinned() -> None:
 def test_analysis_config_default_disables_ks() -> None:
     """Settings default keeps KS off; replication runs flip it explicitly."""
     cfg = AnalysisConfig()
-    assert cfg.enable_ks_test is False
+    assert cfg.hypothesis.enable_ks_test is False

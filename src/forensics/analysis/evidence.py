@@ -41,9 +41,10 @@ def filter_evidence_change_points(
     for cp in change_points:
         d_abs = abs(cp.effect_size_cohens_d)
         if cp.method in _PELT_METHODS:
-            if d_abs >= max(analysis_cfg.effect_size_threshold, _PELT_MIN_EFFECT_SIZE):
+            if d_abs >= max(analysis_cfg.hypothesis.effect_size_threshold, _PELT_MIN_EFFECT_SIZE):
                 cohort.append(cp)
             continue
-        if cp.confidence >= min_confidence and d_abs >= analysis_cfg.effect_size_threshold:
+        min_d = analysis_cfg.hypothesis.effect_size_threshold
+        if cp.confidence >= min_confidence and d_abs >= min_d:
             cohort.append(cp)
     return cohort

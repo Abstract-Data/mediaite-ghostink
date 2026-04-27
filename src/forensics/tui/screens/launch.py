@@ -1,10 +1,4 @@
-"""Pipeline launch screen (Phase 12 §2i).
-
-The wizard stops short of actually running the analysis — instead it emits
-the CLI command the user should run next, after a successful confirmation.
-This keeps the TUI process short-lived and lets the user observe pipeline
-logs directly.
-"""
+"""Launch screen: confirms and prints the next CLI command (does not run the pipeline)."""
 
 from __future__ import annotations
 

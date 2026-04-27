@@ -1,8 +1,6 @@
-"""Config generation screen (Phase 12 §2g).
+"""Writes ``config.toml`` from wizard state.
 
-Renders a ``config.toml`` from wizard state, offers an editable preview, and
-writes it to the project root (backing up any existing file first). The core
-``generate_config`` function is unit-testable without a running Textual app.
+``generate_config`` is unit-testable without a running Textual app.
 """
 
 from __future__ import annotations

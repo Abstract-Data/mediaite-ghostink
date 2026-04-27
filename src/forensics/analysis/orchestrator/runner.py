@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 import time
 
-from forensics.analysis.artifact_paths import AnalysisArtifactPaths
 from forensics.analysis.convergence import ProbabilityTrajectory
 from forensics.analysis.orchestrator.comparison import (
     _resolve_targets_and_controls,
@@ -21,6 +20,7 @@ from forensics.analysis.orchestrator.staleness import _merge_run_metadata
 from forensics.analysis.orchestrator.timings import AnalysisTimings
 from forensics.config.settings import ForensicsSettings
 from forensics.models.analysis import AnalysisResult
+from forensics.paths import AnalysisArtifactPaths
 from forensics.storage.json_io import write_json_artifact
 from forensics.utils.provenance import read_latest_scraped_at_iso, write_corpus_custody
 
@@ -42,26 +42,11 @@ def run_full_analysis(
     exploratory: bool = False,
     allow_pre_phase16_embeddings: bool = False,
 ) -> dict[str, AnalysisResult]:
-    """Run changepoint, drift, convergence, and hypothesis stages; persist analysis artifacts.
+    """Run per-author analysis, comparisons, and shared artifacts under ``paths``.
 
-    Loads per-author feature data, runs the configured detectors and statistical
-    battery, writes per-author JSON under ``paths.analysis_dir``, then builds the
-    pooled target-vs-control comparison report. The main process owns shared
-    artifacts (``comparison_report.json``, ``run_metadata.json``,
-    ``corpus_custody.json``); when ``max_workers > 1``, workers return
-    :class:`AnalysisResult` payloads only and write their own per-slug files
-    atomically so SQLite handles are never shared across processes.
-
-    Invariants: stage ordering inside each author matches the timings buckets;
-    ``run_metadata.json`` is merged in one read/write pass after comparisons and
-    optional provenance fields; preregistration and config-hash gates enforced
-    upstream of this entry point.
-
-    ``compare_pair`` forces ``(target_slug, control_slug)`` for a one-off CLI
-    comparison. ``timings_out`` receives per-author stage seconds plus aggregate
-    ``compare`` and ``total``. ``mp_context`` overrides the process pool start
-    method (default ``spawn``); tests may pass ``fork`` so module-level patches
-    propagate to workers, which is unsafe once native libraries are loaded.
+    Parallel mode: workers return :class:`AnalysisResult` and write per-slug JSON
+    only (no shared SQLite). ``compare_pair``, ``timings_out``, and ``mp_context``
+    follow the CLI / test contracts; preregistration gates live upstream.
     """
     # Parent dirs for analysis outputs are created inside the write helpers
     # (``write_json_artifact`` / ``write_corpus_custody``); no explicit mkdir

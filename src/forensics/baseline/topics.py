@@ -67,8 +67,9 @@ def sample_topic_keywords(
         from forensics.config import get_settings
 
         settings = get_settings()
-    n_topics = num_topics if num_topics is not None else settings.analysis.lda_num_topics
-    n_kw = n_keywords if n_keywords is not None else settings.analysis.lda_n_keywords
+    lda_cfg = settings.analysis.content_lda
+    n_topics = num_topics if num_topics is not None else lda_cfg.lda_num_topics
+    n_kw = n_keywords if n_keywords is not None else lda_cfg.lda_n_keywords
     with Repository(db_path) as repo:
         author = repo.get_author_by_slug(author_slug)
         if author is None:

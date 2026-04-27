@@ -1,10 +1,4 @@
-"""Phase 9 — perplexity and burstiness features.
-
-Pure compute functions operate on preloaded ``model`` / ``tokenizer`` handles so
-callers can decide when to bear the ~500MB GPT-2 load cost. Sentence
-segmentation uses a simple regex rather than spaCy so the probability pipeline
-does not require ``en_core_web_md``.
-"""
+"""Perplexity and burstiness; callers pass loaded model/tokenizer (regex sentences, no spaCy)."""
 
 from __future__ import annotations
 

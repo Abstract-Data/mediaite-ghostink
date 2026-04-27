@@ -103,7 +103,7 @@ flowchart LR
 
 ## Models, measurements, and algorithms
 
-Settings below default from [`config.toml`](config.toml) and [`src/forensics/config/settings.py`](src/forensics/config/settings.py); override with **`FORENSICS_`** environment variables (nested keys use `__`, for example `FORENSICS_ANALYSIS__SIGNIFICANCE_THRESHOLD`).
+Settings below default from [`config.toml`](config.toml) and [`src/forensics/config/settings.py`](src/forensics/config/settings.py); override with **`FORENSICS_`** environment variables. Nested analysis knobs use one `__` segment per model level (for example `FORENSICS_ANALYSIS__HYPOTHESIS__SIGNIFICANCE_THRESHOLD` or `FORENSICS_ANALYSIS__CONVERGENCE__CONVERGENCE_USE_PERMUTATION`). See ADR-016 in [`docs/adr/016-analysis-config-nesting.md`](docs/adr/016-analysis-config-nesting.md).
 
 ### NLP and embeddings
 
@@ -388,7 +388,7 @@ uv run forensics -v scrape --help   # example: DEBUG logs for scrape
 | **`extract`** | Feature extraction + embeddings from `data/articles.db`. Options include `--author`, `--skip-embeddings`, and **`--probability`** (requires `--extra probability`). |
 | **`analyze`** | Modes via flags: `--changepoint`, `--timeseries`, `--drift`, `--convergence`, `--compare`, `--ai-baseline`, corpus **`--verify-corpus`**, optional **`--author`**. With **no** analysis flags, the default runs **time-series** plus the **full convergence-oriented** analysis path; add flags to narrow or extend. See `uv run forensics analyze --help`. |
 | **`report`** | Quarto render (`--notebook`, `--format` html|pdf|both, **`--verify`**). Requires per-author analysis artifacts under `data/analysis/`. |
-| **`all`** | End-to-end: full scrape (`dispatch_scrape` with all stage flags false → same path as bare `forensics scrape`) → `extract_all_features` → `run_analyze(timeseries=True, convergence=True)` (**no** `--changepoint` / `--drift` unless you change `pipeline.py`) → `run_report`. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#forensics-all-end-to-end). |
+| **`all`** | End-to-end: full scrape (`dispatch_scrape` with all stage flags false → same path as bare `forensics scrape`) → `extract_all_features` → `run_analyze(AnalyzeRequest(timeseries=True, convergence=True))` (**no** `--changepoint` / `--drift` unless you change `pipeline.py`) → `run_report`. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#forensics-all-end-to-end). |
 | **`validate`**, **`preflight`**, **`survey`**, **`calibrate`**, **`export`**, **`lock-preregistration`**, **`setup`** | Operational and quality workflows — see [`docs/RUNBOOK.md`](docs/RUNBOOK.md). |
 
 ---

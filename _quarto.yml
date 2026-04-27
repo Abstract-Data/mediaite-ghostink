@@ -1,6 +1,21 @@
 project:
   type: book
   output-dir: data/reports
+  render:
+    - index.qmd
+    - notebooks/*.ipynb
+    - "!data/**"
+    - "!docs/**"
+    - "!prompts/**"
+    - "!evals/**"
+    - "!tests/**"
+    - "!scripts/**"
+    - "!HANDOFF.md"
+    - "!TASK.md"
+    - "!AGENTS*.md"
+    - "!CLAUDE.md"
+    - "!README.md"
+    - "!CHANGELOG.md"
 
 book:
   title: "AI Writing Forensics: Mediaite Investigation"

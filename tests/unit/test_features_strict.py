@@ -1,4 +1,4 @@
-"""Phase 16 H — strict vs lenient JSON decode for flat dict feature columns."""
+"""Strict vs lenient JSON decode for flat dict feature columns."""
 
 from __future__ import annotations
 

@@ -171,11 +171,6 @@ def test_metadata_key_constant_is_stable() -> None:
     assert FEATURE_PARQUET_SCHEMA_METADATA_KEY == "forensics.schema_version"
 
 
-# --------------------------------------------------------------------------- #
-# JOIN-path tests (parquets with ``article_id`` only — real corpus shape).    #
-# --------------------------------------------------------------------------- #
-
-
 def _write_articles_db(path: Path, rows: list[tuple[str, str]]) -> None:
     """Build a minimal ``articles`` table at ``path`` with ``(id, url)`` rows.
 

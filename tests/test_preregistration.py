@@ -62,8 +62,6 @@ def test_lock_content_has_thresholds(forensics_config_path: Path, tmp_path: Path
         "bocpd_hazard_rate",
         "bocpd_hazard_auto",
         "bocpd_expected_changes_per_author",
-        # Phase 15 Unit 1 — ``bocpd_threshold`` removed; detection semantics
-        # now parameterised by these knobs.
         "bocpd_detection_mode",
         "bocpd_map_drop_ratio",
         "bocpd_min_run_length",
@@ -76,8 +74,8 @@ def test_lock_content_has_thresholds(forensics_config_path: Path, tmp_path: Path
         "section_residualize_features",
     }
     assert expected_keys.issubset(analysis.keys())
-    assert analysis["significance_threshold"] == settings.analysis.significance_threshold
-    assert analysis["effect_size_threshold"] == settings.analysis.effect_size_threshold
+    assert analysis["significance_threshold"] == settings.analysis.hypothesis.significance_threshold
+    assert analysis["effect_size_threshold"] == settings.analysis.hypothesis.effect_size_threshold
     assert analysis["confirmatory_split_date"] == "2022-11-01"
     assert analysis["multiple_comparison_scope"] == "global_across_authors"
 
@@ -105,7 +103,7 @@ def test_verify_fails_when_significance_changed(
 
     lock_preregistration(settings, output_path=out)
     # Mutate in-place — pydantic v2 models permit attribute assignment by default.
-    settings.analysis.significance_threshold = 0.01
+    settings.analysis.hypothesis.significance_threshold = 0.01
 
     result = verify_preregistration(settings, lock_path=out)
 
@@ -120,7 +118,7 @@ def test_verify_fails_when_methods_changed(forensics_config_path: Path, tmp_path
     out = tmp_path / "lock.json"
 
     lock_preregistration(settings, output_path=out)
-    settings.analysis.changepoint_methods = ["pelt"]
+    settings.analysis.pelt.changepoint_methods = ["pelt"]
 
     result = verify_preregistration(settings, lock_path=out)
 
@@ -141,14 +139,7 @@ def test_no_lock_file_returns_missing(forensics_config_path: Path, tmp_path: Pat
 
 
 def test_unfilled_template_returns_missing(forensics_config_path: Path, tmp_path: Path) -> None:
-    """An operator-template lock (locked_at=null, no analysis) → ``missing``.
-
-    Committing the bare template before filling it must NOT trip a false
-    ``mismatch`` warning — every analysis-threshold key would otherwise be
-    flagged as drift on every run. ``verify_preregistration`` short-circuits
-    the template state to ``missing`` (still exploratory) so the operator
-    sees the same exploratory log line they would see without any file.
-    """
+    """Template with ``locked_at=null`` and no ``analysis`` → ``missing`` (not ``mismatch``)."""
     settings = get_settings()
     out = tmp_path / "preregistration_lock.json"
     template = {
@@ -174,17 +165,7 @@ def test_unfilled_template_returns_missing(forensics_config_path: Path, tmp_path
 def test_committed_template_lock_does_not_violate(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The repo-committed template at ``data/preregistration/preregistration_lock.json``.
-
-    Pinned smoke-test for the J3/J6 follow-up: shipping the template into
-    the repo must not flip every analyze run to ``mismatch``. If a future
-    edit to the template removes ``locked_at`` or hard-codes ``analysis``
-    fields that drift from current settings, this test catches it before
-    the next CI run logs a false violation.
-
-    Uses the **repository** ``config.toml`` (not the minimal test fixture) so
-    the lock is compared against the same thresholds operators ship.
-    """
+    """Repo ``data/preregistration`` template must not verify as ``mismatch`` vs ``config.toml``."""
     repo_root = Path(__file__).resolve().parents[1]
     cfg = repo_root / "config.toml"
     if not cfg.is_file():
@@ -257,7 +238,7 @@ def test_run_analyze_blocks_missing_preregistration(
     monkeypatch.setattr(analyze_mod, "get_project_root", lambda: tmp_path)
 
     with pytest.raises(analyze_mod.typer.Exit):
-        analyze_mod.run_analyze()
+        analyze_mod.run_analyze(analyze_mod.AnalyzeRequest())
 
     assert len(calls) == 1
     assert calls[0] is get_settings()
@@ -297,7 +278,7 @@ def test_run_analyze_records_exploratory_override(
     monkeypatch.setattr(analyze_mod, "_run_timeseries_stage", lambda *a, **k: None)
     monkeypatch.setattr(analyze_mod, "_run_full_analysis_stage", lambda *a, **k: None)
 
-    analyze_mod.run_analyze(exploratory=True)
+    analyze_mod.run_analyze(analyze_mod.AnalyzeRequest(exploratory=True))
 
     assert len(calls) == 1
     meta_path = tmp_path / "data" / "analysis" / "run_metadata.json"

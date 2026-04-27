@@ -63,11 +63,11 @@ def calibrate(
 ) -> None:
     """Run calibration trials and emit sensitivity / specificity / F1 metrics."""
     from forensics.calibration.runner import run_calibration
-    from forensics.config import get_project_root, get_settings
+    from forensics.config import DEFAULT_DB_RELATIVE, get_project_root, get_settings
 
     settings = get_settings()
     root = get_project_root()
-    db_path = root / "data" / "articles.db"
+    db_path = root / DEFAULT_DB_RELATIVE
 
     report = asyncio.run(
         run_calibration(

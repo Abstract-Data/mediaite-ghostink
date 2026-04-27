@@ -10,7 +10,12 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from forensics.config import ForensicsSettings, get_project_root, get_settings
+from forensics.config import (
+    DEFAULT_DB_RELATIVE,
+    ForensicsSettings,
+    get_project_root,
+    get_settings,
+)
 from forensics.models.analysis import AnalysisResult
 from forensics.models.report_args import ReportArgs
 from forensics.paths import AnalysisArtifactPaths
@@ -106,7 +111,7 @@ def _validate_report_prerequisites(
         return False, 1, None
 
     if bool(getattr(args, "verify", False)):
-        db_path = root / "data" / "articles.db"
+        db_path = root / DEFAULT_DB_RELATIVE
         v_ok, v_msg = verify_corpus_hash(db_path, analysis_dir)
         if not v_ok:
             logger.error("report --verify failed: %s", v_msg)

@@ -34,10 +34,10 @@ from typing import Literal
 import polars as pl
 import pytest
 
-from forensics.analysis.artifact_paths import AnalysisArtifactPaths
 from forensics.analysis.orchestrator import run_full_analysis
 from forensics.config import get_settings
 from forensics.models import Author
+from forensics.paths import AnalysisArtifactPaths
 from forensics.storage.parquet import write_parquet_atomic
 from forensics.storage.repository import Repository, init_db
 

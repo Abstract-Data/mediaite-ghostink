@@ -1,14 +1,6 @@
-"""Stable JSON envelope for ``forensics`` machine-readable output.
+"""JSON envelope for ``--output json``: one sorted object on stdout; logs on stderr.
 
-Contract: a successful ``--output json`` invocation MUST emit exactly
-one JSON object on stdout and nothing else. Logs, progress, warnings,
-and errors go to stderr.
-
-For machine-readable failures mapped to exit code ``TRANSIENT`` (4), the
-conventional extra field on the failure envelope's ``error`` object is
-``retry_after_ms`` (integer milliseconds). Populate it when the upstream
-HTTP response includes a ``Retry-After`` header (or equivalent) so agents
-can backoff deterministically.
+Exit code 4 failures may set ``error.retry_after_ms`` from upstream ``Retry-After``.
 """
 
 from __future__ import annotations
@@ -37,7 +29,7 @@ def failure(
     message: str,
     *,
     suggestion: str | None = None,
-    **extra: Any,
+    **extra: object,
 ) -> dict[str, Any]:
     err: dict[str, Any] = {"code": code, "message": message, **extra}
     if suggestion is not None:

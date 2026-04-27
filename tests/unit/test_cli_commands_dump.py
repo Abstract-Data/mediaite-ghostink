@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any
 
 import click
 from typer.main import get_command
@@ -69,7 +68,7 @@ def test_commands_json_leaf_examples_nonempty() -> None:
     assert result.exit_code == 0
     payload = json.loads((result.stdout or "").strip())
 
-    def walk(node: dict[str, Any]) -> None:
+    def walk(node: dict[str, object]) -> None:
         subs = node.get("subcommands") or []
         if not subs:
             assert node.get("examples"), f"leaf {node.get('name')!r} missing examples"

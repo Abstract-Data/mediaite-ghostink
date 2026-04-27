@@ -5558,3 +5558,521 @@ wc -l .claude/skills/forensics-cli/SKILL.md
 
 #### Risks & Next Steps
 - MCP `gitnexus_detect_changes` was not available in this Cursor workspace (server not registered); re-run when GitNexus MCP is enabled before merge.
+
+---
+
+### Deslop Phase 0 — baseline, churn, stop list (inventory only)
+**Status:** Complete  
+**Date:** 2026-04-27  
+**Agent/Session:** Cursor agent  
+
+#### What Was Done
+- Recorded **BASE** ref and resolved commit for reproducible `git diff` churn.
+- Produced **churn report** (`git diff $BASE --numstat` on `src/` + `tests/`), top files and directory aggregates, and **Phase 1–3 priority** ordering per deslop plan.
+- Filled **stop list** (high-touch paths for comment-only / deslop edits): preregistration, artifact paths, `paths.py`, SQLite migrations.
+
+#### Files Modified
+- `HANDOFF.md` — this completion block (no plan file edits per assignment).
+
+#### Verification Evidence
+```
+# Scope vs main (matches plan: git diff $BASE --stat -- src/ tests/)
+git diff main --shortstat -- src/ tests/
+  -> 105 files changed, 6528 insertions(+), 1812 deletions(-)
+
+# BASE
+git rev-parse main
+  -> e463c886d2b8a607559fba05173144cd802fcd2f
+
+git tag -l 'v*' | tail -15
+  -> (no tags returned in this clone at query time; BASE remains branch main)
+
+# Churn vs main — top 15 files by |insert|+|delete|
+git diff main --numstat -- src/ tests/ | awk '{print $1+$2, $3}' | sort -rn | head -15
+  -> 1232 src/forensics/analysis/orchestrator.py
+     548 src/forensics/analysis/orchestrator/parallel.py
+     413 src/forensics/analysis/orchestrator/per_author.py
+     356 src/forensics/cli/__init__.py
+     240 src/forensics/storage/repository.py
+     210 src/forensics/analysis/statistics.py
+     185 tests/integration/test_pipeline_end_to_end.py
+     173 src/forensics/cli/analyze.py
+     170 tests/unit/test_scrape_transient_classification.py
+     154 src/forensics/analysis/convergence.py
+     139 src/forensics/analysis/orchestrator/runner.py
+     135 src/forensics/analysis/orchestrator/comparison.py
+     128 tests/unit/test_simhash_migration.py
+     125 src/forensics/cli/scrape.py
+     125 src/forensics/baseline/agent.py
+
+# Directory aggregate (same diff)
+  -> 3394 src/forensics/analysis
+     2008 tests/unit
+     1220 src/forensics/cli
+      347 tests/integration
+      332 src/forensics/storage
+      …
+```
+
+#### Decisions Made
+- **BASE = `main`** at `e463c886d2b8a607559fba05173144cd802fcd2f` (no release tag used; tags absent in output — use a `v*` tag as BASE on release branches if needed).
+- **Phase 1–3 prioritization (for upcoming deslop PRs, not raw global churn rank):**
+  1. **Phase 1 (CLI)** — `src/forensics/cli/` has the largest churn among plan Phases 1–3 (1220 lines vs `main`); prioritize `cli/__init__.py`, `cli/analyze.py`, `cli/scrape.py`, `cli/survey.py`, `cli/_commands.py`, plus CLI-heavy tests under `tests/unit/` (e.g. `test_cli_preflight_json.py`, `test_cli_envelope.py`).
+  2. **Phase 3 (storage)** — next by plan scope: `src/forensics/storage/` aggregate 332 lines; hotspot file `storage/repository.py` (240). Treat migrations as **HIGH** touch (stop list).
+  3. **Phase 2 (config / paths / preflight / preregistration)** — lower *relative* churn vs `main` for narrow paths (`config/` 78, `preflight.py` + `preregistration.py` + `paths.py` combined ~99 in spot check) but **MEDIUM default risk** because of env, path, and preregistration gates — schedule after inventory; do not skip tests from plan Phase 2 list.
+
+Global churn is dominated by `src/forensics/analysis/` (3394); that maps to **Phase 6** in the plan — defer until Phase 1–3 slices ship unless explicitly rescoped.
+
+#### Unresolved Questions
+- Whether a **release tag** should replace `main` as BASE on long-lived release branches (none selected here).
+
+#### Risks & Next Steps
+- **Stop list — copy into Phase 1–3 PR descriptions when touching these paths:**
+
+| Area | Paths / symbols (treat as MEDIUM+ risk for “comment-only” deslop) |
+|------|---------------------------------------------------------------------|
+| Preregistration | `src/forensics/preregistration.py`; runtime dir **`data/preregistration/`** (hashes / lockfiles consumed by analyze); `tests/test_preregistration.py` |
+| Canonical data paths | `src/forensics/paths.py`; **`AnalysisArtifactPaths`** in `src/forensics/analysis/artifact_paths.py` (and call sites that persist under `data/analysis/`, parallel staging, etc.) |
+| SQLite migrations | `src/forensics/storage/migrations/__init__.py`, `001_author_shared_byline.py`, `002_feature_parquet_section.py`, `003_articles_word_count_check.py`, `004_articles_dedup_simhash_columns.py`; **`src/forensics/storage/repository.py`** |
+| Preflight / config gates | `src/forensics/preflight.py`; `src/forensics/config/` (`settings`, validators); keep edits minimal and test-backed |
+
+- Next execution step from plan: run Phase **1** deslop as first implementation PR using `BASE=main` above; re-run directory churn after merge.
+
+---
+
+### 2026-04-27 — Phase 1 CLI deslop (completed)
+
+**Status:** Complete  
+**Scope:** `src/forensics/cli/` + `tests/unit/test_cli_commands_dump.py`
+
+**Changes:** Trimmed redundant docstrings/comments; replaced `get_cli_state` parent walk `type: ignore` with `cast`; tightened `_commands` / `_envelope` typing (`object` vs `Any` where safe); typed `survey_kw` as `dict[str, object]`; aligned `_errors.fail` with `failure(**extra: object)`; `_parse_compare_pair` error text now says ``--compare-pair`` (flag name fix).
+
+**Verification:** `uv run ruff check src/forensics/cli tests/unit/test_cli_*.py tests/integration/test_cli.py tests/integration/test_cli_scrape_dispatch.py`; `uv run ruff format --check` (same paths); `uv run pytest tests/unit/test_cli_*.py tests/integration/test_cli.py tests/integration/test_cli_scrape_dispatch.py -q --no-cov` — all passed.
+
+**GitNexus:** `npx gitnexus impact get_cli_state -r mediaite-ghostink -d upstream --depth 2` → **CRITICAL** blast radius (expected); edits are typing/docs only, behavior unchanged.
+
+**Next:** Phase 2 deslop per plan (config/paths/preflight) or merge Phase 1 PR.
+
+---
+
+### 2026-04-27 — Phase 2 config / paths / preflight / preregistration deslop (completed)
+
+**Status:** Complete  
+**Scope:** `src/forensics/config/` (`__init__.py`, `fingerprint.py`, `settings.py`), `src/forensics/paths.py`, `src/forensics/preflight.py`, `src/forensics/preregistration.py`, `tests/test_preregistration.py`, `tests/unit/test_config_hash.py`
+
+**Changes:** Shortened module/class/function docstrings; removed preflight section banners; condensed `AnalysisConfig` / survey / features inline comments to single-line forensic notes (no defaults or `json_schema_extra` changes); trimmed related test module/docstrings. User-facing preregistration messages and lock payload keys unchanged.
+
+**Verification:** `uv run ruff check` + `ruff format --check` on paths above; `uv run pytest tests/test_preflight.py tests/test_preregistration.py tests/unit/test_settings.py tests/unit/test_config_hash.py -q --no-cov` — passed.
+
+**GitNexus:** MCP server not connected in this session — impact/detect_changes not run here; run before merge per `AGENTS.md` if available.
+
+**Next:** Phase 3 storage deslop per plan, or proceed with PR merge train.
+
+---
+
+### 2026-04-27 — Phase 3 storage / repository deslop (completed)
+
+**Status:** Complete  
+**Scope:** `src/forensics/storage/` (`repository.py`, `parquet.py`, `duckdb_queries.py`, `json_io.py`, `export.py` unchanged, `__init__.py`, `migrations/__init__.py`, `migrations/002_feature_parquet_section.py` docstrings/comments only)
+
+**Changes:** Shortened module and API docstrings; removed section banner in `duckdb_queries.py`; replaced verbose comments with shorter factual lines; preserved late-import rationale in `002` migration. No SQL, schema strings, or runtime logic changes.
+
+**Verification:** `uv run ruff check src/forensics/storage`; `uv run ruff format --check src/forensics/storage`; `uv run pytest tests/test_storage.py tests/unit/test_repository_*.py tests/integration/test_repository_*.py -q --no-cov` — passed.
+
+**GitNexus:** MCP tool descriptors not present in workspace session; run `impact` / `detect_changes` before merge if connected.
+
+**Next:** Phase 4 scraper deslop per plan, or merge.
+
+---
+
+### 2026-04-27 — Phase 4 scraper deslop (completed)
+
+**Status:** Complete  
+**Scope:** `src/forensics/scraper/` (`fetcher.py`, `crawler.py`, `coverage.py`, `parser.py`, `__init__.py`; `dedup.py` / `client.py` unchanged)
+
+**Changes:** Trimmed module and class docstrings; removed internal ticket-style prefixes (D-03, L-04, RF-*); shortened concurrency and ingest helper docstrings to factual one-liners. No edits to `scrape_failure_transient`, `scrape_error_transient_from_http_status`, `log_scrape_error`, retry branches, or HTTP status handling.
+
+**Verification:** `uv run ruff check src/forensics/scraper`; `uv run ruff format --check src/forensics/scraper`; `uv run pytest tests/test_scraper.py tests/unit/test_scrape_transient_classification.py tests/unit/test_fetcher_handlers.py tests/unit/test_fetcher_mutations.py tests/unit/test_article_html_fetch_context.py tests/unit/test_scraper_gather_resilience.py tests/integration/test_scrape_mock_http.py tests/test_fetcher_phase_a.py tests/test_crawler_metadata_phase_b.py tests/unit/test_crawler_ingest_single_post.py tests/test_dedup_streaming_export.py tests/test_dedup_banding.py tests/unit/test_dedup_transaction_rollback.py -q --no-cov` — passed.
+
+**GitNexus:** MCP `user-gitnexus` not in available servers this session; run upstream `impact` on touched symbols before merge if connected.
+
+**Next:** Phase 5 features deslop per plan, or merge.
+
+---
+
+### 2026-04-27 — Phase 5–6 features + analysis deslop (completed)
+
+**Status:** Complete  
+**Scope:** `src/forensics/features/*.py` (all modules touched: docstrings only except factual pipeline/assembler/probability text), `tests/test_features.py`, `tests/unit/test_features_strict.py`; `src/forensics/analysis/` (`changepoint.py`, `statistics.py`, `convergence.py`, `drift.py`, `timeseries.py`, `comparison.py`, `feature_families.py`, `section_profile.py`, `section_contrast.py`, `section_mix.py`, `orchestrator/runner.py` — module/entry docstrings only).
+
+**Changes:** Removed phase-number churn from feature module lines; tightened pipeline/assembler/probability-family docstrings; compressed analysis module essays (BH rationale, BOCPD MAP vs legacy, section J-artifacts, family registry) without altering code paths, constants, or log templates.
+
+**Verification:** `uv run ruff check .` and `uv run ruff format --check .` — passed; `uv run pytest tests/test_features.py tests/unit/test_features_strict.py tests/test_analysis.py tests/unit/test_statistics.py tests/unit/test_orchestrator_patch_surface.py tests/integration/test_parallel_parity.py tests/unit/test_section_profile.py tests/unit/test_section_mix.py tests/unit/test_section_contrast.py tests/unit/test_feature_families.py tests/unit/test_changepoint_same_day_determinism.py -q --no-cov` — passed.
+
+**GitNexus:** `user-gitnexus` not in available MCP servers this session; run `impact` / `detect_changes` before merge if connected.
+
+**Next:** Phase 7 reporting/survey/TUI deslop per plan, or merge.
+
+---
+
+### 2026-04-27 — Phase 7–8 deslop: reporting / survey / baseline / calibration / TUI + tests (completed)
+
+**Status:** Complete  
+**Scope:** `src/forensics/reporting/` (`narrative.py`, `html_report.py`, `plots.py`), `src/forensics/survey/` (`scoring.py`, `qualification.py`, `orchestrator.py`, `shared_byline.py`), `src/forensics/baseline/orchestrator.py`, `src/forensics/calibration/` (`__init__.py`, `runner.py`, `synthetic.py`), `src/forensics/tui/` (`__init__.py`, `app.py`, `screens/*.py`); `tests/` — removed three-line `# ---` banner blocks (20 files) via script, manual cleanup for multi-line banner in `tests/unit/test_bootstrap_vectorized.py`, tightened module/fixture docstrings in `tests/unit/test_reporting_section.py`, `tests/unit/test_reporting_diagnostics.py`, `tests/test_narrative.py`.
+
+**Changes:** Comment/section-banner removal and shorter docstrings only; no logic, thresholds, strings consumed by assertions, or exception behavior changed. Assertions and pinned literals untouched.
+
+**Verification:** `uv run ruff format` + `uv run ruff check` on touched trees — passed. `uv run pytest tests/test_narrative.py tests/test_survey.py tests/test_calibration.py tests/test_tui.py tests/unit/test_reporting_section.py tests/unit/test_reporting_diagnostics.py tests/unit/test_pipeline_b_diagnostics.py tests/unit/test_shared_byline.py tests/unit/test_analyze_survey_gate.py tests/unit/test_statistics.py tests/unit/test_bootstrap_vectorized.py -q --no-cov` — passed. Full `uv run pytest tests/ -q --no-cov` currently fails one pre-existing check: `tests/test_report.py::test_quarto_config_exists` (`quarto.yml` lists 11 `.ipynb` substrings vs expected 10 — workspace `quarto.yml` drift, not introduced by this deslop).
+
+**GitNexus:** MCP tool descriptors not available this session; run upstream `impact` / `detect_changes` before merge if connected.
+
+**Next:** Reconcile `quarto.yml` with `test_quarto_config_exists` expectation or update the test when the book index is finalized; merge Phase 7–8 deslop PR.
+
+---
+
+### 2026-04-27 — Deslop optional: TESTING.md + CI no-new-type-ignore (completed)
+
+**Status:** Complete  
+**Scope:** `docs/TESTING.md`, `scripts/check_no_new_type_ignore.py`, `.github/workflows/ci-quality.yml`
+
+**Changes:** Added “Deslop and hygiene PR checklist” to testing docs (diff-first, comments, typing, exceptions, tests) and documented local `uv run python scripts/check_no_new_type_ignore.py origin/main`. New script compares `git diff <base>...HEAD` under `src/` and `tests/` for added lines containing `# type: ignore` / `type: ignore[...]`. CI job `no-new-type-ignore` runs on `pull_request` only, after fetching the PR base branch.
+
+**Verification:** `uv run ruff check scripts/check_no_new_type_ignore.py`; `uv run ruff format --check scripts/check_no_new_type_ignore.py`; `uv run python scripts/check_no_new_type_ignore.py origin/main` — passed (no new ignores vs `origin/main` on this branch at check time).
+
+**Decisions:** Gate applies to PRs only so direct pushes to `main` are unchanged; base ref is `origin/${{ github.base_ref }}` to match GitHub’s merge comparison.
+
+**Next:** None required for this item.
+
+---
+
+## 2026-04-27 — Quarto report config repair + AI_USAGE_FINDINGS relocation
+
+**Status:** complete — full book renders cleanly to `data/reports/` (11 HTML chapters, exit 0).
+
+**What was done**
+
+- Renamed `quarto.yml` → `_quarto.yml` (canonical Quarto project-config filename). Quarto reads `_quarto.yml` for the full project schema; the non-underscored variant was being parsed only partially, which silently dropped `project.render` and forced a tree-walk over the whole repo (135 files including every `prompts/`, `docs/`, `HANDOFF.md`, etc.).
+- Added `project.render` to `_quarto.yml` with explicit chapter sources + negative globs to keep the render scope to the 11 book chapters only.
+- Relocated `data/reports/AI_USAGE_FINDINGS.md` → `docs/AI_USAGE_FINDINGS.md`. The old path lived inside the Quarto output dir, which is wiped at the start of every render — every `forensics report` would have deleted the file before it could be referenced.
+- `.gitignore`: removed the `!data/reports/AI_USAGE_FINDINGS.md` un-ignore (no longer needed; the file lives under `docs/` which is fully tracked).
+- `tests/test_report.py::test_quarto_config_exists`: updated to read `_quarto.yml` and expect 11 `.ipynb` mentions (10 explicit chapter paths + 1 `notebooks/*.ipynb` glob in the new render list).
+- `docs/punch-list-closure-index.md`: updated R-01–R-09 row to point at the new `docs/AI_USAGE_FINDINGS.md` path.
+
+**Files modified / added**
+
+- `_quarto.yml` (new — canonical Quarto config)
+- `quarto.yml` (deleted — was the non-canonical duplicate)
+- `docs/AI_USAGE_FINDINGS.md` (new at this path; content extracted from PR #94 commit `714a84e`)
+- `.gitignore` (removed the AI_USAGE_FINDINGS un-ignore)
+- `tests/test_report.py` (updated `test_quarto_config_exists`)
+- `docs/punch-list-closure-index.md` (R row pointer updated)
+
+**Files intentionally not modified**
+
+- `prompts/punch-list/v0.1.0.md`, `prompts/punch-list/current.md`, `prompts/implementation-plan/v0.1.0.md`, `prompts/implementation-plan/current.md`, `prompts/punch-list/CHANGELOG.md` — bound by the prompt-library immutability contract (`prompts/README.md`). Their references to `data/reports/AI_USAGE_FINDINGS.md` are historical and accurate at the version they describe; updating them requires a prompt version bump.
+- HANDOFF.md historical entries describing the prior `data/reports/AI_USAGE_FINDINGS.md` location are left as-is — they were accurate when written; this new block records the change forward.
+
+**Verification commands run**
+
+```
+uv run forensics analyze --exploratory --allow-pre-phase16-embeddings
+  -> exit 0; 16m 11s wall; 12/12 authors; 0 errors
+uv run forensics report --format html
+  -> exit 0; 11 HTML chapters under data/reports/
+uv run pytest tests/test_report.py -v --no-cov
+  -> 25 passed
+```
+
+**Output inventory**
+
+- `data/reports/index.html`
+- `data/reports/notebooks/00_power_analysis.html` … `09_full_report.html`
+
+**Decisions / rationale**
+
+- Kept output-dir at `data/reports/` per CLAUDE.md "writes go under `data/` only".
+- Chose `docs/AI_USAGE_FINDINGS.md` (over e.g. `data/findings/`) because the file is documentation/narrative, not pipeline data.
+- Did not delete the historical references in immutable prompt artifacts; the old path is part of those snapshots' truth.
+
+**Unresolved**
+
+- No outstanding issues. The full pipeline `analyze → report` cycle is reproducible end-to-end.
+
+---
+
+## 2026-04-27 — Removed `docs/AI_USAGE_FINDINGS.md`
+
+**Status:** complete.
+
+**What was done**
+
+- Deleted `docs/AI_USAGE_FINDINGS.md`. The file was a hand-authored narrative pinned to a 2026-04-24 quantitative run (id `5d0fd46a-…`, config hash `d5c12a3aae737aa2`, 14-row pooled-byline cohort). After today's analysis run produced different findings (id `2ac67e19-…`, config hash `6bffd326f0074688514c3d595ad2bc6065725ea17e783489`, 12-row individual-author cohort), the narrative was actively misleading — it claimed "primary quantitative run remains 2026-04-24" but readers might assume it described the latest output.
+- Updated `docs/punch-list-closure-index.md` row R-01–R-09 to mark the narrative as removed and direct readers to the Quarto book chapter (`notebooks/09_full_report.ipynb` → `data/reports/notebooks/09_full_report.html`) as the canonical narrative artifact.
+
+**Why this is OK**
+
+- The Quarto book chapter 9 covers the same ground (executive summary, per-author determinations, caveats), and unlike the standalone markdown it's bound to whatever `data/analysis/*_result.json` is on disk when the notebook is re-executed (`uv run quarto render --execute`).
+- The deleted file is recoverable from git: `git show 714a84e:data/reports/AI_USAGE_FINDINGS.md`. If a standalone narrative is wanted again, regenerate against current analysis output rather than restoring the stale one.
+
+**Files modified / removed**
+
+- `docs/AI_USAGE_FINDINGS.md` (removed)
+- `docs/punch-list-closure-index.md` (row R-01–R-09 pointer updated to reflect removal)
+
+**Files intentionally not modified**
+
+- HANDOFF.md historical entries describing prior R-01–R-09 work — accurate when written.
+- `prompts/punch-list/{v0.1.0.md,current.md,CHANGELOG.md}`, `prompts/implementation-plan/{v0.1.0.md,current.md}` — bound by the prompt-library immutability contract.
+
+**Caveat — Quarto book is also stale (not addressed in this block)**
+
+The HTML at `data/reports/notebooks/09_full_report.html` was rendered today but the notebook cell outputs baked into `notebooks/09_full_report.ipynb` are from the 2026-04-24 run (visible in the rendered "Report rendered at" footer). `_quarto.yml` has `execute: freeze: auto` and Quarto for ipynb uses existing cell outputs by default. To bind the rendered HTML to today's analysis run, execute `uv run quarto render --execute` (forces re-execution of every notebook against current `data/analysis/`). Not done in this block.
+
+**Unresolved**
+
+- Quarto book content still reflects 2026-04-24 analysis (see caveat above). Owner's call whether to re-execute now or wait for the next analysis cycle.
+
+---
+
+### Refactoring Run 11 — TASK-1 quick wins (RF-DEAD / RF-DRY)
+
+**Status:** Complete  
+**Date:** 2026-04-27
+
+#### What Was Done
+
+- **RF-DEAD-001:** Replaced stale Phase 8 TODO / “stub” framing in `forensics.models.report` with accurate docs for `ReportManifest` and `classify_finding_strength`.
+- **RF-DEAD-002:** Removed redundant `analysis_dir.mkdir(...)` before `section-profile` and `section-contrast` CLI paths (`write_json_artifact` / section helpers already ensure parents).
+- **RF-DRY-002:** `_run_preregistered_split_tests` now uses `_clean_feature_series` after the existing `finite.size == 0` guard so cleaning matches changepoint hypothesis tests.
+- **RF-DRY-003:** Added `utc_archive_stamp()` in `forensics.utils.datetime` and switched embedding archive paths in `features/pipeline.py` plus calibration `run_dir` / report timestamp in `calibration/runner.py`.
+- Corrected a mistaken “RF-DRY-003” tag on `timestamps_from_frame` docstring (unrelated helper).
+
+#### Files Modified
+
+- `src/forensics/models/report.py` — module + class documentation only.
+- `src/forensics/cli/analyze.py` — drop redundant mkdir (2 sites).
+- `src/forensics/analysis/orchestrator/per_author.py` — preregistered split tests reuse `_clean_feature_series`.
+- `src/forensics/utils/datetime.py` — `utc_archive_stamp`; docstring fix on `timestamps_from_frame`.
+- `src/forensics/features/pipeline.py` — use `utc_archive_stamp`; drop unused `UTC` import.
+- `src/forensics/calibration/runner.py` — `utc_archive_stamp`; trim unused `datetime`/`UTC` imports.
+
+#### Verification Evidence
+
+```
+uv run ruff check .   # pass
+uv run ruff format --check .   # pass
+uv run pytest tests/ -v   # 1015 passed, 1 failed, 3 deselected, 1 xfailed
+```
+
+Failure: `tests/integration/test_pipeline_end_to_end.py::test_pipeline_extract_analyze_comparison_end_to_end` — `FileNotFoundError` for repo-root `quarto.yml` (file absent in workspace; unrelated to TASK-1 edits).
+
+#### Decisions Made
+
+- Placed `utc_archive_stamp` in existing `forensics.utils.datetime` instead of a new module to avoid import-path proliferation; name avoids clashing with stdlib `datetime`.
+
+#### GitNexus
+
+- MCP `user-gitnexus` had no tool descriptor JSON in the Cursor mcps folder this session; `impact` / `detect_changes` were not invoked (stale/skipped).
+
+#### Risks & Next Steps
+
+- Restore or fixture `quarto.yml` (or adjust the integration test) if that e2e test must pass in CI.
+
+---
+
+### Refactoring Run 11 — TASK-3 `AnalyzeRequest` + `analyze_options`
+
+**Status:** Complete  
+**Date:** 2026-04-27
+
+#### What Was Done
+
+- Added frozen `AnalyzeRequest` dataclass holding all former `run_analyze` keyword-only parameters (including optional `typer_context`).
+- Refactored `run_analyze(request: AnalyzeRequest) -> None` with local unpacking to preserve existing stage logic.
+- Extracted default-callback Typer `Annotated` option definitions to `src/forensics/cli/analyze_options.py`; `analyze` callback now uses those aliases and builds `AnalyzeRequest`.
+- Updated `run_all_pipeline` to call `run_analyze(AnalyzeRequest(timeseries=True, convergence=True))`.
+- Tests: `test_preregistration.py`, `test_analyze_survey_gate.py` now pass `AnalyzeRequest`; signature test replaced with `AnalyzeRequest` field assertions.
+
+#### Files Modified
+
+- `src/forensics/cli/analyze_options.py` — new Typer option type aliases.
+- `src/forensics/cli/analyze.py` — `AnalyzeRequest`, `run_analyze` signature, slim `analyze` callback.
+- `src/forensics/pipeline.py` — import and invoke `AnalyzeRequest` for analyze stage.
+- `tests/test_preregistration.py`, `tests/unit/test_analyze_survey_gate.py` — callers updated.
+
+#### Verification Evidence
+
+```
+uv run ruff check .   # pass
+uv run ruff format src/forensics/cli/analyze_options.py   # applied
+uv run pytest tests/test_preregistration.py tests/unit/test_analyze_survey_gate.py tests/test_pipeline.py -v --no-cov   # 23 passed
+uv run pytest tests/ -q --tb=no   # coverage 79.2% (passes fail-under); 2 failed (pre-existing: e2e missing repo-root quarto.yml; parser fuzz); 1 xfail
+```
+
+#### Decisions Made
+
+- Kept `compare_pair` as a parsed `tuple[str, str] | None` on `AnalyzeRequest` (CLI still passes raw string into callback, then `_parse_compare_pair` before constructing the request).
+
+#### GitNexus
+
+- `user-gitnexus` MCP not available in this Cursor session; impact not run.
+
+#### Risks & Next Steps
+
+- External code importing `run_analyze` with keyword arguments must switch to `run_analyze(AnalyzeRequest(...))` (repo-internal callers updated).
+
+---
+
+### Refactoring Run 11 — TASK-4 nested `AnalysisConfig` + stable hash
+
+**Status:** Complete  
+**Date:** 2026-04-27
+
+#### What Was Done
+
+- Split `AnalysisConfig` into nested sub-models (`PeltConfig`, `BocpdConfig`, `ConvergenceConfig`, `ContentLdaConfig`, `HypothesisConfig`, `EmbeddingStackConfig`) in `src/forensics/config/analysis_settings.py` with `model_validator(mode="before")` lifting flat `[analysis]` TOML keys.
+- Preserved `compute_model_config_hash(settings.analysis)` via `_build_recursive_hash_payload` in `src/forensics/utils/provenance.py` (flat JSON leaf keys unchanged); added `analysis_config_hash_field_names()` for tests.
+- Updated all production accessors and tests to nested paths; `apply_flat_analysis_overrides` for flat test overrides; `ConvergenceInput.from_settings` reads permutation knobs from `settings.analysis.convergence`.
+- Documented ADR-016; README env-var example updated for nested `FORENSICS_ANALYSIS__…` keys; golden hash test in `tests/unit/test_config_hash.py`.
+
+#### Files Modified (high level)
+
+- `src/forensics/config/analysis_settings.py` (new), `src/forensics/config/settings.py`, `src/forensics/config/__init__.py`
+- `src/forensics/utils/provenance.py`, `src/forensics/preregistration.py`, analysis/features/baseline/cli modules and tests as needed for nested access / env strings
+
+#### Verification Evidence
+
+```
+uv run ruff check .
+uv run ruff format --check .
+uv run pytest tests/ -q --tb=no --no-cov   # 1015 passed; 1 xfail; 2 failed (e2e missing repo quarto copy path; hypothesis fuzz — pre-existing class)
+```
+
+#### GitNexus
+
+- MCP `user-gitnexus` not available in this session; impact not run.
+
+#### Risks & Next Steps
+
+- **Env overrides:** flat `FORENSICS_ANALYSIS__CONVERGENCE_USE_PERMUTATION` must become `FORENSICS_ANALYSIS__CONVERGENCE__CONVERGENCE_USE_PERMUTATION` (and similar for other nested fields). ADR-016 + README document this.
+- Re-run `npx gitnexus analyze` after merge if graph consumers need a fresh index.
+
+---
+
+### Refactoring Run 11 — TASK-5 canonical `AnalysisArtifactPaths` imports
+
+**Status:** Complete  
+**Date:** 2026-04-27
+
+#### What Was Done
+
+- Migrated all in-tree `from forensics.analysis.artifact_paths import AnalysisArtifactPaths` usages to `from forensics.paths import AnalysisArtifactPaths` across `src/`, `tests/`, and `scripts/bench_phase15.py`.
+- Replaced `TYPE_CHECKING` import in `src/forensics/reporting/narrative.py` with `forensics.paths`.
+- Slimmed `src/forensics/analysis/artifact_paths.py` to a documented deprecated re-export shim (aligned with `analysis/utils.py` policy); canonical definition remains `forensics.paths`.
+
+#### Files Modified
+
+- `src/forensics/analysis/artifact_paths.py` — deprecation docstring; thin re-export only.
+- ~25 Python modules under `src/forensics/`, `tests/`, `scripts/` — import path only.
+
+#### Verification Evidence
+
+```
+uv run ruff check .
+uv run ruff format --check .
+uv run pytest tests/test_analysis_infrastructure.py tests/unit/test_analyze_compare.py \
+  tests/unit/test_reporting_diagnostics.py tests/unit/test_pipeline_b_diagnostics.py \
+  tests/unit/test_drift_summary.py tests/unit/test_comparison_target_controls.py \
+  tests/test_report.py tests/integration/test_parallel_parity.py -q --no-cov   # pass
+# Full suite: 2 pre-existing failures (e2e quarto path; parser fuzz) — unchanged by import-only edits
+```
+
+#### GitNexus
+
+- `user-gitnexus` MCP tools not present in workspace descriptors; impact not run (mechanical import-only change).
+
+#### Risks & Next Steps
+
+- External notebooks still importing `forensics.analysis.artifact_paths` continue to work via shim; migrate to `forensics.paths` when convenient.
+
+---
+
+### Refactoring Run 11 — TASK-6 verification + GitNexus index refresh
+
+**Status:** Complete  
+**Date:** 2026-04-27
+
+#### What Was Done
+
+- Ran full quality gates (`ruff check`, `ruff format --check`, full `pytest` suite).
+- Reindexed the repo with GitNexus **preserving embeddings** (`npx gitnexus analyze --embeddings`) so `.gitnexus` matches post–Run 11 graph edits.
+- Appended this handoff block; added a short GitNexus operator note to `docs/RUNBOOK.md`.
+
+#### Files Modified
+
+- `HANDOFF.md` — this completion log entry.
+- `docs/RUNBOOK.md` — GitNexus reindex guidance (`analyze` vs `--embeddings`).
+
+#### Verification Evidence
+
+```
+uv run ruff check .   # All checks passed
+uv run ruff format --check .   # 284 files already formatted
+uv run pytest tests/ -v --tb=no -q   # 1016 passed, 3 deselected, 1 xfailed, 2 failed (see below)
+npx gitnexus analyze --embeddings   # Repository indexed successfully (~29s); nodes/edges updated
+```
+
+**Pytest failures (pre-existing, unchanged by TASK-6):**
+
+- `tests/integration/test_pipeline_end_to_end.py::test_pipeline_extract_analyze_comparison_end_to_end` — `FileNotFoundError` (repo-root `quarto.yml` / temp copy path; see RUNBOOK “Automated pipeline E2E”).
+- `tests/unit/test_parser_html_fuzz.py::test_extract_article_text_from_rest_never_raises` — `AssertionError` on fuzz sentinel (parser edge case).
+
+#### Decisions Made
+
+- Documented GitNexus `--embeddings` in RUNBOOK because `.gitnexus/meta.json` had non-zero embeddings; plain `analyze` would drop them per AGENTS.md.
+
+#### GitNexus
+
+- CLI `npx gitnexus analyze --embeddings` executed successfully (MCP descriptors absent this session; no `detect_changes` on staged scope — verification-only task).
+
+#### Unresolved Questions
+
+- None for TASK-6.
+
+#### Risks & Next Steps
+
+- Fix or fixture the two failing tests if the default `uv run pytest tests/` gate must be green locally.
+- After future large merges, re-run `npx gitnexus analyze` (with `--embeddings` when `stats.embeddings > 0`).
+
+---
+
+### Refactoring Run 11 — gap fill (G1/G2)
+
+**Status:** Complete  
+**Date:** 2026-04-27
+
+#### What Was Done
+
+- **G1:** `scripts/migrate_feature_parquets.py` — default SQLite path uses `DEFAULT_DB_RELATIVE` from `forensics.config` (same as CLI); `--articles-db` help reflects the canonical relative path.
+- **G2:** `tests/unit/test_config_hash.py` — `test_e2e_fixture_empty_analysis_hash_matches_default_golden` locks empty `[analysis]` in `tests/integration/fixtures/e2e/config.toml` to the same digest as nested `AnalysisConfig()` defaults (`81d550a7032fbe95`).
+
+#### Files Modified
+
+- `scripts/migrate_feature_parquets.py`
+- `tests/unit/test_config_hash.py`
+- `HANDOFF.md` — this block
+
+#### Verification Evidence
+
+```
+uv run ruff check scripts/migrate_feature_parquets.py tests/unit/test_config_hash.py   # pass
+uv run pytest tests/unit/test_config_hash.py -v --no-cov   # 45 passed
+```
+
+#### GitNexus
+
+- Script + test only (no `src/` symbol edits); MCP impact not invoked.
+
+#### Risks & Next Steps
+
+- None; optional full `uv run pytest tests/` if you want repo-wide regression signal beyond `test_config_hash`.

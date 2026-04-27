@@ -24,7 +24,6 @@ import pytest
 import typer
 
 from forensics.analysis import orchestrator as orch_mod
-from forensics.analysis.artifact_paths import AnalysisArtifactPaths
 from forensics.analysis.orchestrator import (
     _resolve_max_workers,
     _resolve_parallel_refresh_workers,
@@ -34,6 +33,7 @@ from forensics.analysis.orchestrator import (
 from forensics.cli.analyze import _parse_compare_pair
 from forensics.config import get_settings
 from forensics.models import Author
+from forensics.paths import AnalysisArtifactPaths
 from forensics.storage.parquet import write_parquet_atomic
 from forensics.storage.repository import Repository, init_db
 from forensics.utils.provenance import compute_analysis_config_hash

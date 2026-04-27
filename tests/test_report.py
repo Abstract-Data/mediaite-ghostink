@@ -13,10 +13,10 @@ from pathlib import Path
 import plotly.graph_objects as go
 import pytest
 
-from forensics.analysis.artifact_paths import AnalysisArtifactPaths
 from forensics.config import get_project_root
 from forensics.config.settings import AuthorConfig, ForensicsSettings, ReportConfig, ScrapingConfig
 from forensics.models.analysis import AnalysisResult
+from forensics.paths import AnalysisArtifactPaths
 from forensics.reporting import (
     _analysis_artifacts_ok,
     _per_author_slugs,
@@ -119,10 +119,12 @@ def test_report_config_validation() -> None:
 
 
 def test_quarto_config_exists() -> None:
-    text = (get_project_root() / "quarto.yml").read_text(encoding="utf-8")
+    text = (get_project_root() / "_quarto.yml").read_text(encoding="utf-8")
     assert "project:" in text
     assert "book:" in text
-    assert text.count(".ipynb") == 10
+    # 10 explicit chapter paths under `book.chapters` + 1 `notebooks/*.ipynb`
+    # glob under `project.render`.
+    assert text.count(".ipynb") == 11
 
 
 def test_provenance_hash_deterministic(tmp_path: Path) -> None:

@@ -1,10 +1,6 @@
-"""Interactive setup wizard for the forensics pipeline (Phase 12 §2).
+"""Textual setup wizard (install with ``uv sync --extra tui``).
 
-This package provides a Textual-based TUI. The ``textual`` dependency ships as
-an optional extra — install with ``uv sync --extra tui``. The module-level
-``main()`` entry point is importable without textual, and will emit a friendly
-install hint when the dependency is missing rather than crashing with a raw
-``ImportError``.
+:func:`main` prints a hint if ``textual`` is missing instead of raising raw import errors.
 """
 
 from __future__ import annotations
@@ -15,12 +11,7 @@ from forensics.cli._exit import ExitCode
 
 
 def main() -> int:
-    """Launch the TUI setup wizard.
-
-    Returns an exit code (``0`` on clean exit, ``1`` when the ``tui`` extra is
-    not installed). Designed to be used as the ``forensics-setup`` script entry
-    point and from the ``forensics setup`` Typer command.
-    """
+    """Launch setup wizard; ``1`` if the ``tui`` extra is not installed."""
     try:
         from forensics.tui.app import ForensicsSetupApp
     except ImportError as exc:

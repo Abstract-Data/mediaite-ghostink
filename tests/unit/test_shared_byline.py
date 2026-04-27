@@ -20,11 +20,6 @@ from forensics.survey.shared_byline import is_shared_byline, matching_rule
 OUTLET = "mediaite.com"
 
 
-# ---------------------------------------------------------------------------
-# heuristic — positive cases
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize(
     ("slug", "name"),
     [
@@ -41,11 +36,6 @@ OUTLET = "mediaite.com"
 def test_is_shared_byline_positive(slug: str, name: str) -> None:
     assert is_shared_byline(slug, name, OUTLET) is True
     assert matching_rule(slug, name, OUTLET) is not None
-
-
-# ---------------------------------------------------------------------------
-# heuristic — negative cases (false-positive guards)
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -85,11 +75,6 @@ def test_matching_rule_labels() -> None:
     )
 
 
-# ---------------------------------------------------------------------------
-# Author model wiring
-# ---------------------------------------------------------------------------
-
-
 def test_author_model_default_is_shared_byline_false() -> None:
     author = Author(
         id="author-x",
@@ -106,11 +91,6 @@ def test_author_model_default_is_shared_byline_false() -> None:
     assert upgraded.is_shared_byline is True
     # original frozen instance untouched
     assert author.is_shared_byline is False
-
-
-# ---------------------------------------------------------------------------
-# qualification integration
-# ---------------------------------------------------------------------------
 
 
 def _make_author(slug: str, *, name: str | None = None, shared: bool = False) -> Author:
