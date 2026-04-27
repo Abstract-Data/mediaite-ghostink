@@ -6,6 +6,14 @@ Operational quick reference. Agents: append new sections here whenever you disco
 
 - **Analysis defaults:** With an empty or omitted `[analysis] pipeline_b_mode` in `config.toml`, the nested model default is **`percentile`** (cross-author comparable Pipeline B). Override with `pipeline_b_mode = "legacy"` only when you need the older absolute-cosine behavior.
 
+### `pipeline_b_mode` and per-author `config_hash` (cohort compatibility)
+
+`HypothesisConfig.pipeline_b_mode` participates in the analysis **config hash** (`include_in_config_hash: true`). Older on-disk runs that were produced when the effective default was **`legacy`** (for example, before the nested default switched to **`percentile`**) carry a different `config_hash` than current settings, even if your TOML never mentioned `pipeline_b_mode`.
+
+**Symptoms:** compare-only or full runs fail validation with messages such as `Analysis artifact compatibility failed` or `stale or mismatched analysis config hashes` (from `validate_analysis_result_config_hashes` / `_validate_compare_artifact_hashes` before `comparison_report.json` is rebuilt).
+
+**Remediation:** Re-run `uv run forensics analyze` for the full cohort so each `data/analysis/<slug>_result.json` is regenerated with the current hash, **or** set `pipeline_b_mode = "legacy"` in `config.toml` consistently when you intentionally need to reproduce the legacy Pipeline B behavior against existing artifacts. Downstream consumers (`comparison_report.json`, report hash gates) expect target and control `*_result.json` files to match the live analysis hash.
+
 1. Install dependencies: `uv sync`
 2. For Phase 10 (baseline generation): `uv sync --extra baseline`
 3. Validate environment: `uv run ruff check . && uv run ruff format --check .`

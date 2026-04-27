@@ -11,8 +11,11 @@ import polars as pl
 import pytest
 
 from forensics.analysis.comparison import compare_target_to_controls
+from forensics.analysis.drift import EmbeddingDriftInputsError, EmbeddingRevisionGateError
 from forensics.analysis.orchestrator import AnalysisMode, run_compare_only
+from forensics.analysis.orchestrator.comparison import _iter_compare_targets
 from forensics.config import get_settings
+from forensics.config.settings import ForensicsSettings
 from forensics.models import Author
 from forensics.paths import AnalysisArtifactPaths
 from forensics.storage.parquet import write_parquet_atomic
@@ -278,3 +281,101 @@ def test_compare_target_to_controls_filters_nan_values(
     fc = out["feature_comparisons"]["ttr"]["all"]
     assert fc["p_value"] == pytest.approx(fc["p_value"])
     assert "ttr" in out["feature_coverage_diagnostics"]["target"]["has_non_finite"]
+
+
+def _minimal_paths_for_iter_compare(tmp_path: Path) -> AnalysisArtifactPaths:
+    db = tmp_path / "articles.db"
+    db.write_text("", encoding="utf-8")
+    for name in ("features", "embeddings", "analysis"):
+        (tmp_path / name).mkdir(parents=True, exist_ok=True)
+    return AnalysisArtifactPaths.from_layout(
+        tmp_path,
+        db,
+        tmp_path / "features",
+        tmp_path / "embeddings",
+        analysis_dir=tmp_path / "analysis",
+    )
+
+
+def test_iter_compare_targets_propagates_embedding_revision_gate_confirmatory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = ForensicsSettings()
+    paths = _minimal_paths_for_iter_compare(tmp_path)
+
+    def _boom(*_a: object, **_k: object) -> None:
+        raise EmbeddingRevisionGateError("mock revision gate")
+
+    monkeypatch.setattr(
+        "forensics.analysis.orchestrator.comparison.compare_target_to_controls",
+        _boom,
+    )
+    with pytest.raises(EmbeddingRevisionGateError, match="mock revision gate"):
+        list(
+            _iter_compare_targets(
+                ["t1"],
+                ["c1"],
+                paths,
+                settings,
+                changepoints_memory=None,
+                log_prefix="test",
+                mode=AnalysisMode(),
+            )
+        )
+
+
+def test_iter_compare_targets_skips_embedding_revision_gate_exploratory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = ForensicsSettings()
+    paths = _minimal_paths_for_iter_compare(tmp_path)
+
+    def _boom(*_a: object, **_k: object) -> None:
+        raise EmbeddingRevisionGateError("mock revision gate")
+
+    monkeypatch.setattr(
+        "forensics.analysis.orchestrator.comparison.compare_target_to_controls",
+        _boom,
+    )
+    out = list(
+        _iter_compare_targets(
+            ["t1"],
+            ["c1"],
+            paths,
+            settings,
+            changepoints_memory=None,
+            log_prefix="test",
+            mode=AnalysisMode(exploratory=True),
+        )
+    )
+    assert out == []
+
+
+def test_iter_compare_targets_propagates_embedding_drift_inputs_confirmatory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = ForensicsSettings()
+    paths = _minimal_paths_for_iter_compare(tmp_path)
+
+    def _boom(*_a: object, **_k: object) -> None:
+        raise EmbeddingDriftInputsError("mock thin embeddings")
+
+    monkeypatch.setattr(
+        "forensics.analysis.orchestrator.comparison.compare_target_to_controls",
+        _boom,
+    )
+    with pytest.raises(EmbeddingDriftInputsError, match="mock thin embeddings"):
+        list(
+            _iter_compare_targets(
+                ["t1"],
+                ["c1"],
+                paths,
+                settings,
+                changepoints_memory=None,
+                log_prefix="test",
+                mode=AnalysisMode(),
+            )
+        )

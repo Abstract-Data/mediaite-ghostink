@@ -124,17 +124,23 @@ def classify_direction_concordance(
     """Score how many window features moved in the AI-typical direction.
 
     Callers **must** pre-scope ``window_hypothesis_tests`` to the window (same
-    convention as :func:`classify_finding_strength`). ``convergence_window`` is
-    part of the signature for symmetry and documentation; this function does
-    not filter the test list.
+    convention as :func:`classify_finding_strength`). When
+    ``convergence_window.features_converging`` is non-empty, only hypothesis rows
+    whose ``feature_name`` appears in that list participate (aligned with
+    :func:`classify_finding_strength`); when it is empty, all passed-in tests are
+    used so odd callers are not silently emptied.
 
     For each distinct ``feature_name``, the test with the largest
     ``abs(effect_size_cohens_d)`` is kept; ties break on ``test_name`` for
     determinism. The empirical ≥50% match rule (among features with a non-null
     prior) is **exploratory** until locked in pre-registration.
     """
-    _ = convergence_window
-    by_feature = _collapse_tests_by_max_abs_d(window_hypothesis_tests)
+    scoped = window_hypothesis_tests
+    fc = convergence_window.features_converging
+    if fc:
+        allow = frozenset(fc)
+        scoped = [t for t in window_hypothesis_tests if t.feature_name in allow]
+    by_feature = _collapse_tests_by_max_abs_d(scoped)
 
     matched: list[str] = []
     opposed: list[str] = []

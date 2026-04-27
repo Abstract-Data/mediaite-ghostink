@@ -14,11 +14,13 @@ from forensics.models.report import (
 )
 
 
-def _window() -> ConvergenceWindow:
+def _window(*, features_converging: list[str] | None = None) -> ConvergenceWindow:
+    """Default ``features_converging`` is ``[\"ttr\"]``; pass ``[]`` to disable scoping."""
+    fc = ["ttr"] if features_converging is None else features_converging
     return ConvergenceWindow(
         start_date=date(2025, 1, 1),
         end_date=date(2025, 6, 30),
-        features_converging=["ttr"],
+        features_converging=fc,
         convergence_ratio=0.5,
         pipeline_a_score=0.5,
         pipeline_b_score=0.5,
@@ -62,7 +64,7 @@ def test_only_unknown_feature_names_no_priors_returns_na() -> None:
     tests = [
         _ht(feature="not_in_priors_registry_xyz", d=0.5),
     ]
-    conc, br = classify_direction_concordance(_window(), tests)
+    conc, br = classify_direction_concordance(_window(features_converging=[]), tests)
     assert conc == DirectionConcordance.NA
     assert br.n_no_prior == 1
     assert br.n_match == 0 and br.n_oppose == 0
@@ -70,7 +72,7 @@ def test_only_unknown_feature_names_no_priors_returns_na() -> None:
 
 def test_hedging_frequency_counts_as_no_prior() -> None:
     tests = [_ht(feature="hedging_frequency", d=0.8)]
-    conc, br = classify_direction_concordance(_window(), tests)
+    conc, br = classify_direction_concordance(_window(features_converging=[]), tests)
     assert conc == DirectionConcordance.NA
     assert br.n_no_prior == 1
 
@@ -104,7 +106,8 @@ def test_fifty_percent_threshold_two_features_one_one_is_ai() -> None:
         _ht(feature="ttr", d=-0.5),  # match (decrease)
         _ht(feature="coleman_liau", d=-0.5),  # oppose (increase prior)
     ]
-    conc, br = classify_direction_concordance(_window(), tests)
+    w = _window(features_converging=["ttr", "coleman_liau"])
+    conc, br = classify_direction_concordance(w, tests)
     assert conc == DirectionConcordance.AI
     assert br.n_match == 1 and br.n_oppose == 1
 
@@ -116,7 +119,8 @@ def test_mixed_when_some_match_but_below_half() -> None:
         _ht(feature="coleman_liau", d=-0.5),
         _ht(feature="gunning_fog", d=-0.5),
     ]
-    conc, br = classify_direction_concordance(_window(), tests)
+    w = _window(features_converging=["ttr", "coleman_liau", "gunning_fog"])
+    conc, br = classify_direction_concordance(w, tests)
     assert conc == DirectionConcordance.MIXED
     assert br.n_match == 1 and br.n_oppose == 2
 
@@ -161,5 +165,17 @@ def test_two_features_all_match_or_all_oppose(
     tests: list[HypothesisTest],
     expected: DirectionConcordance,
 ) -> None:
-    conc, _ = classify_direction_concordance(_window(), tests)
+    w = _window(features_converging=["ttr", "coleman_liau"])
+    conc, _ = classify_direction_concordance(w, tests)
     assert conc == expected
+
+
+def test_non_empty_features_converging_ignores_tests_outside_window() -> None:
+    """Extraneous hypothesis rows are dropped when ``features_converging`` is set."""
+    tests = [
+        _ht(feature="ttr", d=-0.4),
+        _ht(feature="coleman_liau", d=0.9),
+    ]
+    conc, br = classify_direction_concordance(_window(), tests)
+    assert conc == DirectionConcordance.AI
+    assert br.n_match == 1 and br.n_oppose == 0

@@ -6450,3 +6450,50 @@ Full suite: **passed** (1 known xfail); parallel parity: **3 passed**. GitNexus 
 #### Unresolved / next steps
 
 - None for this slice.
+
+---
+
+### Pipeline B default, config_hash gate, direction concordance scoping, embedding compare parity
+
+**Status:** Complete  
+**Date:** 2026-04-27  
+**Agent/Session:** Cursor agent (plan slice: doc-hash-migration, integration-hash-test, direction-concordance-filter, comparison-embedding-propagate, probability-trajectory-verify)
+
+#### What was done
+
+- **RUNBOOK:** Documented why `pipeline_b_mode` participates in `config_hash`, symptoms (`Analysis artifact compatibility failed` / stale hashes), and remediation (full `forensics analyze` cohort vs `pipeline_b_mode = "legacy"` to match old artifacts).
+- **Integration:** `tests/integration/test_analysis_config_hash_gate.py` asserts `validate_analysis_result_config_hashes` returns failure and `_validate_compare_artifact_hashes` raises `ValueError` on mismatched `*_result.json` `config_hash`.
+- **Direction concordance:** `classify_direction_concordance` filters hypothesis rows to `convergence_window.features_converging` when that list is non-empty; unit tests updated + new scoping test; Phase 17 golden fixtures already align feature names with `features_converging` (no golden JSON edit).
+- **Compare path:** Introduced `orchestrator/embedding_policy.py` with `embedding_fail_should_propagate` (avoids `parallel` ↔ `comparison` import cycle); `_iter_compare_targets` re-raises embedding drift/revision errors in confirmatory mode; `parallel.py` uses the shared helper; unit tests in `test_comparison_target_controls.py`.
+- **Pipeline C:** Comment on equal-weight monthly means and sparse Binoculars months in `probability_trajectories.py`; unit test `test_sparse_binoculars_months_pipeline_c_score_finite` for length inequality + finite score.
+
+#### Files modified
+
+- `docs/RUNBOOK.md` — `pipeline_b_mode` / `config_hash` operator subsection
+- `HANDOFF.md` — this block
+- `src/forensics/analysis/orchestrator/embedding_policy.py` — new shared policy
+- `src/forensics/analysis/orchestrator/parallel.py`, `comparison.py` — embedding propagation
+- `src/forensics/models/report.py` — concordance scoping
+- `src/forensics/analysis/probability_trajectories.py` — comments
+- `tests/integration/test_analysis_config_hash_gate.py` — new
+- `tests/unit/test_direction_concordance.py`, `test_comparison_target_controls.py`, `test_probability_trajectories.py` — tests
+
+#### Verification evidence
+
+```
+uv run ruff check . && uv run ruff format --check .
+uv run pytest tests/integration/test_analysis_config_hash_gate.py tests/unit/test_direction_concordance.py tests/unit/test_comparison_target_controls.py tests/unit/test_probability_trajectories.py tests/integration/test_phase17_classification.py -v --no-cov
+```
+
+#### Decisions made
+
+- **Embedding policy module:** `comparison.py` cannot import `parallel.py` (existing `parallel` → `comparison` edge); policy lives in `embedding_policy.py` instead of duplicating logic.
+
+#### Unresolved questions
+
+- None.
+
+#### Risks & next steps
+
+- **GitNexus:** `gitnexus_impact` / `gitnexus_detect_changes` were not run (GitNexus MCP server not available in this Cursor session). Run on `classify_direction_concordance`, `_iter_compare_targets`, and `embedding_fail_should_propagate` before merge when enabled.
+- Operators with pre–percentile-default `*_result.json` should follow the new RUNBOOK subsection before compare/report.

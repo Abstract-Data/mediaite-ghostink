@@ -15,6 +15,7 @@ import pytest
 from forensics.analysis.changepoint import PELT_FEATURE_COLUMNS
 from forensics.models.direction_priors import (
     AI_TYPICAL_DIRECTION,
+    AI_TYPICAL_DIRECTION_RATIONALE,
     direction_from_d,
 )
 
@@ -48,6 +49,22 @@ def test_direction_from_d_non_float_rejected() -> None:
 
 def test_hedging_frequency_prior_is_none_by_design() -> None:
     assert AI_TYPICAL_DIRECTION["hedging_frequency"] is None
+
+
+def test_ai_typical_direction_rationale_keys_match_registry() -> None:
+    assert set(AI_TYPICAL_DIRECTION_RATIONALE) == set(AI_TYPICAL_DIRECTION)
+
+
+def test_ai_typical_direction_rationale_nonempty_for_documented_priors() -> None:
+    """Every non-None prior must carry a reviewer-facing rationale string."""
+    for key, prior in AI_TYPICAL_DIRECTION.items():
+        text = AI_TYPICAL_DIRECTION_RATIONALE[key].strip()
+        if prior is not None:
+            assert len(text) >= 20, f"rationale too short for {key!r}"
+        else:
+            assert "mixed" in text.lower() or "evidence" in text.lower(), (
+                f"None-prior {key!r} should document mixed/unknown evidence"
+            )
 
 
 def test_ai_typical_direction_keys_are_audited() -> None:

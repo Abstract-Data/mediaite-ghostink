@@ -133,6 +133,20 @@ def test_ratio_bands_growth_just_above_two() -> None:
     assert ratio == pytest.approx(2.1)
 
 
+def test_ratio_open_boundary_just_above_two_integer_counts() -> None:
+    """200001/100000 = 2.00001 > 2.0 — must classify as GROWTH, not STABLE."""
+    flag, ratio = compute_volume_ramp_flag([_ht(n_pre=100_000, n_post=200_001)])
+    assert flag == VolumeRampFlag.GROWTH
+    assert ratio == pytest.approx(2.00001)
+
+
+def test_ratio_open_boundary_just_above_five_integer_counts() -> None:
+    """50001/10000 = 5.0001 > 5.0 — must classify as RAMP, not GROWTH."""
+    flag, ratio = compute_volume_ramp_flag([_ht(n_pre=10_000, n_post=50_001)])
+    assert flag == VolumeRampFlag.RAMP
+    assert ratio == pytest.approx(5.0001)
+
+
 def test_ratio_bands_growth_at_five() -> None:
     flag, ratio = compute_volume_ramp_flag([_ht(n_pre=10, n_post=50)])
     assert flag == VolumeRampFlag.GROWTH

@@ -24,12 +24,12 @@ from typing import Literal
 from uuid import uuid4
 
 from forensics.analysis.convergence import ProbabilityTrajectory
-from forensics.analysis.drift import EmbeddingDriftInputsError, EmbeddingRevisionGateError
 from forensics.analysis.orchestrator.comparison import (
     _resolve_targets_and_controls,
     _run_target_control_comparisons,
     warn_comparison_report_empty_targets,
 )
+from forensics.analysis.orchestrator.embedding_policy import embedding_fail_should_propagate
 from forensics.analysis.orchestrator.mode import DEFAULT_ANALYSIS_MODE, AnalysisMode
 from forensics.analysis.orchestrator.per_author import (
     _apply_global_test_gates,
@@ -50,14 +50,6 @@ from forensics.utils.provenance import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-def _embedding_fail_should_propagate(mode: AnalysisMode, exc: BaseException) -> bool:
-    """Confirmatory runs surface embedding drift failures instead of swallowing them."""
-    return (not mode.exploratory) and isinstance(
-        exc,
-        (EmbeddingDriftInputsError, EmbeddingRevisionGateError),
-    )
 
 
 def _run_repo_per_author_pipeline_with_artifacts(
@@ -374,7 +366,7 @@ def _run_full_analysis_per_authors(
                 try:
                     returned_slug, assembled, stage_timings = future.result()
                 except Exception as exc:  # noqa: BLE001 - log + continue per-author
-                    if _embedding_fail_should_propagate(mode, exc):
+                    if embedding_fail_should_propagate(mode, exc):
                         raise
                     logger.error(
                         "analysis: worker crashed for slug=%s (%s)",
@@ -473,7 +465,7 @@ def _run_isolated_author_serial_jobs(
                 mode,
             )
         except Exception as exc:  # noqa: BLE001 — mirror full-analysis worker policy
-            if _embedding_fail_should_propagate(mode, exc):
+            if embedding_fail_should_propagate(mode, exc):
                 raise
             logger.exception(
                 "isolated refresh worker failed",
@@ -530,7 +522,7 @@ def _run_isolated_author_jobs(
             try:
                 isolated = fut.result()
             except Exception as exc:  # noqa: BLE001 — mirror full-analysis worker policy
-                if _embedding_fail_should_propagate(mode, exc):
+                if embedding_fail_should_propagate(mode, exc):
                     raise
                 logger.exception(
                     "isolated refresh worker failed",

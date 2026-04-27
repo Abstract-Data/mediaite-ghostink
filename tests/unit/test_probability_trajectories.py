@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from datetime import UTC, date, datetime
 from pathlib import Path
 
@@ -137,3 +138,47 @@ def test_pipeline_c_score_nonzero_when_trajectory_loaded(tmp_path: Path) -> None
         settings=settings,
     )
     assert score > 0.0
+
+
+def test_sparse_binoculars_months_pipeline_c_score_finite(tmp_path: Path) -> None:
+    """Sparse Binoculars months (null scores) still allow a finite Pipeline C score.
+
+    ``monthly_binoculars`` is not index-aligned with ``monthly_perplexity``;
+    :func:`compute_probability_pipeline_score` pulls each series through
+    ``_monthly_values_in_window`` on its own month keys.
+    """
+    prob_dir = tmp_path / "data" / "probability"
+    prob_dir.mkdir(parents=True)
+    rows = [
+        {
+            "article_id": "a1",
+            "author_id": "1",
+            "publish_date": date(2024, 1, 10),
+            "mean_perplexity": 90.0,
+            "perplexity_variance": 25.0,
+            "binoculars_score": None,
+        },
+        {
+            "article_id": "a2",
+            "author_id": "1",
+            "publish_date": date(2024, 2, 5),
+            "mean_perplexity": 20.0,
+            "perplexity_variance": 4.0,
+            "binoculars_score": 0.35,
+        },
+    ]
+    pl.DataFrame(rows).write_parquet(prob_dir / "bx-sparse.parquet")
+    paths = _paths(tmp_path)
+    traj = build_probability_trajectory_by_slug(paths, ["bx-sparse"])["bx-sparse"]
+    assert len(traj.monthly_perplexity) == 2
+    assert traj.monthly_binoculars is not None
+    assert len(traj.monthly_binoculars) < len(traj.monthly_perplexity)
+
+    settings = get_settings()
+    score = compute_probability_pipeline_score(
+        date(2024, 1, 1),
+        date(2024, 2, 29),
+        traj,
+        settings=settings,
+    )
+    assert math.isfinite(score)

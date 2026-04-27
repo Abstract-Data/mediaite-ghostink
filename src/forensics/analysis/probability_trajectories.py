@@ -43,6 +43,8 @@ def _aggregated_trajectory(df: pl.DataFrame) -> ProbabilityTrajectory | None:
         )
         return None
 
+    # Monthly ``avg_ppl`` / ``avg_var`` are unweighted means over articles in
+    # that calendar month (equal weight per article, not token-weighted).
     agg_exprs: list[pl.Expr] = [
         pl.col("mean_perplexity").mean().alias("avg_ppl"),
         pl.col("perplexity_variance").mean().alias("avg_var"),
@@ -72,7 +74,7 @@ def _aggregated_trajectory(df: pl.DataFrame) -> ProbabilityTrajectory | None:
         bx_vals = grouped["avg_bx"]
         pairs: list[tuple[str, float]] = []
         for m, v in zip(months, bx_vals.to_list(), strict=True):
-            if v is None:
+            if v is None:  # Sparse Binoculars months are OK; series need not align ppl/bx lengths.
                 continue
             vf = float(v)
             pairs.append((m, vf))
