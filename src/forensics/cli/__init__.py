@@ -43,7 +43,7 @@ def _configure_logging(
     level: int,
     log_format: Literal["text", "json"],
 ) -> None:
-    """Configure root logging once per process (P2-OPS-001)."""
+    """Configure root logging once (``force=True``)."""
     if log_format == "json":
         from pythonjsonlogger.jsonlogger import JsonFormatter
 
@@ -112,7 +112,7 @@ def _root(
         ),
     ] = "text",
 ) -> None:
-    """AI Writing Forensics Pipeline."""
+    """Apply root flags to ``ctx.obj`` and logging."""
     ctx.obj = ForensicsCliState(
         show_progress=not no_progress and output != "json",
         output_format=output,
@@ -123,7 +123,6 @@ def _root(
     _configure_logging(level, log_format)
 
 
-# --- Register subcommands ---
 from forensics.cli.analyze import analyze_app  # noqa: E402
 from forensics.cli.calibrate import calibrate_app  # noqa: E402
 from forensics.cli.dedup import dedup_app  # noqa: E402
@@ -158,7 +157,7 @@ def _preflight_json_envelope(
     *,
     strict: bool,
 ) -> dict[str, object]:
-    """Build the inner ``data`` payload for ``forensics --output json preflight``."""
+    """Inner ``data`` for JSON preflight output."""
     if report.has_failures:
         status = "fail"
     elif report.has_warnings:
@@ -179,12 +178,7 @@ def _preflight_json_envelope(
 
 @functools.lru_cache(maxsize=1)
 def _settings_load_errors() -> tuple[type[BaseException], ...]:
-    """Return the narrow exception tuple covering ``get_settings()`` failures.
-
-    Cached so repeated CLI entry points (``preflight``, ``validate``, and any
-    future command) don't re-import ``tomllib`` / ``pydantic`` on every
-    invocation.
-    """
+    """Exceptions raised by ``get_settings()`` (cached to avoid repeated imports)."""
     import tomllib
 
     from pydantic import ValidationError
@@ -298,7 +292,7 @@ _OLLAMA_TAGS_URL = "http://localhost:11434/api/tags"
 
 
 def _probe_endpoint(url: str, *, timeout: float = 3.0) -> tuple[bool, str]:
-    """Synchronous GET that tolerates network / transport errors (returns ``(ok, detail)``)."""
+    """GET ``url``; return ``(ok, detail)`` without raising on transport errors."""
     try:
         resp = httpx.get(url, timeout=timeout)
     except (httpx.HTTPError, OSError, ValueError, TypeError) as exc:
@@ -577,7 +571,7 @@ def dashboard_cmd(
 
     root = get_project_root()
     db_path = root / "data" / "articles.db"
-    survey_kw: dict = {
+    survey_kw: dict[str, object] = {
         "project_root": root,
         "db_path": db_path,
         "resume": resume,
@@ -614,7 +608,7 @@ def list_commands(ctx: typer.Context) -> None:
 
 
 def main() -> int:
-    """Entrypoint called by pyproject.toml [project.scripts]."""
+    """Console script entrypoint."""
     try:
         app()
     except SystemExit as exc:
@@ -622,7 +616,6 @@ def main() -> int:
     return 0
 
 
-# Typer ``app`` and console ``main`` only; subcommands live in ``forensics.cli.*``.
 __all__ = ["app", "main"]
 
 

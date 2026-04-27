@@ -1,11 +1,4 @@
-"""Analyze subcommand — change-point, time-series, drift, convergence, comparison.
-
-The default invocation (``forensics analyze [flags]``) preserves the legacy
-behaviour from before Phase 15 J3. New diagnostics ride on nested
-sub-commands (``forensics analyze section-profile``); the surrounding
-``analyze_app`` is registered with ``invoke_without_command=True`` so
-existing flag-only invocations continue to work unchanged.
-"""
+"""Analyze CLI: default callback plus nested commands (e.g. ``section-profile``)."""
 
 from __future__ import annotations
 
@@ -50,11 +43,7 @@ analyze_app = typer.Typer(
 
 @dataclass(frozen=True, slots=True)
 class AnalyzeContext:
-    """Shared inputs threaded through ``analyze`` stage runners.
-
-    ``paths`` is pre-computed so stage runners can reach any artifact location
-    without re-deriving the project layout on each call.
-    """
+    """Shared paths/settings/slug for analyze stage runners."""
 
     db_path: Path
     settings: ForensicsSettings
@@ -78,7 +67,6 @@ class AnalyzeContext:
         exploratory: bool = False,
         allow_pre_phase16_embeddings: bool = False,
     ) -> AnalyzeContext:
-        """Construct a context from the ambient project layout."""
         return cls(
             db_path=db_path,
             settings=settings,
@@ -92,24 +80,17 @@ class AnalyzeContext:
 
     @property
     def root(self) -> Path:
-        """Project root backing the artifact layout."""
         return self.paths.project_root
 
 
 def _parse_compare_pair(raw: str | None) -> tuple[str, str] | None:
-    """Parse ``--compare TARGET,CONTROL`` into a typed pair.
-
-    Returns ``None`` when ``raw`` is ``None`` (the legacy ``--compare`` boolean
-    path). Raises :class:`typer.BadParameter` when the value is malformed so
-    operators get a clear error instead of a silent fall-through to the
-    config-driven target/control resolution.
-    """
+    """Parse ``TARGET,CONTROL`` for ``--compare-pair``; ``None`` if ``raw`` is unset."""
     if raw is None:
         return None
     parts = [p.strip() for p in raw.split(",")]
     if len(parts) != 2 or not all(parts):
         msg = (
-            f"--compare expected 'TARGET,CONTROL' (got {raw!r}); "
+            f"--compare-pair expected 'TARGET,CONTROL' (got {raw!r}); "
             "both slugs must be non-empty and separated by a single comma."
         )
         raise typer.BadParameter(msg)
@@ -131,7 +112,6 @@ def _run_compare_only_flow(ctx: AnalyzeContext) -> None:
     pipeline_ctx = PipelineContext.resolve()
     rid = pipeline_ctx.record_audit("forensics analyze --compare", optional=False, log=logger)
     assert rid is not None
-    # analysis_dir is mkdir'd inside _write_run_metadata → write_json_artifact.
     analysis_dir = ctx.paths.analysis_dir
     meta = {
         "run_id": rid,
@@ -297,14 +277,9 @@ def _enforce_shared_byline_gate(
     author_slug: str,
     include_shared_bylines: bool,
 ) -> None:
-    """Refuse to analyze a shared-byline author unless the operator opts in.
+    """Block shared-byline authors unless ``--include-shared-bylines``.
 
-    Mirrors the Phase 15 D survey-stage gate (``forensics survey``): the
-    accounts ``mediaite`` and ``mediaite-staff`` aggregate output from many
-    contributors, so single-author stylometry on them is meaningless. We
-    consult both the persisted ``Author.is_shared_byline`` flag (set at
-    ingest) AND the slug heuristic so older databases that pre-date the
-    flag still trip the gate.
+    Uses DB ``is_shared_byline`` and slug heuristic.
     """
     if include_shared_bylines:
         return
@@ -317,8 +292,6 @@ def _enforce_shared_byline_gate(
         flagged = bool(author.is_shared_byline)
         matched_name = author.name
         matched_outlet = author.outlet
-    # Fall back to the configured outlet/name when the slug isn't in the DB
-    # yet — analyze CLI may run before scrape on a fresh checkout.
     if not flagged:
         configured = next((a for a in settings.authors if a.slug == author_slug), None)
         if configured is not None:
@@ -346,15 +319,9 @@ def _apply_per_run_overrides(
     include_advertorial: bool,
     residualize_sections: bool,
 ) -> ForensicsSettings:
-    """Return ``settings`` with per-run CLI escape hatches applied.
+    """Per-run advertorial and section-residualization overrides.
 
-    - ``include_advertorial`` (Phase 15 J2): re-enable advertorial / syndicated
-      sections in features + survey config for this run only.
-    - ``residualize_sections`` (Phase 15 J7): flip the J5 toggle without
-      touching the persisted ``config.toml``.
-
-    Both escapes copy nested config models so the global ``get_settings()``
-    cache is never mutated.
+    Model copies only; does not mutate the ``get_settings()`` cache.
     """
     if include_advertorial:
         settings = settings.model_copy(
@@ -397,17 +364,7 @@ def run_analyze(  # noqa: C901
     allow_pre_phase16_embeddings: bool = False,
     typer_context: typer.Context | None = None,
 ) -> None:
-    """Execute the analyze stage as a plain Python function.
-
-    Kept separate from the Typer ``analyze`` callback so the `forensics all`
-    orchestrator can call this without fighting Typer's option defaults.
-
-    ``max_workers`` overrides ``settings.analysis.max_workers`` for this run
-    only — useful when the operator wants to pin the worker count from the
-    command line without editing ``config.toml``. ``compare_pair`` flips on a
-    one-off ``(target, control)`` comparison that bypasses the configured
-    target/control role assignment for this run only.
-    """
+    """Run analyze stages (callable from Typer and from ``forensics all``)."""
     settings = _apply_per_run_overrides(
         get_settings(),
         include_advertorial=include_advertorial,
@@ -432,7 +389,6 @@ def run_analyze(  # noqa: C901
         exploratory=exploratory,
         allow_pre_phase16_embeddings=allow_pre_phase16_embeddings,
     )
-    # analysis_dir is created by the first write helper that lands an artifact.
     analysis_dir = ctx.paths.analysis_dir
 
     if verify_corpus:
@@ -715,8 +671,6 @@ def analyze(
     ] = False,
 ) -> None:
     """Run analysis pipeline (change-point, drift, convergence, comparison)."""
-    # When a sub-command is invoked (e.g. ``analyze section-profile``),
-    # Typer still runs the callback first; let the sub-command own the flow.
     if ctx.invoked_subcommand is not None:
         return
     parsed_pair = _parse_compare_pair(compare_pair)

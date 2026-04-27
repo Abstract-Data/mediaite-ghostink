@@ -3,18 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, cast
 
 import typer
 
 
 @dataclass
 class ForensicsCliState:
-    """Root ``forensics`` options visible to subcommands via :func:`get_cli_state`.
-
-    When ``output_format == \"json\"``, ``show_progress`` is forced to ``False`` at
-    the root callback so Rich progress does not write to stderr during agent runs.
-    """
+    """Root options on ``Context.obj`` (JSON output disables progress in the root callback)."""
 
     show_progress: bool = True
     output_format: Literal["text", "json"] = "text"
@@ -23,11 +19,11 @@ class ForensicsCliState:
 
 
 def get_cli_state(ctx: typer.Context | None) -> ForensicsCliState:
-    """Walk the Typer/Click context chain for :class:`ForensicsCliState` (default if missing)."""
+    """Return ``ForensicsCliState`` from the context chain, or defaults."""
     cur: typer.Context | None = ctx
     while cur is not None:
         obj = getattr(cur, "obj", None)
         if isinstance(obj, ForensicsCliState):
             return obj
-        cur = cur.parent  # type: ignore[assignment]
+        cur = cast(typer.Context | None, cur.parent)
     return ForensicsCliState()

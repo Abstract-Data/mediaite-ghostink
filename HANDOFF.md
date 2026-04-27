@@ -5558,3 +5558,97 @@ wc -l .claude/skills/forensics-cli/SKILL.md
 
 #### Risks & Next Steps
 - MCP `gitnexus_detect_changes` was not available in this Cursor workspace (server not registered); re-run when GitNexus MCP is enabled before merge.
+
+---
+
+### Deslop Phase 0 — baseline, churn, stop list (inventory only)
+**Status:** Complete  
+**Date:** 2026-04-27  
+**Agent/Session:** Cursor agent  
+
+#### What Was Done
+- Recorded **BASE** ref and resolved commit for reproducible `git diff` churn.
+- Produced **churn report** (`git diff $BASE --numstat` on `src/` + `tests/`), top files and directory aggregates, and **Phase 1–3 priority** ordering per deslop plan.
+- Filled **stop list** (high-touch paths for comment-only / deslop edits): preregistration, artifact paths, `paths.py`, SQLite migrations.
+
+#### Files Modified
+- `HANDOFF.md` — this completion block (no plan file edits per assignment).
+
+#### Verification Evidence
+```
+# Scope vs main (matches plan: git diff $BASE --stat -- src/ tests/)
+git diff main --shortstat -- src/ tests/
+  -> 105 files changed, 6528 insertions(+), 1812 deletions(-)
+
+# BASE
+git rev-parse main
+  -> e463c886d2b8a607559fba05173144cd802fcd2f
+
+git tag -l 'v*' | tail -15
+  -> (no tags returned in this clone at query time; BASE remains branch main)
+
+# Churn vs main — top 15 files by |insert|+|delete|
+git diff main --numstat -- src/ tests/ | awk '{print $1+$2, $3}' | sort -rn | head -15
+  -> 1232 src/forensics/analysis/orchestrator.py
+     548 src/forensics/analysis/orchestrator/parallel.py
+     413 src/forensics/analysis/orchestrator/per_author.py
+     356 src/forensics/cli/__init__.py
+     240 src/forensics/storage/repository.py
+     210 src/forensics/analysis/statistics.py
+     185 tests/integration/test_pipeline_end_to_end.py
+     173 src/forensics/cli/analyze.py
+     170 tests/unit/test_scrape_transient_classification.py
+     154 src/forensics/analysis/convergence.py
+     139 src/forensics/analysis/orchestrator/runner.py
+     135 src/forensics/analysis/orchestrator/comparison.py
+     128 tests/unit/test_simhash_migration.py
+     125 src/forensics/cli/scrape.py
+     125 src/forensics/baseline/agent.py
+
+# Directory aggregate (same diff)
+  -> 3394 src/forensics/analysis
+     2008 tests/unit
+     1220 src/forensics/cli
+      347 tests/integration
+      332 src/forensics/storage
+      …
+```
+
+#### Decisions Made
+- **BASE = `main`** at `e463c886d2b8a607559fba05173144cd802fcd2f` (no release tag used; tags absent in output — use a `v*` tag as BASE on release branches if needed).
+- **Phase 1–3 prioritization (for upcoming deslop PRs, not raw global churn rank):**
+  1. **Phase 1 (CLI)** — `src/forensics/cli/` has the largest churn among plan Phases 1–3 (1220 lines vs `main`); prioritize `cli/__init__.py`, `cli/analyze.py`, `cli/scrape.py`, `cli/survey.py`, `cli/_commands.py`, plus CLI-heavy tests under `tests/unit/` (e.g. `test_cli_preflight_json.py`, `test_cli_envelope.py`).
+  2. **Phase 3 (storage)** — next by plan scope: `src/forensics/storage/` aggregate 332 lines; hotspot file `storage/repository.py` (240). Treat migrations as **HIGH** touch (stop list).
+  3. **Phase 2 (config / paths / preflight / preregistration)** — lower *relative* churn vs `main` for narrow paths (`config/` 78, `preflight.py` + `preregistration.py` + `paths.py` combined ~99 in spot check) but **MEDIUM default risk** because of env, path, and preregistration gates — schedule after inventory; do not skip tests from plan Phase 2 list.
+
+Global churn is dominated by `src/forensics/analysis/` (3394); that maps to **Phase 6** in the plan — defer until Phase 1–3 slices ship unless explicitly rescoped.
+
+#### Unresolved Questions
+- Whether a **release tag** should replace `main` as BASE on long-lived release branches (none selected here).
+
+#### Risks & Next Steps
+- **Stop list — copy into Phase 1–3 PR descriptions when touching these paths:**
+
+| Area | Paths / symbols (treat as MEDIUM+ risk for “comment-only” deslop) |
+|------|---------------------------------------------------------------------|
+| Preregistration | `src/forensics/preregistration.py`; runtime dir **`data/preregistration/`** (hashes / lockfiles consumed by analyze); `tests/test_preregistration.py` |
+| Canonical data paths | `src/forensics/paths.py`; **`AnalysisArtifactPaths`** in `src/forensics/analysis/artifact_paths.py` (and call sites that persist under `data/analysis/`, parallel staging, etc.) |
+| SQLite migrations | `src/forensics/storage/migrations/__init__.py`, `001_author_shared_byline.py`, `002_feature_parquet_section.py`, `003_articles_word_count_check.py`, `004_articles_dedup_simhash_columns.py`; **`src/forensics/storage/repository.py`** |
+| Preflight / config gates | `src/forensics/preflight.py`; `src/forensics/config/` (`settings`, validators); keep edits minimal and test-backed |
+
+- Next execution step from plan: run Phase **1** deslop as first implementation PR using `BASE=main` above; re-run directory churn after merge.
+
+---
+
+### 2026-04-27 — Phase 1 CLI deslop (completed)
+
+**Status:** Complete  
+**Scope:** `src/forensics/cli/` + `tests/unit/test_cli_commands_dump.py`
+
+**Changes:** Trimmed redundant docstrings/comments; replaced `get_cli_state` parent walk `type: ignore` with `cast`; tightened `_commands` / `_envelope` typing (`object` vs `Any` where safe); typed `survey_kw` as `dict[str, object]`; aligned `_errors.fail` with `failure(**extra: object)`; `_parse_compare_pair` error text now says ``--compare-pair`` (flag name fix).
+
+**Verification:** `uv run ruff check src/forensics/cli tests/unit/test_cli_*.py tests/integration/test_cli.py tests/integration/test_cli_scrape_dispatch.py`; `uv run ruff format --check` (same paths); `uv run pytest tests/unit/test_cli_*.py tests/integration/test_cli.py tests/integration/test_cli_scrape_dispatch.py -q --no-cov` — all passed.
+
+**GitNexus:** `npx gitnexus impact get_cli_state -r mediaite-ghostink -d upstream --depth 2` → **CRITICAL** blast radius (expected); edits are typing/docs only, behavior unchanged.
+
+**Next:** Phase 2 deslop per plan (config/paths/preflight) or merge Phase 1 PR.
