@@ -13,12 +13,14 @@ the report CLI standardizes on a single emitted JSON bundle.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
 
 from pydantic import BaseModel
 
 from forensics.models.analysis import ConvergenceWindow, HypothesisTest
+from forensics.models.direction_priors import AI_TYPICAL_DIRECTION, direction_from_d
 
 
 class FindingStrength(StrEnum):
@@ -73,6 +75,154 @@ def classify_finding_strength(
     if len(significant_tests) >= 1:
         return FindingStrength.WEAK
     return FindingStrength.NONE
+
+
+def _strictly_stronger_hypothesis(a: HypothesisTest, b: HypothesisTest) -> bool:
+    am, bm = abs(a.effect_size_cohens_d), abs(b.effect_size_cohens_d)
+    if am > bm:
+        return True
+    if am < bm:
+        return False
+    return a.test_name < b.test_name
+
+
+def _collapse_tests_by_max_abs_d(
+    window_hypothesis_tests: list[HypothesisTest],
+) -> dict[str, HypothesisTest]:
+    by_feature: dict[str, HypothesisTest] = {}
+    for test in window_hypothesis_tests:
+        prev = by_feature.get(test.feature_name)
+        if prev is None or _strictly_stronger_hypothesis(test, prev):
+            by_feature[test.feature_name] = test
+    return by_feature
+
+
+class DirectionConcordance(StrEnum):
+    """Exploratory diagnostic: how window effects align with AI-typical directions."""
+
+    AI = "direction_ai"
+    MIXED = "direction_mixed"
+    NON_AI = "direction_non_ai"
+    NA = "direction_na"
+
+
+@dataclass(frozen=True)
+class DirectionBreakdown:
+    """Per-window counts after collapsing to one test per ``feature_name`` (max |d|)."""
+
+    n_match: int
+    n_oppose: int
+    n_no_prior: int
+    matched_features: tuple[str, ...]
+    opposed_features: tuple[str, ...]
+
+
+def classify_direction_concordance(
+    convergence_window: ConvergenceWindow,
+    window_hypothesis_tests: list[HypothesisTest],
+) -> tuple[DirectionConcordance, DirectionBreakdown]:
+    """Score how many window features moved in the AI-typical direction.
+
+    Callers **must** pre-scope ``window_hypothesis_tests`` to the window (same
+    convention as :func:`classify_finding_strength`). ``convergence_window`` is
+    part of the signature for symmetry and documentation; this function does
+    not filter the test list.
+
+    For each distinct ``feature_name``, the test with the largest
+    ``abs(effect_size_cohens_d)`` is kept; ties break on ``test_name`` for
+    determinism. The empirical ≥50% match rule (among features with a non-null
+    prior) is **exploratory** until locked in pre-registration.
+    """
+    _ = convergence_window
+    by_feature = _collapse_tests_by_max_abs_d(window_hypothesis_tests)
+
+    matched: list[str] = []
+    opposed: list[str] = []
+    n_no_prior = 0
+    for feature_name in sorted(by_feature):
+        prior = AI_TYPICAL_DIRECTION.get(feature_name)
+        observed = direction_from_d(by_feature[feature_name].effect_size_cohens_d)
+        if prior is None:
+            n_no_prior += 1
+            continue
+        if observed is None:
+            n_no_prior += 1
+            continue
+        if observed == prior:
+            matched.append(feature_name)
+        else:
+            opposed.append(feature_name)
+
+    n_match = len(matched)
+    n_oppose = len(opposed)
+    prior_total = n_match + n_oppose
+    if prior_total == 0:
+        return (
+            DirectionConcordance.NA,
+            DirectionBreakdown(
+                n_match=0,
+                n_oppose=0,
+                n_no_prior=n_no_prior,
+                matched_features=tuple(),
+                opposed_features=tuple(),
+            ),
+        )
+    if n_match * 2 >= prior_total:
+        concordance = DirectionConcordance.AI
+    elif n_match > 0:
+        concordance = DirectionConcordance.MIXED
+    else:
+        concordance = DirectionConcordance.NON_AI
+    return (
+        concordance,
+        DirectionBreakdown(
+            n_match=n_match,
+            n_oppose=n_oppose,
+            n_no_prior=n_no_prior,
+            matched_features=tuple(matched),
+            opposed_features=tuple(opposed),
+        ),
+    )
+
+
+class VolumeRampFlag(StrEnum):
+    """Exploratory diagnostic for pre/post article-count ratio inside the window."""
+
+    STABLE = "volume_stable"
+    GROWTH = "volume_growth"
+    RAMP = "volume_ramp"
+    DECLINE = "volume_decline"
+    UNKNOWN = "volume_unknown"
+
+
+def compute_volume_ramp_flag(
+    window_hypothesis_tests: list[HypothesisTest],
+) -> tuple[VolumeRampFlag, float | None]:
+    """Classify corpus volume change using ``n_post / n_pre`` from the first usable row.
+
+    The first **non-degenerate** test with ``n_pre > 0``, ``n_pre != -1``,
+    ``n_post >= 0``, and ``n_post != -1`` supplies the ratio. Heterogeneous lists
+    are rare; the first-wins rule is documented for transparency.
+
+    Bands: stable ``[0.5, 2.0]``, growth ``(2, 5]``, ramp ``> 5``, decline
+    ``< 0.5``. The 5× ramp cutoff is **exploratory** until pre-registration lock.
+    """
+    for test in window_hypothesis_tests:
+        if test.degenerate:
+            continue
+        if test.n_pre <= 0 or test.n_pre == -1:
+            continue
+        if test.n_post < 0 or test.n_post == -1:
+            continue
+        ratio = test.n_post / test.n_pre
+        if ratio < 0.5:
+            return VolumeRampFlag.DECLINE, ratio
+        if ratio <= 2.0:
+            return VolumeRampFlag.STABLE, ratio
+        if ratio <= 5.0:
+            return VolumeRampFlag.GROWTH, ratio
+        return VolumeRampFlag.RAMP, ratio
+    return VolumeRampFlag.UNKNOWN, None
 
 
 class ReportManifest(BaseModel):

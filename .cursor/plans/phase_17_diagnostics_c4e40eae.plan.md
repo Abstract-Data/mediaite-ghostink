@@ -7,7 +7,7 @@ todos:
     status: completed
   - id: phase-b-report
     content: Extend report.py (DirectionConcordance, DirectionBreakdown, VolumeRampFlag, classify_*, compute_*) + models/__init__.py re-exports
-    status: pending
+    status: completed
   - id: phase-b-units
     content: Add test_direction_concordance.py + test_volume_ramp_flag.py (incl. -1 n_pre/n_post, degenerate, div-by-zero)
     status: pending

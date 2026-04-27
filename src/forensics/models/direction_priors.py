@@ -14,6 +14,10 @@ fabricate a direction for a feature without evidence.
 This file should be reviewed before pre-registration lock; any
 threshold or directional claim derived from it is exploratory until
 the lock exists.
+
+Lives under ``forensics.models`` (not ``forensics.analysis``) so
+:mod:`forensics.models.report` can import priors without executing
+``forensics.analysis``'s orchestrator barrel (circular import).
 """
 
 from __future__ import annotations

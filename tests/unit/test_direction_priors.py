@@ -1,4 +1,4 @@
-"""Unit tests for :mod:`forensics.analysis.direction_priors`.
+"""Unit tests for :mod:`forensics.models.direction_priors`.
 
 Includes an audit that every key in :data:`AI_TYPICAL_DIRECTION` is either
 (1) a column name that participates in PELT / hypothesis-test outputs, or
@@ -13,7 +13,7 @@ import math
 import pytest
 
 from forensics.analysis.changepoint import PELT_FEATURE_COLUMNS
-from forensics.analysis.direction_priors import (
+from forensics.models.direction_priors import (
     AI_TYPICAL_DIRECTION,
     direction_from_d,
 )
