@@ -238,7 +238,7 @@ def test_run_analyze_blocks_missing_preregistration(
     monkeypatch.setattr(analyze_mod, "get_project_root", lambda: tmp_path)
 
     with pytest.raises(analyze_mod.typer.Exit):
-        analyze_mod.run_analyze()
+        analyze_mod.run_analyze(analyze_mod.AnalyzeRequest())
 
     assert len(calls) == 1
     assert calls[0] is get_settings()
@@ -278,7 +278,7 @@ def test_run_analyze_records_exploratory_override(
     monkeypatch.setattr(analyze_mod, "_run_timeseries_stage", lambda *a, **k: None)
     monkeypatch.setattr(analyze_mod, "_run_full_analysis_stage", lambda *a, **k: None)
 
-    analyze_mod.run_analyze(exploratory=True)
+    analyze_mod.run_analyze(analyze_mod.AnalyzeRequest(exploratory=True))
 
     assert len(calls) == 1
     meta_path = tmp_path / "data" / "analysis" / "run_metadata.json"

@@ -30,7 +30,7 @@ Configuration is **`ForensicsSettings`** from `forensics.config.settings` (TOML 
 | 1 | `insert_analysis_run` | Writes an `analysis_runs` row with description `forensics all` (non-fatal on `OSError`). |
 | 2 | `dispatch_scrape(discover=False, …, archive=False)` | All stage flags false selects the **full scrape** branch (same as bare `forensics scrape`), which again records `forensics scrape` in `analysis_runs` inside `dispatch_scrape`. |
 | 3 | `extract_all_features` | All authors; embeddings unless skipped elsewhere. |
-| 4 | `run_analyze(timeseries=True, convergence=True)` | **Does not** enable `--changepoint`, `--drift`, `--compare`, or `--ai-baseline`; change `pipeline.py` if `all` should match a richer CLI default. |
+| 4 | `run_analyze(AnalyzeRequest(timeseries=True, convergence=True))` | **Does not** enable `--changepoint`, `--drift`, `--compare`, or `--ai-baseline`; change `pipeline.py` if `all` should match a richer CLI default. |
 | 5 | `run_report` | Uses `settings.report.output_format`; requires Quarto on `PATH` and per-author artifacts under `data/analysis/`. |
 
 ## Stage map (implemented entrypoints)

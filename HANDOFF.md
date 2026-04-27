@@ -5877,3 +5877,46 @@ Failure: `tests/integration/test_pipeline_end_to_end.py::test_pipeline_extract_a
 #### Risks & Next Steps
 
 - Restore or fixture `quarto.yml` (or adjust the integration test) if that e2e test must pass in CI.
+
+---
+
+### Refactoring Run 11 — TASK-3 `AnalyzeRequest` + `analyze_options`
+
+**Status:** Complete  
+**Date:** 2026-04-27
+
+#### What Was Done
+
+- Added frozen `AnalyzeRequest` dataclass holding all former `run_analyze` keyword-only parameters (including optional `typer_context`).
+- Refactored `run_analyze(request: AnalyzeRequest) -> None` with local unpacking to preserve existing stage logic.
+- Extracted default-callback Typer `Annotated` option definitions to `src/forensics/cli/analyze_options.py`; `analyze` callback now uses those aliases and builds `AnalyzeRequest`.
+- Updated `run_all_pipeline` to call `run_analyze(AnalyzeRequest(timeseries=True, convergence=True))`.
+- Tests: `test_preregistration.py`, `test_analyze_survey_gate.py` now pass `AnalyzeRequest`; signature test replaced with `AnalyzeRequest` field assertions.
+
+#### Files Modified
+
+- `src/forensics/cli/analyze_options.py` — new Typer option type aliases.
+- `src/forensics/cli/analyze.py` — `AnalyzeRequest`, `run_analyze` signature, slim `analyze` callback.
+- `src/forensics/pipeline.py` — import and invoke `AnalyzeRequest` for analyze stage.
+- `tests/test_preregistration.py`, `tests/unit/test_analyze_survey_gate.py` — callers updated.
+
+#### Verification Evidence
+
+```
+uv run ruff check .   # pass
+uv run ruff format src/forensics/cli/analyze_options.py   # applied
+uv run pytest tests/test_preregistration.py tests/unit/test_analyze_survey_gate.py tests/test_pipeline.py -v --no-cov   # 23 passed
+uv run pytest tests/ -q --tb=no   # coverage 79.2% (passes fail-under); 2 failed (pre-existing: e2e missing repo-root quarto.yml; parser fuzz); 1 xfail
+```
+
+#### Decisions Made
+
+- Kept `compare_pair` as a parsed `tuple[str, str] | None` on `AnalyzeRequest` (CLI still passes raw string into callback, then `_parse_compare_pair` before constructing the request).
+
+#### GitNexus
+
+- `user-gitnexus` MCP not available in this Cursor session; impact not run.
+
+#### Risks & Next Steps
+
+- External code importing `run_analyze` with keyword arguments must switch to `run_analyze(AnalyzeRequest(...))` (repo-internal callers updated).

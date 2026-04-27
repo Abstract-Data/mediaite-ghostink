@@ -10,7 +10,7 @@ todos:
     status: completed
   - id: task-3-analyze-request
     content: "TASK-3: Introduce AnalyzeRequest; refactor run_analyze + Typer analyze callback/options module; update forensics all and tests"
-    status: pending
+    status: completed
   - id: task-4-analysis-config
     content: "TASK-4: Split AnalysisConfig into nested sub-models with flat TOML compat + stable config hash; update all accessors; ADR + golden hash test"
     status: pending

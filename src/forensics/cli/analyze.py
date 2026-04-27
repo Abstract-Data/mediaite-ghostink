@@ -15,6 +15,27 @@ from forensics.cli._decorators import examples_epilog, forensics_examples, with_
 from forensics.cli._envelope import status
 from forensics.cli._errors import fail
 from forensics.cli._exit import ExitCode
+from forensics.cli.analyze_options import (
+    AnalyzeAiBaselineFlag,
+    AnalyzeAllowPrePhase16EmbeddingsFlag,
+    AnalyzeArticlesPerCellOption,
+    AnalyzeAuthorOption,
+    AnalyzeBaselineModelOption,
+    AnalyzeChangepointFlag,
+    AnalyzeCompareFlag,
+    AnalyzeComparePairOption,
+    AnalyzeConvergenceFlag,
+    AnalyzeDriftFlag,
+    AnalyzeExploratoryFlag,
+    AnalyzeIncludeAdvertorialFlag,
+    AnalyzeIncludeSharedBylinesFlag,
+    AnalyzeMaxWorkersOption,
+    AnalyzeParallelAuthorsFlag,
+    AnalyzeResidualizeSectionsFlag,
+    AnalyzeSkipGenerationFlag,
+    AnalyzeTimeseriesFlag,
+    AnalyzeVerifyCorpusFlag,
+)
 from forensics.cli.state import get_cli_state
 from forensics.config import DEFAULT_DB_RELATIVE, get_project_root, get_settings
 from forensics.config.settings import ForensicsSettings
@@ -81,6 +102,32 @@ class AnalyzeContext:
     @property
     def root(self) -> Path:
         return self.paths.project_root
+
+
+@dataclass(frozen=True, slots=True)
+class AnalyzeRequest:
+    """Parameters for :func:`run_analyze` (CLI default callback and programmatic callers)."""
+
+    changepoint: bool = False
+    timeseries: bool = False
+    drift: bool = False
+    convergence: bool = False
+    compare: bool = False
+    ai_baseline: bool = False
+    skip_generation: bool = False
+    verify_corpus: bool = False
+    baseline_model: str | None = None
+    articles_per_cell: int | None = None
+    author: str | None = None
+    exploratory: bool = False
+    include_advertorial: bool = False
+    residualize_sections: bool = False
+    include_shared_bylines: bool = False
+    max_workers: int | None = None
+    compare_pair: tuple[str, str] | None = None
+    parallel_authors: bool = False
+    allow_pre_phase16_embeddings: bool = False
+    typer_context: typer.Context | None = None
 
 
 def _parse_compare_pair(raw: str | None) -> tuple[str, str] | None:
@@ -341,30 +388,29 @@ def _apply_per_run_overrides(
     return settings
 
 
-def run_analyze(  # noqa: C901
-    *,
-    changepoint: bool = False,
-    timeseries: bool = False,
-    drift: bool = False,
-    convergence: bool = False,
-    compare: bool = False,
-    ai_baseline: bool = False,
-    skip_generation: bool = False,
-    verify_corpus: bool = False,
-    baseline_model: str | None = None,
-    articles_per_cell: int | None = None,
-    author: str | None = None,
-    exploratory: bool = False,
-    include_advertorial: bool = False,
-    residualize_sections: bool = False,
-    include_shared_bylines: bool = False,
-    max_workers: int | None = None,
-    compare_pair: tuple[str, str] | None = None,
-    parallel_authors: bool = False,
-    allow_pre_phase16_embeddings: bool = False,
-    typer_context: typer.Context | None = None,
-) -> None:
+def run_analyze(request: AnalyzeRequest) -> None:  # noqa: C901
     """Run analyze stages (callable from Typer and from ``forensics all``)."""
+    changepoint = request.changepoint
+    timeseries = request.timeseries
+    drift = request.drift
+    convergence = request.convergence
+    compare = request.compare
+    ai_baseline = request.ai_baseline
+    skip_generation = request.skip_generation
+    verify_corpus = request.verify_corpus
+    baseline_model = request.baseline_model
+    articles_per_cell = request.articles_per_cell
+    author = request.author
+    exploratory = request.exploratory
+    include_advertorial = request.include_advertorial
+    residualize_sections = request.residualize_sections
+    include_shared_bylines = request.include_shared_bylines
+    max_workers = request.max_workers
+    compare_pair = request.compare_pair
+    parallel_authors = request.parallel_authors
+    allow_pre_phase16_embeddings = request.allow_pre_phase16_embeddings
+    typer_context = request.typer_context
+
     settings = _apply_per_run_overrides(
         get_settings(),
         include_advertorial=include_advertorial,
@@ -516,185 +562,53 @@ def run_analyze(  # noqa: C901
 @with_examples(*_ANALYZE_EXAMPLES)
 def analyze(
     ctx: typer.Context,
-    changepoint: Annotated[
-        bool,
-        typer.Option("--changepoint", help="Run change-point detection (PELT/BOCPD)"),
-    ] = False,
-    timeseries: Annotated[
-        bool,
-        typer.Option("--timeseries", help="Run rolling statistics + STL decomposition"),
-    ] = False,
-    drift: Annotated[
-        bool,
-        typer.Option("--drift", help="Run embedding drift analysis (Phase 6)"),
-    ] = False,
-    convergence: Annotated[
-        bool,
-        typer.Option(
-            "--convergence",
-            help="Cross-validate pipelines and run hypothesis tests (Phase 7)",
-        ),
-    ] = False,
-    compare: Annotated[
-        bool,
-        typer.Option("--compare", help="Control author comparison only (Phase 7)"),
-    ] = False,
-    ai_baseline: Annotated[
-        bool,
-        typer.Option("--ai-baseline", help="Generate or refresh synthetic AI baseline articles"),
-    ] = False,
-    skip_generation: Annotated[
-        bool,
-        typer.Option(
-            "--skip-generation",
-            help="With --ai-baseline: re-embed existing JSON articles only",
-        ),
-    ] = False,
-    verify_corpus: Annotated[
-        bool,
-        typer.Option(
-            "--verify-corpus",
-            help="Verify corpus hash against data/analysis/corpus_custody.json",
-        ),
-    ] = False,
-    baseline_model: Annotated[
-        str | None,
-        typer.Option(
-            "--baseline-model",
-            metavar="MODEL",
-            help="With --ai-baseline: restrict to one configured Ollama model",
-        ),
-    ] = None,
-    articles_per_cell: Annotated[
-        int | None,
-        typer.Option(
-            "--articles-per-cell",
-            metavar="N",
-            help="With --ai-baseline: override articles_per_cell (default from config)",
-        ),
-    ] = None,
-    author: Annotated[
-        str | None,
-        typer.Option("--author", metavar="SLUG", help="Limit to one author slug"),
-    ] = None,
-    exploratory: Annotated[
-        bool,
-        typer.Option(
-            "--exploratory",
-            help=(
-                "Allow analysis without a matching pre-registration lock "
-                "and record exploratory mode."
-            ),
-        ),
-    ] = False,
-    include_advertorial: Annotated[
-        bool,
-        typer.Option(
-            "--include-advertorial",
-            help=(
-                "Re-include advertorial / syndicated sections (sponsored, "
-                "partner-content, crosspost) in feature extraction and survey "
-                "qualification for this run; default OFF (Phase 15 J2)."
-            ),
-        ),
-    ] = False,
-    residualize_sections: Annotated[
-        bool,
-        typer.Option(
-            "--residualize-sections",
-            help=(
-                "Toggle J5 section-residualized changepoints for this run "
-                "(flips analysis.section_residualize_features). Default OFF "
-                "matches the persisted config (Phase 15 J7)."
-            ),
-        ),
-    ] = False,
-    include_shared_bylines: Annotated[
-        bool,
-        typer.Option(
-            "--include-shared-bylines",
-            help=(
-                "Re-enable analysis of shared-byline accounts (e.g. "
-                "mediaite-staff, mediaite). Default OFF — matches the Phase "
-                "15 D survey gate, which disqualifies group bylines because "
-                "single-author stylometry on aggregate accounts is "
-                "meaningless. Mirrors ``forensics survey "
-                "--include-shared-bylines``."
-            ),
-        ),
-    ] = False,
-    max_workers: Annotated[
-        int | None,
-        typer.Option(
-            "--max-workers",
-            metavar="N",
-            help=(
-                "Override analysis.max_workers for this run only. N=1 forces "
-                "the legacy serial dispatch; N>1 fans the per-author loop out "
-                "across a ProcessPoolExecutor (Phase 15 G1)."
-            ),
-        ),
-    ] = None,
-    parallel_authors: Annotated[
-        bool,
-        typer.Option(
-            "--parallel-authors",
-            help=(
-                "Refresh configured author analysis artifacts via isolated per-author "
-                "directories, then promote validated outputs and rebuild shared artifacts once."
-            ),
-        ),
-    ] = False,
-    compare_pair: Annotated[
-        str | None,
-        typer.Option(
-            "--compare-pair",
-            metavar="TARGET,CONTROL",
-            help=(
-                "Run a one-off target↔control comparison for the named slugs, "
-                "bypassing the configured author roles. Example: "
-                "'--compare-pair isaac-schorr,john-doe'."
-            ),
-        ),
-    ] = None,
-    allow_pre_phase16_embeddings: Annotated[
-        bool,
-        typer.Option(
-            "--allow-pre-phase16-embeddings",
-            help=(
-                "With --exploratory: load embedding batches whose manifest "
-                "model_revision does not match analysis.embedding_model_revision, "
-                "logging a WARNING instead of failing. Default OFF — confirmatory "
-                "runs always require a matching revision."
-            ),
-        ),
-    ] = False,
+    changepoint: AnalyzeChangepointFlag = False,
+    timeseries: AnalyzeTimeseriesFlag = False,
+    drift: AnalyzeDriftFlag = False,
+    convergence: AnalyzeConvergenceFlag = False,
+    compare: AnalyzeCompareFlag = False,
+    ai_baseline: AnalyzeAiBaselineFlag = False,
+    skip_generation: AnalyzeSkipGenerationFlag = False,
+    verify_corpus: AnalyzeVerifyCorpusFlag = False,
+    baseline_model: AnalyzeBaselineModelOption = None,
+    articles_per_cell: AnalyzeArticlesPerCellOption = None,
+    author: AnalyzeAuthorOption = None,
+    exploratory: AnalyzeExploratoryFlag = False,
+    include_advertorial: AnalyzeIncludeAdvertorialFlag = False,
+    residualize_sections: AnalyzeResidualizeSectionsFlag = False,
+    include_shared_bylines: AnalyzeIncludeSharedBylinesFlag = False,
+    max_workers: AnalyzeMaxWorkersOption = None,
+    parallel_authors: AnalyzeParallelAuthorsFlag = False,
+    compare_pair: AnalyzeComparePairOption = None,
+    allow_pre_phase16_embeddings: AnalyzeAllowPrePhase16EmbeddingsFlag = False,
 ) -> None:
     """Run analysis pipeline (change-point, drift, convergence, comparison)."""
     if ctx.invoked_subcommand is not None:
         return
     parsed_pair = _parse_compare_pair(compare_pair)
     run_analyze(
-        changepoint=changepoint,
-        timeseries=timeseries,
-        drift=drift,
-        convergence=convergence,
-        compare=compare,
-        ai_baseline=ai_baseline,
-        skip_generation=skip_generation,
-        verify_corpus=verify_corpus,
-        baseline_model=baseline_model,
-        articles_per_cell=articles_per_cell,
-        author=author,
-        exploratory=exploratory,
-        include_advertorial=include_advertorial,
-        residualize_sections=residualize_sections,
-        include_shared_bylines=include_shared_bylines,
-        max_workers=max_workers,
-        compare_pair=parsed_pair,
-        parallel_authors=parallel_authors,
-        allow_pre_phase16_embeddings=allow_pre_phase16_embeddings,
-        typer_context=ctx,
+        AnalyzeRequest(
+            changepoint=changepoint,
+            timeseries=timeseries,
+            drift=drift,
+            convergence=convergence,
+            compare=compare,
+            ai_baseline=ai_baseline,
+            skip_generation=skip_generation,
+            verify_corpus=verify_corpus,
+            baseline_model=baseline_model,
+            articles_per_cell=articles_per_cell,
+            author=author,
+            exploratory=exploratory,
+            include_advertorial=include_advertorial,
+            residualize_sections=residualize_sections,
+            include_shared_bylines=include_shared_bylines,
+            max_workers=max_workers,
+            compare_pair=parsed_pair,
+            parallel_authors=parallel_authors,
+            allow_pre_phase16_embeddings=allow_pre_phase16_embeddings,
+            typer_context=ctx,
+        )
     )
 
 

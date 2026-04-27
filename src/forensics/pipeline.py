@@ -8,8 +8,8 @@
    selects the same **full scrape** handler as a plain `forensics scrape` (discover → metadata
    → fetch → dedup → JSONL export). See `forensics.cli.scrape.dispatch_scrape`.
 3. **Extract** — `extract_all_features` for all authors, embeddings on.
-4. **Analyze** — `run_analyze(timeseries=True, convergence=True)` only (no changepoint,
-   drift, compare-only, or AI baseline unless you edit this module).
+4. **Analyze** — ``run_analyze(AnalyzeRequest(timeseries=True, convergence=True))`` only
+   (no changepoint, drift, compare-only, or AI baseline unless you edit this module).
 5. **Report** — `run_report` with `ReportArgs` built from `get_settings().report.output_format`.
 
 Operational detail and artifact layout: `docs/RUNBOOK.md`, `docs/ARCHITECTURE.md`.
@@ -23,7 +23,7 @@ from contextlib import contextmanager
 
 import typer
 
-from forensics.cli.analyze import run_analyze
+from forensics.cli.analyze import AnalyzeRequest, run_analyze
 from forensics.cli.scrape import dispatch_scrape
 from forensics.config import DEFAULT_DB_RELATIVE, get_project_root, get_settings
 from forensics.features.pipeline import extract_all_features
@@ -115,7 +115,7 @@ def run_all_pipeline(
 
         with _pipeline_phase(obs, PipelineRunPhase.ANALYZE):
             try:
-                run_analyze(timeseries=True, convergence=True)
+                run_analyze(AnalyzeRequest(timeseries=True, convergence=True))
             except typer.Exit as exc:
                 if exc.exit_code:
                     return int(exc.exit_code or 1)
