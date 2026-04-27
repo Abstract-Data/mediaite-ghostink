@@ -1,4 +1,4 @@
-"""Embedding drift analysis (Phase 6): monthly centroids, velocities, AI baseline."""
+"""Embedding drift: monthly centroids, velocities, AI baseline."""
 
 from __future__ import annotations
 

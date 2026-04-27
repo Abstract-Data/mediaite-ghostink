@@ -1,8 +1,4 @@
-"""Phase 9 — orchestrator that scores all articles for probability features.
-
-Writes one Parquet per author under ``data/probability/`` plus a
-``model_card.json`` that pins the reference / Binoculars model revisions.
-"""
+"""Score articles for probability features; write per-author Parquet + ``model_card.json``."""
 
 from __future__ import annotations
 

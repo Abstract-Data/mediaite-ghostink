@@ -25,10 +25,10 @@ todos:
     status: completed
   - id: deslop-phase-5-features
     content: Phase 5 — Deslop features pipeline + related tests
-    status: pending
+    status: completed
   - id: deslop-phase-6-analysis
     content: Phase 6 — Deslop analysis + orchestrator + parity tests
-    status: pending
+    status: completed
   - id: deslop-phase-7-reporting
     content: Phase 7 — Deslop reporting, survey, baseline, calibration, TUI + tests
     status: pending

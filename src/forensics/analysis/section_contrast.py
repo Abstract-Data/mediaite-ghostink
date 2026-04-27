@@ -1,29 +1,9 @@
-"""Per-author section-contrast tests (Phase 15 J6).
+"""Per-author section contrasts: Welch + Mann–Whitney on PELT columns, grouped BH.
 
-For each author with at least two sections each represented by at least
-``MIN_SECTION_ARTICLES`` articles, run pairwise Welch + Mann-Whitney tests on
-every PELT feature between the author's section samples. Apply per-family
-Benjamini-Hochberg correction (re-using
-:func:`forensics.analysis.statistics.apply_correction_grouped` from Phase 15
-C2) and emit a JSON artifact at ``data/analysis/<slug>_section_contrast.json``.
-
-Per-author diagnostic question: *does this author write opinion and politics
-in measurably different registers?* An author with significant contrasts is
-one for whom Phase A-C change-points should be interpreted with section-mix
-in mind; an author with no significant contrasts is one for whom pooled
-analysis was safe all along.
-
-Edge cases (handled here, not in callers):
-
-* **Single qualifying pair** — BH correction is still valid with a smaller
-  per-family denominator. Emitted as one entry in ``pairs``.
-* **No qualifying pairs** (< 2 sections meeting the article bar) — the
-  artifact carries ``disposition: "insufficient_section_volume"`` and an
-  empty ``pairs`` list. Downstream consumers render "N/A" rather than
-  raising.
-* **All features pass** in any single pair — emit a WARNING. An author who
-  writes two sections in wholly different registers on every feature is
-  suspicious and warrants a spot-check.
+Writes ``data/analysis/<slug>_section_contrast.json``. Sparse sections use
+``disposition: "insufficient_section_volume"``; WARN when every feature differs
+for a pair (spot-check signal). Uses
+:func:`~forensics.analysis.statistics.apply_correction_grouped`.
 """
 
 from __future__ import annotations

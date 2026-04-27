@@ -1,8 +1,7 @@
-"""Content and topic feature extractors (Phase 4).
+"""Content and topic feature extractors.
 
-C-11 — TF-IDF self-similarity uses a process-local LRU (``_SELF_SIM_CACHE_MAX``).
-It speeds repeated peer sets but is not shared across workers; parallel extract
-paths may re-fit vectorizers independently.
+C-11: TF-IDF self-similarity LRU (``_SELF_SIM_CACHE_MAX``) is process-local; parallel
+workers do not share it and may re-fit vectorizers independently.
 """
 
 from __future__ import annotations

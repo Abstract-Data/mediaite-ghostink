@@ -1,14 +1,9 @@
-"""Change-point detection (PELT, BOCPD) and convergence windows (Phase 5).
+"""Change-point detection (PELT, BOCPD) and convergence windows.
 
-Phase 15 Phase A overhaul (this file):
-- ``detect_bocpd`` now defaults to a MAP run-length reset rule. The legacy
-  ``P(r=0)`` threshold path is preserved under ``mode="p_r0_legacy"`` so
-  callers can A/B against the previous (algebraically broken) behavior. See
-  GUARDRAILS Sign "BOCPD ``P(r=0)`` posterior is pinned to the hazard rate".
-- ``_BocpdPrior`` carries a ``cumsum_sq`` array so per-step segment
-  sum-of-squares is O(1), enabling the NIG → Student-t posterior predictive
-  (Murphy 2007 §7.6) gated by ``student_t``. The Normal-known-σ² path is
-  kept for parity tests and rollback.
+``detect_bocpd`` defaults to MAP run-length reset; ``mode="p_r0_legacy"`` keeps the
+old ``P(r=0)`` threshold path for A/B and parity (see GUARDRAILS for the legacy pin).
+``_BocpdPrior.cumsum_sq`` gives O(1) segment SS for NIG → Student-t when
+``student_t``; Normal-known-σ² remains for parity.
 """
 
 from __future__ import annotations

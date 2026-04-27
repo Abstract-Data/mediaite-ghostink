@@ -1,4 +1,4 @@
-"""Rolling statistics, STL-style decomposition, Chow, CUSUM, burst heuristics (Phase 5)."""
+"""Rolling statistics, STL-style decomposition, Chow, CUSUM, burst heuristics."""
 
 from __future__ import annotations
 

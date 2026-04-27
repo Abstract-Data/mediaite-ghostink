@@ -1,4 +1,4 @@
-"""Feature extraction unit tests (Phase 4)."""
+"""Feature extraction unit tests."""
 
 from __future__ import annotations
 

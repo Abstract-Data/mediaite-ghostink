@@ -1,4 +1,4 @@
-"""Target vs control author comparisons and editorial attribution (Phase 7)."""
+"""Target vs control author comparisons and editorial attribution."""
 
 from __future__ import annotations
 

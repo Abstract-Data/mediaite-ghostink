@@ -1,6 +1,18 @@
 project:
   type: book
   output-dir: data/reports
+  render:
+    - index.qmd
+    - notebooks/00_power_analysis.ipynb
+    - notebooks/01_scraping.ipynb
+    - notebooks/02_corpus_audit.ipynb
+    - notebooks/03_exploration.ipynb
+    - notebooks/04_feature_analysis.ipynb
+    - notebooks/05_change_point_detection.ipynb
+    - notebooks/06_embedding_drift.ipynb
+    - notebooks/07_statistical_evidence.ipynb
+    - notebooks/08_control_comparison.ipynb
+    - notebooks/09_full_report.ipynb
 
 book:
   title: "AI Writing Forensics: Mediaite Investigation"

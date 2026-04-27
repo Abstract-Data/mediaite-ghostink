@@ -1,4 +1,4 @@
-"""Structural feature extractors (Phase 4)."""
+"""Structural feature extractors."""
 
 from __future__ import annotations
 

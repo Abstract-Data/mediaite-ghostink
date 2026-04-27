@@ -1,31 +1,9 @@
-"""Hypothesis tests, effect sizes, bootstrap CIs, and multiple-comparison correction (Phase 7).
+"""Hypothesis tests, effect sizes, bootstrap CIs, and multiple-comparison correction.
 
-Per-family vs per-author FDR (Phase 15 C2)
-------------------------------------------
-
-Benjamini–Hochberg (BH) assumes the p-values it corrects are drawn from
-independent hypotheses. In this pipeline, many stylometric features live in
-the same logical "family" and test correlated hypotheses of the same
-underlying shift (e.g. ``flesch_kincaid`` / ``coleman_liau`` / ``gunning_fog``
-all read "this author got easier to read"; the passive-voice /
-nominalization / first-person-plural features all move together when a
-writer leans on AI-style boilerplate).
-
-Running a single author-wide BH collapses those correlated families into one
-pooled denominator, inflates ``n`` in ``rank * alpha / n``, and over-corrects
-away real signal. The methodologically preferable alternative — implemented
-by :func:`apply_correction_grouped` — is to run BH independently within
-each feature family and concatenate the results. Each family becomes its own
-FDR regime (so ``n`` is the within-family test count) while the across-
-family denominator stays honest because families are, by construction,
-designed to be independent axes of writing style.
-
-Residual within-family correlation (e.g. three readability formulas inside
-one ``readability`` family) still over-corrects slightly: BH is conservative
-under positive dependence. Closing that gap requires an effective-N
-correction (correlation-matrix estimation per author) and is out of scope
-for v0.4.0; it is documented as a known limitation rather than silently
-adjusted here.
+BH assumes independent tests; stylometric columns cluster by family, so one
+author-wide BH over-corrects. :func:`apply_correction_grouped` runs BH per family
+then concatenates. Within-family correlation still makes BH slightly conservative;
+effective-N correction is out of scope for v0.4.0 (documented limitation).
 """
 
 from __future__ import annotations

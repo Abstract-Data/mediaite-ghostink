@@ -5697,3 +5697,18 @@ Global churn is dominated by `src/forensics/analysis/` (3394); that maps to **Ph
 **GitNexus:** MCP `user-gitnexus` not in available servers this session; run upstream `impact` on touched symbols before merge if connected.
 
 **Next:** Phase 5 features deslop per plan, or merge.
+
+---
+
+### 2026-04-27 — Phase 5–6 features + analysis deslop (completed)
+
+**Status:** Complete  
+**Scope:** `src/forensics/features/*.py` (all modules touched: docstrings only except factual pipeline/assembler/probability text), `tests/test_features.py`, `tests/unit/test_features_strict.py`; `src/forensics/analysis/` (`changepoint.py`, `statistics.py`, `convergence.py`, `drift.py`, `timeseries.py`, `comparison.py`, `feature_families.py`, `section_profile.py`, `section_contrast.py`, `section_mix.py`, `orchestrator/runner.py` — module/entry docstrings only).
+
+**Changes:** Removed phase-number churn from feature module lines; tightened pipeline/assembler/probability-family docstrings; compressed analysis module essays (BH rationale, BOCPD MAP vs legacy, section J-artifacts, family registry) without altering code paths, constants, or log templates.
+
+**Verification:** `uv run ruff check .` and `uv run ruff format --check .` — passed; `uv run pytest tests/test_features.py tests/unit/test_features_strict.py tests/test_analysis.py tests/unit/test_statistics.py tests/unit/test_orchestrator_patch_surface.py tests/integration/test_parallel_parity.py tests/unit/test_section_profile.py tests/unit/test_section_mix.py tests/unit/test_section_contrast.py tests/unit/test_feature_families.py tests/unit/test_changepoint_same_day_determinism.py -q --no-cov` — passed.
+
+**GitNexus:** `user-gitnexus` not in available MCP servers this session; run `impact` / `detect_changes` before merge if connected.
+
+**Next:** Phase 7 reporting/survey/TUI deslop per plan, or merge.

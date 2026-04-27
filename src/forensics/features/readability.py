@@ -1,4 +1,4 @@
-"""Readability scores (Phase 4)."""
+"""Readability scores."""
 
 from __future__ import annotations
 

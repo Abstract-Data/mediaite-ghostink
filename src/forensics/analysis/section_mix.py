@@ -1,22 +1,7 @@
-"""Per-author section-mix time series (Phase 15 J4).
+"""Per-author monthly section-share matrix → ``data/analysis/<slug>_section_mix.json``.
 
-Computes the monthly share of articles per section for one author and
-serialises the result to ``data/analysis/<slug>_section_mix.json``. The shape
-is a dense ``months x sections`` matrix where each row sums to 1.0 (or 0.0
-for months with no articles).
-
-The artifact is consumed by Wave 3's reporting wiring (K2): each author
-narrative renders a stacked-area chart so reviewers can eyeball-test "did
-this author's section mix shift in the same window the stylometric drift
-fired?". J4 only produces the data — the report wiring lives in K2.
-
-This module lives wholly inside the **analyze** stage; it reads from a
-feature/article frame and writes to ``data/analysis/`` only.
-
-The serialised JSON is byte-stable for a fixed input fixture: keys are
-sorted, sections are alphabetically ordered, months are chronologically
-ordered. Any change to the on-disk format breaks the regression-pin test
-in ``tests/unit/test_section_mix.py``.
+Rows sum to 1 per month (0 when empty). JSON key ordering is stable; see
+``tests/unit/test_section_mix.py``.
 """
 
 from __future__ import annotations

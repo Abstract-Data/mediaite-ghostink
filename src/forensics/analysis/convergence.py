@@ -1,4 +1,4 @@
-"""Cross-pipeline convergence (Phase 7): stylometry, embedding drift, optional probability."""
+"""Cross-pipeline convergence: stylometry, embedding drift, optional probability."""
 
 from __future__ import annotations
 
