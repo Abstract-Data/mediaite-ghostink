@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import functools
 import importlib.metadata
-import json
 import logging
 import sys
 from pathlib import Path
@@ -12,7 +11,13 @@ from typing import Annotated, Literal
 
 import httpx
 import typer
+from typer.main import get_command
 
+from forensics.cli._commands import run_list_commands
+from forensics.cli._decorators import examples_epilog, forensics_examples
+from forensics.cli._envelope import emit, status, success
+from forensics.cli._errors import fail
+from forensics.cli._exit import ExitCode
 from forensics.cli.state import ForensicsCliState, get_cli_state
 from forensics.preflight import PreflightReport
 
@@ -20,6 +25,7 @@ app = typer.Typer(
     name="forensics",
     help="AI Writing Forensics Pipeline",
     no_args_is_help=True,
+    epilog="Exit code reference: docs/EXIT_CODES.md (retry backoff only on code 4).",
 )
 
 
@@ -30,7 +36,7 @@ def _version_callback(value: bool) -> None:
         except importlib.metadata.PackageNotFoundError:
             version = "0.0.0+unknown"
         typer.echo(f"forensics {version}")
-        raise typer.Exit()
+        raise typer.Exit(int(ExitCode.OK))
 
 
 def _configure_logging(
@@ -73,6 +79,31 @@ def _root(
             help="Disable Rich progress bars and pipeline observers (CI, logs, minimal TTY).",
         ),
     ] = False,
+    output: Annotated[
+        Literal["text", "json"],
+        typer.Option(
+            "--output",
+            help=(
+                "text (default): human-readable lines on stdout. "
+                "json: one JSON envelope object on stdout (logs to stderr)."
+            ),
+        ),
+    ] = "text",
+    non_interactive: Annotated[
+        bool,
+        typer.Option(
+            "--non-interactive",
+            help="Disable TUI fallbacks and refuse any prompt; auto-fail if a prompt would block.",
+        ),
+    ] = False,
+    yes: Annotated[
+        bool,
+        typer.Option(
+            "--yes",
+            "-y",
+            help="Bypass any confirmation prompt.",
+        ),
+    ] = False,
     log_format: Annotated[
         Literal["text", "json"],
         typer.Option(
@@ -82,7 +113,12 @@ def _root(
     ] = "text",
 ) -> None:
     """AI Writing Forensics Pipeline."""
-    ctx.obj = ForensicsCliState(show_progress=not no_progress)
+    ctx.obj = ForensicsCliState(
+        show_progress=not no_progress and output != "json",
+        output_format=output,
+        non_interactive=non_interactive,
+        assume_yes=yes,
+    )
     level = logging.DEBUG if verbose else logging.INFO
     _configure_logging(level, log_format)
 
@@ -103,9 +139,18 @@ app.add_typer(calibrate_app, name="calibrate")
 app.add_typer(features_app, name="features")
 app.add_typer(analyze_app, name="analyze")
 app.add_typer(dedup_app, name="dedup")
-app.command(name="extract")(extract)
-app.command(name="report")(report)
-app.command(name="migrate")(migrate)
+app.command(
+    name="extract",
+    epilog=examples_epilog("forensics extract --author colby-hall"),
+)(extract)
+app.command(
+    name="report",
+    epilog=examples_epilog("forensics report --format html"),
+)(report)
+app.command(
+    name="migrate",
+    epilog=examples_epilog("forensics migrate"),
+)(migrate)
 
 
 def _preflight_json_envelope(
@@ -113,7 +158,7 @@ def _preflight_json_envelope(
     *,
     strict: bool,
 ) -> dict[str, object]:
-    """Build the stable JSON object for ``forensics preflight --output json``."""
+    """Build the inner ``data`` payload for ``forensics --output json preflight``."""
     if report.has_failures:
         status = "fail"
     elif report.has_warnings:
@@ -153,8 +198,16 @@ def _settings_load_errors() -> tuple[type[BaseException], ...]:
     )
 
 
-@app.command(name="preflight")
+_PREFLIGHT_EPILOG, _preflight_ex = forensics_examples(
+    "forensics --output json preflight",
+    "forensics preflight --strict",
+)
+
+
+@app.command(name="preflight", epilog=_PREFLIGHT_EPILOG)
+@_preflight_ex
 def preflight(
+    ctx: typer.Context,
     strict: Annotated[
         bool,
         typer.Option(
@@ -162,19 +215,13 @@ def preflight(
             help="Promote warnings to failures (useful in CI).",
         ),
     ] = False,
-    output: Annotated[
-        Literal["text", "json"],
-        typer.Option(
-            "--output",
-            help="text: human-readable lines; json: one JSON object on stdout (sort_keys=True).",
-        ),
-    ] = "text",
 ) -> None:
     """Run preflight checks and report pass/warn/fail for each boundary."""
     from forensics.config import get_settings
     from forensics.preflight import run_all_preflight_checks
 
     logger = logging.getLogger(__name__)
+    state = get_cli_state(ctx)
     try:
         settings = get_settings()
     except _settings_load_errors() as exc:
@@ -182,36 +229,68 @@ def preflight(
         settings = None
     report = run_all_preflight_checks(settings, strict=strict)
 
-    if output == "json":
-        payload = _preflight_json_envelope(report, strict=strict)
-        typer.echo(json.dumps(payload, sort_keys=True))
+    if state.output_format == "json":
+        emit(success("preflight", _preflight_json_envelope(report, strict=strict)))
     else:
         icons = {"pass": "PASS", "warn": "WARN", "fail": "FAIL"}
         for check in report.checks:
-            typer.echo(f"  [{icons[check.status]}] {check.name}: {check.message}")
+            status(
+                f"  [{icons[check.status]}] {check.name}: {check.message}",
+                output_format=state.output_format,
+            )
 
         if report.has_failures:
-            typer.echo("\nSome required checks failed. Fix issues before running the pipeline.")
+            status(
+                "\nSome required checks failed. Fix issues before running the pipeline.",
+                output_format=state.output_format,
+            )
         elif report.has_warnings:
-            typer.echo("\nAll required checks passed (some warnings).")
+            status(
+                "\nAll required checks passed (some warnings).",
+                output_format=state.output_format,
+            )
         else:
-            typer.echo("\nAll preflight checks passed.")
+            status("\nAll preflight checks passed.", output_format=state.output_format)
 
     if report.has_failures:
-        raise typer.Exit(code=1)
-    raise typer.Exit(code=0)
+        raise typer.Exit(int(ExitCode.GENERAL_ERROR))
+    raise typer.Exit(int(ExitCode.OK))
 
 
-@app.command(name="lock-preregistration")
-def lock_preregistration_cmd() -> None:
+_LOCK_EPILOG, _lock_ex = forensics_examples(
+    "forensics --yes lock-preregistration",
+    "forensics lock-preregistration",
+)
+
+
+@app.command(name="lock-preregistration", epilog=_LOCK_EPILOG)
+@_lock_ex
+def lock_preregistration_cmd(ctx: typer.Context) -> None:
     """Lock analysis thresholds for pre-registration (run before analyzing data)."""
-    from forensics.config import get_settings
+    from forensics.config import get_project_root, get_settings
     from forensics.preregistration import lock_preregistration
 
+    st = get_cli_state(ctx)
+    lock_path = get_project_root() / "data" / "preregistration" / "preregistration_lock.json"
+    if lock_path.is_file() and not st.assume_yes:
+        raise fail(
+            ctx,
+            "lock-preregistration",
+            "lock_exists",
+            f"Pre-registration lock already exists: {lock_path}",
+            exit_code=ExitCode.CONFLICT,
+            suggestion=(
+                "re-run: forensics --yes lock-preregistration "
+                "(place global --yes before the subcommand)"
+            ),
+        )
     settings = get_settings()
     path = lock_preregistration(settings)
-    typer.echo(f"Pre-registration locked: {path}")
-    typer.echo("Run analysis AFTER this point. Threshold changes will trigger warnings.")
+    status(f"Pre-registration locked: {path}", output_format=st.output_format)
+    status(
+        "Run analysis AFTER this point. Threshold changes will trigger warnings.",
+        output_format=st.output_format,
+    )
 
 
 _WP_TYPES_URL = "https://www.mediaite.com/wp-json/wp/v2/types"
@@ -229,8 +308,13 @@ def _probe_endpoint(url: str, *, timeout: float = 3.0) -> tuple[bool, str]:
     return False, f"HTTP {resp.status_code}"
 
 
-@app.command(name="validate")
+_VALIDATE_EPILOG, _validate_ex = forensics_examples("forensics validate --check-endpoints")
+
+
+@app.command(name="validate", epilog=_VALIDATE_EPILOG)
+@_validate_ex
 def validate_config(
+    ctx: typer.Context,
     check_endpoints: Annotated[
         bool,
         typer.Option(
@@ -243,13 +327,18 @@ def validate_config(
     from forensics.config import get_settings
     from forensics.preflight import run_all_preflight_checks
 
-    logger = logging.getLogger(__name__)
+    st = get_cli_state(ctx)
     try:
         settings = get_settings()
     except _settings_load_errors() as exc:
-        logger.error("Config error: %s", exc)
-        typer.echo(f"Config error: {exc}")
-        raise typer.Exit(code=1) from exc
+        raise fail(
+            ctx,
+            "validate",
+            "config_invalid",
+            f"Could not parse config.toml: {exc}",
+            exit_code=ExitCode.USAGE_ERROR,
+            suggestion="run: forensics preflight to see which check failed",
+        ) from exc
 
     typer.echo(f"Config parsed: {len(settings.authors)} author(s)")
 
@@ -259,24 +348,40 @@ def validate_config(
         typer.echo(f"  [{icons[check.status]}] {check.name}: {check.message}")
 
     if check_endpoints:
-        typer.echo("\nEndpoint probes (warnings only, do not affect exit code):")
+        status(
+            "\nEndpoint probes (warnings only, do not affect exit code):",
+            output_format=st.output_format,
+        )
         wp_ok, wp_detail = _probe_endpoint(_WP_TYPES_URL)
-        typer.echo(f"  [{'PASS' if wp_ok else 'WARN'}] WordPress API: {wp_detail}")
+        status(
+            f"  [{'PASS' if wp_ok else 'WARN'}] WordPress API: {wp_detail}",
+            output_format=st.output_format,
+        )
         oll_ok, oll_detail = _probe_endpoint(_OLLAMA_TAGS_URL)
-        typer.echo(f"  [{'PASS' if oll_ok else 'WARN'}] Ollama: {oll_detail}")
+        status(
+            f"  [{'PASS' if oll_ok else 'WARN'}] Ollama: {oll_detail}",
+            output_format=st.output_format,
+        )
 
     if report.has_failures:
-        typer.echo("\nSome required checks failed.")
-        raise typer.Exit(code=1)
+        status("\nSome required checks failed.", output_format=st.output_format)
+        raise typer.Exit(int(ExitCode.GENERAL_ERROR))
     if report.has_warnings:
-        typer.echo("\nAll required checks passed (some warnings).")
+        status("\nAll required checks passed (some warnings).", output_format=st.output_format)
     else:
-        typer.echo("\nAll validation checks passed.")
-    raise typer.Exit(code=0)
+        status("\nAll validation checks passed.", output_format=st.output_format)
+    raise typer.Exit(int(ExitCode.OK))
 
 
-@app.command(name="export")
+_EXPORT_EPILOG, _export_ex = forensics_examples(
+    "forensics export --output data/forensics_2026-04-26.duckdb",
+)
+
+
+@app.command(name="export", epilog=_EXPORT_EPILOG)
+@_export_ex
 def export_data(
+    ctx: typer.Context,
     output: Annotated[
         Path,
         typer.Option(
@@ -308,9 +413,16 @@ def export_data(
     db_path = root / "data" / "articles.db"
     out_path = output if output.is_absolute() else root / output
 
+    st = get_cli_state(ctx)
     if not db_path.is_file():
-        typer.echo(f"SQLite source not found: {db_path}")
-        raise typer.Exit(code=1)
+        raise fail(
+            ctx,
+            "export",
+            "database_missing",
+            f"SQLite source not found: {db_path}",
+            exit_code=ExitCode.AUTH_OR_RESOURCE,
+            suggestion="run: forensics scrape --discover --metadata to populate data/articles.db",
+        )
 
     report = export_to_duckdb(
         db_path,
@@ -321,25 +433,54 @@ def export_data(
     typer.echo(f"Exported to {report.output_path} ({report.bytes_written} bytes)")
     for name, count in report.tables.items():
         typer.echo(f"  {name}: {count} rows")
-    typer.echo(f"Query with: duckdb {report.output_path}")
+    status(f"Query with: duckdb {report.output_path}", output_format=st.output_format)
 
 
-@app.command(name="all")
+_ALL_EPILOG, _all_ex = forensics_examples(
+    "forensics all",
+    "forensics --output json all",
+)
+
+
+@app.command(name="all", epilog=_ALL_EPILOG)
+@_all_ex
 def run_all(ctx: typer.Context) -> None:
     """Run full pipeline end-to-end: scrape → extract → analyze → report."""
     from forensics.pipeline import run_all_pipeline
 
-    logger = logging.getLogger(__name__)
     st = get_cli_state(ctx)
     rc = run_all_pipeline(show_progress=st.show_progress)
     if rc != 0:
-        logger.error("pipeline exited with code %d", rc)
-        raise typer.Exit(code=rc)
+        try:
+            ec = ExitCode(rc)
+        except ValueError:
+            ec = ExitCode.GENERAL_ERROR
+        raise fail(
+            ctx,
+            "all",
+            "pipeline_failed",
+            f"Pipeline exited with code {rc}",
+            exit_code=ec,
+        )
 
 
-@app.command(name="setup")
-def setup_wizard() -> None:
+_SETUP_EPILOG, _setup_ex = forensics_examples("forensics setup")
+
+
+@app.command(name="setup", epilog=_SETUP_EPILOG)
+@_setup_ex
+def setup_wizard(ctx: typer.Context) -> None:
     """Launch the interactive setup wizard (requires the 'tui' extra)."""
+    if get_cli_state(ctx).non_interactive:
+        raise fail(
+            ctx,
+            "setup",
+            "tty_required",
+            "This command requires an interactive terminal (TUI).",
+            exit_code=ExitCode.USAGE_ERROR,
+            suggestion="Omit --non-interactive for headless environments; "
+            "use `forensics preflight` / `forensics all` instead.",
+        )
     from forensics.tui import main as tui_main
 
     rc = tui_main()
@@ -347,7 +488,11 @@ def setup_wizard() -> None:
         raise typer.Exit(code=rc)
 
 
-@app.command(name="dashboard")
+_DASH_EPILOG, _dash_ex = forensics_examples("forensics dashboard --survey --skip-scrape")
+
+
+@app.command(name="dashboard", epilog=_DASH_EPILOG)
+@_dash_ex
 def dashboard_cmd(
     ctx: typer.Context,
     survey: Annotated[
@@ -385,13 +530,25 @@ def dashboard_cmd(
 ) -> None:
     """Full-screen pipeline dashboard (``tui`` extra). Incompatible with ``--no-progress``."""
     st = get_cli_state(ctx)
+    if st.non_interactive:
+        raise fail(
+            ctx,
+            "dashboard",
+            "tty_required",
+            "This command requires an interactive terminal (TUI).",
+            exit_code=ExitCode.USAGE_ERROR,
+            suggestion="Omit --non-interactive, or use `forensics all` / `forensics survey` "
+            "for headless runs.",
+        )
     if not st.show_progress:
-        typer.echo(
+        raise fail(
+            ctx,
+            "dashboard",
+            "tty_required",
             "The dashboard needs an interactive terminal. "
             "Omit --no-progress, or use `forensics all` / `forensics survey` with --no-progress.",
-            err=True,
+            exit_code=ExitCode.USAGE_ERROR,
         )
-        raise typer.Exit(code=1)
 
     if not survey and (
         skip_scrape
@@ -402,12 +559,15 @@ def dashboard_cmd(
         or post_year_min is not None
         or post_year_max is not None
     ):
-        typer.echo(
-            "Survey-only options (--skip-scrape, --resume, --author, --min-articles, "
-            "--min-span-days, --post-year-min, --post-year-max) require --survey.",
-            err=True,
+        raise fail(
+            ctx,
+            "dashboard",
+            "invalid_options",
+            "Survey-only flags were passed without --survey.",
+            exit_code=ExitCode.USAGE_ERROR,
+            suggestion="Add --survey, or remove --skip-scrape / --resume / --author / "
+            "--min-articles / --min-span-days / --post-year-*.",
         )
-        raise typer.Exit(code=2)
 
     from dataclasses import replace
 
@@ -439,6 +599,18 @@ def dashboard_cmd(
     rc = main_dashboard(survey_mode=survey, survey_kwargs=survey_kw if survey else None)
     if rc != 0:
         raise typer.Exit(code=rc)
+
+
+_COMMANDS_EPILOG, _commands_ex = forensics_examples(
+    "forensics --output json commands | jq '.data.root.subcommands[].name'",
+)
+
+
+@app.command(name="commands", epilog=_COMMANDS_EPILOG)
+@_commands_ex
+def list_commands(ctx: typer.Context) -> None:
+    """Dump the full command catalog (for agent discovery)."""
+    run_list_commands(ctx, get_command(app))
 
 
 def main() -> int:

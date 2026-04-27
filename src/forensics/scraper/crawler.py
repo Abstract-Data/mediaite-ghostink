@@ -26,7 +26,14 @@ from forensics.models.author import Author, AuthorManifest
 from forensics.progress import PipelineObserver
 from forensics.scraper.client import create_scraping_client
 from forensics.scraper.coverage import write_crawl_summary_json
-from forensics.scraper.fetcher import RateLimiter, log_scrape_error, request_with_retry
+from forensics.scraper.fetcher import (
+    SCRAPE_RUN_TELEMETRY,
+    RateLimiter,
+    log_scrape_error,
+    request_with_retry,
+    scrape_error_transient_from_http_status,
+    scrape_failure_transient,
+)
 from forensics.scraper.parser import (
     extract_article_text_from_rest,
     filter_insufficient_article_body,
@@ -261,6 +268,7 @@ async def _fetch_wp_user_rows(
                 resp.status_code,
                 f"{resp.reason_phrase} (users page {page})",
                 "discover_users",
+                transient=scrape_error_transient_from_http_status(resp.status_code),
             )
             break
         tp = _int_header(resp, "X-WP-TotalPages", 1)
@@ -313,6 +321,7 @@ async def _manifests_from_user_rows(
                     cresp.status_code,
                     cresp.reason_phrase,
                     "discover_count",
+                    transient=scrape_error_transient_from_http_status(cresp.status_code),
                 )
             try:
                 return _user_dict_to_manifest(
@@ -343,6 +352,7 @@ async def _manifests_from_user_rows(
                 None,
                 f"{type(outcome).__name__}: {outcome!s}",
                 "discover_count",
+                transient=scrape_failure_transient(outcome),
             )
             continue
         if outcome is not None:
@@ -413,6 +423,9 @@ async def discover_authors(
 
         top = ", ".join(f"{m.name} ({m.total_posts})" for m in manifests[:10])
         logger.info("Discovered %s authors; top by posts: %s", len(manifests), top)
+        tel = SCRAPE_RUN_TELEMETRY.get()
+        if tel is not None and manifests:
+            tel.mark_row_success()
         return len(manifests)
 
 
@@ -436,6 +449,7 @@ async def _aggregate_parallel_ingest_results(
                 None,
                 f"{cfg.slug}: {type(outcome).__name__}: {outcome!s}",
                 "metadata_author",
+                transient=scrape_failure_transient(outcome),
             )
             continue
         inserted_total += int(outcome)
@@ -527,6 +541,7 @@ async def collect_article_metadata(
                         None,
                         f"{cfg.slug}: {exc!r}",
                         "metadata_author",
+                        transient=scrape_failure_transient(exc),
                     )
                 finally:
                     if observer is not None:
@@ -543,6 +558,9 @@ async def collect_article_metadata(
     with ensure_repo(db_path, repo) as r:
         inserted = await _run(r)
     write_crawl_summary_json(errors, errors.with_name("crawl_summary.json"))
+    tel = SCRAPE_RUN_TELEMETRY.get()
+    if tel is not None and inserted > 0:
+        tel.mark_row_success()
     return inserted
 
 
@@ -648,6 +666,7 @@ async def _paginate_author_post_pages(
                 resp.status_code,
                 f"{resp.reason_phrase} (author={author_slug} posts page {page})",
                 "metadata",
+                transient=scrape_error_transient_from_http_status(resp.status_code),
             )
             break
         tp = _int_header(resp, "X-WP-TotalPages", 1)
@@ -692,6 +711,7 @@ async def _ingest_author_posts(
             None,
             f"slug_not_in_manifest:{cfg.slug}",
             "metadata",
+            transient=False,
         )
         return 0
 

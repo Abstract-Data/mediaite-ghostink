@@ -26,6 +26,15 @@ Operational quick reference. Agents: append new sections here whenever you disco
 
 If you need the default `addopts` out of the way for a one-off: `uv run pytest tests/integration/test_pipeline_end_to_end.py -v --override-ini "addopts=-ra -q --strict-markers" --no-cov`.
 
+## Headless / agent invocation
+
+For scripts, CI, or LLM agents driving the CLI:
+
+1. **Flags:** pass global options **before** the subcommand: `uv run forensics --output json --non-interactive <subcommand> …`. See `.claude/skills/forensics-cli/SKILL.md` (mirrored under `.cursor/skills/forensics-cli/`) for recommended command sequences, TUI guardrails, and when to retry.
+2. **Exit codes:** `docs/EXIT_CODES.md` defines the contract (`0` ok, `2` usage, `3` missing resource, `4` transient/retry, `5` conflict/idempotent skip). Parse the process exit code before parsing stdout.
+3. **Stdout vs stderr:** with `--output json`, successful commands emit **exactly one** JSON envelope line on stdout (`ok`, `type`, `schemaVersion`, `data` or `error`); status and logs belong on stderr. Do not scrape stdout for prose when in JSON mode.
+4. **Discovery:** `uv run forensics --output json commands` dumps the full command tree (params, help, examples) for tooling.
+
 ## Phase 16 hash-break migration
 
 Phase 16 intentionally changes the analysis-config hash, corpus fingerprint, and embedding revision contract. Treat any pre–Phase-16 `data/analysis/*_result.json` and preregistration locks as **stale** relative to a Phase-16 `config.toml` until you re-lock and re-run (see GUARDRAILS Sign: *Pre-Phase-16 locked artifacts must be re-locked*).
@@ -60,8 +69,7 @@ Near-duplicate detection (`forensics.scraper.dedup`) compares 128-bit simhashes 
 
 Fingerprint values are versioned (`dedup_simhash_version`, current = `v2` in code as `SIMHASH_FINGERPRINT_VERSION`). Rows with a missing version or a version other than `v2` are excluded from the cached fingerprint set until recomputed; running dedup **without** migrating first can admit historical near-duplicates that no longer match stored bands.
 
-- Recompute all stale rows: `uv run forensics dedup recompute-fingerprints` (optional `--db PATH`, `--limit N` for tests).
-- stdout is one JSON object: `recomputed`, `skipped`, `errors`.
+- Recompute all stale rows: `uv run forensics dedup recompute-fingerprints` (optional `--db PATH`, `--limit N` for tests). **Text (default):** prints a one-line human summary on stdout. **JSON:** `uv run forensics --output json dedup recompute-fingerprints` emits one envelope on stdout; read `.data` for `recomputed`, `skipped`, `errors`.
 
 ## Pipeline Operations
 
@@ -73,8 +81,8 @@ Fingerprint values are versioned (`dedup_simhash_version`, current = `v2` in cod
   - `uv run forensics report` (requires **Quarto** on `PATH`; output under `data/reports/` per `quarto.yml`)
 - Extract probability features (Phase 9): `uv run forensics extract --probability`
 - Generate AI baseline (Phase 10): `uv run python scripts/generate_baseline.py --author {slug}`
-- Validate environment before a run: `uv run forensics preflight` (pass `--strict` to promote warnings to failures). Hard-fails on Python < 3.13, missing `en_core_web_sm`, disk < 5 GB, config parse errors, or placeholder authors; warns for Quarto/Ollama/sentence-transformers cache misses. Machine-readable preflight: `uv run forensics preflight --output json` prints one JSON object on stdout (`sort_keys=True`) with keys `status` (`ok`/`warn`/`fail`), `strict`, `checks` (each `name`/`status`/`message`), `has_warnings`, and `has_failures`; exit codes match text mode (`1` only when any check is `fail`). If `uv` ever mis-parses flags, use `uv run -- forensics preflight --output json`.
-- Lock pre-registration thresholds: `uv run forensics lock-preregistration` writes `data/preregistration/preregistration_lock.json` (SHA256-hashed canonical JSON). Run **before** first `analyze` to convert the run from exploratory to confirmatory. Re-running simply overwrites with the current thresholds. Analyze always invokes `verify_preregistration` (same return statuses). See `src/forensics/preregistration.py`.
+- Validate environment before a run: `uv run forensics preflight` (pass `--strict` to promote warnings to failures). Hard-fails on Python < 3.13, missing `en_core_web_sm`, disk < 5 GB, config parse errors, or placeholder authors; warns for Quarto/Ollama/sentence-transformers cache misses. Machine-readable preflight: `uv run forensics --output json preflight` prints one JSON envelope on stdout (`sort_keys=True`; keys `ok`, `type`, `schemaVersion`, `data`). The `data` object holds `status` (`ok`/`warn`/`fail`), `strict`, `checks` (each `name`/`status`/`message`), `has_warnings`, and `has_failures`; exit codes match text mode (`1` only when any check is `fail`). Global `--output` must appear **before** the subcommand name. If `uv` ever mis-parses flags, use `uv run -- forensics --output json preflight`.
+- Lock pre-registration thresholds: `uv run forensics lock-preregistration` writes `data/preregistration/preregistration_lock.json` (SHA256-hashed canonical JSON). Run **before** first `analyze` to convert the run from exploratory to confirmatory. If a filled lock already exists, the CLI exits **5 (CONFLICT)** unless you pass the global confirm flag **before** the subcommand: `uv run forensics --yes lock-preregistration` (not `lock-preregistration --yes`). Analyze always invokes `verify_preregistration` (same return statuses). See `src/forensics/preregistration.py`.
 - Convergence permutation null (Phase 12 §5b): under `[analysis]` in `config.toml`, set `convergence_use_permutation = true` to draw an empirical null for each convergence window (p-values are **logged only**; detected windows are unchanged). Defaults: `convergence_use_permutation = false` (CPU), `convergence_permutation_iterations = 1000`, `convergence_permutation_seed = 42`. Wired from `src/forensics/config/settings.py` into `compute_convergence_scores` in `src/forensics/analysis/orchestrator/` (runner + `comparison.py`) and `src/forensics/analysis/comparison.py`.
 - Blind newsroom survey (Phase 12 §1): `uv run forensics survey` runs the full pipeline across every qualified author on the manifest and ranks them by composite AI-adoption signal. Options: `--dry-run` (list qualified authors, no analysis), `--resume <run_id>` (skip authors already in `data/survey/run_<id>/checkpoint.json`), `--skip-scrape` (reuse existing corpus), `--author <slug>` (single-author debug run), `--min-articles` / `--min-span-days` (override `[survey]` thresholds). Output lands under `data/survey/run_<id>/` with `checkpoint.json` (written after each author) and `survey_results.json` (ranked, with the natural control cohort). Thresholds default to `SurveyConfig` in `config.toml` (`min_articles=50`, `min_span_days=730`, `min_words_per_article=200`, `min_articles_per_year=12.0`, `require_recent_activity=true`, `recent_activity_days=180`). Natural controls are authors whose composite score ≤ 0.2 AND `SignalStrength.NONE`; see `src/forensics/survey/scoring.py::identify_natural_controls`.
 - **Survey parallelism:** with more than one pending author, `run_survey` may dispatch `ProcessPoolExecutor` workers sized by env `SURVEY_AUTHOR_WORKERS` or default `min(8, os.cpu_count())`. Child processes do **not** inherit parent `pytest` monkeypatches — the survey test stubs set `SURVEY_AUTHOR_WORKERS=1` to force sequential in-process fakes.
@@ -91,6 +99,7 @@ Fingerprint values are versioned (`dedup_simhash_version`, current = `v2` in cod
 - Stages return **non-zero** on fatal errors (scrape failure, missing Quarto, analysis `typer.Exit`, report subprocess failure). `forensics all` propagates the first non-zero code.
 - `forensics all` returns exit code **`2`** when preflight hard-fails (distinct from `1` used by analyze).
 - `insert_analysis_run` at the start of `all` / scrape / extract / analyze is **best-effort**: SQLite permission or I/O errors log **`Could not record analysis_runs row`** and the stage still continues where the code path allows.
+- **`forensics scrape`** may exit **`4` (TRANSIENT)** when the run recorded at least one `scrape_errors.jsonl` line, **every** logged line is classified `transient: true` (timeouts, exhausted 429/5xx retries, etc.), and there was **no** successful ingest/fetch outcome for the run (see `docs/EXIT_CODES.md`). Each JSONL row now includes a boolean `transient` field for downstream tooling.
 
 ## Expected Artifacts
 

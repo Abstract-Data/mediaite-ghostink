@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import typer
 
+from forensics.cli._exit import ExitCode
+
 
 def main() -> int:
     """Launch the TUI setup wizard.
@@ -28,11 +30,11 @@ def main() -> int:
             f"  (import failure: {exc})",
             err=True,
         )
-        return 1
+        return int(ExitCode.GENERAL_ERROR)
 
     app = ForensicsSetupApp()
     app.run()
-    return 0
+    return int(ExitCode.OK)
 
 
 def main_dashboard(
@@ -50,7 +52,7 @@ def main_dashboard(
             f"  (import failure: {exc})",
             err=True,
         )
-        return 1
+        return int(ExitCode.GENERAL_ERROR)
 
     return run_dashboard_interactive(survey_mode=survey_mode, survey_kwargs=survey_kwargs)
 

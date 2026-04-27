@@ -104,7 +104,7 @@ def test_dashboard_cli_rejects_no_progress(forensics_config_path: Path) -> None:
 
     runner = CliRunner()
     r = runner.invoke(app, ["--no-progress", "dashboard"])
-    assert r.exit_code == 1
+    assert r.exit_code == 2
     err = (r.stderr or "").lower()
     assert "omit" in err
     assert "no-progress" in err

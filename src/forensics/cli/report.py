@@ -7,13 +7,18 @@ from typing import Annotated
 
 import typer
 
+from forensics.cli._decorators import with_examples
+from forensics.cli._errors import fail
+from forensics.cli._exit import ExitCode
 from forensics.models.report_args import ReportArgs
 from forensics.pipeline_context import PipelineContext
 
 logger = logging.getLogger(__name__)
 
 
+@with_examples("forensics report --format html")
 def report(
+    ctx: typer.Context,
     notebook: Annotated[
         str | None,
         typer.Option(
@@ -78,7 +83,12 @@ def report(
     try:
         rc = run_report(args)
     except ValueError as exc:
-        logger.error("%s", exc)
-        raise typer.Exit(code=1) from exc
+        raise fail(
+            ctx,
+            "report",
+            "report_failed",
+            str(exc),
+            exit_code=ExitCode.GENERAL_ERROR,
+        ) from exc
     if rc != 0:
-        raise typer.Exit(code=rc)
+        raise typer.Exit(int(rc))

@@ -635,6 +635,12 @@ class Repository(RepositoryReader):
         """
         return self._bulk_set_is_duplicate(article_ids, 1, chunk_size=chunk_size)
 
+    def dedup_simhash_columns_present(self) -> bool:
+        """Return True when ``articles`` has dedup simhash columns (D-01 schema)."""
+        conn = self._require_conn()
+        keys = {str(r[1]) for r in conn.execute("PRAGMA table_info(articles)").fetchall()}
+        return "dedup_simhash" in keys and "dedup_simhash_version" in keys
+
     def recompute_stale_dedup_simhashes(self, *, limit: int | None = None) -> dict[str, int]:
         """Recompute simhash + version for articles not stamped at the current version.
 
@@ -644,8 +650,7 @@ class Repository(RepositoryReader):
         from forensics.utils.hashing import simhash
 
         conn = self._require_conn()
-        keys = {str(r[1]) for r in conn.execute("PRAGMA table_info(articles)").fetchall()}
-        if "dedup_simhash" not in keys or "dedup_simhash_version" not in keys:
+        if not self.dedup_simhash_columns_present():
             return {"recomputed": 0, "skipped": 0, "errors": 0}
 
         sql = """

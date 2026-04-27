@@ -4,14 +4,19 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import replace
-from typing import Annotated
+from typing import Annotated, Literal
 
 import typer
 
+from forensics.cli._decorators import forensics_examples
+from forensics.cli._envelope import status
+from forensics.cli._exit import ExitCode
 from forensics.cli.state import get_cli_state
 from forensics.config import get_project_root, get_settings
 from forensics.progress import managed_rich_observer
 from forensics.survey.qualification import QualificationCriteria, qualify_authors
+
+_SURVEY_EPILOG, _SURVEY_EX = forensics_examples("forensics survey --dry-run")
 
 survey_app = typer.Typer(
     name="survey",
@@ -30,56 +35,73 @@ _STRENGTH_ICONS: dict[str, str] = {
 }
 
 
-def _survey_dry_run_echo(db_path, criteria) -> None:
+def _survey_dry_run_echo(
+    db_path,
+    criteria,
+    *,
+    output_format: Literal["text", "json"],
+) -> None:
     qualified, disqualified = qualify_authors(db_path, criteria)
-    typer.echo("")
-    typer.echo(f"Qualified: {len(qualified)} authors")
-    typer.echo(f"Disqualified: {len(disqualified)} authors")
-    typer.echo("")
-    for qa in qualified:
-        typer.echo(
-            f"  {qa.author.name:<30} {qa.total_articles:>5} articles  "
-            f"{qa.date_range_days:>5}d span  {qa.articles_per_year:>5.1f}/yr"
-        )
-    if disqualified:
-        typer.echo("")
-        typer.echo(f"Disqualified ({len(disqualified)}):")
-        for dq in disqualified[:10]:
-            typer.echo(f"  {dq.author.name:<30} reason: {dq.disqualification_reason}")
-        if len(disqualified) > 10:
-            typer.echo(f"  ... and {len(disqualified) - 10} more")
-
-
-def _survey_print_report(report) -> None:
-    typer.echo("")
-    typer.echo("=" * 70)
-    typer.echo(f"SURVEY COMPLETE — run_id={report.run_id}")
-    typer.echo(f"{len(report.results)} authors analyzed")
-    typer.echo("=" * 70)
-    typer.echo("")
-
-    for r in report.results[:20]:
-        if r.score is not None:
-            icon = _STRENGTH_ICONS.get(r.score.strength.value, "???")
+    status("", output_format=output_format)
+    status(f"Qualified: {len(qualified)} authors", output_format=output_format)
+    status(f"Disqualified: {len(disqualified)} authors", output_format=output_format)
+    status("", output_format=output_format)
+    if output_format == "text":
+        for qa in qualified:
             typer.echo(
-                f"  [{icon}] {r.author_name:<30} "
-                f"score={r.score.composite:.3f}  "
-                f"strength={r.score.strength.value:<10} "
-                f"{r.score.evidence_summary[:60]}"
+                f"  {qa.author.name:<30} {qa.total_articles:>5} articles  "
+                f"{qa.date_range_days:>5}d span  {qa.articles_per_year:>5.1f}/yr"
             )
-        elif r.error is not None:
-            typer.echo(f"  [ERR] {r.author_name:<30} {r.error[:60]}")
+    if disqualified:
+        status("", output_format=output_format)
+        status(f"Disqualified ({len(disqualified)}):", output_format=output_format)
+        if output_format == "text":
+            for dq in disqualified[:10]:
+                typer.echo(f"  {dq.author.name:<30} reason: {dq.disqualification_reason}")
+            if len(disqualified) > 10:
+                typer.echo(f"  ... and {len(disqualified) - 10} more")
+
+
+def _survey_print_report(
+    report,
+    *,
+    output_format: Literal["text", "json"],
+) -> None:
+    status("", output_format=output_format)
+    status("=" * 70, output_format=output_format)
+    status(f"SURVEY COMPLETE — run_id={report.run_id}", output_format=output_format)
+    status(f"{len(report.results)} authors analyzed", output_format=output_format)
+    status("=" * 70, output_format=output_format)
+    status("", output_format=output_format)
+
+    if output_format == "text":
+        for r in report.results[:20]:
+            if r.score is not None:
+                icon = _STRENGTH_ICONS.get(r.score.strength.value, "???")
+                typer.echo(
+                    f"  [{icon}] {r.author_name:<30} "
+                    f"score={r.score.composite:.3f}  "
+                    f"strength={r.score.strength.value:<10} "
+                    f"{r.score.evidence_summary[:60]}"
+                )
+            elif r.error is not None:
+                typer.echo(f"  [ERR] {r.author_name:<30} {r.error[:60]}")
 
     if report.natural_controls:
-        typer.echo("")
-        typer.echo(f"Natural control cohort: {len(report.natural_controls)} author(s)")
+        status("", output_format=output_format)
+        status(
+            f"Natural control cohort: {len(report.natural_controls)} author(s)",
+            output_format=output_format,
+        )
 
     if report.run_dir is not None:
-        typer.echo("")
-        typer.echo(f"Full results: {report.run_dir}")
+        status("", output_format=output_format)
+        if output_format == "text":
+            typer.echo(f"Full results: {report.run_dir}")
 
 
-@survey_app.callback(invoke_without_command=True)
+@survey_app.callback(invoke_without_command=True, epilog=_SURVEY_EPILOG)
+@_SURVEY_EX
 def survey(
     ctx: typer.Context,
     dry_run: Annotated[
@@ -182,8 +204,8 @@ def survey(
     criteria = replace(QualificationCriteria.from_settings(settings.survey), **overrides)
 
     if dry_run:
-        _survey_dry_run_echo(db_path, criteria)
-        raise typer.Exit(0)
+        _survey_dry_run_echo(db_path, criteria, output_format=get_cli_state(ctx).output_format)
+        raise typer.Exit(int(ExitCode.OK))
 
     from forensics.survey.orchestrator import run_survey
 
@@ -205,4 +227,4 @@ def survey(
             )
         )
 
-    _survey_print_report(report)
+    _survey_print_report(report, output_format=get_cli_state(ctx).output_format)

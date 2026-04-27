@@ -18,6 +18,11 @@ from typing import Annotated
 import typer
 
 from forensics.analysis.artifact_paths import AnalysisArtifactPaths
+from forensics.cli._decorators import examples_epilog, forensics_examples, with_examples
+from forensics.cli._envelope import status
+from forensics.cli._errors import fail
+from forensics.cli._exit import ExitCode
+from forensics.cli.state import get_cli_state
 from forensics.config import get_project_root, get_settings
 from forensics.config.settings import ForensicsSettings
 from forensics.pipeline_context import PipelineContext
@@ -28,11 +33,18 @@ from forensics.survey.shared_byline import is_shared_byline as _is_shared_byline
 
 logger = logging.getLogger(__name__)
 
+_ANALYZE_EXAMPLES = (
+    "forensics analyze --author isaac-schorr",
+    "forensics analyze --compare-pair isaac-schorr,john-doe",
+    "forensics analyze --parallel-authors --max-workers 4",
+)
+
 analyze_app = typer.Typer(
     name="analyze",
     help="Run analysis pipeline (change-point, drift, convergence, comparison).",
     no_args_is_help=False,
     invoke_without_command=True,
+    epilog=examples_epilog(*_ANALYZE_EXAMPLES),
 )
 
 
@@ -221,6 +233,7 @@ def _run_ai_baseline_stage(
     skip_generation: bool,
     articles_per_cell: int | None,
     baseline_model: str | None,
+    typer_context: typer.Context | None,
 ) -> None:
     from forensics.cli.baseline import run_ai_baseline_command
 
@@ -235,11 +248,20 @@ def _run_ai_baseline_stage(
             model_filter=baseline_model,
         )
     except ValueError as exc:
-        logger.error("ai-baseline failed: %s", exc)
-        raise typer.Exit(code=1) from exc
+        raise fail(
+            typer_context,
+            "analyze",
+            "ai_baseline_failed",
+            str(exc),
+            exit_code=ExitCode.GENERAL_ERROR,
+        ) from exc
 
 
-def _verify_requested_ai_baseline_vectors(ctx: AnalyzeContext) -> None:
+def _verify_requested_ai_baseline_vectors(
+    ctx: AnalyzeContext,
+    *,
+    typer_context: typer.Context | None,
+) -> None:
     from forensics.analysis.drift import load_ai_baseline_embeddings
 
     slugs = (
@@ -256,11 +278,16 @@ def _verify_requested_ai_baseline_vectors(ctx: AnalyzeContext) -> None:
         ):
             missing.append(slug)
     if missing:
-        logger.error(
-            "ai-baseline requested but drift artifacts have no usable AI baseline vectors: %s",
-            ", ".join(missing),
+        raise fail(
+            typer_context,
+            "analyze",
+            "ai_baseline_vectors_missing",
+            (
+                "ai-baseline requested but drift artifacts have no usable AI baseline vectors: "
+                + ", ".join(missing)
+            ),
+            exit_code=ExitCode.AUTH_OR_RESOURCE,
         )
-        raise typer.Exit(code=1)
 
 
 def _enforce_shared_byline_gate(
@@ -368,6 +395,7 @@ def run_analyze(  # noqa: C901
     compare_pair: tuple[str, str] | None = None,
     parallel_authors: bool = False,
     allow_pre_phase16_embeddings: bool = False,
+    typer_context: typer.Context | None = None,
 ) -> None:
     """Execute the analyze stage as a plain Python function.
 
@@ -412,8 +440,29 @@ def run_analyze(  # noqa: C901
 
         ok, message = verify_corpus_hash(db_path, analysis_dir)
         if not ok:
-            logger.error("corpus hash verification failed: %s", message)
-            raise typer.Exit(code=1)
+            if "Corpus hash mismatch" in message:
+                raise fail(
+                    typer_context,
+                    "analyze",
+                    "corpus_hash_mismatch",
+                    message,
+                    exit_code=ExitCode.CONFLICT,
+                )
+            if "No custody record" in message:
+                raise fail(
+                    typer_context,
+                    "analyze",
+                    "corpus_custody_missing",
+                    message,
+                    exit_code=ExitCode.AUTH_OR_RESOURCE,
+                )
+            raise fail(
+                typer_context,
+                "analyze",
+                "corpus_hash_error",
+                message,
+                exit_code=ExitCode.GENERAL_ERROR,
+            )
         logger.info("corpus hash verified (%s)", message)
 
     preregistration = verify_preregistration(settings)
@@ -428,8 +477,16 @@ def run_analyze(  # noqa: C901
             "allow_pre_phase16_embeddings": allow_pre_phase16_embeddings,
         }
         _write_run_metadata(analysis_dir, rid="preregistration-blocked", meta=meta)
-        logger.error("pre-registration gate failed: %s", preregistration.message)
-        raise typer.Exit(code=1)
+        raise fail(
+            typer_context,
+            "analyze",
+            "preregistration_not_locked",
+            preregistration.message,
+            exit_code=ExitCode.CONFLICT,
+            suggestion=(
+                "run: forensics --yes lock-preregistration (or pass --exploratory to bypass)"
+            ),
+        )
 
     if compare and not (
         parallel_authors or changepoint or timeseries or drift or ai_baseline or convergence
@@ -484,8 +541,9 @@ def run_analyze(  # noqa: C901
             skip_generation=skip_generation,
             articles_per_cell=articles_per_cell,
             baseline_model=baseline_model,
+            typer_context=typer_context,
         )
-        _verify_requested_ai_baseline_vectors(ctx)
+        _verify_requested_ai_baseline_vectors(ctx, typer_context=typer_context)
     logger.info(
         "analyze: completed (changepoint=%s, timeseries=%s, drift=%s, "
         "full_analysis=%s, ai_baseline=%s, author=%s)",
@@ -499,6 +557,7 @@ def run_analyze(  # noqa: C901
 
 
 @analyze_app.callback(invoke_without_command=True)
+@with_examples(*_ANALYZE_EXAMPLES)
 def analyze(
     ctx: typer.Context,
     changepoint: Annotated[
@@ -681,11 +740,17 @@ def analyze(
         compare_pair=parsed_pair,
         parallel_authors=parallel_authors,
         allow_pre_phase16_embeddings=allow_pre_phase16_embeddings,
+        typer_context=ctx,
     )
 
 
-@analyze_app.command(name="section-profile")
+_SP_EPILOG, _sp_ex = forensics_examples("forensics analyze section-profile")
+
+
+@analyze_app.command(name="section-profile", epilog=_SP_EPILOG)
+@_sp_ex
 def section_profile_cmd(
+    ctx: typer.Context,
     output: Annotated[
         Path | None,
         typer.Option(
@@ -723,20 +788,32 @@ def section_profile_cmd(
         analysis_dir=analysis_dir,
         report_path=output,
     )
-    typer.echo(f"section-profile: retained {len(result.sections)} sections")
-    typer.echo(
+    fmt = get_cli_state(ctx).output_format
+    status(f"section-profile: retained {len(result.sections)} sections", output_format=fmt)
+    status(
         f"  significant families (p<{GATE_OMNIBUS_ALPHA}): "
         f"{len(result.significant_families)} "
-        f"({', '.join(result.significant_families) or 'none'})"
+        f"({', '.join(result.significant_families) or 'none'})",
+        output_format=fmt,
     )
-    typer.echo(f"  max off-diagonal cosine distance: {result.max_off_diagonal_distance:.4f}")
-    typer.echo(f"  J5 gate verdict: {result.gate_verdict}")
+    status(
+        f"  max off-diagonal cosine distance: {result.max_off_diagonal_distance:.4f}",
+        output_format=fmt,
+    )
+    status(f"  J5 gate verdict: {result.gate_verdict}", output_format=fmt)
     if result.artifacts is not None:
-        typer.echo(f"  report: {result.artifacts.report_md}")
+        status(f"  report: {result.artifacts.report_md}", output_format=fmt)
 
 
-@analyze_app.command(name="section-contrast")
+_SC_EPILOG, _sc_ex = forensics_examples(
+    "forensics analyze section-contrast --author colby-hall",
+)
+
+
+@analyze_app.command(name="section-contrast", epilog=_SC_EPILOG)
+@_sc_ex
 def section_contrast_cmd(
+    ctx: typer.Context,
     author: Annotated[
         str | None,
         typer.Option(
@@ -773,15 +850,28 @@ def section_contrast_cmd(
     with Repository(db_path) as repo:
         author_rows = resolve_author_rows(repo, settings, author_slug=author)
 
+    fmt = get_cli_state(ctx).output_format
     if not author_rows:
-        typer.echo("section-contrast: no authors resolved (check --author / config.toml)")
-        raise typer.Exit(code=1)
+        status(
+            "section-contrast: no authors resolved (check --author / config.toml)",
+            output_format=fmt,
+        )
+        raise fail(
+            ctx,
+            "analyze.section_contrast",
+            "no_authors",
+            "No authors resolved (check --author / config.toml).",
+            exit_code=ExitCode.USAGE_ERROR,
+        )
 
     written = 0
     for author_row in author_rows:
         df = load_feature_frame_for_author(feat_dir, author_row.slug, author_row.id)
         if df is None or df.is_empty():
-            typer.echo(f"section-contrast: skipped {author_row.slug} (no feature rows)")
+            status(
+                f"section-contrast: skipped {author_row.slug} (no feature rows)",
+                output_format=fmt,
+            )
             continue
         result, path = compute_and_write_section_contrast(
             df,
@@ -793,11 +883,13 @@ def section_contrast_cmd(
         )
         written += 1
         if result.disposition == "insufficient_section_volume":
-            typer.echo(
-                f"section-contrast: {author_row.slug} → insufficient_section_volume → {path}"
+            status(
+                f"section-contrast: {author_row.slug} → insufficient_section_volume → {path}",
+                output_format=fmt,
             )
         else:
-            typer.echo(
-                f"section-contrast: {author_row.slug} → {len(result.pairs)} pair(s) → {path}"
+            status(
+                f"section-contrast: {author_row.slug} → {len(result.pairs)} pair(s) → {path}",
+                output_format=fmt,
             )
-    typer.echo(f"section-contrast: wrote {written} artifact(s)")
+    status(f"section-contrast: wrote {written} artifact(s)", output_format=fmt)

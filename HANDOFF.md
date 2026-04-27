@@ -5333,3 +5333,228 @@ uv run forensics preflight --output json
 #### Risks & Next Steps
 - Before merge: enable GitNexus MCP and attach `detect_changes` output to the PR (or paste `git diff --stat origin/main...HEAD` if MCP stays disabled).
 - Commit docs + any pending `src/` changes together or in dependency order per team GitButler / branch policy.
+
+---
+
+### CLI agent-readiness — item 1 (envelope, root `--output`, preflight/dedup)
+**Status:** Complete  
+**Date:** 2026-04-26  
+**Agent/Session:** Cursor agent  
+
+#### What Was Done
+- Added `src/forensics/cli/_envelope.py` (`SCHEMA_VERSION`, `success`, `failure`, `emit`, `status` for text vs json).
+- Extended `ForensicsCliState` with `output_format`, `non_interactive`, `assume_yes`; root callback sets `show_progress=not no_progress and output != "json"`.
+- Moved `--output` / `--non-interactive` / `--yes` to root `_root` in `src/forensics/cli/__init__.py`; `preflight` uses `get_cli_state(ctx)` and emits `emit(success("preflight", _preflight_json_envelope(...)))` in json mode; text preflight lines go to stderr.
+- `dedup recompute-fingerprints`: json via root `--output json` + `emit(success("dedup.recompute_fingerprints", summary))`; default text prints a one-line human summary on stdout.
+
+#### Files Modified
+- `src/forensics/cli/_envelope.py` — new
+- `src/forensics/cli/state.py` — CLI state fields
+- `src/forensics/cli/__init__.py` — root flags, preflight ctx + envelope
+- `src/forensics/cli/dedup.py` — ctx + format branch
+- `tests/unit/test_cli_envelope.py` — new
+- `tests/unit/test_cli_preflight_json.py` — global flag order + envelope assertions
+- `tests/unit/test_simhash_migration.py` — dedup JSON via `--output json` before subcommand
+- `docs/RUNBOOK.md` — machine-readable preflight command + envelope `data` note
+
+#### Verification Evidence
+```
+uv run pytest tests/unit/test_cli_envelope.py tests/unit/test_cli_preflight_json.py tests/unit/test_simhash_migration.py -v --no-cov
+  -> 15 passed
+
+uv run pytest tests/ -v --no-cov -q
+  -> 975 passed, 3 deselected, 1 xfailed
+
+uv run ruff check src/forensics/cli/_envelope.py src/forensics/cli/state.py src/forensics/cli/__init__.py src/forensics/cli/dedup.py tests/unit/test_cli_envelope.py tests/unit/test_cli_preflight_json.py
+  -> pass (after I001 fix on test_cli_envelope)
+```
+
+#### Decisions Made
+- Machine-readable preflight is now `forensics --output json preflight` (global flag before subcommand); inner check payload unchanged under envelope `data`.
+
+#### Unresolved Questions
+- None for this slice.
+
+#### Risks & Next Steps
+- **Breaking:** `forensics preflight --output json` no longer works; use `forensics --output json preflight`. `docs/RUNBOOK.md` preflight line updated; grep for stale `preflight --output` elsewhere if needed (item 10).
+- GitNexus `impact` / `detect_changes`: MCP server not verified in this session; run when enabled before merge.
+
+---
+
+### CLI agent-readiness — item 4–5 (`commands` catalog + `with_examples` / epilog)
+**Status:** Complete  
+**Date:** 2026-04-26  
+**Agent/Session:** Cursor agent  
+
+#### What Was Done
+- Added `forensics commands`: walks the root Click group, emits `success("commands", {"root": ...})` in JSON or an indented text tree; param defaults normalized for JSON (e.g. `Path` → `str`).
+- Added `src/forensics/cli/_decorators.py` (`with_examples`, `examples_epilog`, `forensics_examples`, `jsonable_param_default`) and `src/forensics/cli/_commands.py` (walk + `run_list_commands`).
+- Attached example metadata to every CLI entry point and matching Rich `epilog=` (Typer does not surface long `__doc__` appendices in `--help` without epilog).
+- New tests: `tests/unit/test_cli_commands_dump.py`, `tests/unit/test_cli_help_examples.py`.
+
+#### Files Modified
+- `src/forensics/cli/_decorators.py` — new
+- `src/forensics/cli/_commands.py` — new
+- `src/forensics/cli/__init__.py` — `list_commands` + epilog/examples on top-level commands; `extract` / `report` / `migrate` registration epilogs
+- `src/forensics/cli/analyze.py`, `scrape.py`, `survey.py`, `calibrate.py`, `dedup.py`, `migrate.py`, `extract.py`, `report.py` — examples + epilogs
+- `tests/unit/test_cli_commands_dump.py`, `tests/unit/test_cli_help_examples.py` — new
+
+#### Verification Evidence
+```
+npx gitnexus impact preflight --direction upstream --repo mediaite-ghostink
+  -> risk LOW, impactedCount 0
+
+uv run pytest tests/unit/test_cli_commands_dump.py tests/unit/test_cli_help_examples.py -v --no-cov
+  -> 24 passed
+
+uv run pytest tests/integration/test_cli.py tests/unit/test_cli_*.py -v --no-cov -q
+  -> 56 passed
+
+uv run ruff check src/forensics/cli/_decorators.py src/forensics/cli/_commands.py … (touched CLI + tests)
+  -> All checks passed
+
+uv run ruff format src/forensics/cli/_commands.py
+```
+
+#### Decisions Made
+- Examples are a single source via `forensics_examples(...)` → `(epilog, decorator)` so JSON catalog and Rich `--help` stay aligned; catalog reads `__forensics_examples__` from the Click callback (with `__wrapped__` fallback).
+
+#### Unresolved Questions
+- None for this slice.
+
+#### Risks & Next Steps
+- If new CLI commands are added, register `epilog=` + `with_examples` (or `forensics_examples`) so `test_cli_help_examples` and leaf JSON example assertions keep passing.
+- Re-run `npx gitnexus detect_changes` (MCP) before merge when available.
+
+---
+
+### CLI agent-readiness — items 6 & 8 (`fail()` + TUI / lock / dedup CONFLICT)
+**Status:** Complete  
+**Date:** 2026-04-26  
+**Agent/Session:** Cursor agent  
+
+#### What Was Done
+- Added `src/forensics/cli/_errors.py` with `fail(ctx, cmd, code, message, *, exit_code, suggestion=..., **extra)` returning `typer.Exit` (JSON envelope on stdout in json mode; stderr human lines in text; always logs).
+- Refactored CLI exits to use `fail` where appropriate: `validate`, `export`, `all`, `migrate` (parent missing + no pending migrations), `extract`, `report` (new `ctx` param), `analyze` / `run_analyze` (optional `typer_context` for preregistration, corpus hash, AI baseline paths), `dedup` (missing DB), `section-contrast` (no authors).
+- Item 8: `setup` / `dashboard` refuse `--non-interactive` with `tty_required` (USAGE_ERROR 2); dashboard survey-only flags use `fail`; `lock-preregistration` checks existing lock file and exits CONFLICT (5) unless root `assume_yes` from global `--yes` / `-y` (**must** be `forensics --yes lock-preregistration`, not after subcommand); `dedup recompute-fingerprints` exits CONFLICT (5) when dedup columns exist, `recomputed == 0`, `errors == 0` (after emitting JSON summary in json mode).
+- `Repository.dedup_simhash_columns_present()` for CONFLICT vs missing-schema distinction.
+- Tests: `tests/unit/test_cli_failure_envelope.py`, `tests/unit/test_cli_exit_codes.py`; extended `test_simhash_migration.py` for second-run dedup exit 5; `tests/integration/test_cli.py` assert updated for `config_invalid`.
+
+#### Files Modified
+- `src/forensics/cli/_errors.py` — new
+- `src/forensics/cli/__init__.py` — `fail`, lock guard, validate/export/all/setup/dashboard
+- `src/forensics/cli/analyze.py` — `fail` + `typer_context` threading
+- `src/forensics/cli/dedup.py`, `extract.py`, `report.py`, `migrate.py`
+- `src/forensics/storage/repository.py` — `dedup_simhash_columns_present`
+- `tests/unit/test_cli_failure_envelope.py`, `tests/unit/test_cli_exit_codes.py`, `tests/unit/test_simhash_migration.py`, `tests/integration/test_cli.py`
+
+#### Verification Evidence
+```
+uv run pytest tests/ -q --no-cov
+  -> pass (1 xfail known)
+
+uv run ruff check src/forensics/cli/ src/forensics/storage/repository.py tests/unit/test_cli_exit_codes.py tests/unit/test_cli_failure_envelope.py tests/unit/test_simhash_migration.py tests/integration/test_cli.py
+  -> All checks passed
+```
+
+#### Decisions Made
+- Root `--yes` is stored on `ForensicsCliState.assume_yes`; Typer only binds root options when they appear **before** the subcommand, so overwrite flow is `forensics --yes lock-preregistration` (examples and analyze suggestion updated accordingly).
+
+#### Unresolved Questions
+- None.
+
+#### Risks & Next Steps
+- Operators/scripts that used `forensics lock-preregistration --yes` must move `--yes` to the root (`forensics --yes lock-preregistration`).
+- GitNexus MCP was unavailable this session; run `impact` / `detect_changes` when the server is enabled.
+
+---
+
+### CLI agent-readiness — item 9 (scrape TRANSIENT + JSONL classification)
+**Status:** Complete  
+**Date:** 2026-04-26  
+**Agent/Session:** Cursor agent  
+
+#### What Was Done
+- Added `scrape_failure_transient()`, `scrape_error_transient_from_http_status()`, `ScrapeRunTelemetry`, and `SCRAPE_RUN_TELEMETRY` in `src/forensics/scraper/fetcher.py`; extended `scrape_error_record` / `log_scrape_error` with a `transient` flag (recorded on each JSONL line and mirrored into telemetry when `dispatch_scrape` installs the context var).
+- Wired transient classification at all `log_scrape_error` sites in `fetcher.py` and `crawler.py`; mark successful discover/manifest writes, metadata inserts, and HTML parse commits for telemetry `any_row_success`.
+- `dispatch_scrape` (`src/forensics/cli/scrape.py`) returns `ExitCode.TRANSIENT` (4) when `rc == 0` and `transient_only_total_failure()` (no successes, ≥1 error, all transient).
+- Documented `retry_after_ms` convention for TRANSIENT failures in `src/forensics/cli/_envelope.py` module docstring.
+- `docs/RUNBOOK.md` — exit 4 scrape semantics + `transient` JSONL field.
+- Tests: `tests/unit/test_scrape_transient_classification.py`.
+
+#### Files Modified
+- `src/forensics/scraper/fetcher.py`, `src/forensics/scraper/crawler.py`, `src/forensics/cli/scrape.py`, `src/forensics/cli/_envelope.py`, `docs/RUNBOOK.md`
+- `tests/unit/test_scrape_transient_classification.py` — new
+
+#### Verification Evidence
+```
+uv run pytest tests/unit/test_scrape_transient_classification.py -v --no-cov
+  -> 10 passed
+
+uv run pytest tests/ -q --no-cov
+  -> 1016 passed, 1 xfailed (known)
+
+uv run ruff check src/forensics/scraper/fetcher.py src/forensics/scraper/crawler.py src/forensics/cli/scrape.py …
+  -> All checks passed
+```
+
+#### Decisions Made
+- **Correctness (hierarchy):** TRANSIENT (4) only when telemetry shows no successful work units for the run and every appended scrape error was transient — avoids masking partial successes or mixed permanent/transient failures.
+
+#### Unresolved Questions
+- None.
+
+#### Risks & Next Steps
+- Consumers that parse `scrape_errors.jsonl` should tolerate the new `transient` key (additive). GitNexus `impact` was not run (MCP path unavailable this session).
+
+---
+
+### CLI agent-readiness — items 7–10 (docs, SKILL, suite verification)
+**Status:** Complete  
+**Date:** 2026-04-26  
+**Agent/Session:** Cursor agent  
+
+#### What Was Done
+- **Item 7:** Added `.claude/skills/forensics-cli/SKILL.md` and byte-identical mirror `.cursor/skills/forensics-cli/SKILL.md` (workflows, headless flags, exit-code hints, guardrails, trigger table).
+- **Item 10 / mandatory docs:** Updated `CLAUDE.md` (Key Documentation bullet), `docs/RUNBOOK.md` (new **Headless / agent invocation** section; dedup stdout contract clarified for text vs `--output json`), `docs/GUARDRAILS.md` (Sign: stdout/stderr + JSON contract).
+- **Verification:** Full unit suite + `ruff check`; `ruff format` applied to `analyze.py` / `dedup.py` so `ruff format --check` passes; integration-marked tests run.
+
+#### Files Modified
+- `.claude/skills/forensics-cli/SKILL.md`, `.cursor/skills/forensics-cli/SKILL.md` — new
+- `CLAUDE.md` — forensics-cli skill reference
+- `docs/RUNBOOK.md` — headless section + dedup output note
+- `docs/GUARDRAILS.md` — agent stdout/stderr Sign
+- `src/forensics/cli/analyze.py`, `src/forensics/cli/dedup.py` — `ruff format` only (no logic change)
+
+#### Verification Evidence
+```
+uv run pytest tests/ -v --no-cov
+  -> 1016 passed, 3 deselected, 1 xfailed (known), ~91s
+
+uv run pytest tests/ -m integration -v --no-cov
+  -> 2 passed, 1018 deselected, ~13s
+
+npx gitnexus analyze --embeddings .
+  -> Repository indexed successfully (~31s); embeddings preserved
+
+uv run ruff check .
+  -> All checks passed
+
+uv run ruff format --check .
+  -> 280 files OK (after formatting analyze.py, dedup.py)
+
+diff .claude/skills/forensics-cli/SKILL.md .cursor/skills/forensics-cli/SKILL.md
+  -> empty
+
+wc -l .claude/skills/forensics-cli/SKILL.md
+  -> 67 (>= 60)
+```
+
+#### Decisions Made
+- Documented dedup default as **text summary on stdout**; JSON envelope only with root `--output json` before `dedup`, aligned with CLI agent-readiness out-of-scope note.
+
+#### Unresolved Questions
+- None.
+
+#### Risks & Next Steps
+- MCP `gitnexus_detect_changes` was not available in this Cursor workspace (server not registered); re-run when GitNexus MCP is enabled before merge.
