@@ -6237,3 +6237,54 @@ uv run pytest tests/ -q --no-cov
 #### Notes
 
 - GitNexus MCP was unavailable in this environment; impact was not run for `generate_evidence_narrative`.
+
+---
+
+### Phase 17 — integration fixtures + RUNBOOK (plan: phase-d-integration-docs)
+
+**Status:** Complete  
+**Date:** 2026-04-27
+
+#### What Was Done
+
+- Added committed **Phase 17 golden fixtures** (`tests/fixtures/phase17/golden_cases.json`) with nine synthetic author cases (Colby Hall + eight MODERATE slugs from the Phase 17 prompt): window + window-scoped `HypothesisTest` rows and expected `DirectionConcordance`, `VolumeRampFlag`, `FindingStrength`, and `volume_ratio`.
+- Added **`tests/integration/test_phase17_classification.py`** (`@pytest.mark.integration`) to load fixtures, run `classify_direction_concordance`, `compute_volume_ramp_flag`, and `classify_finding_strength`, and assert golden outputs; cohort slug set is asserted explicitly.
+- Documented diagnostic meanings, confounds, CI fixture refresh, and exploratory thresholds in **`docs/RUNBOOK.md`** (new subsection *Phase 17 diagnostic columns*).
+- **GUARDRAILS:** no new Sign (no recurring footgun discovered during this slice; `-1` / unusable counts are already covered in unit tests and `compute_volume_ramp_flag` docstring).
+
+#### Files Modified
+
+- `tests/fixtures/phase17/golden_cases.json` — committed golden payloads (replaces reliance on gitignored `data/analysis/` in CI).
+- `tests/integration/test_phase17_classification.py` — integration golden tests.
+- `docs/RUNBOOK.md` — Phase 17 operator notes.
+- `HANDOFF.md` — this block.
+
+#### Verification Evidence
+
+```
+uv run pytest tests/integration/test_phase17_classification.py -v --no-cov
+# 10 passed
+
+uv run ruff check . && uv run ruff format --check .
+# All checks passed; 293 files already formatted
+
+uv run pytest tests/ -v --no-cov
+# 1073 passed, 3 deselected, 1 xfailed (known section_residualize), 3 warnings
+```
+
+#### Decisions Made
+
+- Single **`golden_cases.json`** instead of nine separate files: easier to keep the nine-author cohort and `expected` blobs in sync; module docstring documents refresh from local `*_result.json` if analysis is re-run.
+- **isaac-schorr** expected **`direction_mixed`** per plan (one AI-direction match, two opposes) with **volume_growth** (3.5×).
+
+#### Unresolved Questions
+
+- Pre-registration lock still does not encode Phase 17 priors or volume bands; publication workflow remains: exploratory columns until lock is extended (per Phase 17 prompt).
+
+#### Risks & Next Steps
+
+- If real analyzed windows change materialy, update `golden_cases.json` + `expected` in the same PR. Re-run `gitnexus_detect_changes` before merge when GitNexus MCP is available.
+
+#### GitNexus
+
+- `gitnexus_detect_changes({ "scope": "all" })` was invoked via MCP; **server `user-gitnexus` is not registered** in this Cursor workspace (available MCP list has no GitNexus entry). Re-run detect_changes when the GitNexus MCP is enabled before merge.

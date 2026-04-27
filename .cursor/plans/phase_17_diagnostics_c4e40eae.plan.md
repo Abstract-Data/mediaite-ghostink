@@ -16,7 +16,7 @@ todos:
     status: completed
   - id: phase-d-integration-docs
     content: tests/fixtures/phase17 + test_phase17_classification.py; RUNBOOK; HANDOFF; GUARDRAILS if needed; ruff + full pytest + GitNexus detect_changes
-    status: pending
+    status: completed
 isProject: false
 ---
 

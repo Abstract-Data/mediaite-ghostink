@@ -44,6 +44,21 @@ After large refactors or merges, refresh the local graph so impact/context tools
 - **Default:** `npx gitnexus analyze` (from repo root).
 - **Embeddings preserved:** If `.gitnexus/meta.json` shows `stats.embeddings` greater than zero, use `npx gitnexus analyze --embeddings`. Running `analyze` without `--embeddings` **removes** any previously generated index embeddings (see `AGENTS.md` / CLAUDE GitNexus section).
 
+## Phase 17 diagnostic columns (§11.3 notebook)
+
+Phase 17 adds **exploratory** report-side diagnostics alongside `FindingStrength` (which is unchanged). They are implemented in `src/forensics/models/report.py` and `src/forensics/models/direction_priors.py` and surfaced in `notebooks/09_full_report.ipynb` §11.3.
+
+| Column / symbol | Meaning |
+|-----------------|--------|
+| `DirectionConcordance` (`direction_ai`, `direction_mixed`, `direction_non_ai`, `direction_na`) | After collapsing to one hypothesis test per `feature_name` (max \|Cohen's d\|), compares the sign of d to `AI_TYPICAL_DIRECTION` priors. **≥50%** of prior-backed features matching the AI-typical direction yields `direction_ai`; mixed partial agreement yields `direction_mixed`; no matches with at least one oppose yields `direction_non_ai`; no usable priors yields `direction_na`. Thresholds are exploratory until locked in `data/preregistration/preregistration_lock.json`. |
+| `DirectionBreakdown` | Counts `dir_match` / `dir_oppose` / `dir_no_prior` (and optional feature lists) for transparency tables. |
+| `VolumeRampFlag` (`volume_stable`, `volume_growth`, `volume_ramp`, `volume_decline`, `volume_unknown`) | Uses **n_post / n_pre** from the first non-degenerate hypothesis row with usable sample counts (`n_pre > 0`, neither count `-1`). Bands: stable `[0.5, 2.0]`, growth `(2, 5]`, ramp `> 5`, decline `< 0.5`. **Confound:** a large ratio often reflects corpus expansion or cadence change, not model use; pair with direction columns. The **5×** ramp cutoff is exploratory. |
+| `volume_ratio` | The ratio used for the flag (or null when unknown). |
+
+**CI fixtures:** `tests/fixtures/phase17/golden_cases.json` plus `tests/integration/test_phase17_classification.py` assert golden direction/volume/strength tuples without reading gitignored `data/analysis/`. After a local full analyze, you may copy window-scoped rows from `data/analysis/<slug>_result.json` into that fixture and update `expected` in the same commit so CI stays deterministic.
+
+**TODO (not implemented):** optional env/CLI overrides for concordance or volume bands; until then, treat diagnostics as fixed code + pre-reg lock discipline.
+
 ## Phase 16 hash-break migration
 
 Phase 16 intentionally changes the analysis-config hash, corpus fingerprint, and embedding revision contract. Treat any pre–Phase-16 `data/analysis/*_result.json` and preregistration locks as **stale** relative to a Phase-16 `config.toml` until you re-lock and re-run (see GUARDRAILS Sign: *Pre-Phase-16 locked artifacts must be re-locked*).

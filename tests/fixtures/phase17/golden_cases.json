@@ -1,0 +1,586 @@
+{
+  "schema_version": 1,
+  "description": "Trimmed window + hypothesis rows for Phase 17 integration tests. Values are synthetic but aligned with Apr 27 review narratives (Colby: AI concordance + volume decline; eight MODERATE: oppose priors + volume ramps). Refresh from local data/analysis/*_result.json if analysis is re-run; update expected + this file together.",
+  "cases": [
+    {
+      "slug": "colby-hall",
+      "probability_features_available": false,
+      "control_comparison": { "editorial_vs_author_signal": 0.85 },
+      "convergence_window": {
+        "start_date": "2026-03-17",
+        "end_date": "2026-06-15",
+        "features_converging": [
+          "self_similarity_30d",
+          "formula_opening_score",
+          "ai_marker_frequency"
+        ],
+        "families_converging": [],
+        "n_rankable_per_family": {},
+        "convergence_ratio": 0.72,
+        "pipeline_a_score": 0.6,
+        "pipeline_b_score": 0.55,
+        "pipeline_c_score": null,
+        "passes_via": ["ratio"]
+      },
+      "window_hypothesis_tests": [
+        {
+          "test_name": "welch_self_sim",
+          "feature_name": "self_similarity_30d",
+          "author_id": "colby-hall",
+          "raw_p_value": 0.0001,
+          "corrected_p_value": 0.0005,
+          "effect_size_cohens_d": 4.66,
+          "confidence_interval_95": [3.0, 5.5],
+          "significant": true,
+          "n_pre": 100,
+          "n_post": 44,
+          "degenerate": false
+        },
+        {
+          "test_name": "welch_formula",
+          "feature_name": "formula_opening_score",
+          "author_id": "colby-hall",
+          "raw_p_value": 0.001,
+          "corrected_p_value": 0.002,
+          "effect_size_cohens_d": 0.89,
+          "confidence_interval_95": [0.2, 1.4],
+          "significant": true,
+          "n_pre": 100,
+          "n_post": 44,
+          "degenerate": false
+        },
+        {
+          "test_name": "welch_ai_marker",
+          "feature_name": "ai_marker_frequency",
+          "author_id": "colby-hall",
+          "raw_p_value": 0.0005,
+          "corrected_p_value": 0.001,
+          "effect_size_cohens_d": 1.1,
+          "confidence_interval_95": [0.5, 1.6],
+          "significant": true,
+          "n_pre": 100,
+          "n_post": 44,
+          "degenerate": false
+        }
+      ],
+      "expected": {
+        "direction_concordance": "direction_ai",
+        "volume_flag": "volume_decline",
+        "volume_ratio": 0.44,
+        "finding_strength": "strong"
+      }
+    },
+    {
+      "slug": "ahmad-austin",
+      "probability_features_available": false,
+      "control_comparison": { "editorial_vs_author_signal": 0.4 },
+      "convergence_window": {
+        "start_date": "2021-01-01",
+        "end_date": "2023-06-30",
+        "features_converging": ["ttr", "bigram_entropy", "trigram_entropy"],
+        "families_converging": [],
+        "n_rankable_per_family": {},
+        "convergence_ratio": 0.5,
+        "pipeline_a_score": 0.5,
+        "pipeline_b_score": 0.5,
+        "pipeline_c_score": null,
+        "passes_via": []
+      },
+      "window_hypothesis_tests": [
+        {
+          "test_name": "welch_ttr",
+          "feature_name": "ttr",
+          "author_id": "ahmad-austin",
+          "raw_p_value": 0.001,
+          "corrected_p_value": 0.005,
+          "effect_size_cohens_d": 1.2,
+          "confidence_interval_95": [0.5, 1.8],
+          "significant": true,
+          "n_pre": 10,
+          "n_post": 200,
+          "degenerate": false
+        },
+        {
+          "test_name": "welch_bi",
+          "feature_name": "bigram_entropy",
+          "author_id": "ahmad-austin",
+          "raw_p_value": 0.001,
+          "corrected_p_value": 0.005,
+          "effect_size_cohens_d": 1.05,
+          "confidence_interval_95": [0.4, 1.6],
+          "significant": true,
+          "n_pre": 10,
+          "n_post": 200,
+          "degenerate": false
+        },
+        {
+          "test_name": "welch_tri",
+          "feature_name": "trigram_entropy",
+          "author_id": "ahmad-austin",
+          "raw_p_value": 0.001,
+          "corrected_p_value": 0.005,
+          "effect_size_cohens_d": 1.1,
+          "confidence_interval_95": [0.45, 1.7],
+          "significant": true,
+          "n_pre": 10,
+          "n_post": 200,
+          "degenerate": false
+        }
+      ],
+      "expected": {
+        "direction_concordance": "direction_non_ai",
+        "volume_flag": "volume_ramp",
+        "volume_ratio": 20.0,
+        "finding_strength": "moderate"
+      }
+    },
+    {
+      "slug": "charlie-nash",
+      "probability_features_available": false,
+      "control_comparison": { "editorial_vs_author_signal": 0.35 },
+      "convergence_window": {
+        "start_date": "2022-01-01",
+        "end_date": "2023-12-31",
+        "features_converging": ["ttr", "bigram_entropy", "self_similarity_30d"],
+        "families_converging": [],
+        "n_rankable_per_family": {},
+        "convergence_ratio": 0.55,
+        "pipeline_a_score": 0.52,
+        "pipeline_b_score": 0.51,
+        "pipeline_c_score": null,
+        "passes_via": []
+      },
+      "window_hypothesis_tests": [
+        {
+          "test_name": "mw_ttr",
+          "feature_name": "ttr",
+          "author_id": "charlie-nash",
+          "raw_p_value": 0.002,
+          "corrected_p_value": 0.004,
+          "effect_size_cohens_d": 1.4,
+          "confidence_interval_95": [0.6, 2.0],
+          "significant": true,
+          "n_pre": 8,
+          "n_post": 120,
+          "degenerate": false
+        },
+        {
+          "test_name": "mw_bi",
+          "feature_name": "bigram_entropy",
+          "author_id": "charlie-nash",
+          "raw_p_value": 0.002,
+          "corrected_p_value": 0.004,
+          "effect_size_cohens_d": 1.35,
+          "confidence_interval_95": [0.55, 1.95],
+          "significant": true,
+          "n_pre": 8,
+          "n_post": 120,
+          "degenerate": false
+        },
+        {
+          "test_name": "mw_self",
+          "feature_name": "self_similarity_30d",
+          "author_id": "charlie-nash",
+          "raw_p_value": 0.002,
+          "corrected_p_value": 0.004,
+          "effect_size_cohens_d": -1.2,
+          "confidence_interval_95": [-2.0, -0.5],
+          "significant": true,
+          "n_pre": 8,
+          "n_post": 120,
+          "degenerate": false
+        }
+      ],
+      "expected": {
+        "direction_concordance": "direction_non_ai",
+        "volume_flag": "volume_ramp",
+        "volume_ratio": 15.0,
+        "finding_strength": "moderate"
+      }
+    },
+    {
+      "slug": "isaac-schorr",
+      "probability_features_available": false,
+      "control_comparison": { "editorial_vs_author_signal": 0.45 },
+      "convergence_window": {
+        "start_date": "2021-06-01",
+        "end_date": "2023-03-15",
+        "features_converging": ["ttr", "coleman_liau", "gunning_fog"],
+        "families_converging": [],
+        "n_rankable_per_family": {},
+        "convergence_ratio": 0.48,
+        "pipeline_a_score": 0.5,
+        "pipeline_b_score": 0.49,
+        "pipeline_c_score": null,
+        "passes_via": []
+      },
+      "window_hypothesis_tests": [
+        {
+          "test_name": "welch_ttr",
+          "feature_name": "ttr",
+          "author_id": "isaac-schorr",
+          "raw_p_value": 0.001,
+          "corrected_p_value": 0.005,
+          "effect_size_cohens_d": -1.5,
+          "confidence_interval_95": [-2.2, -0.9],
+          "significant": true,
+          "n_pre": 20,
+          "n_post": 70,
+          "degenerate": false
+        },
+        {
+          "test_name": "welch_cl",
+          "feature_name": "coleman_liau",
+          "author_id": "isaac-schorr",
+          "raw_p_value": 0.001,
+          "corrected_p_value": 0.005,
+          "effect_size_cohens_d": -1.5,
+          "confidence_interval_95": [-2.1, -0.95],
+          "significant": true,
+          "n_pre": 20,
+          "n_post": 70,
+          "degenerate": false
+        },
+        {
+          "test_name": "welch_gf",
+          "feature_name": "gunning_fog",
+          "author_id": "isaac-schorr",
+          "raw_p_value": 0.001,
+          "corrected_p_value": 0.005,
+          "effect_size_cohens_d": -1.5,
+          "confidence_interval_95": [-2.0, -0.9],
+          "significant": true,
+          "n_pre": 20,
+          "n_post": 70,
+          "degenerate": false
+        }
+      ],
+      "expected": {
+        "direction_concordance": "direction_mixed",
+        "volume_flag": "volume_growth",
+        "volume_ratio": 3.5,
+        "finding_strength": "moderate"
+      }
+    },
+    {
+      "slug": "jennifer-bowers-bahney",
+      "probability_features_available": false,
+      "control_comparison": { "editorial_vs_author_signal": 0.5 },
+      "convergence_window": {
+        "start_date": "2020-01-01",
+        "end_date": "2022-12-31",
+        "features_converging": ["lexical_diversity", "sent_length_std", "conjunction_freq"],
+        "families_converging": [],
+        "n_rankable_per_family": {},
+        "convergence_ratio": 0.5,
+        "pipeline_a_score": 0.5,
+        "pipeline_b_score": 0.5,
+        "pipeline_c_score": null,
+        "passes_via": []
+      },
+      "window_hypothesis_tests": [
+        {
+          "test_name": "welch_lex",
+          "feature_name": "lexical_diversity",
+          "author_id": "jennifer-bowers-bahney",
+          "raw_p_value": 0.001,
+          "corrected_p_value": 0.005,
+          "effect_size_cohens_d": 1.0,
+          "confidence_interval_95": [0.3, 1.6],
+          "significant": true,
+          "n_pre": 12,
+          "n_post": 48,
+          "degenerate": false
+        },
+        {
+          "test_name": "welch_sent",
+          "feature_name": "sent_length_std",
+          "author_id": "jennifer-bowers-bahney",
+          "raw_p_value": 0.001,
+          "corrected_p_value": 0.005,
+          "effect_size_cohens_d": 1.1,
+          "confidence_interval_95": [0.4, 1.7],
+          "significant": true,
+          "n_pre": 12,
+          "n_post": 48,
+          "degenerate": false
+        },
+        {
+          "test_name": "welch_conj",
+          "feature_name": "conjunction_freq",
+          "author_id": "jennifer-bowers-bahney",
+          "raw_p_value": 0.001,
+          "corrected_p_value": 0.005,
+          "effect_size_cohens_d": -1.2,
+          "confidence_interval_95": [-1.9, -0.6],
+          "significant": true,
+          "n_pre": 12,
+          "n_post": 48,
+          "degenerate": false
+        }
+      ],
+      "expected": {
+        "direction_concordance": "direction_non_ai",
+        "volume_flag": "volume_growth",
+        "volume_ratio": 4.0,
+        "finding_strength": "moderate"
+      }
+    },
+    {
+      "slug": "joe-depaolo",
+      "probability_features_available": false,
+      "control_comparison": { "editorial_vs_author_signal": 0.42 },
+      "convergence_window": {
+        "start_date": "2021-03-01",
+        "end_date": "2023-08-31",
+        "features_converging": ["ttr", "formula_opening_score", "flesch_kincaid"],
+        "families_converging": [],
+        "n_rankable_per_family": {},
+        "convergence_ratio": 0.51,
+        "pipeline_a_score": 0.51,
+        "pipeline_b_score": 0.5,
+        "pipeline_c_score": null,
+        "passes_via": []
+      },
+      "window_hypothesis_tests": [
+        {
+          "test_name": "welch_ttr",
+          "feature_name": "ttr",
+          "author_id": "joe-depaolo",
+          "raw_p_value": 0.001,
+          "corrected_p_value": 0.005,
+          "effect_size_cohens_d": 1.5,
+          "confidence_interval_95": [0.7, 2.1],
+          "significant": true,
+          "n_pre": 5,
+          "n_post": 150,
+          "degenerate": false
+        },
+        {
+          "test_name": "welch_form",
+          "feature_name": "formula_opening_score",
+          "author_id": "joe-depaolo",
+          "raw_p_value": 0.001,
+          "corrected_p_value": 0.005,
+          "effect_size_cohens_d": -1.0,
+          "confidence_interval_95": [-1.6, -0.5],
+          "significant": true,
+          "n_pre": 5,
+          "n_post": 150,
+          "degenerate": false
+        },
+        {
+          "test_name": "welch_fk",
+          "feature_name": "flesch_kincaid",
+          "author_id": "joe-depaolo",
+          "raw_p_value": 0.001,
+          "corrected_p_value": 0.005,
+          "effect_size_cohens_d": -1.1,
+          "confidence_interval_95": [-1.7, -0.55],
+          "significant": true,
+          "n_pre": 5,
+          "n_post": 150,
+          "degenerate": false
+        }
+      ],
+      "expected": {
+        "direction_concordance": "direction_non_ai",
+        "volume_flag": "volume_ramp",
+        "volume_ratio": 30.0,
+        "finding_strength": "moderate"
+      }
+    },
+    {
+      "slug": "sarah-rumpf",
+      "probability_features_available": false,
+      "control_comparison": { "editorial_vs_author_signal": 0.38 },
+      "convergence_window": {
+        "start_date": "2022-06-01",
+        "end_date": "2024-01-15",
+        "features_converging": ["bigram_entropy", "trigram_entropy", "ttr"],
+        "families_converging": [],
+        "n_rankable_per_family": {},
+        "convergence_ratio": 0.53,
+        "pipeline_a_score": 0.52,
+        "pipeline_b_score": 0.51,
+        "pipeline_c_score": null,
+        "passes_via": []
+      },
+      "window_hypothesis_tests": [
+        {
+          "test_name": "welch_bi",
+          "feature_name": "bigram_entropy",
+          "author_id": "sarah-rumpf",
+          "raw_p_value": 0.001,
+          "corrected_p_value": 0.005,
+          "effect_size_cohens_d": 1.25,
+          "confidence_interval_95": [0.5, 1.9],
+          "significant": true,
+          "n_pre": 15,
+          "n_post": 180,
+          "degenerate": false
+        },
+        {
+          "test_name": "welch_tri",
+          "feature_name": "trigram_entropy",
+          "author_id": "sarah-rumpf",
+          "raw_p_value": 0.001,
+          "corrected_p_value": 0.005,
+          "effect_size_cohens_d": 1.3,
+          "confidence_interval_95": [0.55, 1.95],
+          "significant": true,
+          "n_pre": 15,
+          "n_post": 180,
+          "degenerate": false
+        },
+        {
+          "test_name": "welch_ttr",
+          "feature_name": "ttr",
+          "author_id": "sarah-rumpf",
+          "raw_p_value": 0.001,
+          "corrected_p_value": 0.005,
+          "effect_size_cohens_d": 1.15,
+          "confidence_interval_95": [0.45, 1.75],
+          "significant": true,
+          "n_pre": 15,
+          "n_post": 180,
+          "degenerate": false
+        }
+      ],
+      "expected": {
+        "direction_concordance": "direction_non_ai",
+        "volume_flag": "volume_ramp",
+        "volume_ratio": 12.0,
+        "finding_strength": "moderate"
+      }
+    },
+    {
+      "slug": "tommy-christopher",
+      "probability_features_available": false,
+      "control_comparison": { "editorial_vs_author_signal": 0.48 },
+      "convergence_window": {
+        "start_date": "2021-01-15",
+        "end_date": "2023-05-30",
+        "features_converging": ["ttr", "self_similarity_90d", "sent_length_mean"],
+        "families_converging": [],
+        "n_rankable_per_family": {},
+        "convergence_ratio": 0.49,
+        "pipeline_a_score": 0.5,
+        "pipeline_b_score": 0.5,
+        "pipeline_c_score": null,
+        "passes_via": []
+      },
+      "window_hypothesis_tests": [
+        {
+          "test_name": "welch_ttr",
+          "feature_name": "ttr",
+          "author_id": "tommy-christopher",
+          "raw_p_value": 0.001,
+          "corrected_p_value": 0.005,
+          "effect_size_cohens_d": 1.2,
+          "confidence_interval_95": [0.5, 1.8],
+          "significant": true,
+          "n_pre": 50,
+          "n_post": 50,
+          "degenerate": false
+        },
+        {
+          "test_name": "welch_ss90",
+          "feature_name": "self_similarity_90d",
+          "author_id": "tommy-christopher",
+          "raw_p_value": 0.001,
+          "corrected_p_value": 0.005,
+          "effect_size_cohens_d": -1.5,
+          "confidence_interval_95": [-2.2, -0.9],
+          "significant": true,
+          "n_pre": 50,
+          "n_post": 50,
+          "degenerate": false
+        },
+        {
+          "test_name": "welch_slm",
+          "feature_name": "sent_length_mean",
+          "author_id": "tommy-christopher",
+          "raw_p_value": 0.001,
+          "corrected_p_value": 0.005,
+          "effect_size_cohens_d": -1.0,
+          "confidence_interval_95": [-1.6, -0.45],
+          "significant": true,
+          "n_pre": 50,
+          "n_post": 50,
+          "degenerate": false
+        }
+      ],
+      "expected": {
+        "direction_concordance": "direction_non_ai",
+        "volume_flag": "volume_stable",
+        "volume_ratio": 1.0,
+        "finding_strength": "moderate"
+      }
+    },
+    {
+      "slug": "zachary-leeman",
+      "probability_features_available": false,
+      "control_comparison": { "editorial_vs_author_signal": 0.44 },
+      "convergence_window": {
+        "start_date": "2020-09-01",
+        "end_date": "2022-11-30",
+        "features_converging": ["ttr", "coleman_liau", "ai_marker_frequency"],
+        "families_converging": [],
+        "n_rankable_per_family": {},
+        "convergence_ratio": 0.5,
+        "pipeline_a_score": 0.5,
+        "pipeline_b_score": 0.5,
+        "pipeline_c_score": null,
+        "passes_via": []
+      },
+      "window_hypothesis_tests": [
+        {
+          "test_name": "welch_ttr",
+          "feature_name": "ttr",
+          "author_id": "zachary-leeman",
+          "raw_p_value": 0.001,
+          "corrected_p_value": 0.005,
+          "effect_size_cohens_d": 1.3,
+          "confidence_interval_95": [0.6, 1.9],
+          "significant": true,
+          "n_pre": 50,
+          "n_post": 15,
+          "degenerate": false
+        },
+        {
+          "test_name": "welch_cl",
+          "feature_name": "coleman_liau",
+          "author_id": "zachary-leeman",
+          "raw_p_value": 0.001,
+          "corrected_p_value": 0.005,
+          "effect_size_cohens_d": -1.2,
+          "confidence_interval_95": [-1.9, -0.55],
+          "significant": true,
+          "n_pre": 50,
+          "n_post": 15,
+          "degenerate": false
+        },
+        {
+          "test_name": "welch_ai",
+          "feature_name": "ai_marker_frequency",
+          "author_id": "zachary-leeman",
+          "raw_p_value": 0.001,
+          "corrected_p_value": 0.005,
+          "effect_size_cohens_d": -1.5,
+          "confidence_interval_95": [-2.1, -0.85],
+          "significant": true,
+          "n_pre": 50,
+          "n_post": 15,
+          "degenerate": false
+        }
+      ],
+      "expected": {
+        "direction_concordance": "direction_non_ai",
+        "volume_flag": "volume_decline",
+        "volume_ratio": 0.3,
+        "finding_strength": "moderate"
+      }
+    }
+  ]
+}
