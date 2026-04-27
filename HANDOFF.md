@@ -6354,3 +6354,34 @@ Full suite: **1076 passed**, 1 xfailed (known), 3 deselected.
 #### GitNexus
 
 `gitnexus_impact` / `gitnexus_detect_changes` not run (GitNexus MCP descriptors not present in this session); run upstream impact on edited public entrypoints before merge when available.
+
+---
+
+### Run 12 — TASK-4 `run_analyze` decomposition
+
+**Status:** Complete  
+**Date:** 2026-04-27
+
+#### What was done
+
+- Extracted `_verify_corpus_stage`, `_gate_preregistration`, `_dispatch_analysis_stages` plus helpers `_compare_only_or_parallel_early_exit`, `_run_serial_analyze_stages`, `_run_analyze_stage_embedding_guarded` from monolithic `run_analyze`.
+- Removed `# noqa: C901` from `run_analyze`; Ruff C901 satisfied via split.
+- Added frozen `AnalyzeStageFlags` and `AnalyzeBaselineParams` with `AnalyzeRequest.stage_flags` / `baseline_params` properties so the Typer/programmatic flat constructor is unchanged; CLI callback still builds `AnalyzeRequest(...)` with the same fields.
+
+#### Files modified
+
+- `src/forensics/cli/analyze.py`
+- `HANDOFF.md`
+
+#### Verification
+
+```
+uv run ruff check src/forensics/cli/analyze.py && uv run ruff format --check src/forensics/cli/analyze.py
+uv run pytest tests/test_preregistration.py tests/unit/test_analyze_survey_gate.py tests/unit/test_analyze_compare.py -v --no-cov -q
+```
+
+**34 passed** (subset). GitNexus MCP not available in session; run `gitnexus_impact` on `run_analyze` / new helpers before merge when enabled.
+
+#### Risks & next steps
+
+- None beyond usual merge hygiene; behavior is refactor-only with identical control flow.

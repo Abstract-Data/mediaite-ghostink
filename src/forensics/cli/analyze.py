@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -42,7 +43,7 @@ from forensics.config import DEFAULT_DB_RELATIVE, get_project_root, get_settings
 from forensics.config.settings import ForensicsSettings
 from forensics.paths import AnalysisArtifactPaths
 from forensics.pipeline_context import PipelineContext
-from forensics.preregistration import verify_preregistration
+from forensics.preregistration import VerificationResult, verify_preregistration
 from forensics.storage.json_io import write_json_artifact
 from forensics.storage.repository import Repository
 from forensics.survey.shared_byline import is_shared_byline as _is_shared_byline_heuristic
@@ -104,6 +105,28 @@ class AnalyzeContext:
 
 
 @dataclass(frozen=True, slots=True)
+class AnalyzeStageFlags:
+    """Stage toggles grouped for dispatch; :class:`AnalyzeRequest` keeps a flat public API."""
+
+    changepoint: bool = False
+    timeseries: bool = False
+    drift: bool = False
+    convergence: bool = False
+    compare: bool = False
+    ai_baseline: bool = False
+    parallel_authors: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class AnalyzeBaselineParams:
+    """AI baseline options grouped for dispatch."""
+
+    skip_generation: bool = False
+    baseline_model: str | None = None
+    articles_per_cell: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class AnalyzeRequest:
     """Parameters for :func:`run_analyze` (CLI default callback and programmatic callers)."""
 
@@ -126,6 +149,26 @@ class AnalyzeRequest:
     parallel_authors: bool = False
     analysis_mode: AnalysisMode = DEFAULT_ANALYSIS_MODE
     typer_context: typer.Context | None = None
+
+    @property
+    def stage_flags(self) -> AnalyzeStageFlags:
+        return AnalyzeStageFlags(
+            changepoint=self.changepoint,
+            timeseries=self.timeseries,
+            drift=self.drift,
+            convergence=self.convergence,
+            compare=self.compare,
+            ai_baseline=self.ai_baseline,
+            parallel_authors=self.parallel_authors,
+        )
+
+    @property
+    def baseline_params(self) -> AnalyzeBaselineParams:
+        return AnalyzeBaselineParams(
+            skip_generation=self.skip_generation,
+            baseline_model=self.baseline_model,
+            articles_per_cell=self.articles_per_cell,
+        )
 
 
 def _parse_compare_pair(raw: str | None) -> tuple[str, str] | None:
@@ -262,6 +305,23 @@ def _raise_analyze_embedding_failure(
             ),
         )
     raise RuntimeError(f"unexpected embedding failure: {exc!r}") from exc
+
+
+def _run_analyze_stage_embedding_guarded(
+    request: AnalyzeRequest,
+    *,
+    cmd: str,
+    runner: Callable[[], None],
+) -> None:
+    """Run a stage; map embedding drift failures to stable CLI exit codes."""
+    try:
+        runner()
+    except (EmbeddingDriftInputsError, EmbeddingRevisionGateError) as exc:
+        raise _raise_analyze_embedding_failure(
+            request.typer_context,
+            cmd=cmd,
+            exc=exc,
+        ) from exc
 
 
 def _run_parallel_author_refresh_stage(ctx: AnalyzeContext) -> None:
@@ -419,7 +479,198 @@ def _apply_per_run_overrides(
     return settings
 
 
-def run_analyze(request: AnalyzeRequest) -> None:  # noqa: C901
+def _verify_corpus_stage(
+    *,
+    db_path: Path,
+    analysis_dir: Path,
+    verify_corpus: bool,
+    typer_context: typer.Context | None,
+) -> None:
+    """Chain-of-custody corpus hash check before analysis stages."""
+    if not verify_corpus:
+        return
+    from forensics.utils.provenance import verify_corpus_hash
+
+    ok, message = verify_corpus_hash(db_path, analysis_dir)
+    if not ok:
+        if "Corpus hash mismatch" in message:
+            raise fail(
+                typer_context,
+                "analyze",
+                "corpus_hash_mismatch",
+                message,
+                exit_code=ExitCode.CONFLICT,
+            )
+        if "No custody record" in message:
+            raise fail(
+                typer_context,
+                "analyze",
+                "corpus_custody_missing",
+                message,
+                exit_code=ExitCode.AUTH_OR_RESOURCE,
+            )
+        raise fail(
+            typer_context,
+            "analyze",
+            "corpus_hash_error",
+            message,
+            exit_code=ExitCode.GENERAL_ERROR,
+        )
+    logger.info("corpus hash verified (%s)", message)
+
+
+def _gate_preregistration(
+    request: AnalyzeRequest,
+    *,
+    preregistration: VerificationResult,
+    analysis_dir: Path,
+) -> None:
+    """Hard-stop when preregistration is not satisfied and run is confirmatory."""
+    if preregistration.status == "ok" or request.analysis_mode.exploratory:
+        return
+    meta = {
+        "run_timestamp": datetime.now(UTC).isoformat(),
+        "last_processed_author": request.author,
+        "authors_in_run": ([request.author] if request.author else []),
+        "preregistration_status": preregistration.status,
+        "preregistration_message": preregistration.message,
+        "exploratory": False,
+        "allow_pre_phase16_embeddings": request.analysis_mode.allow_pre_phase16_embeddings,
+    }
+    _write_run_metadata(analysis_dir, rid="preregistration-blocked", meta=meta)
+    raise fail(
+        request.typer_context,
+        "analyze",
+        "preregistration_not_locked",
+        preregistration.message,
+        exit_code=ExitCode.CONFLICT,
+        suggestion="run: forensics --yes lock-preregistration (or pass --exploratory to bypass)",
+    )
+
+
+def _compare_only_or_parallel_early_exit(
+    request: AnalyzeRequest,
+    *,
+    ctx: AnalyzeContext,
+    sf: AnalyzeStageFlags,
+) -> bool:
+    """Run compare-only or parallel refresh when selected; True if serial pipeline should skip."""
+    if sf.compare and not (
+        sf.parallel_authors
+        or sf.changepoint
+        or sf.timeseries
+        or sf.drift
+        or sf.ai_baseline
+        or sf.convergence
+    ):
+        _run_compare_only_flow(ctx)
+        return True
+    if sf.parallel_authors:
+        _run_analyze_stage_embedding_guarded(
+            request,
+            cmd="analyze.parallel_refresh",
+            runner=lambda: _run_parallel_author_refresh_stage(ctx),
+        )
+        return True
+    return False
+
+
+def _run_serial_analyze_stages(
+    request: AnalyzeRequest,
+    *,
+    ctx: AnalyzeContext,
+    analysis_dir: Path,
+    preregistration: VerificationResult,
+    sf: AnalyzeStageFlags,
+) -> None:
+    """Serial stages: changepoint, timeseries, drift, convergence, optional AI baseline."""
+    do_changepoint, do_timeseries, do_drift, do_full_analysis = _resolve_mode_flags(
+        changepoint=sf.changepoint,
+        timeseries=sf.timeseries,
+        drift=sf.drift,
+        convergence=sf.convergence,
+        compare=sf.compare,
+        ai_baseline=sf.ai_baseline,
+    )
+
+    pipeline_ctx = PipelineContext.resolve()
+    rid = pipeline_ctx.record_audit("forensics analyze", optional=False, log=logger)
+    assert rid is not None
+    meta = {
+        "run_id": rid,
+        "run_timestamp": datetime.now(UTC).isoformat(),
+        "config_hash": pipeline_ctx.config_hash,
+        "changepoint": do_changepoint,
+        "timeseries": do_timeseries,
+        "drift": do_drift,
+        "convergence_full": do_full_analysis,
+        "last_processed_author": request.author,
+        "authors_in_run": ([request.author] if request.author else []),
+        "preregistration_status": preregistration.status,
+        "preregistration_message": preregistration.message,
+        **request.analysis_mode.run_metadata_subset(),
+    }
+    _write_run_metadata(analysis_dir, rid=rid, meta=meta)
+
+    if do_changepoint:
+        _run_changepoint_stage(ctx)
+    if do_timeseries:
+        _run_timeseries_stage(ctx)
+    if do_drift:
+        _run_analyze_stage_embedding_guarded(
+            request,
+            cmd="analyze.drift",
+            runner=lambda: _run_drift_stage(ctx),
+        )
+    if do_full_analysis:
+        _run_analyze_stage_embedding_guarded(
+            request,
+            cmd="analyze.full",
+            runner=lambda: _run_full_analysis_stage(ctx),
+        )
+    if sf.ai_baseline:
+        bp = request.baseline_params
+        _run_ai_baseline_stage(
+            ctx,
+            skip_generation=bp.skip_generation,
+            articles_per_cell=bp.articles_per_cell,
+            baseline_model=bp.baseline_model,
+            typer_context=request.typer_context,
+        )
+        _verify_requested_ai_baseline_vectors(ctx, typer_context=request.typer_context)
+    logger.info(
+        "analyze: completed (changepoint=%s, timeseries=%s, drift=%s, "
+        "full_analysis=%s, ai_baseline=%s, author=%s)",
+        do_changepoint,
+        do_timeseries,
+        do_drift,
+        do_full_analysis,
+        sf.ai_baseline,
+        request.author or "all",
+    )
+
+
+def _dispatch_analysis_stages(
+    request: AnalyzeRequest,
+    *,
+    ctx: AnalyzeContext,
+    analysis_dir: Path,
+    preregistration: VerificationResult,
+) -> None:
+    """Compare-only, parallel refresh, or serial analyze pipeline after preregistration gate."""
+    sf = request.stage_flags
+    if _compare_only_or_parallel_early_exit(request, ctx=ctx, sf=sf):
+        return
+    _run_serial_analyze_stages(
+        request,
+        ctx=ctx,
+        analysis_dir=analysis_dir,
+        preregistration=preregistration,
+        sf=sf,
+    )
+
+
+def run_analyze(request: AnalyzeRequest) -> None:
     """Run analyze stages (callable from Typer and from ``forensics all``)."""
     settings = _apply_per_run_overrides(
         get_settings(),
@@ -450,149 +701,21 @@ def run_analyze(request: AnalyzeRequest) -> None:  # noqa: C901
     if verify_corpus is None:
         verify_corpus = settings.chain_of_custody.verify_corpus_hash
 
-    if verify_corpus:
-        from forensics.utils.provenance import verify_corpus_hash
-
-        ok, message = verify_corpus_hash(db_path, analysis_dir)
-        if not ok:
-            if "Corpus hash mismatch" in message:
-                raise fail(
-                    request.typer_context,
-                    "analyze",
-                    "corpus_hash_mismatch",
-                    message,
-                    exit_code=ExitCode.CONFLICT,
-                )
-            if "No custody record" in message:
-                raise fail(
-                    request.typer_context,
-                    "analyze",
-                    "corpus_custody_missing",
-                    message,
-                    exit_code=ExitCode.AUTH_OR_RESOURCE,
-                )
-            raise fail(
-                request.typer_context,
-                "analyze",
-                "corpus_hash_error",
-                message,
-                exit_code=ExitCode.GENERAL_ERROR,
-            )
-        logger.info("corpus hash verified (%s)", message)
-
-    preregistration = verify_preregistration(settings)
-    if preregistration.status != "ok" and not request.analysis_mode.exploratory:
-        meta = {
-            "run_timestamp": datetime.now(UTC).isoformat(),
-            "last_processed_author": request.author,
-            "authors_in_run": ([request.author] if request.author else []),
-            "preregistration_status": preregistration.status,
-            "preregistration_message": preregistration.message,
-            "exploratory": False,
-            "allow_pre_phase16_embeddings": request.analysis_mode.allow_pre_phase16_embeddings,
-        }
-        _write_run_metadata(analysis_dir, rid="preregistration-blocked", meta=meta)
-        raise fail(
-            request.typer_context,
-            "analyze",
-            "preregistration_not_locked",
-            preregistration.message,
-            exit_code=ExitCode.CONFLICT,
-            suggestion=(
-                "run: forensics --yes lock-preregistration (or pass --exploratory to bypass)"
-            ),
-        )
-
-    if request.compare and not (
-        request.parallel_authors
-        or request.changepoint
-        or request.timeseries
-        or request.drift
-        or request.ai_baseline
-        or request.convergence
-    ):
-        _run_compare_only_flow(ctx)
-        return
-
-    if request.parallel_authors:
-        try:
-            _run_parallel_author_refresh_stage(ctx)
-        except (EmbeddingDriftInputsError, EmbeddingRevisionGateError) as exc:
-            raise _raise_analyze_embedding_failure(
-                request.typer_context,
-                cmd="analyze.parallel_refresh",
-                exc=exc,
-            ) from exc
-        return
-
-    do_changepoint, do_timeseries, do_drift, do_full_analysis = _resolve_mode_flags(
-        changepoint=request.changepoint,
-        timeseries=request.timeseries,
-        drift=request.drift,
-        convergence=request.convergence,
-        compare=request.compare,
-        ai_baseline=request.ai_baseline,
+    _verify_corpus_stage(
+        db_path=db_path,
+        analysis_dir=analysis_dir,
+        verify_corpus=verify_corpus,
+        typer_context=request.typer_context,
     )
 
-    pipeline_ctx = PipelineContext.resolve()
-    rid = pipeline_ctx.record_audit("forensics analyze", optional=False, log=logger)
-    assert rid is not None
-    meta = {
-        "run_id": rid,
-        "run_timestamp": datetime.now(UTC).isoformat(),
-        "config_hash": pipeline_ctx.config_hash,
-        "changepoint": do_changepoint,
-        "timeseries": do_timeseries,
-        "drift": do_drift,
-        "convergence_full": do_full_analysis,
-        "last_processed_author": request.author,
-        "authors_in_run": ([request.author] if request.author else []),
-        "preregistration_status": preregistration.status,
-        "preregistration_message": preregistration.message,
-        **request.analysis_mode.run_metadata_subset(),
-    }
-    _write_run_metadata(analysis_dir, rid=rid, meta=meta)
+    preregistration = verify_preregistration(settings)
+    _gate_preregistration(request, preregistration=preregistration, analysis_dir=analysis_dir)
 
-    if do_changepoint:
-        _run_changepoint_stage(ctx)
-    if do_timeseries:
-        _run_timeseries_stage(ctx)
-    if do_drift:
-        try:
-            _run_drift_stage(ctx)
-        except (EmbeddingDriftInputsError, EmbeddingRevisionGateError) as exc:
-            raise _raise_analyze_embedding_failure(
-                request.typer_context,
-                cmd="analyze.drift",
-                exc=exc,
-            ) from exc
-    if do_full_analysis:
-        try:
-            _run_full_analysis_stage(ctx)
-        except (EmbeddingDriftInputsError, EmbeddingRevisionGateError) as exc:
-            raise _raise_analyze_embedding_failure(
-                request.typer_context,
-                cmd="analyze.full",
-                exc=exc,
-            ) from exc
-    if request.ai_baseline:
-        _run_ai_baseline_stage(
-            ctx,
-            skip_generation=request.skip_generation,
-            articles_per_cell=request.articles_per_cell,
-            baseline_model=request.baseline_model,
-            typer_context=request.typer_context,
-        )
-        _verify_requested_ai_baseline_vectors(ctx, typer_context=request.typer_context)
-    logger.info(
-        "analyze: completed (changepoint=%s, timeseries=%s, drift=%s, "
-        "full_analysis=%s, ai_baseline=%s, author=%s)",
-        do_changepoint,
-        do_timeseries,
-        do_drift,
-        do_full_analysis,
-        request.ai_baseline,
-        request.author or "all",
+    _dispatch_analysis_stages(
+        request,
+        ctx=ctx,
+        analysis_dir=analysis_dir,
+        preregistration=preregistration,
     )
 
 

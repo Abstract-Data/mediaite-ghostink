@@ -13,7 +13,7 @@ todos:
     status: completed
   - id: task-4-run-analyze-split
     content: Extract run_analyze stages; remove C901 noqa when clean; optional AnalyzeRequest sub-dataclasses without breaking CLI
-    status: pending
+    status: completed
   - id: task-5-repo-p3
     content: P2-PERF-005 selective Repository projections; P3-DRY-007 subcommand preamble helper; P3-MAINT-008 worker ContextVar assertion/docs
     status: pending
