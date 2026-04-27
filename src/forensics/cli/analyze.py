@@ -484,8 +484,7 @@ def run_analyze(  # noqa: C901
             preregistration.message,
             exit_code=ExitCode.CONFLICT,
             suggestion=(
-                "run: forensics --yes lock-preregistration "
-                "(or pass --exploratory to bypass)"
+                "run: forensics --yes lock-preregistration (or pass --exploratory to bypass)"
             ),
         )
 

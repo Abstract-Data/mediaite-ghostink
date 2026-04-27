@@ -26,6 +26,15 @@ Operational quick reference. Agents: append new sections here whenever you disco
 
 If you need the default `addopts` out of the way for a one-off: `uv run pytest tests/integration/test_pipeline_end_to_end.py -v --override-ini "addopts=-ra -q --strict-markers" --no-cov`.
 
+## Headless / agent invocation
+
+For scripts, CI, or LLM agents driving the CLI:
+
+1. **Flags:** pass global options **before** the subcommand: `uv run forensics --output json --non-interactive <subcommand> …`. See `.claude/skills/forensics-cli/SKILL.md` (mirrored under `.cursor/skills/forensics-cli/`) for recommended command sequences, TUI guardrails, and when to retry.
+2. **Exit codes:** `docs/EXIT_CODES.md` defines the contract (`0` ok, `2` usage, `3` missing resource, `4` transient/retry, `5` conflict/idempotent skip). Parse the process exit code before parsing stdout.
+3. **Stdout vs stderr:** with `--output json`, successful commands emit **exactly one** JSON envelope line on stdout (`ok`, `type`, `schemaVersion`, `data` or `error`); status and logs belong on stderr. Do not scrape stdout for prose when in JSON mode.
+4. **Discovery:** `uv run forensics --output json commands` dumps the full command tree (params, help, examples) for tooling.
+
 ## Phase 16 hash-break migration
 
 Phase 16 intentionally changes the analysis-config hash, corpus fingerprint, and embedding revision contract. Treat any pre–Phase-16 `data/analysis/*_result.json` and preregistration locks as **stale** relative to a Phase-16 `config.toml` until you re-lock and re-run (see GUARDRAILS Sign: *Pre-Phase-16 locked artifacts must be re-locked*).
@@ -60,8 +69,7 @@ Near-duplicate detection (`forensics.scraper.dedup`) compares 128-bit simhashes 
 
 Fingerprint values are versioned (`dedup_simhash_version`, current = `v2` in code as `SIMHASH_FINGERPRINT_VERSION`). Rows with a missing version or a version other than `v2` are excluded from the cached fingerprint set until recomputed; running dedup **without** migrating first can admit historical near-duplicates that no longer match stored bands.
 
-- Recompute all stale rows: `uv run forensics dedup recompute-fingerprints` (optional `--db PATH`, `--limit N` for tests).
-- stdout is one JSON object: `recomputed`, `skipped`, `errors`.
+- Recompute all stale rows: `uv run forensics dedup recompute-fingerprints` (optional `--db PATH`, `--limit N` for tests). **Text (default):** prints a one-line human summary on stdout. **JSON:** `uv run forensics --output json dedup recompute-fingerprints` emits one envelope on stdout; read `.data` for `recomputed`, `skipped`, `errors`.
 
 ## Pipeline Operations
 

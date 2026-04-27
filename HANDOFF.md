@@ -5506,3 +5506,55 @@ uv run ruff check src/forensics/scraper/fetcher.py src/forensics/scraper/crawler
 
 #### Risks & Next Steps
 - Consumers that parse `scrape_errors.jsonl` should tolerate the new `transient` key (additive). GitNexus `impact` was not run (MCP path unavailable this session).
+
+---
+
+### CLI agent-readiness — items 7–10 (docs, SKILL, suite verification)
+**Status:** Complete  
+**Date:** 2026-04-26  
+**Agent/Session:** Cursor agent  
+
+#### What Was Done
+- **Item 7:** Added `.claude/skills/forensics-cli/SKILL.md` and byte-identical mirror `.cursor/skills/forensics-cli/SKILL.md` (workflows, headless flags, exit-code hints, guardrails, trigger table).
+- **Item 10 / mandatory docs:** Updated `CLAUDE.md` (Key Documentation bullet), `docs/RUNBOOK.md` (new **Headless / agent invocation** section; dedup stdout contract clarified for text vs `--output json`), `docs/GUARDRAILS.md` (Sign: stdout/stderr + JSON contract).
+- **Verification:** Full unit suite + `ruff check`; `ruff format` applied to `analyze.py` / `dedup.py` so `ruff format --check` passes; integration-marked tests run.
+
+#### Files Modified
+- `.claude/skills/forensics-cli/SKILL.md`, `.cursor/skills/forensics-cli/SKILL.md` — new
+- `CLAUDE.md` — forensics-cli skill reference
+- `docs/RUNBOOK.md` — headless section + dedup output note
+- `docs/GUARDRAILS.md` — agent stdout/stderr Sign
+- `src/forensics/cli/analyze.py`, `src/forensics/cli/dedup.py` — `ruff format` only (no logic change)
+
+#### Verification Evidence
+```
+uv run pytest tests/ -v --no-cov
+  -> 1016 passed, 3 deselected, 1 xfailed (known), ~91s
+
+uv run pytest tests/ -m integration -v --no-cov
+  -> 2 passed, 1018 deselected, ~13s
+
+npx gitnexus analyze --embeddings .
+  -> Repository indexed successfully (~31s); embeddings preserved
+
+uv run ruff check .
+  -> All checks passed
+
+uv run ruff format --check .
+  -> 280 files OK (after formatting analyze.py, dedup.py)
+
+diff .claude/skills/forensics-cli/SKILL.md .cursor/skills/forensics-cli/SKILL.md
+  -> empty
+
+wc -l .claude/skills/forensics-cli/SKILL.md
+  -> 67 (>= 60)
+```
+
+#### Decisions Made
+- Documented dedup default as **text summary on stdout**; JSON envelope only with root `--output json` before `dedup`, aligned with CLI agent-readiness out-of-scope note.
+
+#### Unresolved Questions
+- None.
+
+#### Risks & Next Steps
+- MCP `gitnexus_detect_changes` was not available in this Cursor workspace (server not registered); re-run when GitNexus MCP is enabled before merge.

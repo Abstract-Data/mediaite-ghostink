@@ -30,6 +30,7 @@
 - `.claude/skills/gitbutler/SKILL.md` — GitButler (`but`) version-control skill (mirrored under `.cursor/skills/gitbutler/`)
 - `.claude/skills/gitbutler-workflow/SKILL.md` — Notion playbook add-on: virtual branches vs worktrees, JSON status workflow (mirrored under `.cursor/skills/gitbutler-workflow/`)
 - `.claude/skills/adversarial-review/SKILL.md` — adversarial architecture review adapted for this pipeline's stack (mirrored under `.cursor/skills/adversarial-review/`)
+- `.claude/skills/forensics-cli/SKILL.md` — agent-facing workflows, exit-code reference, headless invocation guide (mirrored under `.cursor/skills/forensics-cli/`)
 - `prompts/README.md` — prompt versioning contract (semver, immutability, release workflow)
 - `config.toml` — pipeline configuration (scraper, features, analysis settings)
 
@@ -62,7 +63,7 @@ If you hit the same error 3+ times, encounter a circular tool loop, or discover 
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **mediaite-ghostink** (7579 symbols, 15619 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **mediaite-ghostink** (7827 symbols, 16270 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 

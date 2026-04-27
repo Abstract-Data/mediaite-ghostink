@@ -82,6 +82,12 @@ Each Sign has:
 
 <!-- Agents: append new Signs here when you detect failure patterns (3+ consecutive identical errors, circular tool loops, or context pollution). Use the format above. -->
 
+**Sign: Mixing data and logs on stdout breaks agent parsing**
+- Trigger: A CLI command prints status, warnings, progress, or errors on stdout in text mode, or emits anything other than a single JSON envelope on stdout when `--output json` is set; tests or operators pipe stdout into `jq` and get corrupted output.
+- Instruction: Route metadata, status lines, warnings, and errors to **stderr** in text mode; suppress them in JSON mode except the final envelope from `emit` / structured `fail`. Only the command’s documented primary output belongs on stdout. Global `--output json` must appear before the subcommand (`uv run forensics --output json preflight`). See `docs/EXIT_CODES.md` and `.claude/skills/forensics-cli/SKILL.md`.
+- Reason: Agents and CI expect a stable contract: stdout = data (or one JSON line), stderr = everything else. Mixing streams makes automation non-deterministic and breaks `jq`/JSON parsers.
+- Provenance: CLI agent-readiness prompt — 2026-04-26.
+
 **Sign: Repository Used Outside an Active Session**
 - Trigger: Code calls `Repository(db_path).upsert_*` without entering `with Repository(db_path) as repo:` (or passes `db_path` into ad-hoc `sqlite3.connect` helpers outside `repository.py`).
 - Instruction: Always use ``with Repository(path) as repo:`` for SQLite writes/reads. For scrape orchestration, prefer injecting the same `repo` into `collect_article_metadata` / `fetch_articles` when multiple operations should share one transaction. See ADR-005.

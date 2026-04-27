@@ -53,9 +53,7 @@ def recompute_fingerprints(
             "database_missing",
             f"SQLite database not found: {db_path}",
             exit_code=ExitCode.AUTH_OR_RESOURCE,
-            suggestion=(
-                "run: forensics scrape --discover --metadata to populate data/articles.db"
-            ),
+            suggestion=("run: forensics scrape --discover --metadata to populate data/articles.db"),
         )
     with Repository(db_path) as repo:
         columns_ok = repo.dedup_simhash_columns_present()
@@ -70,11 +68,7 @@ def recompute_fingerprints(
             f"skipped={summary['skipped']} "
             f"errors={summary['errors']}",
         )
-    idle = (
-        columns_ok
-        and summary["recomputed"] == 0
-        and summary["errors"] == 0
-    )
+    idle = columns_ok and summary["recomputed"] == 0 and summary["errors"] == 0
     if idle:
         raise typer.Exit(int(ExitCode.CONFLICT))
     raise typer.Exit(int(ExitCode.OK))

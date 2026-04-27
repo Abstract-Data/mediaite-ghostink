@@ -19,7 +19,7 @@ todos:
     status: completed
   - id: item-7-10-docs
     content: forensics-cli SKILL (clone) + CLAUDE.md; HANDOFF/RUNBOOK/GUARDRAILS; suite-wide test fixes; verification + gitnexus
-    status: in_progress
+    status: completed
 isProject: false
 ---
 
