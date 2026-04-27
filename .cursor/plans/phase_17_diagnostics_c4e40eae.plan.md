@@ -13,7 +13,7 @@ todos:
     status: completed
   - id: phase-c-notebook
     content: "Edit 09_full_report.ipynb: cell-strength-code, cell-direction-md, cell-recommendations; nbconvert smoke"
-    status: pending
+    status: completed
   - id: phase-d-integration-docs
     content: tests/fixtures/phase17 + test_phase17_classification.py; RUNBOOK; HANDOFF; GUARDRAILS if needed; ruff + full pytest + GitNexus detect_changes
     status: pending
