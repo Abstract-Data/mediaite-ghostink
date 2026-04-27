@@ -1,24 +1,7 @@
-"""Forward-only SQLite migrations for the forensics corpus DB (Phase 15 Step 0.2).
+"""Forward-only numbered SQLite migrations (``NNN_slug.py`` with ``migrate(conn)``).
 
-Each migration is a Python module under this package exposing
-
-    def migrate(conn: sqlite3.Connection) -> None: ...
-
-and is named ``NNN_short_slug.py`` where ``NNN`` is a zero-padded monotonic
-integer. :func:`apply_migrations` is idempotent — it inspects ``schema_version``
-and applies only migrations whose version is higher than the current maximum.
-
-Run via ``forensics migrate`` (see ``src/forensics/cli/migrate.py``) or
-implicitly on ``Repository.__enter__`` (both code paths end up here).
-
-Design choices:
-
-* Forward-only. Rollbacks are accomplished by restoring from the pre-migration
-  backup DB copy the operator takes before running migrations in production.
-* ``schema_version`` table is created lazily so existing databases gain
-  migration bookkeeping on first contact.
-* Migrations run inside a single transaction per-migration so a failure in
-  migration N does not leave the DB straddling N/N+1.
+Idempotent via ``schema_version``; each migration commits atomically. Invoked from
+``Repository.__enter__`` and ``forensics migrate``. Restore from backup to roll back.
 """
 
 from __future__ import annotations
@@ -72,9 +55,7 @@ def discover_migrations() -> list[tuple[int, str, Callable[[sqlite3.Connection],
         mod = importlib.import_module(f"{__name__}.{info.name}")
         fn = getattr(mod, "migrate", None)
         if not callable(fn):
-            # Non-SQLite migrations (e.g. parquet migrations) live in the same
-            # package but expose a differently-named entry point. Skip them
-            # silently — they have their own runner.
+            # Parquet helpers in this package omit ``migrate``; they use a separate runner.
             logger.debug("Migration %s has no callable migrate(); skipping.", info.name)
             continue
         out.append((version, info.name, fn))

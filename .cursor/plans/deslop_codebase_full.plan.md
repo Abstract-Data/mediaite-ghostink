@@ -19,7 +19,7 @@ todos:
     status: completed
   - id: deslop-phase-3-storage
     content: Phase 3 — Deslop storage/repository (comments + dead code only; no schema edits)
-    status: pending
+    status: completed
   - id: deslop-phase-4-scraper
     content: Phase 4 — Deslop scraper (preserve scrape_errors / transient semantics)
     status: pending

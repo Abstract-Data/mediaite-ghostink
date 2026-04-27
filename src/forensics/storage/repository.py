@@ -93,25 +93,12 @@ CREATE TABLE IF NOT EXISTS analysis_runs (
 
 
 def _connect(db_path: Path) -> sqlite3.Connection:
-    """Open SQLite with DEFERRED transactions, WAL, and busy timeout (ADR-005).
+    """Open SQLite with DEFERRED, WAL, busy timeout, and foreign keys (ADR-005).
 
-    Threading contract (Phase 16 E — supersedes P1-SEC-001 for ``Repository``):
-
-    - ``check_same_thread=False`` allows asyncio worker threads
-      (``asyncio.to_thread``) to share one connection with the thread that
-      opened the context manager.
-    - :class:`Repository` holds a ``threading.Lock`` and acquires it around
-      every mutating SQL path (schema setup, migrations, upserts, bulk duplicate
-      flags, path rewrites, analysis run inserts, and commit/rollback/close in
-      ``__exit__``). Multiple threads may call mutation APIs without an external
-      mutex; the connection is serialized for those operations.
-    - Read/query methods remain lock-free; WAL still provides database-level
-      consistency for committed pages. Callers that fan out heavy read traffic
-      across threads on one connection should still measure for contention.
-    - Higher-level orchestration (for example the scraper's ``asyncio.Lock``
-      around a whole ingest batch) remains valid for coordinating with non-SQL
-      work but is no longer required solely for SQLite safety on ``Repository``
-      mutation APIs.
+    ``check_same_thread=False`` allows ``asyncio.to_thread`` workers to share the
+    connection. :class:`Repository` serializes mutations with an internal lock;
+    readers do not take that lock. WAL covers committed-read consistency; fan-out
+    read load on one connection may still contend.
     """
     conn = sqlite3.connect(
         db_path,
@@ -153,10 +140,7 @@ def _migrate_articles_columns(conn: sqlite3.Connection) -> None:
 
 def _author_row_to_model(row: sqlite3.Row) -> Author:
     """Map an ``authors`` table row to :class:`Author`."""
-    # ``is_shared_byline`` was added in migration 001 (Phase 15 D); older
-    # databases may already have rows without it but the migration is applied
-    # on Repository entry. Defensive ``in row.keys()`` keeps us safe in tests
-    # that build rows by hand.
+    # Migration 001 adds ``is_shared_byline``; hand-built sqlite3.Row fixtures may omit it.
     keys = set(row.keys())
     shared = bool(row["is_shared_byline"]) if "is_shared_byline" in keys else False
     return Author(
@@ -213,7 +197,7 @@ def _row_to_article(row: sqlite3.Row) -> Article:
 
 
 class RepositoryReader:
-    """Read-only queries and iterators mixed into :class:`Repository` (P2-ARCH-001)."""
+    """Read-only queries and iterators mixed into :class:`Repository`."""
 
     __slots__ = ()
 
@@ -241,7 +225,10 @@ class RepositoryReader:
         return [_author_row_to_model(row) for row in rows]
 
     def list_articles_for_extraction(self, *, author_id: str | None = None) -> list[Article]:
-        """Return articles eligible for feature extraction (Phase 4 selection rules)."""
+        """Return articles eligible for feature extraction.
+
+        Non-empty body, not a redirect stub, not duplicate, minimum word count.
+        """
         parts = [
             "length(trim(a.clean_text)) > 0",
             "instr(a.clean_text, '[REDIRECT:') != 1",
@@ -378,14 +365,11 @@ class RepositoryReader:
                 )
 
     def load_dedup_simhashes(self) -> list[tuple[str, int]]:
-        """Return article ids whose persisted simhash matches the current fingerprint version.
+        """Return ``(id, simhash)`` for rows whose version matches the current simhash fingerprint.
 
-        Rows with missing columns, NULL fingerprints, or a version other than
-        :data:`forensics.utils.hashing.SIMHASH_FINGERPRINT_VERSION` are excluded
-        from the returned list (they remain eligible for
-        :meth:`Repository.recompute_stale_dedup_simhashes`). Emits a single
-        warning summarising how many in-corpus rows carry stale or missing
-        version stamps while still having a non-empty dedup body.
+        Omits missing/stale versions (still eligible for
+        :meth:`Repository.recompute_stale_dedup_simhashes`). Logs one warning
+        count for stale in-corpus rows with dedup-eligible body text.
         """
         conn = self._require_conn()
         keys = {str(r[1]) for r in conn.execute("PRAGMA table_info(articles)").fetchall()}
@@ -467,14 +451,8 @@ class RepositoryReader:
 class Repository(RepositoryReader):
     """SQLite access for authors and articles.
 
-    Use as a context manager to hold one connection for a batch of operations::
-
-        with Repository(db_path) as repo:
-            repo.upsert_article(...)
-
-    Read/query methods live on :class:`RepositoryReader` (P2-ARCH-001); this class
-    holds connection lifecycle, schema, and mutation APIs. Mutations are
-    serialized with an internal ``threading.Lock`` (Phase 16 E).
+    Use as a context manager. Reads use :class:`RepositoryReader`; this class
+    owns the connection, schema setup, migrations, and mutations (lock-serialized).
     """
 
     __slots__ = ("_db_path", "_conn", "_lock")
@@ -496,8 +474,6 @@ class Repository(RepositoryReader):
             self._conn.executescript(_SCHEMA)
             _migrate_articles_columns(self._conn)
             self._conn.commit()
-            # Phase 15 Step 0.2 — forward-only numbered migrations (schema_version
-            # bookkeeping). Safe to run on every open; each migration is idempotent.
             _apply_sqlite_migrations(self._conn)
         return self
 
@@ -530,12 +506,9 @@ class Repository(RepositoryReader):
             _migrate_articles_columns(conn)
 
     def apply_migrations(self) -> list[int]:
-        """Run pending forward-only numbered migrations (Phase 15 Step 0.2).
+        """Run pending numbered SQLite migrations; return newly applied version ints.
 
-        Returns the versions newly applied (empty list when the DB is already
-        up-to-date). Intended for CLI use (``forensics migrate``); the
-        ``Repository`` context manager also calls this on every open, so
-        application code rarely needs to invoke it directly.
+        Also invoked from ``Repository.__enter__``; idempotent per migration.
         """
         conn = self._require_conn()
         with self._lock:
@@ -707,11 +680,7 @@ class Repository(RepositoryReader):
         *,
         chunk_size: int = 500,
     ) -> tuple[int, int]:
-        """C-05 — atomically reset then mark duplicate flags (single ``BEGIN IMMEDIATE``).
-
-        Use for simhash dedup so a crash cannot leave ``is_duplicate`` cleared
-        without the subsequent mark pass completing.
-        """
+        """Atomically clear then mark duplicate flags in one ``BEGIN IMMEDIATE`` transaction."""
         clear_list = list(clear_ids)
         mark_list = list(mark_duplicate_ids)
         if chunk_size < 1:

@@ -174,11 +174,6 @@ def get_ai_marker_spike_detection(features_dir: Path) -> pl.DataFrame:
         con.close()
 
 
-# ---------------------------------------------------------------------------
-# Single-file DuckDB export (Phase 12 §7b)
-# ---------------------------------------------------------------------------
-
-
 @dataclass(frozen=True, slots=True)
 class ExportReport:
     """Summary of a :func:`export_to_duckdb` run.
@@ -203,28 +198,11 @@ def export_to_duckdb(
     include_features: bool = True,
     include_analysis: bool = True,
 ) -> ExportReport:
-    """Export the forensic corpus into a single DuckDB file for ad-hoc team queries.
+    """Export SQLite authors/articles into one ``.duckdb`` file.
 
-    Reads ``articles`` and ``authors`` directly from the SQLite ``articles.db``
-    via DuckDB's ``sqlite`` extension. Optionally folds in the Parquet feature
-    shards under ``data/features/`` as a ``features`` table and the per-author
-    ``*_result.json`` analysis artifacts under ``data/analysis/`` as an
-    ``analysis_results`` table.
-
-    The output is a single ``.duckdb`` file; no Parquet pipeline is involved.
-
-    Parameters
-    ----------
-    db_path:
-        SQLite ``articles.db`` source (must exist).
-    output:
-        Destination ``.duckdb`` path. Overwritten if present.
-    include_features:
-        When True, attempts to read ``<project_root>/data/features/*.parquet``
-        (derived from ``db_path.parent``). Skipped silently if no shards exist.
-    include_analysis:
-        When True, attempts to read ``<project_root>/data/analysis/*_result.json``.
-        Skipped silently if no files exist.
+    Optionally loads ``data/features/*.parquet`` as ``features`` and
+    ``data/analysis/*_result.json`` as ``analysis_results`` when those paths exist
+    (resolved from ``db_path``'s parent). Overwrites ``output``.
     """
     sqlite_path = Path(db_path).expanduser().resolve(strict=True)
     if not sqlite_path.is_file():

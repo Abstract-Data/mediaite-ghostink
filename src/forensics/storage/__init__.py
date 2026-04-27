@@ -1,8 +1,4 @@
-"""Storage backends: SQLite repository, exports, and Parquet/DuckDB helpers.
-
-``__all__`` lists the symbols re-exported from this package; prefer submodule
-imports for APIs not listed (e.g. ``forensics.storage.parquet``).
-"""
+"""SQLite repository, JSONL export, and related storage entry points."""
 
 from forensics.storage.export import append_jsonl, append_jsonl_async, export_articles_jsonl
 from forensics.storage.repository import (

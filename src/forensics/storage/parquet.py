@@ -24,19 +24,14 @@ _DICT_FIELDS = frozenset(
     },
 )
 
-# Phase 15 Step 0.3 — feature parquet schema bookkeeping. Writers stamp
-# ``forensics.schema_version`` into parquet key/value metadata; the loader
-# rejects parquets stamped with a lower version and demands a migration
-# (see ``src/forensics/storage/migrations/002_feature_parquet_section.py``).
+# Parquet Arrow metadata key for feature table schema versioning (migrations/002 when bumped).
 FEATURE_PARQUET_SCHEMA_METADATA_KEY = "forensics.schema_version"
 
 
 class SchemaMigrationRequired(RuntimeError):
-    """Raised when a feature parquet needs migration to the current schema.
+    """Raised when feature parquet metadata is below the configured schema version.
 
-    Operators resolve this by running ``forensics features migrate`` (see
-    ``src/forensics/cli/migrate.py``). The message carries both the observed
-    on-disk version and the version the current settings demand.
+    Run ``forensics features migrate``; the exception message includes observed vs required version.
     """
 
     def __init__(self, path: Path, found: int | None, required: int) -> None:
@@ -137,17 +132,11 @@ def write_parquet_atomic(
     *,
     stamp_feature_schema: bool = True,
 ) -> None:
-    """Write a Polars frame (or list of dicts) to Parquet, mkdir'ing parent dirs.
+    """Write ``frame`` to Parquet, creating parent directories.
 
-    Thin wrapper around ``pl.DataFrame.write_parquet`` that removes the
-    ``path.parent.mkdir(parents=True, exist_ok=True)`` ceremony from callers
-    (RF-DRY-004 / G1). Accepts an existing frame or a list of row dicts.
-
-    When ``stamp_feature_schema`` is True (the default, Phase 15 Step 0.3) the
-    current ``feature_parquet_schema_version`` is written into parquet
-    key/value metadata so downstream readers can detect out-of-date files and
-    demand a migration. The extra round-trip is cheap; opt out only for
-    unit-level tests that deliberately need an unstamped parquet.
+    When ``stamp_feature_schema`` is True (default), stamps
+    ``feature_parquet_schema_version`` into parquet metadata so readers can require
+    migration. Set False for tests that need an unstamped file.
     """
     ensure_parent(path)
     df = frame if isinstance(frame, pl.DataFrame) else pl.DataFrame(frame)
@@ -175,15 +164,9 @@ def save_numpy_compressed_atomic(path: Path, **arrays: np.ndarray) -> None:
 def write_features(features: list[FeatureVector], output_path: Path) -> None:
     """Write feature vectors to Parquet (dict fields as JSON strings).
 
-    Schema includes the ``section: pl.Utf8`` column derived from the article
-    URL via :func:`forensics.utils.url.section_from_url` (Phase 15 Step J1);
-    legacy parquets without this column are upgraded by
-    ``forensics features migrate``.
-
-    ``write_parquet_atomic`` stamps the current
-    ``feature_parquet_schema_version`` into parquet key/value metadata
-    automatically (Phase 15 Step 0.3). N-04 stamps ``ai_marker_list_version``
-    alongside without forcing a parquet schema migration.
+    Includes ``section`` from the article URL where applicable; legacy files are migrated via CLI.
+    Stamps schema version via :func:`write_parquet_atomic` and appends
+    ``ai_marker_list_version`` metadata.
     """
     from forensics.features.lexical import AI_MARKER_LIST_VERSION
 
@@ -224,17 +207,10 @@ def read_features(path: Path) -> pl.DataFrame:
 
 
 def load_feature_frame_sorted(features_path: Path) -> pl.LazyFrame:
-    """Return a ``LazyFrame`` for the feature Parquet, sorted by ``timestamp``.
+    """Return a lazy, timestamp-sorted feature frame (tie-break by ``article_id`` when present).
 
-    Returning a ``LazyFrame`` lets downstream callers push ``filter(...)``
-    predicates (e.g. per-author slicing) into the scan before materialization
-    (P2-PERF-002). Call ``.collect()`` at the boundary where a ``DataFrame`` is
-    required. For the small number of eager callers, use
-    :func:`load_feature_frame_sorted_eager`.
-
-    Raises :class:`SchemaMigrationRequired` when the parquet's stamped
-    ``forensics.schema_version`` is absent or below
-    ``settings.features.feature_parquet_schema_version`` (Phase 15 Step 0.3).
+    Raises :class:`SchemaMigrationRequired` when parquet metadata is below
+    ``feature_parquet_schema_version``.
     """
     # Import here so this module is safe to import before config is wired.
     from forensics.config import get_settings
@@ -282,10 +258,8 @@ def read_embeddings_manifest(path: Path) -> list[EmbeddingRecord]:
     return list(by_id.values())
 
 
-# Per-author batch file (Phase 5): many articles, one compressed NPZ on disk.
 AUTHOR_EMBEDDING_BATCH_BASENAME = "batch.npz"
 
-# NPZ keys: UTF-8 ids as int32 lengths + uint8 blob (no object dtype / no pickle on load).
 EMBEDDING_BATCH_KEY_LENGTHS = "article_id_lengths"
 EMBEDDING_BATCH_KEY_BYTES = "article_id_bytes"
 EMBEDDING_BATCH_KEY_VECTORS = "vectors"

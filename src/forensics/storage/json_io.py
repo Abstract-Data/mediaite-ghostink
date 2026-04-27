@@ -1,10 +1,4 @@
-"""Shared JSON artifact writer for the analysis/survey/calibration stages.
-
-Prior to this module each stage independently duplicated the
-``json.dumps(..., indent=2, default=str)`` + ``Path.write_text`` + ``mkdir``
-ceremony (see RF-DRY-001). Centralising the serialisation path keeps the
-encoding, indentation, atomic-write, and Pydantic handling rules in one place.
-"""
+"""Atomic JSON/text writers and stable list sorting for pipeline artifacts."""
 
 from __future__ import annotations
 
@@ -62,10 +56,8 @@ def write_json_artifact(
       :func:`_to_jsonable`.
     - Writes to a sibling tempfile then atomically renames over ``path`` so a
       crash mid-write cannot corrupt a pre-existing artifact.
-    - ``sort_keys=True`` by default (Phase 15 H2) so two equivalent payloads
-      serialise to byte-identical bytes regardless of dict-insertion order.
-      Set ``sort_keys=False`` only when an artifact's reader depends on a
-      specific top-level key ordering (none currently do).
+    - ``sort_keys=True`` by default for deterministic bytes; set False only if a reader
+      requires key order.
     """
     ensure_parent(path)
     rendered = json.dumps(_to_jsonable(payload), indent=indent, sort_keys=sort_keys, default=str)
@@ -122,9 +114,7 @@ def write_text_atomic(path: Path, text: str, *, encoding: str = "utf-8") -> None
         raise
 
 
-# Sort-key spec from prompts/phase15-optimizations/v0.4.0.md lines 1604-1620.
-# Kept module-level so the routing is data, not control flow — and so a future
-# artifact kind only requires adding a row, not editing logic.
+# Per-artifact stable sort keys for deterministic JSON (extend by adding a row).
 _ARTIFACT_SORT_KEYS: dict[str, tuple[str, ...]] = {
     "change_points": ("feature_name", "timestamp", "effect_size_cohens_d"),
     "hypothesis_tests": ("feature_name", "test_name"),
@@ -133,16 +123,10 @@ _ARTIFACT_SORT_KEYS: dict[str, tuple[str, ...]] = {
 
 
 def stable_sort_artifact_list(items: list[Any], *, kind: str) -> list[Any]:
-    """Sort a list of artifact records by a stable, semantic key (Phase 15 H2).
+    """Sort list-valued artifact records for deterministic JSON.
 
-    Two parallel runs of the same analysis must produce byte-identical JSON
-    artifacts. Object identity / dict insertion order leak into the wire
-    format unless we explicitly sort list-valued fields. ``kind`` selects the
-    per-list key from :data:`_ARTIFACT_SORT_KEYS`. ``KeyError`` on an unknown
-    ``kind`` is intentional — undefined kinds must not silently pass.
-
-    Items can be Pydantic models or plain dicts; both are read via ``getattr``
-    + ``Mapping.get`` so the same call works either side of a ``model_dump``.
+    Uses :data:`_ARTIFACT_SORT_KEYS`[``kind``]. Unknown ``kind`` raises ``KeyError``.
+    Accepts dicts or objects with attributes.
     """
     sort_fields = _ARTIFACT_SORT_KEYS[kind]
 

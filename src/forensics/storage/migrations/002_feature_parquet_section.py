@@ -1,22 +1,7 @@
-"""Phase 15 Step 0.3 migration: add ``section`` column to feature parquets.
+"""Add ``section`` to feature parquets (schema v2), with backup under ``_pre_phase15_backup/``.
 
-Reads an existing feature parquet, derives ``section`` from each row's article
-URL via :func:`forensics.utils.url.section_from_url`, writes a new parquet
-stamped with schema version 2, and atomically swaps the file in place —
-preserving a backup under ``data/features/_pre_phase15_backup/``.
-
-URL resolution order per row:
-
-1. If the parquet already carries a ``url`` column, derive ``section`` directly
-   from that column (legacy / fixture path).
-2. Otherwise, if the parquet carries an ``article_id`` column AND a SQLite
-   ``articles.db`` was provided (or the project default exists), JOIN to
-   ``articles(id, url)`` and derive ``section`` from the looked-up URL. IDs
-   that don't match get ``section = "unknown"``.
-3. Otherwise fall back to ``section = "unknown"`` for every row.
-
-Branches 2 and 3 emit a per-file ``WARNING`` so degenerate-section corpora
-surface in operator logs rather than masquerading as a single-section result.
+Derives ``section`` from a ``url`` column, else from ``article_id`` + optional SQLite URL map,
+else ``unknown``. Logs warnings when many rows resolve to ``unknown``.
 """
 
 from __future__ import annotations
@@ -56,8 +41,7 @@ def _load_article_url_map(articles_db: Path | None) -> dict[str, str] | None:
     """
     if articles_db is None or not Path(articles_db).is_file():
         return None
-    # Late import — ``forensics.storage.repository`` imports this migrations
-    # package, so a top-level import would create a cycle on package init.
+    # Local import: ``repository`` imports this package at init.
     from forensics.storage.repository import open_repository_connection
 
     conn = open_repository_connection(articles_db)

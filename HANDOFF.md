@@ -5667,3 +5667,18 @@ Global churn is dominated by `src/forensics/analysis/` (3394); that maps to **Ph
 **GitNexus:** MCP server not connected in this session — impact/detect_changes not run here; run before merge per `AGENTS.md` if available.
 
 **Next:** Phase 3 storage deslop per plan, or proceed with PR merge train.
+
+---
+
+### 2026-04-27 — Phase 3 storage / repository deslop (completed)
+
+**Status:** Complete  
+**Scope:** `src/forensics/storage/` (`repository.py`, `parquet.py`, `duckdb_queries.py`, `json_io.py`, `export.py` unchanged, `__init__.py`, `migrations/__init__.py`, `migrations/002_feature_parquet_section.py` docstrings/comments only)
+
+**Changes:** Shortened module and API docstrings; removed section banner in `duckdb_queries.py`; replaced verbose comments with shorter factual lines; preserved late-import rationale in `002` migration. No SQL, schema strings, or runtime logic changes.
+
+**Verification:** `uv run ruff check src/forensics/storage`; `uv run ruff format --check src/forensics/storage`; `uv run pytest tests/test_storage.py tests/unit/test_repository_*.py tests/integration/test_repository_*.py -q --no-cov` — passed.
+
+**GitNexus:** MCP tool descriptors not present in workspace session; run `impact` / `detect_changes` before merge if connected.
+
+**Next:** Phase 4 scraper deslop per plan, or merge.
