@@ -10,7 +10,7 @@ todos:
     status: completed
   - id: item-4-5
     content: commands + walk + text tree; with_examples on all CLI commands; tests commands_dump + help_examples
-    status: pending
+    status: completed
   - id: item-6-8
     content: _errors.fail refactor; lock overwrite + non-interactive TUI + dedup CONFLICT; failure envelope tests
     status: pending

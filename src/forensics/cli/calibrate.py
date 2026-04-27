@@ -9,10 +9,13 @@ from typing import Annotated
 
 import typer
 
+from forensics.cli._decorators import forensics_examples
 from forensics.cli._envelope import status
 from forensics.cli.state import get_cli_state
 
 logger = logging.getLogger(__name__)
+
+_CALIB_EPILOG, _CALIB_EX = forensics_examples("forensics calibrate --dry-run")
 
 calibrate_app = typer.Typer(
     name="calibrate",
@@ -22,7 +25,8 @@ calibrate_app = typer.Typer(
 )
 
 
-@calibrate_app.callback(invoke_without_command=True)
+@calibrate_app.callback(invoke_without_command=True, epilog=_CALIB_EPILOG)
+@_CALIB_EX
 def calibrate(
     ctx: typer.Context,
     positive_trials: Annotated[

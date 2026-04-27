@@ -7,6 +7,7 @@ from typing import Annotated
 
 import typer
 
+from forensics.cli._decorators import with_examples
 from forensics.cli._exit import ExitCode
 from forensics.cli.state import get_cli_state
 from forensics.config import get_project_root, get_settings
@@ -15,6 +16,7 @@ from forensics.pipeline_context import PipelineContext
 logger = logging.getLogger(__name__)
 
 
+@with_examples("forensics extract --author colby-hall")
 def extract(
     ctx: typer.Context,
     author: Annotated[

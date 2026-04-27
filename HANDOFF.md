@@ -5378,3 +5378,50 @@ uv run ruff check src/forensics/cli/_envelope.py src/forensics/cli/state.py src/
 #### Risks & Next Steps
 - **Breaking:** `forensics preflight --output json` no longer works; use `forensics --output json preflight`. `docs/RUNBOOK.md` preflight line updated; grep for stale `preflight --output` elsewhere if needed (item 10).
 - GitNexus `impact` / `detect_changes`: MCP server not verified in this session; run when enabled before merge.
+
+---
+
+### CLI agent-readiness — item 4–5 (`commands` catalog + `with_examples` / epilog)
+**Status:** Complete  
+**Date:** 2026-04-26  
+**Agent/Session:** Cursor agent  
+
+#### What Was Done
+- Added `forensics commands`: walks the root Click group, emits `success("commands", {"root": ...})` in JSON or an indented text tree; param defaults normalized for JSON (e.g. `Path` → `str`).
+- Added `src/forensics/cli/_decorators.py` (`with_examples`, `examples_epilog`, `forensics_examples`, `jsonable_param_default`) and `src/forensics/cli/_commands.py` (walk + `run_list_commands`).
+- Attached example metadata to every CLI entry point and matching Rich `epilog=` (Typer does not surface long `__doc__` appendices in `--help` without epilog).
+- New tests: `tests/unit/test_cli_commands_dump.py`, `tests/unit/test_cli_help_examples.py`.
+
+#### Files Modified
+- `src/forensics/cli/_decorators.py` — new
+- `src/forensics/cli/_commands.py` — new
+- `src/forensics/cli/__init__.py` — `list_commands` + epilog/examples on top-level commands; `extract` / `report` / `migrate` registration epilogs
+- `src/forensics/cli/analyze.py`, `scrape.py`, `survey.py`, `calibrate.py`, `dedup.py`, `migrate.py`, `extract.py`, `report.py` — examples + epilogs
+- `tests/unit/test_cli_commands_dump.py`, `tests/unit/test_cli_help_examples.py` — new
+
+#### Verification Evidence
+```
+npx gitnexus impact preflight --direction upstream --repo mediaite-ghostink
+  -> risk LOW, impactedCount 0
+
+uv run pytest tests/unit/test_cli_commands_dump.py tests/unit/test_cli_help_examples.py -v --no-cov
+  -> 24 passed
+
+uv run pytest tests/integration/test_cli.py tests/unit/test_cli_*.py -v --no-cov -q
+  -> 56 passed
+
+uv run ruff check src/forensics/cli/_decorators.py src/forensics/cli/_commands.py … (touched CLI + tests)
+  -> All checks passed
+
+uv run ruff format src/forensics/cli/_commands.py
+```
+
+#### Decisions Made
+- Examples are a single source via `forensics_examples(...)` → `(epilog, decorator)` so JSON catalog and Rich `--help` stay aligned; catalog reads `__forensics_examples__` from the Click callback (with `__wrapped__` fallback).
+
+#### Unresolved Questions
+- None for this slice.
+
+#### Risks & Next Steps
+- If new CLI commands are added, register `epilog=` + `with_examples` (or `forensics_examples`) so `test_cli_help_examples` and leaf JSON example assertions keep passing.
+- Re-run `npx gitnexus detect_changes` (MCP) before merge when available.

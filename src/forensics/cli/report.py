@@ -7,6 +7,7 @@ from typing import Annotated
 
 import typer
 
+from forensics.cli._decorators import with_examples
 from forensics.cli._exit import ExitCode
 from forensics.models.report_args import ReportArgs
 from forensics.pipeline_context import PipelineContext
@@ -14,6 +15,7 @@ from forensics.pipeline_context import PipelineContext
 logger = logging.getLogger(__name__)
 
 
+@with_examples("forensics report --format html")
 def report(
     notebook: Annotated[
         str | None,

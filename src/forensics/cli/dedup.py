@@ -8,6 +8,7 @@ from typing import Annotated
 
 import typer
 
+from forensics.cli._decorators import examples_epilog, forensics_examples
 from forensics.cli._envelope import emit, success
 from forensics.cli._exit import ExitCode
 from forensics.cli.state import get_cli_state
@@ -16,10 +17,18 @@ from forensics.storage.repository import Repository
 
 logger = logging.getLogger(__name__)
 
-dedup_app = typer.Typer(help="Near-duplicate fingerprint utilities")
+dedup_app = typer.Typer(
+    help="Near-duplicate fingerprint utilities",
+    epilog=examples_epilog("forensics dedup recompute-fingerprints --limit 100"),
+)
+
+_RECOMP_EPILOG, _recomp_ex = forensics_examples(
+    "forensics --output json dedup recompute-fingerprints --limit 100",
+)
 
 
-@dedup_app.command("recompute-fingerprints")
+@dedup_app.command("recompute-fingerprints", epilog=_RECOMP_EPILOG)
+@_recomp_ex
 def recompute_fingerprints(
     ctx: typer.Context,
     limit: Annotated[

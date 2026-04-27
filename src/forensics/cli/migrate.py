@@ -23,6 +23,7 @@ from typing import Annotated
 
 import typer
 
+from forensics.cli._decorators import examples_epilog, forensics_examples, with_examples
 from forensics.cli._envelope import status
 from forensics.cli._exit import ExitCode
 from forensics.cli.state import get_cli_state
@@ -31,9 +32,15 @@ features_app = typer.Typer(
     name="features",
     help="Feature-store maintenance commands (schema migrations, etc).",
     no_args_is_help=True,
+    epilog=examples_epilog("forensics features migrate --dry-run"),
+)
+
+_FEATURES_MIG_EPILOG, _features_mig_ex = forensics_examples(
+    "forensics features migrate --dry-run",
 )
 
 
+@with_examples("forensics migrate")
 def migrate(
     ctx: typer.Context,
     db_path: Annotated[
@@ -69,7 +76,8 @@ def migrate(
         raise typer.Exit(int(ExitCode.CONFLICT))
 
 
-@features_app.command(name="migrate")
+@features_app.command(name="migrate", epilog=_FEATURES_MIG_EPILOG)
+@_features_mig_ex
 def features_migrate(
     ctx: typer.Context,
     features_dir: Annotated[

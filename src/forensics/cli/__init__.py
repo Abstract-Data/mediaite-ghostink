@@ -11,7 +11,10 @@ from typing import Annotated, Literal
 
 import httpx
 import typer
+from typer.main import get_command
 
+from forensics.cli._commands import run_list_commands
+from forensics.cli._decorators import examples_epilog, forensics_examples
 from forensics.cli._envelope import emit, status, success
 from forensics.cli._exit import ExitCode
 from forensics.cli.state import ForensicsCliState, get_cli_state
@@ -135,9 +138,18 @@ app.add_typer(calibrate_app, name="calibrate")
 app.add_typer(features_app, name="features")
 app.add_typer(analyze_app, name="analyze")
 app.add_typer(dedup_app, name="dedup")
-app.command(name="extract")(extract)
-app.command(name="report")(report)
-app.command(name="migrate")(migrate)
+app.command(
+    name="extract",
+    epilog=examples_epilog("forensics extract --author colby-hall"),
+)(extract)
+app.command(
+    name="report",
+    epilog=examples_epilog("forensics report --format html"),
+)(report)
+app.command(
+    name="migrate",
+    epilog=examples_epilog("forensics migrate"),
+)(migrate)
 
 
 def _preflight_json_envelope(
@@ -185,7 +197,14 @@ def _settings_load_errors() -> tuple[type[BaseException], ...]:
     )
 
 
-@app.command(name="preflight")
+_PREFLIGHT_EPILOG, _preflight_ex = forensics_examples(
+    "forensics --output json preflight",
+    "forensics preflight --strict",
+)
+
+
+@app.command(name="preflight", epilog=_PREFLIGHT_EPILOG)
+@_preflight_ex
 def preflight(
     ctx: typer.Context,
     strict: Annotated[
@@ -237,7 +256,14 @@ def preflight(
     raise typer.Exit(int(ExitCode.OK))
 
 
-@app.command(name="lock-preregistration")
+_LOCK_EPILOG, _lock_ex = forensics_examples(
+    "forensics lock-preregistration --yes",
+    "forensics lock-preregistration",
+)
+
+
+@app.command(name="lock-preregistration", epilog=_LOCK_EPILOG)
+@_lock_ex
 def lock_preregistration_cmd(ctx: typer.Context) -> None:
     """Lock analysis thresholds for pre-registration (run before analyzing data)."""
     from forensics.config import get_settings
@@ -268,7 +294,11 @@ def _probe_endpoint(url: str, *, timeout: float = 3.0) -> tuple[bool, str]:
     return False, f"HTTP {resp.status_code}"
 
 
-@app.command(name="validate")
+_VALIDATE_EPILOG, _validate_ex = forensics_examples("forensics validate --check-endpoints")
+
+
+@app.command(name="validate", epilog=_VALIDATE_EPILOG)
+@_validate_ex
 def validate_config(
     ctx: typer.Context,
     check_endpoints: Annotated[
@@ -325,7 +355,13 @@ def validate_config(
     raise typer.Exit(int(ExitCode.OK))
 
 
-@app.command(name="export")
+_EXPORT_EPILOG, _export_ex = forensics_examples(
+    "forensics export --output data/forensics_2026-04-26.duckdb",
+)
+
+
+@app.command(name="export", epilog=_EXPORT_EPILOG)
+@_export_ex
 def export_data(
     ctx: typer.Context,
     output: Annotated[
@@ -376,7 +412,14 @@ def export_data(
     status(f"Query with: duckdb {report.output_path}", output_format=st.output_format)
 
 
-@app.command(name="all")
+_ALL_EPILOG, _all_ex = forensics_examples(
+    "forensics all",
+    "forensics --output json all",
+)
+
+
+@app.command(name="all", epilog=_ALL_EPILOG)
+@_all_ex
 def run_all(ctx: typer.Context) -> None:
     """Run full pipeline end-to-end: scrape → extract → analyze → report."""
     from forensics.pipeline import run_all_pipeline
@@ -389,7 +432,11 @@ def run_all(ctx: typer.Context) -> None:
         raise typer.Exit(code=rc)
 
 
-@app.command(name="setup")
+_SETUP_EPILOG, _setup_ex = forensics_examples("forensics setup")
+
+
+@app.command(name="setup", epilog=_SETUP_EPILOG)
+@_setup_ex
 def setup_wizard() -> None:
     """Launch the interactive setup wizard (requires the 'tui' extra)."""
     from forensics.tui import main as tui_main
@@ -399,7 +446,11 @@ def setup_wizard() -> None:
         raise typer.Exit(code=rc)
 
 
-@app.command(name="dashboard")
+_DASH_EPILOG, _dash_ex = forensics_examples("forensics dashboard --survey --skip-scrape")
+
+
+@app.command(name="dashboard", epilog=_DASH_EPILOG)
+@_dash_ex
 def dashboard_cmd(
     ctx: typer.Context,
     survey: Annotated[
@@ -491,6 +542,18 @@ def dashboard_cmd(
     rc = main_dashboard(survey_mode=survey, survey_kwargs=survey_kw if survey else None)
     if rc != 0:
         raise typer.Exit(code=rc)
+
+
+_COMMANDS_EPILOG, _commands_ex = forensics_examples(
+    "forensics --output json commands | jq '.data.root.subcommands[].name'",
+)
+
+
+@app.command(name="commands", epilog=_COMMANDS_EPILOG)
+@_commands_ex
+def list_commands(ctx: typer.Context) -> None:
+    """Dump the full command catalog (for agent discovery)."""
+    run_list_commands(ctx, get_command(app))
 
 
 def main() -> int:

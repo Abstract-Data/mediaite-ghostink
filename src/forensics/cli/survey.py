@@ -8,12 +8,15 @@ from typing import Annotated, Literal
 
 import typer
 
+from forensics.cli._decorators import forensics_examples
 from forensics.cli._envelope import status
 from forensics.cli._exit import ExitCode
 from forensics.cli.state import get_cli_state
 from forensics.config import get_project_root, get_settings
 from forensics.progress import managed_rich_observer
 from forensics.survey.qualification import QualificationCriteria, qualify_authors
+
+_SURVEY_EPILOG, _SURVEY_EX = forensics_examples("forensics survey --dry-run")
 
 survey_app = typer.Typer(
     name="survey",
@@ -97,7 +100,8 @@ def _survey_print_report(
             typer.echo(f"Full results: {report.run_dir}")
 
 
-@survey_app.callback(invoke_without_command=True)
+@survey_app.callback(invoke_without_command=True, epilog=_SURVEY_EPILOG)
+@_SURVEY_EX
 def survey(
     ctx: typer.Context,
     dry_run: Annotated[

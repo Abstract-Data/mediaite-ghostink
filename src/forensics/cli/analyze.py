@@ -18,6 +18,7 @@ from typing import Annotated
 import typer
 
 from forensics.analysis.artifact_paths import AnalysisArtifactPaths
+from forensics.cli._decorators import examples_epilog, forensics_examples, with_examples
 from forensics.cli._envelope import status
 from forensics.cli._exit import ExitCode
 from forensics.cli.state import get_cli_state
@@ -31,11 +32,18 @@ from forensics.survey.shared_byline import is_shared_byline as _is_shared_byline
 
 logger = logging.getLogger(__name__)
 
+_ANALYZE_EXAMPLES = (
+    "forensics analyze --author isaac-schorr",
+    "forensics analyze --compare-pair isaac-schorr,john-doe",
+    "forensics analyze --parallel-authors --max-workers 4",
+)
+
 analyze_app = typer.Typer(
     name="analyze",
     help="Run analysis pipeline (change-point, drift, convergence, comparison).",
     no_args_is_help=False,
     invoke_without_command=True,
+    epilog=examples_epilog(*_ANALYZE_EXAMPLES),
 )
 
 
@@ -506,6 +514,7 @@ def run_analyze(  # noqa: C901
 
 
 @analyze_app.callback(invoke_without_command=True)
+@with_examples(*_ANALYZE_EXAMPLES)
 def analyze(
     ctx: typer.Context,
     changepoint: Annotated[
@@ -691,7 +700,11 @@ def analyze(
     )
 
 
-@analyze_app.command(name="section-profile")
+_SP_EPILOG, _sp_ex = forensics_examples("forensics analyze section-profile")
+
+
+@analyze_app.command(name="section-profile", epilog=_SP_EPILOG)
+@_sp_ex
 def section_profile_cmd(
     ctx: typer.Context,
     output: Annotated[
@@ -748,7 +761,13 @@ def section_profile_cmd(
         status(f"  report: {result.artifacts.report_md}", output_format=fmt)
 
 
-@analyze_app.command(name="section-contrast")
+_SC_EPILOG, _sc_ex = forensics_examples(
+    "forensics analyze section-contrast --author colby-hall",
+)
+
+
+@analyze_app.command(name="section-contrast", epilog=_SC_EPILOG)
+@_sc_ex
 def section_contrast_cmd(
     ctx: typer.Context,
     author: Annotated[

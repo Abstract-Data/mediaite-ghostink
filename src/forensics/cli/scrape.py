@@ -11,6 +11,7 @@ from typing import Annotated, assert_never
 
 import typer
 
+from forensics.cli._decorators import forensics_examples
 from forensics.cli._helpers import guard_placeholder_authors
 from forensics.cli.state import get_cli_state
 from forensics.config import DEFAULT_DB_RELATIVE, get_project_root, get_settings
@@ -28,6 +29,17 @@ from forensics.storage.export import export_articles_jsonl
 from forensics.storage.repository import Repository, ensure_repo
 
 logger = logging.getLogger(__name__)
+
+_SCRAPE_EPILOG, _SCRAPE_EX = forensics_examples(
+    "forensics scrape --archive",
+    "forensics scrape --dedup",
+    "forensics scrape --fetch",
+    "forensics scrape --fetch --dedup",
+    "forensics scrape --discover",
+    "forensics scrape --metadata",
+    "forensics scrape --discover --metadata",
+    "forensics scrape",
+)
 
 scrape_app = typer.Typer(help="Crawl and fetch articles for configured authors")
 
@@ -490,7 +502,8 @@ async def dispatch_scrape(
     )
 
 
-@scrape_app.callback(invoke_without_command=True)
+@scrape_app.callback(invoke_without_command=True, epilog=_SCRAPE_EPILOG)
+@_SCRAPE_EX
 def scrape(
     ctx: typer.Context,
     discover: Annotated[
