@@ -8,7 +8,6 @@ from unittest import mock
 
 import numpy as np
 
-from forensics.analysis.artifact_paths import AnalysisArtifactPaths
 from forensics.analysis.drift import (
     ArticleEmbedding,
     compute_author_drift_pipeline,
@@ -20,6 +19,7 @@ from forensics.config.settings import (
     ReportConfig,
     ScrapingConfig,
 )
+from forensics.paths import AnalysisArtifactPaths
 from forensics.storage.repository import init_db
 
 

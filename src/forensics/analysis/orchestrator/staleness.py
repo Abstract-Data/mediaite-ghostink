@@ -6,9 +6,9 @@ import json
 from datetime import UTC, datetime
 from typing import Any
 
-from forensics.analysis.artifact_paths import AnalysisArtifactPaths
 from forensics.config.settings import ForensicsSettings
 from forensics.models.analysis import AnalysisResult
+from forensics.paths import AnalysisArtifactPaths
 from forensics.storage.json_io import write_json_artifact
 from forensics.utils.provenance import compute_model_config_hash
 

@@ -5,9 +5,9 @@ from __future__ import annotations
 from datetime import date
 from pathlib import Path
 
-from forensics.analysis.artifact_paths import AnalysisArtifactPaths
 from forensics.analysis.comparison import compute_signal_attribution
 from forensics.models.analysis import ConvergenceWindow
+from forensics.paths import AnalysisArtifactPaths
 from forensics.utils.model_cache import KeyedModelCache
 
 

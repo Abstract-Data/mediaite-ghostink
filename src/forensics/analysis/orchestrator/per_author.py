@@ -12,7 +12,6 @@ from uuid import uuid4
 import numpy as np
 import polars as pl
 
-from forensics.analysis.artifact_paths import AnalysisArtifactPaths
 from forensics.analysis.changepoint import (
     analyze_author_feature_changepoints,
     write_imputation_stats_artifact,
@@ -41,6 +40,7 @@ from forensics.analysis.utils import pair_months_with_velocities
 from forensics.config.settings import AnalysisConfig, ForensicsSettings
 from forensics.models.analysis import AnalysisResult, ChangePoint, DriftScores
 from forensics.models.features import strict_feature_decode_confirmatory
+from forensics.paths import AnalysisArtifactPaths
 from forensics.preregistration import (
     PREREGISTERED_FEATURES,
     PREREGISTERED_SPLIT_DATE,

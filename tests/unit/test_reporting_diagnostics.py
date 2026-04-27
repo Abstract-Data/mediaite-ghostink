@@ -6,7 +6,7 @@ import hashlib
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from forensics.analysis.artifact_paths import AnalysisArtifactPaths
+from forensics.paths import AnalysisArtifactPaths
 from forensics.reporting.html_report import (
     K5_FALLBACK_HTML,
     SECTION_PROFILE_REPORT_RELPATH,

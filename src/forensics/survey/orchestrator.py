@@ -14,11 +14,11 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from forensics.analysis.artifact_paths import AnalysisArtifactPaths
 from forensics.analysis.orchestrator import run_full_analysis
 from forensics.config.settings import DEFAULT_DB_RELATIVE, ForensicsSettings
 from forensics.features.pipeline import extract_all_features
 from forensics.models.analysis import AnalysisResult
+from forensics.paths import AnalysisArtifactPaths
 from forensics.progress import PipelineObserver, PipelineRunPhase, live_ui_mode
 from forensics.storage.json_io import write_json_artifact
 from forensics.survey.qualification import (

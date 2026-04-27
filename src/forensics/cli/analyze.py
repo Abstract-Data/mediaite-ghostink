@@ -10,7 +10,6 @@ from typing import Annotated
 
 import typer
 
-from forensics.analysis.artifact_paths import AnalysisArtifactPaths
 from forensics.cli._decorators import examples_epilog, forensics_examples, with_examples
 from forensics.cli._envelope import status
 from forensics.cli._errors import fail
@@ -39,6 +38,7 @@ from forensics.cli.analyze_options import (
 from forensics.cli.state import get_cli_state
 from forensics.config import DEFAULT_DB_RELATIVE, get_project_root, get_settings
 from forensics.config.settings import ForensicsSettings
+from forensics.paths import AnalysisArtifactPaths
 from forensics.pipeline_context import PipelineContext
 from forensics.preregistration import verify_preregistration
 from forensics.storage.json_io import write_json_artifact

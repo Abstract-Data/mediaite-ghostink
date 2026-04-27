@@ -18,7 +18,6 @@ from pathlib import Path
 
 import pytest
 
-from forensics.analysis.artifact_paths import AnalysisArtifactPaths
 from forensics.analysis.convergence import ConvergenceInput, compute_convergence_scores
 from forensics.analysis.drift import (
     _DRIFT_ARTIFACT_MISSING_WARNING,
@@ -26,6 +25,7 @@ from forensics.analysis.drift import (
 )
 from forensics.config.settings import AnalysisConfig, ForensicsSettings, ScrapingConfig
 from forensics.models.analysis import ChangePoint
+from forensics.paths import AnalysisArtifactPaths
 from forensics.storage.repository import init_db
 
 

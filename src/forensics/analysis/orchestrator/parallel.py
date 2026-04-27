@@ -12,7 +12,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from uuid import uuid4
 
-from forensics.analysis.artifact_paths import AnalysisArtifactPaths
 from forensics.analysis.convergence import ProbabilityTrajectory
 from forensics.analysis.orchestrator.comparison import (
     _resolve_targets_and_controls,
@@ -26,6 +25,7 @@ from forensics.analysis.orchestrator.per_author import (
 from forensics.analysis.orchestrator.staleness import _merge_run_metadata, _stale_author_slugs
 from forensics.config.settings import ForensicsSettings
 from forensics.models.analysis import AnalysisResult, ChangePoint
+from forensics.paths import AnalysisArtifactPaths
 from forensics.storage.json_io import write_json_artifact
 from forensics.storage.repository import Repository
 from forensics.utils.provenance import (

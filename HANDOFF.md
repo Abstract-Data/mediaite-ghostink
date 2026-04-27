@@ -5956,3 +5956,41 @@ uv run pytest tests/ -q --tb=no --no-cov   # 1015 passed; 1 xfail; 2 failed (e2e
 
 - **Env overrides:** flat `FORENSICS_ANALYSIS__CONVERGENCE_USE_PERMUTATION` must become `FORENSICS_ANALYSIS__CONVERGENCE__CONVERGENCE_USE_PERMUTATION` (and similar for other nested fields). ADR-016 + README document this.
 - Re-run `npx gitnexus analyze` after merge if graph consumers need a fresh index.
+
+---
+
+### Refactoring Run 11 — TASK-5 canonical `AnalysisArtifactPaths` imports
+
+**Status:** Complete  
+**Date:** 2026-04-27
+
+#### What Was Done
+
+- Migrated all in-tree `from forensics.analysis.artifact_paths import AnalysisArtifactPaths` usages to `from forensics.paths import AnalysisArtifactPaths` across `src/`, `tests/`, and `scripts/bench_phase15.py`.
+- Replaced `TYPE_CHECKING` import in `src/forensics/reporting/narrative.py` with `forensics.paths`.
+- Slimmed `src/forensics/analysis/artifact_paths.py` to a documented deprecated re-export shim (aligned with `analysis/utils.py` policy); canonical definition remains `forensics.paths`.
+
+#### Files Modified
+
+- `src/forensics/analysis/artifact_paths.py` — deprecation docstring; thin re-export only.
+- ~25 Python modules under `src/forensics/`, `tests/`, `scripts/` — import path only.
+
+#### Verification Evidence
+
+```
+uv run ruff check .
+uv run ruff format --check .
+uv run pytest tests/test_analysis_infrastructure.py tests/unit/test_analyze_compare.py \
+  tests/unit/test_reporting_diagnostics.py tests/unit/test_pipeline_b_diagnostics.py \
+  tests/unit/test_drift_summary.py tests/unit/test_comparison_target_controls.py \
+  tests/test_report.py tests/integration/test_parallel_parity.py -q --no-cov   # pass
+# Full suite: 2 pre-existing failures (e2e quarto path; parser fuzz) — unchanged by import-only edits
+```
+
+#### GitNexus
+
+- `user-gitnexus` MCP tools not present in workspace descriptors; impact not run (mechanical import-only change).
+
+#### Risks & Next Steps
+
+- External notebooks still importing `forensics.analysis.artifact_paths` continue to work via shim; migrate to `forensics.paths` when convenient.

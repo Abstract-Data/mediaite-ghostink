@@ -18,7 +18,7 @@ from forensics.survey.scoring import (
 )
 
 if TYPE_CHECKING:
-    from forensics.analysis.artifact_paths import AnalysisArtifactPaths
+    from forensics.paths import AnalysisArtifactPaths
     from forensics.preregistration import VerificationResult
 
 

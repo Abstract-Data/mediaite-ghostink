@@ -7,9 +7,9 @@ from datetime import UTC, datetime
 import numpy as np
 import pytest
 
-from forensics.analysis.artifact_paths import AnalysisArtifactPaths
 from forensics.analysis.drift import load_article_embeddings, validate_embedding_record
 from forensics.models.features import EmbeddingRecord
+from forensics.paths import AnalysisArtifactPaths
 from forensics.storage.parquet import write_author_embedding_batch, write_embeddings_manifest
 from forensics.storage.repository import Repository, init_db
 

@@ -13,12 +13,11 @@ from typing import Any
 
 import numpy as np
 
-from forensics.analysis.artifact_paths import AnalysisArtifactPaths
 from forensics.analysis.utils import pair_months_with_velocities
 from forensics.config.settings import ForensicsSettings
 from forensics.models.analysis import DriftScores
 from forensics.models.features import EmbeddingRecord
-from forensics.paths import resolve_author_rows
+from forensics.paths import AnalysisArtifactPaths, resolve_author_rows
 from forensics.storage.json_io import write_json_artifact
 from forensics.storage.parquet import (
     EMBEDDING_BATCH_KEY_BYTES,

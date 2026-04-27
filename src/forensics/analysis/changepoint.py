@@ -21,13 +21,16 @@ import ruptures as rpt
 from scipy.special import logsumexp
 from scipy.stats import t as student_t_dist
 
-from forensics.analysis.artifact_paths import AnalysisArtifactPaths
 from forensics.analysis.evidence import filter_evidence_change_points
 from forensics.analysis.section_residualization import residualize_features_by_section
 from forensics.analysis.statistics import cohens_d
 from forensics.config.settings import ForensicsSettings
 from forensics.models.analysis import ChangePoint
-from forensics.paths import load_feature_frame_for_author, resolve_author_rows
+from forensics.paths import (
+    AnalysisArtifactPaths,
+    load_feature_frame_for_author,
+    resolve_author_rows,
+)
 from forensics.storage.json_io import write_json_artifact
 from forensics.storage.repository import Repository
 from forensics.utils.datetime import timestamps_from_frame

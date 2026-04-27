@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 import time
 
-from forensics.analysis.artifact_paths import AnalysisArtifactPaths
 from forensics.analysis.convergence import ProbabilityTrajectory
 from forensics.analysis.orchestrator.comparison import (
     _resolve_targets_and_controls,
@@ -21,6 +20,7 @@ from forensics.analysis.orchestrator.staleness import _merge_run_metadata
 from forensics.analysis.orchestrator.timings import AnalysisTimings
 from forensics.config.settings import ForensicsSettings
 from forensics.models.analysis import AnalysisResult
+from forensics.paths import AnalysisArtifactPaths
 from forensics.storage.json_io import write_json_artifact
 from forensics.utils.provenance import read_latest_scraped_at_iso, write_corpus_custody
 

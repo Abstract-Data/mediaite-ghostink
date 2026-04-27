@@ -16,7 +16,7 @@ todos:
     status: completed
   - id: task-5-imports
     content: "TASK-5: Standardize AnalysisArtifactPaths imports to forensics.paths across src/tests/scripts; deprecate or thin artifact_paths shim"
-    status: pending
+    status: completed
   - id: task-6-verify-handoff
     content: "TASK-6: ruff/pytest/gitnexus analyze; HANDOFF.md + RUNBOOK if needed"
     status: pending

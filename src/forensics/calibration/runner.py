@@ -15,7 +15,6 @@ from typing import Any
 
 import numpy as np
 
-from forensics.analysis.artifact_paths import AnalysisArtifactPaths
 from forensics.analysis.orchestrator import run_full_analysis
 from forensics.calibration.synthetic import (
     SyntheticCorpus,
@@ -27,6 +26,7 @@ from forensics.features.pipeline import extract_all_features
 from forensics.models.analysis import AnalysisResult
 from forensics.models.article import Article
 from forensics.models.author import Author
+from forensics.paths import AnalysisArtifactPaths
 from forensics.storage.json_io import write_json_artifact
 from forensics.storage.repository import Repository, init_db
 from forensics.survey.scoring import SignalStrength, compute_composite_score

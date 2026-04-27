@@ -13,10 +13,10 @@ from pathlib import Path
 import plotly.graph_objects as go
 import pytest
 
-from forensics.analysis.artifact_paths import AnalysisArtifactPaths
 from forensics.config import get_project_root
 from forensics.config.settings import AuthorConfig, ForensicsSettings, ReportConfig, ScrapingConfig
 from forensics.models.analysis import AnalysisResult
+from forensics.paths import AnalysisArtifactPaths
 from forensics.reporting import (
     _analysis_artifacts_ok,
     _per_author_slugs,

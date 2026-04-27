@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from forensics.analysis.artifact_paths import AnalysisArtifactPaths
 from forensics.analysis.convergence import ProbabilityTrajectory
 from forensics.analysis.orchestrator.per_author import (
     _run_per_author_analysis,
@@ -12,6 +11,7 @@ from forensics.analysis.orchestrator.per_author import (
 )
 from forensics.config.settings import ForensicsSettings
 from forensics.models.analysis import AnalysisResult
+from forensics.paths import AnalysisArtifactPaths
 from forensics.storage.json_io import write_json_artifact
 from forensics.storage.repository import Repository
 
