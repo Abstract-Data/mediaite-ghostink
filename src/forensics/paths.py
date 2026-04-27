@@ -188,9 +188,10 @@ def resolve_author_rows(
             msg = f"Unknown author slug: {author_slug}"
             raise ValueError(msg)
         return [au]
+    by_slug = repo.get_authors_by_slugs(a.slug for a in settings.authors)
     rows: list[Author] = []
     for a in settings.authors:
-        au = repo.get_author_by_slug(a.slug)
+        au = by_slug.get(a.slug)
         if au is not None:
             rows.append(au)
     return rows

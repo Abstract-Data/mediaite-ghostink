@@ -16,7 +16,7 @@ todos:
     status: completed
   - id: task-5-repo-p3
     content: P2-PERF-005 selective Repository projections; P3-DRY-007 subcommand preamble helper; P3-MAINT-008 worker ContextVar assertion/docs
-    status: pending
+    status: completed
   - id: task-6-patch-targets
     content: Document _PATCH_TARGETS registration; unit test vs __all__/allowlist (P2-TEST-006 + RF-SMELL-003)
     status: pending

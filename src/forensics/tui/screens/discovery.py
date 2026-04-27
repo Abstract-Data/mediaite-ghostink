@@ -42,11 +42,11 @@ def discover_authors_summary(db_path: Path) -> AuthorDiscoveryResult:
         from forensics.storage.repository import Repository
 
         with Repository(db_path) as repo:
-            authors = repo.all_authors()
+            n = repo.count_authors()
         return AuthorDiscoveryResult(
             db_exists=True,
-            author_count=len(authors),
-            source="database" if authors else "empty",
+            author_count=n,
+            source="database" if n else "empty",
             db_path=db_path,
         )
     except Exception as exc:  # noqa: BLE001 - surface any repo error as empty

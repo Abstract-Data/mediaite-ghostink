@@ -6385,3 +6385,33 @@ uv run pytest tests/test_preregistration.py tests/unit/test_analyze_survey_gate.
 #### Risks & next steps
 
 - None beyond usual merge hygiene; behavior is refactor-only with identical control flow.
+
+---
+
+### Run 12 — TASK-5 (partial): P2-PERF-005 + P3-DRY-007 + P3-MAINT-008
+
+**Status:** Complete  
+**Date:** 2026-04-27
+
+#### What was done
+
+- **P2-PERF-005:** Added `RepositoryReader.count_authors`, `get_authors_by_slugs`, `count_articles_by_author_ids`; switched author single/list queries from `SELECT *` to an explicit `_AUTHOR_SELECT` column list. Migrated `resolve_author_rows` (batch slug load), TUI `discover_authors_summary` (count-only), and calibration `_load_author_articles` “most prolific” branch (one `GROUP BY` count pass + single article load).
+- **P3-DRY-007:** Introduced `AnalyzeSubcommandPaths` + `_resolve_analyze_subcommand_context` in `cli/analyze.py` and wired `section-profile` / `section-contrast` commands through it.
+- **P3-MAINT-008:** Documented `STRICT_DECODE_CTX` / `strict_feature_decode_confirmatory` contract in `parallel.py` module docstring; added confirmatory debug log lines at pool worker entry; `assert not STRICT_DECODE_CTX.get()` after `_run_per_author_analysis` in `_per_author_worker` and `_isolated_author_worker` to catch ContextVar leaks.
+
+#### Files modified
+
+- `src/forensics/storage/repository.py`, `src/forensics/paths.py`, `src/forensics/tui/screens/discovery.py`, `src/forensics/calibration/runner.py`, `src/forensics/cli/analyze.py`, `src/forensics/analysis/orchestrator/parallel.py`, `tests/test_storage.py`, `HANDOFF.md`
+
+#### Verification
+
+```
+uv run ruff check . && uv run ruff format --check .
+uv run pytest tests/ -q --no-cov
+```
+
+**Full suite:** all passed; 1 xfail (known section_residualize); 3 warnings (scipy/umap).
+
+#### GitNexus
+
+`gitnexus_impact` / `detect_changes` not run (no GitNexus tool descriptors under workspace `mcps/user-gitnexus/tools` this session).

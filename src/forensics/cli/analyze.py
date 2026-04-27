@@ -105,6 +105,38 @@ class AnalyzeContext:
 
 
 @dataclass(frozen=True, slots=True)
+class AnalyzeSubcommandPaths:
+    """Resolved settings and artifact paths for nested ``analyze`` commands."""
+
+    settings: ForensicsSettings
+    project_root: Path
+    db_path: Path
+    paths: AnalysisArtifactPaths
+    features_dir: Path
+    analysis_dir: Path
+
+
+def _resolve_analyze_subcommand_context(
+    *,
+    features_dir: Path | None,
+) -> AnalyzeSubcommandPaths:
+    """Shared preamble for ``section-profile`` / ``section-contrast`` (P3-DRY-007)."""
+    settings = get_settings()
+    project_root = get_project_root()
+    db_path = project_root / DEFAULT_DB_RELATIVE
+    paths = AnalysisArtifactPaths.from_project(project_root, db_path)
+    feat_dir = features_dir if features_dir is not None else paths.features_dir
+    return AnalyzeSubcommandPaths(
+        settings=settings,
+        project_root=project_root,
+        db_path=db_path,
+        paths=paths,
+        features_dir=feat_dir,
+        analysis_dir=paths.analysis_dir,
+    )
+
+
+@dataclass(frozen=True, slots=True)
 class AnalyzeStageFlags:
     """Stage toggles grouped for dispatch; :class:`AnalyzeRequest` keeps a flat public API."""
 
@@ -805,17 +837,12 @@ def section_profile_cmd(
     """Phase 15 J3: newsroom-wide section descriptive report and J5 gate verdict."""
     from forensics.analysis.section_profile import GATE_OMNIBUS_ALPHA, run_section_profile
 
-    settings = get_settings()
-    root = get_project_root()
-    db_path = root / DEFAULT_DB_RELATIVE
-    paths = AnalysisArtifactPaths.from_project(root, db_path)
-    feat_dir = features_dir if features_dir is not None else paths.features_dir
-    analysis_dir = paths.analysis_dir
+    ctx_paths = _resolve_analyze_subcommand_context(features_dir=features_dir)
 
     result = run_section_profile(
-        settings,
-        features_dir=feat_dir,
-        analysis_dir=analysis_dir,
+        ctx_paths.settings,
+        features_dir=ctx_paths.features_dir,
+        analysis_dir=ctx_paths.analysis_dir,
         report_path=output,
     )
     fmt = get_cli_state(ctx).output_format
@@ -869,15 +896,10 @@ def section_contrast_cmd(
     from forensics.paths import load_feature_frame_for_author, resolve_author_rows
     from forensics.storage.repository import Repository
 
-    settings = get_settings()
-    root = get_project_root()
-    db_path = root / DEFAULT_DB_RELATIVE
-    paths = AnalysisArtifactPaths.from_project(root, db_path)
-    feat_dir = features_dir if features_dir is not None else paths.features_dir
-    analysis_dir = paths.analysis_dir
+    ctx_paths = _resolve_analyze_subcommand_context(features_dir=features_dir)
 
-    with Repository(db_path) as repo:
-        author_rows = resolve_author_rows(repo, settings, author_slug=author)
+    with Repository(ctx_paths.db_path) as repo:
+        author_rows = resolve_author_rows(repo, ctx_paths.settings, author_slug=author)
 
     fmt = get_cli_state(ctx).output_format
     if not author_rows:
@@ -895,7 +917,7 @@ def section_contrast_cmd(
 
     written = 0
     for author_row in author_rows:
-        df = load_feature_frame_for_author(feat_dir, author_row.slug, author_row.id)
+        df = load_feature_frame_for_author(ctx_paths.features_dir, author_row.slug, author_row.id)
         if df is None or df.is_empty():
             status(
                 f"section-contrast: skipped {author_row.slug} (no feature rows)",
@@ -906,9 +928,9 @@ def section_contrast_cmd(
             df,
             author_id=author_row.id,
             author_slug=author_row.slug,
-            analysis_dir=analysis_dir,
-            alpha=settings.analysis.hypothesis.significance_threshold,
-            bh_method=settings.analysis.hypothesis.multiple_comparison_method,
+            analysis_dir=ctx_paths.analysis_dir,
+            alpha=ctx_paths.settings.analysis.hypothesis.significance_threshold,
+            bh_method=ctx_paths.settings.analysis.hypothesis.multiple_comparison_method,
         )
         written += 1
         if result.disposition == "insufficient_section_volume":

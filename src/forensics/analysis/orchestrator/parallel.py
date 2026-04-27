@@ -1,4 +1,14 @@
-"""Parallel/isolated author execution for analysis orchestration."""
+"""Parallel/isolated author execution for analysis orchestration.
+
+Confirmatory analysis (``AnalysisMode.exploratory`` false) relies on
+:data:`forensics.models.features.STRICT_DECODE_CTX` so nested feature JSON
+decodes fail closed instead of coercing to ``{}``. That ContextVar defaults to
+``False`` in each new process-pool worker; :func:`_run_per_author_analysis`
+wraps its body in :func:`forensics.models.features.strict_feature_decode_confirmatory`
+so strict mode is enabled only for the duration of that call. Do not invoke
+feature decode paths from parallel workers outside that wrapper, or hashes and
+downstream gates may diverge from the in-process CLI path.
+"""
 
 from __future__ import annotations
 
@@ -29,6 +39,7 @@ from forensics.analysis.orchestrator.staleness import _merge_run_metadata, _stal
 from forensics.analysis.probability_trajectories import build_probability_trajectory_by_slug
 from forensics.config.settings import ForensicsSettings
 from forensics.models.analysis import AnalysisResult, ChangePoint
+from forensics.models.features import STRICT_DECODE_CTX
 from forensics.paths import AnalysisArtifactPaths
 from forensics.storage.json_io import write_json_artifact
 from forensics.storage.repository import Repository
@@ -102,6 +113,12 @@ def _per_author_worker(
     Log lines are tagged with ``slug=%s`` so concurrent worker output can be
     disambiguated when grepping the run log.
     """
+    if not mode.exploratory:
+        logger.debug(
+            "analysis worker: confirmatory mode slug=%s "
+            "(strict feature JSON decode is scoped inside _run_per_author_analysis)",
+            slug,
+        )
     stage_timings: dict[str, float] = {}
     with Repository(db_path) as repo:
         per_author = _run_per_author_analysis(
@@ -113,6 +130,9 @@ def _per_author_worker(
             stage_timings=stage_timings,
             mode=mode,
         )
+    assert not STRICT_DECODE_CTX.get(), (
+        f"STRICT_DECODE_CTX must be reset after _run_per_author_analysis (worker slug={slug!r})"
+    )
     if per_author is None:
         logger.info("analysis: slug=%s skipped (missing author or features)", slug)
         return slug, None, stage_timings
@@ -152,6 +172,12 @@ def _isolated_author_worker(
     mode: AnalysisMode,
 ) -> IsolatedAuthorAnalysis | None:
     """Run one author into ``data/analysis/parallel/<run_id>/<slug>/``."""
+    if not mode.exploratory:
+        logger.debug(
+            "analysis-refresh worker: confirmatory mode slug=%s "
+            "(strict feature JSON decode is scoped inside _run_per_author_analysis)",
+            slug,
+        )
     isolated_paths = _isolated_author_paths(paths, run_id, slug)
     stage_timings: dict[str, float] = {}
     with Repository(paths.db_path) as repo:
@@ -164,6 +190,10 @@ def _isolated_author_worker(
             stage_timings=stage_timings,
             mode=mode,
         )
+    assert not STRICT_DECODE_CTX.get(), (
+        "STRICT_DECODE_CTX must be reset after _run_per_author_analysis "
+        f"(isolated worker slug={slug!r})"
+    )
     if per_author is None:
         logger.info("analysis-refresh: slug=%s skipped (missing author or features)", slug)
         return None
