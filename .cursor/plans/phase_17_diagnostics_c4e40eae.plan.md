@@ -10,7 +10,7 @@ todos:
     status: completed
   - id: phase-b-units
     content: Add test_direction_concordance.py + test_volume_ramp_flag.py (incl. -1 n_pre/n_post, degenerate, div-by-zero)
-    status: pending
+    status: completed
   - id: phase-c-notebook
     content: "Edit 09_full_report.ipynb: cell-strength-code, cell-direction-md, cell-recommendations; nbconvert smoke"
     status: pending
