@@ -5682,3 +5682,18 @@ Global churn is dominated by `src/forensics/analysis/` (3394); that maps to **Ph
 **GitNexus:** MCP tool descriptors not present in workspace session; run `impact` / `detect_changes` before merge if connected.
 
 **Next:** Phase 4 scraper deslop per plan, or merge.
+
+---
+
+### 2026-04-27 — Phase 4 scraper deslop (completed)
+
+**Status:** Complete  
+**Scope:** `src/forensics/scraper/` (`fetcher.py`, `crawler.py`, `coverage.py`, `parser.py`, `__init__.py`; `dedup.py` / `client.py` unchanged)
+
+**Changes:** Trimmed module and class docstrings; removed internal ticket-style prefixes (D-03, L-04, RF-*); shortened concurrency and ingest helper docstrings to factual one-liners. No edits to `scrape_failure_transient`, `scrape_error_transient_from_http_status`, `log_scrape_error`, retry branches, or HTTP status handling.
+
+**Verification:** `uv run ruff check src/forensics/scraper`; `uv run ruff format --check src/forensics/scraper`; `uv run pytest tests/test_scraper.py tests/unit/test_scrape_transient_classification.py tests/unit/test_fetcher_handlers.py tests/unit/test_fetcher_mutations.py tests/unit/test_article_html_fetch_context.py tests/unit/test_scraper_gather_resilience.py tests/integration/test_scrape_mock_http.py tests/test_fetcher_phase_a.py tests/test_crawler_metadata_phase_b.py tests/unit/test_crawler_ingest_single_post.py tests/test_dedup_streaming_export.py tests/test_dedup_banding.py tests/unit/test_dedup_transaction_rollback.py -q --no-cov` — passed.
+
+**GitNexus:** MCP `user-gitnexus` not in available servers this session; run upstream `impact` on touched symbols before merge if connected.
+
+**Next:** Phase 5 features deslop per plan, or merge.

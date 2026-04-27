@@ -22,7 +22,7 @@ todos:
     status: completed
   - id: deslop-phase-4-scraper
     content: Phase 4 — Deslop scraper (preserve scrape_errors / transient semantics)
-    status: pending
+    status: completed
   - id: deslop-phase-5-features
     content: Phase 5 — Deslop features pipeline + related tests
     status: pending

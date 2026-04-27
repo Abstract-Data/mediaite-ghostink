@@ -1,4 +1,4 @@
-"""HTML parsing utilities (Phase 3+)."""
+"""HTML parsing utilities for scraped article bodies and metadata."""
 
 from __future__ import annotations
 
@@ -43,7 +43,7 @@ _REMOVE_CLASS_SUBSTRINGS = (
 
 
 def _sanitize_and_extract(root: BeautifulSoup | Tag) -> str:
-    """Strip boilerplate tags/classes then normalize body text (RF-DRY-001)."""
+    """Strip boilerplate tags/classes, then normalize body text."""
     for tag in root.find_all(["script", "style", "nav", "aside", "footer"]):
         tag.decompose()
     for el in root.find_all(True):

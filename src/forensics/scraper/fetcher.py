@@ -1,4 +1,4 @@
-"""HTTP helpers: async rate limiting, HTML fetch, and resilient requests (Phase 2+)."""
+"""HTTP helpers: rate limiting, HTML fetch, and retried requests."""
 
 from __future__ import annotations
 
@@ -56,7 +56,7 @@ def _error_lock_for_current_loop() -> asyncio.Lock:
 
 @dataclass
 class ScrapeRunTelemetry:
-    """Per-``dispatch_scrape`` scrape_errors.jsonl classification + coarse success signal."""
+    """Tracks ``transient`` flags appended to scrape_errors and whether any row succeeded."""
 
     error_transient: list[bool] = field(default_factory=list)
     any_row_success: bool = False
@@ -356,12 +356,7 @@ class ParsedArticleFetch:
 
 
 def _parse_article_html(article: Article, html: str) -> ParsedArticleFetch:
-    """Extract text, metadata, word count, and coauthored flag from HTML.
-
-    Split from persistence so persistence can run inside the final db_lock
-    critical section (after the resume-skip re-check) without orphaning
-    raw files when a concurrent worker wins the race.
-    """
+    """Parse HTML to text, metadata, word count, and coauthorship (CPU work outside db_lock)."""
     raw_clean = extract_article_text(html)
     clean = filter_insufficient_article_body(
         raw_clean,
@@ -392,12 +387,7 @@ async def _persist_article_fetch(
     coauth: Path,
     warns: Path,
 ) -> Article:
-    """Write raw HTML, return an updated ``Article``, and append side-JSONL entries.
-
-    Must run under the DB lock, after the final ``_resume_skip_fetch`` check.
-    ``Article`` is ``frozen=True`` so the updated row is returned to the caller
-    rather than mutated in place.
-    """
+    """Write raw HTML and coauth/warn JSONL; caller holds db_lock after resume re-check."""
     raw_path = _write_raw_html_file(root, year, article_id, html)
     merged_meta = {**article.metadata, **parsed.meta_extra}
 
@@ -436,7 +426,7 @@ async def _persist_article_fetch(
 
 @dataclass(frozen=True, slots=True)
 class FetchConfig:
-    """Immutable paths and limits for one HTML fetch run (RF-SMELL-004)."""
+    """Immutable paths and limits for one HTML fetch run."""
 
     root: Path
     scraping: ScrapingConfig
@@ -448,7 +438,7 @@ class FetchConfig:
 
 @dataclass(slots=True)
 class FetchSession:
-    """Per-run mutable coordination state (RF-SMELL-004)."""
+    """Per-run mutable coordination state (repo, locks, counters)."""
 
     repo: Repository
     limiter: RateLimiter
@@ -461,12 +451,9 @@ class FetchSession:
 
 
 class ArticleHtmlFetchContext:
-    """Paths, locks, and shared counters for one ``fetch_articles`` concurrent HTML run.
+    """Paths, locks, and counters for ``fetch_articles``.
 
-    Internally split into :class:`FetchConfig` + :class:`FetchSession` (RF-SMELL-004).
-    Callers may construct either ``ArticleHtmlFetchContext(config=..., session=...)``
-    (both required together; do not mix with legacy keys) or pass the legacy flat
-    keyword set (``repo=``, ``root=``, …) preserved for tests.
+    Use ``config`` + ``session`` together, or the legacy flat kwargs (``repo``, ``root``, …).
     """
 
     __slots__ = ("config", "session")
@@ -584,17 +571,7 @@ async def _persist_and_log(
     log_suffix: str,
     article: Article | None = None,
 ) -> bool:
-    """Persist a fetch result under ``ctx.db_lock`` and log completion under ``ctx.done_lock``.
-
-    Two modes share this ceremony:
-    - When ``mutate`` is provided (HTTP-fail, off-domain): read the row, skip if already
-      filled, call ``mutate(row)`` which returns a new ``Article``, upsert it.
-    - When ``article`` is provided (success): read the latest row, skip upsert if filled,
-      else upsert the caller's pre-built ``article``.
-
-    Returns True when a row was persisted (counter incremented + log emitted),
-    False when the write was skipped because the row was already fetched.
-    """
+    """Upsert under db_lock; bump done_count under done_lock. ``mutate`` XOR ``article``."""
     async with ctx.db_lock:
         latest = await asyncio.to_thread(ctx.repo.get_article_by_id, row.article_id)
         if _resume_skip_fetch(latest):
@@ -669,11 +646,7 @@ async def _commit_parsed_article(
     scraped_at: datetime,
     year: int,
 ) -> bool:
-    """Second lock leg: re-check row, persist parsed HTML, upsert (RF-CPLX-007).
-
-    Returns ``True`` when an upsert was written; ``False`` when a concurrent worker
-    won the race (caller must not bump ``done_count``).
-    """
+    """Re-check row under lock, persist parse result. False if another worker already wrote."""
     async with ctx.db_lock:
         latest = await asyncio.to_thread(ctx.repo.get_article_by_id, row.article_id)
         if _resume_skip_fetch(latest):
@@ -701,26 +674,10 @@ async def _handle_success(
     scraped_at: datetime,
     year: int,
 ) -> None:
-    """Persist a fetched article using a deliberate read–parse–write double-lock pattern.
+    """Read row under db_lock, parse HTML outside the lock, then commit under db_lock again.
 
-    Concurrency contract (see RF-SMELL-002):
-
-    1. **First lock (read)** — acquire ``ctx.db_lock`` only long enough to load the
-       latest DB row for this article. Release the lock immediately so other coroutines
-       can keep progressing. If another worker already marked the article as fetched
-       (``_resume_skip_fetch``), bail out early.
-    2. **Parse outside the lock** — HTML parsing is CPU-bound and can be slow.
-       Running it under the DB lock would serialize fetchers; doing it *between*
-       the locks allows N workers to parse concurrently against a single SQLite
-       connection.
-    3. **Second lock (write)** — :func:`_commit_parsed_article` re-reads the DB row
-       under a fresh lock to detect the race where a peer wrote the same article while
-       we were parsing. If the peer already committed, abort our write to keep upserts
-       idempotent. Otherwise persist the parsed result and bump the done counter.
-
-    The ``db_lock`` is the single serialization point for the SQLite connection,
-    which ``_connect`` opened with ``check_same_thread=False``. Skipping it on
-    either leg risks WAL-journal corruption or "database is locked" stalls.
+    Parsing stays outside the lock so workers do not serialize on CPU; the second
+    locked pass avoids duplicate raw files / upserts when two tasks race the same row.
     """
     async with ctx.db_lock:
         article = await asyncio.to_thread(ctx.repo.get_article_by_id, row.article_id)

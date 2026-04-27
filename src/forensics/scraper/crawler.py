@@ -1,4 +1,4 @@
-"""Author discovery and WordPress REST metadata collection (Phase 2)."""
+"""Author discovery and WordPress REST metadata collection."""
 
 from __future__ import annotations
 
@@ -46,7 +46,7 @@ from forensics.utils.text import word_count
 
 logger = logging.getLogger(__name__)
 
-# Recoverable failures during per-author metadata ingest (P2-SEC-001). Others propagate.
+# Swallowed in collect_article_metadata per-author tasks; others propagate.
 _METADATA_INGEST_RECOVERABLE: tuple[type[BaseException], ...] = (
     httpx.HTTPError,
     OSError,
@@ -57,7 +57,6 @@ _METADATA_INGEST_RECOVERABLE: tuple[type[BaseException], ...] = (
     sqlite3.Error,
 )
 
-# Stable entrypoints for CLI and cross-module idempotency; everything else is internal.
 __all__ = (
     "collect_article_metadata",
     "discover_authors",
@@ -201,11 +200,7 @@ def _int_header(response: httpx.Response, name: str, default: int | None = None)
 
 
 def _author_config_from_manifest(m: AuthorManifest) -> AuthorConfig:
-    """Build ``AuthorConfig`` for corpus-wide metadata ingestion.
-
-    Baseline dates are wide placeholders; downstream analysis should filter or
-    override using ``config.toml`` targets when needed.
-    """
+    """Build ``AuthorConfig`` from manifest; baselines are placeholders until config narrows."""
     return AuthorConfig(
         name=m.name,
         slug=m.slug,
@@ -233,7 +228,6 @@ def _load_authors_manifest(path: Path) -> dict[str, AuthorManifest]:
 
 
 def _write_authors_manifest(path: Path, rows: list[AuthorManifest]) -> None:
-    # Serialize then write atomically via the centralised text writer.
     from forensics.storage.json_io import write_text_atomic
 
     body = "".join(row.model_dump_json() + "\n" for row in rows)
@@ -508,8 +502,6 @@ async def collect_article_metadata(
         )
     else:
         logger.info("metadata: WordPress posts date filter off (full published history)")
-    # One RateLimiter for the whole metadata run: parallel author tasks all call
-    # request_with_retry with this instance, so inter-request spacing is global.
     limiter = RateLimiter(scraping.rate_limit_seconds, scraping.rate_limit_jitter)
 
     async def _run(r: Repository) -> int:
@@ -565,14 +557,7 @@ async def collect_article_metadata(
 
 
 def _ingest_single_post(post: object, author_id: str) -> Article | None:
-    """Parse one WordPress ``wp/v2/posts`` element into an ``Article``.
-
-    Pure function: no I/O, no locks, no async. Returns ``None`` when the
-    item isn't a dict (the WP API occasionally returns stub rows on
-    rate-limit) or when required fields are missing/malformed. Kept small
-    so the ingest loop in :func:`_ingest_author_posts` stays readable and
-    the parse step is independently testable (RF-CPLX-002).
-    """
+    """Parse one ``wp/v2/posts`` element; None if not a dict or fields are malformed."""
     if not isinstance(post, dict):
         return None
     try:
@@ -593,12 +578,7 @@ async def _persist_page_articles(
     scraping: ScrapingConfig,
     db_lock: asyncio.Lock,
 ) -> int:
-    """Upsert one page's worth of articles under a single ``db_lock`` acquisition.
-
-    Previously each article took its own lock; batching per page reduces lock
-    churn without changing behaviour. The existence check remains inside the
-    lock because it's part of the insert-vs-upgrade decision.
-    """
+    """Upsert one page of articles under one db_lock (URL existence + optional body upgrade)."""
     inserted = 0
     async with db_lock:
         for article in articles:
@@ -608,8 +588,7 @@ async def _persist_page_articles(
                 await asyncio.to_thread(repo.upsert_article, article)
                 inserted += 1
             elif scraping.bulk_fetch_mode and article.clean_text:
-                # Resume case: metadata-only row already present — upgrade it
-                # with the body text we just got from content.rendered.
+                # Bulk resume: fill empty body from REST content.rendered.
                 existing = await asyncio.to_thread(repo.get_article_by_id, article.id)
                 if existing is not None and not existing.clean_text.strip():
                     upgraded = existing.with_updates(
@@ -759,12 +738,7 @@ def _iter_manifests_from_users_json(
     total_posts_by_id: dict[int, int],
     discovered_at: datetime | None = None,
 ) -> Iterator[AuthorManifest]:
-    """Build manifests from static user JSON and post-count map.
-
-    **Supported test and tooling surface** (RF-DEAD-003): not used by the live
-    crawl path, but exercised by ``tests/test_scraper.py`` and available for
-    offline fixtures / notebooks. Do not remove without migrating those tests.
-    """
+    """Yield manifests from static JSON + counts (tests/offline; not the live crawl)."""
     when = discovered_at or datetime.now(UTC)
     for u in users:
         wp_id = int(u["id"])
