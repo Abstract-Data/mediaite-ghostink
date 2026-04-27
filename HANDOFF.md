@@ -6178,3 +6178,62 @@ uv run pytest tests/unit/test_probability_trajectories.py tests/unit/test_analyz
 #### Risks & Next Steps
 
 - Optional `analysis.convergence.require_probability_inputs` flag from the plan was not added; publication runs still rely on having run `extract --probability` when Pipeline C is desired.
+
+---
+
+### TASK-4 — Preregistration publication checklist + CI (plan: prereg-ops-ci)
+
+**Status:** Complete  
+**Date:** 2026-04-27
+
+#### What Was Done
+
+- Added **Preregistration: publication lock checklist** to `docs/RUNBOOK.md` (commit lock artifacts, re-lock after config changes, no `--exploratory` for publication, `run_metadata.json` expectations).
+- Added `scripts/verify_repo_preregistration_lock.py` and a **Preregistration lock** job in `.github/workflows/ci-quality.yml` so CI fails if the committed lock is missing, unfilled, or mismatched vs `config.toml`.
+
+#### Files Modified
+
+- `docs/RUNBOOK.md`, `scripts/verify_repo_preregistration_lock.py`, `.github/workflows/ci-quality.yml`, `HANDOFF.md`
+
+#### Verification Evidence
+
+```
+uv run python scripts/verify_repo_preregistration_lock.py
+uv run ruff check scripts/verify_repo_preregistration_lock.py
+```
+
+#### GitNexus
+
+- New script only; `gitnexus_impact` not run.
+
+#### Risks & Next Steps
+
+- Any PR that changes `config.toml` analysis thresholds without updating `data/preregistration/preregistration_lock.json` will fail the new CI job until `uv run forensics --yes lock-preregistration` and commit.
+
+---
+
+### Prereg RUNBOOK checklist + client Quarto copy (session)
+
+**Status:** Complete  
+**Date:** 2026-04-27
+
+#### What was done
+
+- **Prereg (TASK-4):** Added a **Pre-publication checklist (confirmatory lock)** subsection to `docs/RUNBOOK.md` (human steps: commit `data/preregistration/*`, confirmatory `analyze`, verify `run_metadata.json`). Documented existing CI: `ci-quality.yml` job + `scripts/verify_repo_preregistration_lock.py` (no duplicate job in `ci-tests.yml`).
+- **Client Quarto (TASK-5):** Client-facing tone in `index.qmd`, `_quarto.yml` book title, `notebooks/09_full_report.ipynb`, `05`, `06`, `07`, `00_power_analysis.ipynb`; `src/forensics/reporting/narrative.py` prose; tests updated for new strings.
+- **Hardening:** `tests/integration/test_pipeline_end_to_end.py` copies `_quarto.yml` + `notebooks/` for Quarto; `.github/workflows/deploy.yml` watches `_quarto.yml`; `tests/test_report.py` index assertion; `tests/unit/test_parser_html_fuzz.py` restricts HTML fuzz alphabet so sentinels are not swallowed by malformed tags.
+
+#### Files touched (high level)
+
+- `docs/RUNBOOK.md`, `HANDOFF.md`, `_quarto.yml`, `index.qmd`, `notebooks/*.ipynb` (as above), `src/forensics/reporting/narrative.py`, `tests/test_narrative.py`, `tests/unit/test_reporting_diagnostics.py`, `tests/test_report.py`, `tests/integration/test_pipeline_end_to_end.py`, `tests/unit/test_parser_html_fuzz.py`, `.github/workflows/deploy.yml`
+
+#### Verification
+
+```
+uv run ruff check . && uv run ruff format --check .
+uv run pytest tests/ -q --no-cov
+```
+
+#### Notes
+
+- GitNexus MCP was unavailable in this environment; impact was not run for `generate_evidence_narrative`.

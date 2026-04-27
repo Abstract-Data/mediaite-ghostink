@@ -450,9 +450,7 @@ def test_validate_and_promote_isolated_outputs_rejects_stale_config_hash(
     paths, _cfg = pair_project
     settings = get_settings()
     valid = orch_mod._isolated_author_worker("tgt1", paths, settings, {}, "run-stale", True, False)
-    stale = orch_mod._isolated_author_worker(
-        "ctrl1", paths, settings, {}, "run-stale", True, False
-    )
+    stale = orch_mod._isolated_author_worker("ctrl1", paths, settings, {}, "run-stale", True, False)
     assert valid is not None
     assert stale is not None
 
@@ -501,9 +499,7 @@ def test_parallel_refresh_rebuilds_shared_artifacts_after_promotion(
         wrapped_validate_and_promote,
     )
 
-    results = orch_mod.run_parallel_author_refresh(
-        paths, settings, max_workers=1, exploratory=True
-    )
+    results = orch_mod.run_parallel_author_refresh(paths, settings, max_workers=1, exploratory=True)
 
     assert set(results) == {"tgt1", "ctrl1", "spare"}
     assert observed == {"promoted_before_shared_rebuild": True}

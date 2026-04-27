@@ -42,7 +42,13 @@ def test_pipeline_extract_analyze_comparison_end_to_end(
     cfg_dest = e2e_root / "config.toml"
     shutil.copyfile(_FIXTURE_CONFIG, cfg_dest)
     shutil.copyfile(_REPO_ROOT / "index.qmd", e2e_root / "index.qmd")
-    shutil.copyfile(_REPO_ROOT / "quarto.yml", e2e_root / "quarto.yml")
+    shutil.copyfile(_REPO_ROOT / "_quarto.yml", e2e_root / "_quarto.yml")
+    shutil.copytree(
+        _REPO_ROOT / "notebooks",
+        e2e_root / "notebooks",
+        dirs_exist_ok=True,
+        ignore=shutil.ignore_patterns("__pycache__", ".ipynb_checkpoints"),
+    )
 
     db_path = e2e_root / "data" / "articles.db"
     shift = seed_two_regime_corpus(db_path)

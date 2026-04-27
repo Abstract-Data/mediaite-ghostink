@@ -155,7 +155,7 @@ def test_narrative_no_signal() -> None:
     """NONE tier should use calibrated 'no evidence' language."""
     analysis = _empty_result()
     text = generate_evidence_narrative(analysis, "jane-doe")
-    assert "NONE" in text
+    assert "None" in text
     assert "no evidence" in text.lower()
     # Do not overclaim in the absence of signal.
     assert "convergence window" not in text.lower()
@@ -167,7 +167,7 @@ def test_narrative_strong_signal() -> None:
     score = compute_composite_score(analysis)
     text = generate_evidence_narrative(analysis, "jane-doe", score=score)
     assert score.strength.value == "strong"
-    assert "STRONG" in text
+    assert "Strong" in text
     # Effect sizes appear in "d=..." form for at least one feature.
     assert "d=" in text
     assert "ai_marker_frequency" in text  # largest |d| = 1.2
@@ -211,7 +211,7 @@ def test_narrative_control_sentence_toggle() -> None:
     text_ctrl = generate_evidence_narrative(analysis, "jane-doe", control_count=3)
     assert "natural-control" not in text_no_ctrl.lower()
     assert "natural-control" in text_ctrl.lower()
-    assert "3 natural-control" in text_ctrl
+    assert "3 natural-control author" in text_ctrl.lower()
 
 
 @pytest.mark.parametrize("slug", ["jane-doe", "a-b-c"])

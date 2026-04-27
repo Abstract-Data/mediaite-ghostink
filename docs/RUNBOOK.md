@@ -63,11 +63,34 @@ Typical operator workflow:
 
 To check the live lock state at any time: `cat data/preregistration/preregistration_lock.json | jq '{locked_at, content_hash}'`. To check whether the **most recent run** was confirmatory: `jq '.preregistration_status, .exploratory' data/analysis/run_metadata.json` — `ok` and `false` (or absent) means confirmatory.
 
+### Preregistration: publication lock checklist (governance)
+
+Before treating pipeline outputs or reports as **confirmatory** for external publication:
+
+1. **Committed lock** — `data/preregistration/preregistration_lock.json` (and any amendment notes such as `data/preregistration/amendment_*.md` referenced by your process) are committed on the branch you are releasing; `locked_at` is non-null and `analysis` + `content_hash` are present.
+2. **Lock matches config** — After any intentional `config.toml` analysis-threshold change, run `uv run forensics --yes lock-preregistration` and commit the updated JSON. Local gate (same as CI): `uv run python scripts/verify_repo_preregistration_lock.py` must exit `0`.
+3. **Confirmatory runs only** — Publication runs use `uv run forensics analyze` **without** `--exploratory` (and the same rule for `forensics all` / automation unless explicitly marked exploratory).
+4. **Run metadata** — After the publication analyze, archive or cite `data/analysis/run_metadata.json`: `preregistration_status` must be `"ok"` and `exploratory` must be `false` or absent.
+
+CI enforces (2) for every push/PR via the **Preregistration lock** job in `.github/workflows/ci-quality.yml` (`verify_repo_preregistration_lock.py`).
+
 Detail / lifecycle:
 
 1. **Write or refresh the lock** from the current `config.toml` thresholds: `uv run forensics lock-preregistration` → updates `data/preregistration/preregistration_lock.json` with `locked_at` (UTC ISO), `analysis` snapshot, and `content_hash`.
 2. **Template / exploratory state:** the committed repo default is an unfilled lock (`{"locked_at": null}` only). `verify_preregistration` reports `status="missing"` — confirmatory `analyze` exits non-zero until you run `lock-preregistration` or pass `--exploratory`.
 3. **Verify after a run:** read `data/analysis/run_metadata.json` → `preregistration_status` is `ok`, `missing`, or `mismatch`. A **mismatch** means the live settings no longer match the lock; confirmatory analyze **hard-fails** (exit code 1) after writing run metadata under `rid=preregistration-blocked`.
+
+### Pre-publication checklist (confirmatory lock)
+
+Use this before treating any analysis drop as **publication-ready** (client deliverable, filing, or sworn work product). Exploratory runs (`--exploratory`) are fine for development; they must not be relabeled as confirmatory without completing the steps below.
+
+1. **Lock artifacts in version control:** commit `data/preregistration/preregistration_lock.json` and any active amendment or methodology notes under `data/preregistration/` (for example `amendment_phase15.md`) on the same branch as the analysis config you intend to ship.
+2. **Config parity:** the committed `config.toml` (or `FORENSICS_CONFIG_FILE` used in CI) must be the same file that was hashed when the lock was written. After any threshold or analysis-model change, run `uv run forensics --yes lock-preregistration` and commit the updated lock.
+3. **Confirmatory run:** execute `uv run forensics analyze` **without** `--exploratory` for the final corpus slice you are publishing. Do not hand-edit `run_metadata.json`.
+4. **Record proof in run metadata:** open `data/analysis/run_metadata.json` from that run and confirm `preregistration_status` is **`ok`**, `exploratory` is **`false`** or absent, and `preregistration_message` is empty or informational (not a mismatch explanation).
+5. **Optional sanity:** `jq '.preregistration_status, .exploratory' data/analysis/run_metadata.json` should print `ok` then `false` (or `null`).
+
+**CI automation:** the **Preregistration lock matches config.toml** job in [`.github/workflows/ci-quality.yml`](../.github/workflows/ci-quality.yml) runs [`scripts/verify_repo_preregistration_lock.py`](../scripts/verify_repo_preregistration_lock.py) on every push/PR so the committed lock cannot be a template or out of sync with repo `config.toml`. For helper-level regression coverage, run [`tests/test_preregistration.py`](../tests/test_preregistration.py) locally or via the main test job. These checks do **not** substitute for steps 1–4 above — they do not ship your production lock or run your full analyze corpus.
 
 ### Embeddings (quarantine + re-extract)
 

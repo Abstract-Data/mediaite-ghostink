@@ -18,7 +18,7 @@ project:
     - "!CHANGELOG.md"
 
 book:
-  title: "AI Writing Forensics: Mediaite Investigation"
+  title: "Mediaite writing analysis — technical report"
   author: "Abstract Data LLC"
   date: today
   chapters:
