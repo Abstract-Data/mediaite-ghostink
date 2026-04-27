@@ -53,7 +53,7 @@ Near-duplicate detection (`forensics.scraper.dedup`) compares 128-bit simhashes 
 - Stage-by-stage (recommended when debugging):
   - `uv run forensics scrape` (use `--discover` / `--metadata` / `--fetch` etc. as needed; see `--help`)
   - `uv run forensics extract`
-  - `uv run forensics analyze` (add `--changepoint`, `--drift`, … as needed). Each analyze run calls `verify_preregistration(settings)` before stages (see `src/forensics/cli/analyze.py`); threshold drift vs `data/preregistration/preregistration_lock.json` logs at WARNING, and `data/analysis/run_metadata.json` records `preregistration_status` (`ok` / `missing` / `mismatch`).
+  - `uv run forensics analyze` (add `--changepoint`, `--drift`, … as needed). Each analyze run calls `verify_preregistration(settings)` before stages (see `src/forensics/cli/analyze.py`); threshold drift vs `data/preregistration/preregistration_lock.json` logs at WARNING, and `data/analysis/run_metadata.json` records `preregistration_status` (`ok` / `missing` / `mismatch`). **SQLite in analyze (ADR-009 Option A):** analyze still opens `data/articles.db` via `Repository` for **slug ↔ `author_id`** and roster wiring only; Parquet / `batch.npz` / manifests supply the measured signals. Keep the same `articles.db` that extract used (do not swap or truncate authors between extract and analyze without re-extracting), or joins and manifest filters can silently drop or mis-attribute rows.
   - `uv run forensics report` (requires **Quarto** on `PATH`; output under `data/reports/` per `quarto.yml`)
 - Extract probability features (Phase 9): `uv run forensics extract --probability`
 - Generate AI baseline (Phase 10): `uv run python scripts/generate_baseline.py --author {slug}`

@@ -22,7 +22,7 @@ todos:
     status: completed
   - id: gate-c06
     content: Write ADR for analyze-stage data sources; obtain approval before Repository removal (C-06)
-    status: pending
+    status: completed
 isProject: false
 ---
 

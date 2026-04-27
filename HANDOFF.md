@@ -5138,3 +5138,65 @@ uv run ruff check . && uv run ruff format --check .
 
 #### Risks & Next Steps
 - Re-run **`npx gitnexus analyze --embeddings`** only if preserving an existing embedding index (see `.gitnexus/meta.json`); plain `analyze` without `--embeddings` drops prior embeddings per project docs.
+
+---
+
+### C-06 gate — ADR for analyze-stage data sources (`gate-c06`)
+**Status:** Complete  
+**Date:** 2026-04-26  
+**Agent/Session:** Cursor agent (gate-c06)
+
+#### What Was Done
+- Expanded **`docs/adr/ADR-009-analyze-stage-sqlite-reads.md`** from a short stub into a full ADR: context (C-06 vs AGENTS/ARCHITECTURE), **inventory table** of all `Repository` touchpoints under `src/forensics/analysis/`, three options **A / B / C** (documented exception, extract-time export, read-only SQLite), shared consequences, fork/parallel notes, and a **pending approval** block for the product owner to record decision before any Repository removal work.
+
+#### Files Modified
+- `docs/adr/ADR-009-analyze-stage-sqlite-reads.md` — full C-06 gate ADR
+- `HANDOFF.md` — this block
+
+#### Verification Evidence
+```
+Documentation-only change; no pytest/ruff required for ADR text.
+```
+
+#### Decisions Made
+- **No code change** — per plan gate, **Repository** removal waits on explicit **Accepted** decision in ADR-009.
+
+#### Unresolved Questions
+- Which option (A, B, C, or hybrid) the owner approves.
+
+#### Risks & Next Steps
+- After approval, implement chosen path, update ARCHITECTURE/RUNBOOK as needed, and re-run full test + analyze smoke paths.
+
+---
+
+### ADR-009 Option A — analyze-stage SQLite contract (`c06-option-a`)
+**Status:** Complete  
+**Date:** 2026-04-26  
+**Agent/Session:** Cursor agent (user directive)
+
+#### What Was Done
+- Recorded **Accepted — Option A** in **`docs/adr/ADR-009-analyze-stage-sqlite-reads.md`** (status, decision block, Option A marked chosen).
+- Documented the contract in **`docs/ARCHITECTURE.md`** (Analyze bullet + short “Analyze stage and SQLite” subsection).
+- Operator note in **`docs/RUNBOOK.md`** under stage-by-stage analyze (identity-only DB use; do not swap `articles.db` between extract and analyze).
+- Updated **`docs/punch-list-closure-index.md`** C-06 row to reflect acceptance.
+
+#### Files Modified
+- `docs/adr/ADR-009-analyze-stage-sqlite-reads.md`
+- `docs/ARCHITECTURE.md`
+- `docs/RUNBOOK.md`
+- `docs/punch-list-closure-index.md`
+- `HANDOFF.md` — this block
+
+#### Verification Evidence
+```
+Documentation-only; no code or tests changed.
+```
+
+#### Decisions Made
+- **Option A:** analyze keeps `Repository` for slug ↔ `author_id`; no extract-time author bundle (B) or mandatory read-only URI (C).
+
+#### Unresolved Questions
+- None.
+
+#### Risks & Next Steps
+- If future work needs artifact-only analyze, open a new ADR revision rather than treating C-06 as “open.”

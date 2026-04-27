@@ -60,7 +60,7 @@ This document maps each punch **ID** to the **primary deliverable** (code path, 
 | C-02 | code | `src/forensics/analysis/changepoint.py` — single median-imputation path for detectors |
 | C-03, C-04 | code | `src/forensics/analysis/drift.py` — shared cosine / guard helpers |
 | C-05 | code + test | `src/forensics/scraper/dedup.py`; `tests/unit/test_dedup_transaction_rollback.py` |
-| C-06 | ADR | **`docs/adr/ADR-009-analyze-stage-sqlite-reads.md`** — proposed options; **no contract change** until approval |
+| C-06 | ADR | **`docs/adr/ADR-009-analyze-stage-sqlite-reads.md`** — **Accepted Option A** (2026-04-26); `ARCHITECTURE.md` + `RUNBOOK.md` document analyze-stage SQLite for identity only; no Repository removal |
 | C-07 | code | `src/forensics/analysis/statistics.py` — Cohen’s d metadata dedupe |
 | C-08 | code | `src/forensics/analysis/convergence.py` — narrowed legacy exception handling |
 | C-09 | code | `src/forensics/analysis/orchestrator/parallel.py` — explicit multiprocessing spawn context |
