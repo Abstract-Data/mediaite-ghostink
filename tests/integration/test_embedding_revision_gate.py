@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 
 from forensics.analysis.drift import load_article_embeddings, validate_embedding_record
+from forensics.analysis.orchestrator import AnalysisMode
 from forensics.models.features import EmbeddingRecord
 from forensics.paths import AnalysisArtifactPaths
 from forensics.storage.parquet import write_author_embedding_batch, write_embeddings_manifest
@@ -55,8 +56,7 @@ def test_load_article_embeddings_revision_mismatch_raises_confirmatory(
             sample_author.slug,
             paths,
             expected_revision="good-sha",
-            exploratory=False,
-            allow_pre_phase16_embeddings=False,
+            mode=AnalysisMode(),
         )
 
 
@@ -80,8 +80,7 @@ def test_load_article_embeddings_revision_mismatch_exploratory_raises_without_fl
             sample_author.slug,
             paths,
             expected_revision="good-sha",
-            exploratory=True,
-            allow_pre_phase16_embeddings=False,
+            mode=AnalysisMode(exploratory=True),
         )
 
 
@@ -106,8 +105,7 @@ def test_load_article_embeddings_revision_mismatch_exploratory_warns_with_flag(
         sample_author.slug,
         paths,
         expected_revision="good-sha",
-        exploratory=True,
-        allow_pre_phase16_embeddings=True,
+        mode=AnalysisMode(exploratory=True, allow_pre_phase16_embeddings=True),
     )
     assert len(pairs) == 1
     assert "revision mismatch" in caplog.text
@@ -130,6 +128,5 @@ def test_validate_embedding_record_dim_mismatch_always_raises() -> None:
             rec,
             vec,
             "r",
-            exploratory=True,
-            allow_pre_phase16_embeddings=True,
+            mode=AnalysisMode(exploratory=True, allow_pre_phase16_embeddings=True),
         )

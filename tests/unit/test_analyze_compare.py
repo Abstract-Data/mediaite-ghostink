@@ -25,6 +25,7 @@ import typer
 
 from forensics.analysis import orchestrator as orch_mod
 from forensics.analysis.orchestrator import (
+    AnalysisMode,
     _resolve_max_workers,
     _resolve_parallel_refresh_workers,
     _resolve_targets_and_controls,
@@ -204,7 +205,7 @@ def test_run_compare_only_with_pair_writes_report(
         settings,
         paths=paths,
         compare_pair=("spare", "ctrl1"),
-        exploratory=True,
+        mode=AnalysisMode(exploratory=True),
     )
     # Only the explicit target is in the output — the configured target tgt1 is skipped.
     assert set(out["targets"]) == {"spare"}
@@ -283,7 +284,9 @@ def test_run_full_analysis_merges_run_metadata_in_single_write(
     settings = get_settings()
     for slug in ("ctrl1", "spare"):
         _write_current_result(paths, slug, settings)
-    run_full_analysis(paths, settings, author_slug="tgt1", max_workers=1, exploratory=True)
+    run_full_analysis(
+        paths, settings, author_slug="tgt1", max_workers=1, mode=AnalysisMode(exploratory=True)
+    )
     assert counts["run_metadata"] == 1
 
 
@@ -304,7 +307,7 @@ def test_run_full_analysis_timings_out_populates_per_stage_buckets(
         author_slug="tgt1",
         max_workers=1,
         timings_out=timings,
-        exploratory=True,
+        mode=AnalysisMode(exploratory=True),
     )
     assert timings.total > 0.0
     assert "tgt1" in timings.per_author
@@ -324,7 +327,7 @@ def test_run_full_analysis_parallel_dispatch_returns_results(
 
     paths, _cfg = pair_project
     settings = get_settings()
-    results = run_full_analysis(paths, settings, max_workers=2, exploratory=True)
+    results = run_full_analysis(paths, settings, max_workers=2, mode=AnalysisMode(exploratory=True))
     # All three configured authors should have feature parquets; the worker
     # path writes per-author artifacts and returns the assembled dict.
     assert set(results) == {"tgt1", "ctrl1", "spare"}
@@ -347,8 +350,7 @@ def test_per_author_worker_returns_assembled_and_timings(
         paths,
         settings,
         {},
-        True,
-        False,
+        AnalysisMode(exploratory=True),
     )
     assert slug == "tgt1"
     assert assembled is not None
@@ -375,8 +377,7 @@ def test_per_author_worker_handles_unknown_slug(
         paths,
         settings,
         {},
-        False,
-        False,
+        AnalysisMode(),
     )
     assert slug == "ghost-author"
     assert assembled is None
@@ -391,7 +392,9 @@ def test_isolated_author_worker_does_not_write_canonical_artifacts(
 
     paths, _cfg = pair_project
     settings = get_settings()
-    isolated = _isolated_author_worker("tgt1", paths, settings, {}, "run-1", True, False)
+    isolated = _isolated_author_worker(
+        "tgt1", paths, settings, {}, "run-1", AnalysisMode(exploratory=True)
+    )
 
     assert isolated is not None
     assert isolated.analysis_dir == paths.analysis_dir / "parallel" / "run-1" / "tgt1"
@@ -409,7 +412,9 @@ def test_run_parallel_author_refresh_promotes_after_validation(
     paths, _cfg = pair_project
     settings = get_settings()
 
-    results = run_parallel_author_refresh(paths, settings, max_workers=1, exploratory=True)
+    results = run_parallel_author_refresh(
+        paths, settings, max_workers=1, mode=AnalysisMode(exploratory=True)
+    )
 
     assert set(results) == {"tgt1", "ctrl1", "spare"}
     for slug in results:
@@ -426,10 +431,10 @@ def test_validate_and_promote_isolated_outputs_is_all_or_nothing(
     paths, _cfg = pair_project
     settings = get_settings()
     valid = orch_mod._isolated_author_worker(
-        "tgt1", paths, settings, {}, "run-validation", True, False
+        "tgt1", paths, settings, {}, "run-validation", AnalysisMode(exploratory=True)
     )
     invalid = orch_mod._isolated_author_worker(
-        "ctrl1", paths, settings, {}, "run-validation", True, False
+        "ctrl1", paths, settings, {}, "run-validation", AnalysisMode(exploratory=True)
     )
     assert valid is not None
     assert invalid is not None
@@ -449,8 +454,12 @@ def test_validate_and_promote_isolated_outputs_rejects_stale_config_hash(
     """A stale isolated result hash is rejected before any canonical promotion."""
     paths, _cfg = pair_project
     settings = get_settings()
-    valid = orch_mod._isolated_author_worker("tgt1", paths, settings, {}, "run-stale", True, False)
-    stale = orch_mod._isolated_author_worker("ctrl1", paths, settings, {}, "run-stale", True, False)
+    valid = orch_mod._isolated_author_worker(
+        "tgt1", paths, settings, {}, "run-stale", AnalysisMode(exploratory=True)
+    )
+    stale = orch_mod._isolated_author_worker(
+        "ctrl1", paths, settings, {}, "run-stale", AnalysisMode(exploratory=True)
+    )
     assert valid is not None
     assert stale is not None
 
@@ -499,7 +508,9 @@ def test_parallel_refresh_rebuilds_shared_artifacts_after_promotion(
         wrapped_validate_and_promote,
     )
 
-    results = orch_mod.run_parallel_author_refresh(paths, settings, max_workers=1, exploratory=True)
+    results = orch_mod.run_parallel_author_refresh(
+        paths, settings, max_workers=1, mode=AnalysisMode(exploratory=True)
+    )
 
     assert set(results) == {"tgt1", "ctrl1", "spare"}
     assert observed == {"promoted_before_shared_rebuild": True}

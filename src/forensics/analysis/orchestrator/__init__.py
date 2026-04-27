@@ -28,6 +28,7 @@ from forensics.analysis.orchestrator import per_author as _per_author
 from forensics.analysis.orchestrator import runner as _runner
 from forensics.analysis.orchestrator import sensitivity as _sensitivity
 from forensics.analysis.orchestrator import staleness as _staleness
+from forensics.analysis.orchestrator.mode import DEFAULT_ANALYSIS_MODE, AnalysisMode
 from forensics.analysis.orchestrator.timings import AnalysisTimings
 
 _clean_feature_series = _per_author._clean_feature_series
@@ -85,7 +86,9 @@ def _run_section_residualized_sensitivity(*args: Any, **kwargs: Any):
 run_compare_only = _comparison.run_compare_only
 
 __all__ = [
+    "AnalysisMode",
     "AnalysisTimings",
+    "DEFAULT_ANALYSIS_MODE",
     "assemble_analysis_result",
     "run_compare_only",
     "run_full_analysis",

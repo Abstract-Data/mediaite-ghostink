@@ -13,6 +13,7 @@ from typing import Any
 
 import numpy as np
 
+from forensics.analysis.orchestrator.mode import DEFAULT_ANALYSIS_MODE, AnalysisMode
 from forensics.analysis.utils import pair_months_with_velocities
 from forensics.config.settings import ForensicsSettings
 from forensics.models.analysis import DriftScores
@@ -165,16 +166,15 @@ def validate_embedding_record(
     vec: np.ndarray,
     expected_revision: str,
     *,
-    exploratory: bool,
-    allow_pre_phase16_embeddings: bool,
+    mode: AnalysisMode,
 ) -> None:
     """Ensure ``vec`` matches ``record`` metadata before drift consumes it.
 
     Dimension mismatches always raise :class:`ValueError` (correctness /
     integrity). When ``expected_revision`` is non-empty, the manifest revision
-    must match unless the operator is in exploratory mode **and** passed
-    ``--allow-pre-phase16-embeddings`` (legacy vectors or mismatched HF pins),
-    in which case a WARNING is logged and execution continues.
+    must match unless ``mode.exploratory`` and ``mode.allow_pre_phase16_embeddings``
+    (legacy vectors or mismatched HF pins), in which case a WARNING is logged
+    and execution continues.
     """
     got_dim = int(vec.shape[-1])
     if got_dim != int(record.embedding_dim):
@@ -193,7 +193,7 @@ def validate_embedding_record(
         f"Embedding model revision mismatch for article {record.article_id}: "
         f"manifest has {stored!r}, analysis expects {expected!r}."
     )
-    if exploratory and allow_pre_phase16_embeddings:
+    if mode.exploratory and mode.allow_pre_phase16_embeddings:
         logger.warning(
             "%s Continuing due to --exploratory and --allow-pre-phase16-embeddings.",
             msg,
@@ -433,8 +433,7 @@ def load_article_embeddings(
     paths: AnalysisArtifactPaths,
     *,
     expected_revision: str = "",
-    exploratory: bool = False,
-    allow_pre_phase16_embeddings: bool = False,
+    mode: AnalysisMode = DEFAULT_ANALYSIS_MODE,
 ) -> list[ArticleEmbedding]:
     """Load article embeddings from manifest + ``.npy`` or ``batch.npz``.
 
@@ -447,8 +446,7 @@ def load_article_embeddings(
     Pass ``expected_revision=settings.analysis.embedding.embedding_model_revision`` in
     production so vectors from a different HF commit fail fast. Use
     ``expected_revision=\"\"`` only in tests that intentionally omit revision
-    metadata. Mismatches respect ``exploratory`` and
-    ``allow_pre_phase16_embeddings`` (see :func:`validate_embedding_record`).
+    metadata. Mismatches respect ``mode`` (see :func:`validate_embedding_record`).
     """
     root = paths.project_root
     batch_cache: dict[Path, tuple[np.ndarray, dict[str, int]]] = {}
@@ -477,8 +475,7 @@ def load_article_embeddings(
                 rec,
                 vec,
                 expected_revision,
-                exploratory=exploratory,
-                allow_pre_phase16_embeddings=allow_pre_phase16_embeddings,
+                mode=mode,
             )
             pairs.append(ArticleEmbedding(published_at=rec.timestamp, embedding=vec))
         if format_counts["npz"] or format_counts["npy"]:
@@ -611,14 +608,13 @@ def load_drift_summary(
     paths: AnalysisArtifactPaths,
     *,
     settings: ForensicsSettings,
-    exploratory: bool = False,
-    allow_pre_phase16_embeddings: bool = False,
+    mode: AnalysisMode = DEFAULT_ANALYSIS_MODE,
 ) -> DriftSummary:
     """Drift velocities and baseline curve for ``slug``.
 
     Prefers cached artifacts (``*_drift.json``, ``*_centroids.npz``, ``*_baseline_curve.json``)
     written by :func:`run_drift_analysis`. Falls back to recomputing from raw embeddings
-    when cached velocities are missing. With ``exploratory=False`` (confirmatory),
+    when cached velocities are missing. With ``mode.exploratory=False`` (confirmatory),
     missing or insufficient embeddings (fewer than two usable vectors) raise
     :class:`EmbeddingDriftInputsError` instead of returning empty fields.
 
@@ -641,13 +637,12 @@ def load_drift_summary(
             slug,
             paths,
             expected_revision=settings.analysis.embedding.embedding_model_revision,
-            exploratory=exploratory,
-            allow_pre_phase16_embeddings=allow_pre_phase16_embeddings,
+            mode=mode,
         )
     except EmbeddingRevisionGateError:
         raise
     except (ValueError, OSError) as exc:
-        if exploratory:
+        if mode.exploratory:
             logger.debug("drift summary: no embeddings for %s (%s)", slug, exc)
             return DriftSummary(velocities=velocities, baseline_curve=baseline_curve)
         raise EmbeddingDriftInputsError(
@@ -655,7 +650,7 @@ def load_drift_summary(
         ) from exc
 
     if len(pairs) < 2:
-        if exploratory:
+        if mode.exploratory:
             return DriftSummary(velocities=velocities, baseline_curve=baseline_curve)
         raise EmbeddingDriftInputsError(
             "Insufficient article embeddings for drift summary "
@@ -802,8 +797,7 @@ def run_drift_analysis(
     *,
     paths: AnalysisArtifactPaths,
     author_slug: str | None = None,
-    exploratory: bool = False,
-    allow_pre_phase16_embeddings: bool = False,
+    mode: AnalysisMode = DEFAULT_ANALYSIS_MODE,
 ) -> None:
     """Compute drift metrics for configured authors and write ``data/analysis/*`` outputs."""
     centroids_by_author: dict[str, list[tuple[str, np.ndarray]]] = {}
@@ -816,19 +810,18 @@ def run_drift_analysis(
                     author.slug,
                     paths,
                     expected_revision=settings.analysis.embedding.embedding_model_revision,
-                    exploratory=exploratory,
-                    allow_pre_phase16_embeddings=allow_pre_phase16_embeddings,
+                    mode=mode,
                 )
             except EmbeddingRevisionGateError:
                 raise
             except (ValueError, OSError) as exc:
-                if exploratory:
+                if mode.exploratory:
                     logger.warning("drift: skip slug=%s (%s)", author.slug, exc)
                     continue
                 raise EmbeddingDriftInputsError(
                     f"Cannot load article embeddings for drift analysis (author={author.slug!r})."
                 ) from exc
-            if not exploratory and len(article_embs) < 2:
+            if not mode.exploratory and len(article_embs) < 2:
                 raise EmbeddingDriftInputsError(
                     "Insufficient article embeddings for drift analysis "
                     f"(author={author.slug!r}): need at least 2 usable vectors, "
@@ -842,7 +835,7 @@ def run_drift_analysis(
                 paths=paths,
             )
             if res is None:
-                if exploratory:
+                if mode.exploratory:
                     logger.warning("drift: insufficient embeddings for %s", author.slug)
                     continue
                 raise EmbeddingDriftInputsError(

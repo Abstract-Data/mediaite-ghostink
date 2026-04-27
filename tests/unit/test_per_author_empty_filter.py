@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from forensics.analysis.orchestrator import AnalysisMode
 from forensics.analysis.orchestrator import per_author as pa_mod
 from forensics.config import get_settings
 from forensics.models.author import Author
@@ -63,8 +64,7 @@ def test_run_per_author_analysis_returns_none_when_author_slice_empty(
                 paths,
                 cfg,
                 probability_trajectory_by_slug={},
-                exploratory=True,
-                allow_pre_phase16_embeddings=False,
+                mode=AnalysisMode(exploratory=True),
             )
     assert out is None
     assert "per_author frame empty after filter" in caplog.text

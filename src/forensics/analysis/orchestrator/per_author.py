@@ -29,6 +29,7 @@ from forensics.analysis.drift import (
 )
 from forensics.analysis.era import classify_ai_marker_era
 from forensics.analysis.evidence import filter_evidence_change_points
+from forensics.analysis.orchestrator.mode import DEFAULT_ANALYSIS_MODE, AnalysisMode
 from forensics.analysis.orchestrator.timings import _StageTimer
 from forensics.analysis.statistics import (
     apply_correction,
@@ -216,8 +217,7 @@ def _load_drift_signals(
     paths: AnalysisArtifactPaths,
     config: ForensicsSettings,
     *,
-    exploratory: bool = False,
-    allow_pre_phase16_embeddings: bool = False,
+    mode: AnalysisMode = DEFAULT_ANALYSIS_MODE,
 ) -> tuple[
     DriftScores | None,
     list[tuple[datetime, float]],
@@ -231,7 +231,7 @@ def _load_drift_signals(
     timing brackets and the early-out ``return None`` paths are factored
     in. Returns ``(drift, baseline_curve, vel_tuples, ai_conv)`` with
     permissive defaults (empty lists / ``None``) when embeddings are
-    unavailable and ``exploratory`` is true; confirmatory runs raise
+    unavailable and ``mode.exploratory`` is true; confirmatory runs raise
     ``EmbeddingDriftInputsError`` instead.
     """
     baseline_curve: list[tuple[datetime, float]] = []
@@ -244,13 +244,12 @@ def _load_drift_signals(
             slug,
             paths,
             expected_revision=config.analysis.embedding.embedding_model_revision,
-            exploratory=exploratory,
-            allow_pre_phase16_embeddings=allow_pre_phase16_embeddings,
+            mode=mode,
         )
     except EmbeddingRevisionGateError:
         raise
     except (ValueError, OSError) as exc:
-        if exploratory:
+        if mode.exploratory:
             logger.info("analysis: no embeddings for %s (%s)", slug, exc)
             pairs = []
         else:
@@ -258,7 +257,7 @@ def _load_drift_signals(
                 f"Cannot load article embeddings for analysis (author={slug!r})."
             ) from exc
 
-    if not exploratory and len(pairs) < 2:
+    if not mode.exploratory and len(pairs) < 2:
         raise EmbeddingDriftInputsError(
             "Insufficient article embeddings for drift in analysis "
             f"(author={slug!r}): need at least 2 usable vectors, got {len(pairs)}."
@@ -310,8 +309,7 @@ def _run_per_author_analysis(
     *,
     probability_trajectory_by_slug: dict[str, ProbabilityTrajectory],
     stage_timings: dict[str, float] | None = None,
-    exploratory: bool = False,
-    allow_pre_phase16_embeddings: bool = False,
+    mode: AnalysisMode = DEFAULT_ANALYSIS_MODE,
 ) -> tuple[AnalysisResult, list[ChangePoint], list, list] | None:
     """Changepoint, drift, convergence, and hypothesis testing for one author slug.
 
@@ -320,7 +318,7 @@ def _run_per_author_analysis(
     ``convergence``, ``hypothesis_tests``) so the bench script can emit
     non-zero per-stage measurements instead of only the grand ``total``.
     """
-    with strict_feature_decode_confirmatory(exploratory):
+    with strict_feature_decode_confirmatory(mode.exploratory):
         author = repo.get_author_by_slug(slug)
         if author is None:
             logger.warning("analysis: unknown slug=%s", slug)
@@ -373,8 +371,7 @@ def _run_per_author_analysis(
             author.id,
             paths,
             config,
-            exploratory=exploratory,
-            allow_pre_phase16_embeddings=allow_pre_phase16_embeddings,
+            mode=mode,
         )
         timer.record("drift")
 

@@ -7,6 +7,7 @@ from collections.abc import Iterator
 from typing import Any
 
 from forensics.analysis.comparison import compare_target_to_controls
+from forensics.analysis.orchestrator.mode import DEFAULT_ANALYSIS_MODE, AnalysisMode
 from forensics.config.settings import ForensicsSettings
 from forensics.models.analysis import AnalysisResult, ChangePoint
 from forensics.paths import AnalysisArtifactPaths
@@ -66,7 +67,7 @@ def _iter_compare_targets(
     *,
     changepoints_memory: dict[str, list[ChangePoint]] | None,
     log_prefix: str,
-    exploratory: bool = False,
+    mode: AnalysisMode = DEFAULT_ANALYSIS_MODE,
 ) -> Iterator[tuple[str, dict[str, Any]]]:
     for tid in targets:
         try:
@@ -76,7 +77,7 @@ def _iter_compare_targets(
                 paths,
                 settings=config,
                 changepoints_memory=changepoints_memory,
-                exploratory=exploratory,
+                mode=mode,
             )
         except (ValueError, OSError) as exc:
             logger.warning("%s failed for %s (%s)", log_prefix, tid, exc)
@@ -91,7 +92,7 @@ def _run_target_control_comparisons(
     *,
     paths: AnalysisArtifactPaths,
     config: ForensicsSettings,
-    exploratory: bool = False,
+    mode: AnalysisMode = DEFAULT_ANALYSIS_MODE,
 ) -> dict[str, Any]:
     comparison_payload: dict[str, Any] = {"targets": {}}
     active_targets = [target for target in targets if target in results]
@@ -105,7 +106,7 @@ def _run_target_control_comparisons(
         config,
         changepoints_memory=changepoints_memory,
         log_prefix="analysis: comparison",
-        exploratory=exploratory,
+        mode=mode,
     ):
         comparison_payload["targets"][tid] = report
     return comparison_payload
@@ -117,7 +118,7 @@ def run_compare_only(
     paths: AnalysisArtifactPaths,
     author_slug: str | None = None,
     compare_pair: tuple[str, str] | None = None,
-    exploratory: bool = False,
+    mode: AnalysisMode = DEFAULT_ANALYSIS_MODE,
 ) -> dict[str, Any]:
     """Rebuild ``comparison_report.json`` from on-disk artifacts.
 
@@ -147,7 +148,7 @@ def run_compare_only(
         config,
         changepoints_memory=None,
         log_prefix="compare-only",
-        exploratory=exploratory,
+        mode=mode,
     ):
         out["targets"][tid] = report
     if not out.get("targets"):

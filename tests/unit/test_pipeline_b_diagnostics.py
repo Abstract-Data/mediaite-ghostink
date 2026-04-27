@@ -23,6 +23,7 @@ from forensics.analysis.drift import (
     _DRIFT_ARTIFACT_MISSING_WARNING,
     load_drift_summary,
 )
+from forensics.analysis.orchestrator import AnalysisMode
 from forensics.config.settings import AnalysisConfig, ForensicsSettings, ScrapingConfig
 from forensics.models.analysis import ChangePoint
 from forensics.paths import AnalysisArtifactPaths
@@ -121,7 +122,7 @@ def test_e2_warns_when_artifacts_missing_but_embeddings_exist(
     _seed_embedding_dir(paths, slug)
 
     caplog.set_level(logging.WARNING, logger="forensics.analysis.drift")
-    load_drift_summary(slug, paths, settings=_settings(), exploratory=True)
+    load_drift_summary(slug, paths, settings=_settings(), mode=AnalysisMode(exploratory=True))
 
     warnings = [
         r
@@ -153,7 +154,7 @@ def test_e2_silent_when_no_embeddings_exist(
     slug = "untouched-author"
 
     caplog.set_level(logging.WARNING, logger="forensics.analysis.drift")
-    load_drift_summary(slug, paths, settings=_settings(), exploratory=True)
+    load_drift_summary(slug, paths, settings=_settings(), mode=AnalysisMode(exploratory=True))
 
     warnings = [
         r
@@ -185,7 +186,7 @@ def test_e2_warning_message_format_is_stable(
     _seed_embedding_dir(paths, slug)
 
     caplog.set_level(logging.WARNING, logger="forensics.analysis.drift")
-    load_drift_summary(slug, paths, settings=_settings(), exploratory=True)
+    load_drift_summary(slug, paths, settings=_settings(), mode=AnalysisMode(exploratory=True))
 
     warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
     assert warnings, "expected at least one WARNING when artifacts are missing and embeddings exist"

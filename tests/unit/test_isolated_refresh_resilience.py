@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from forensics.analysis.orchestrator import AnalysisMode
 from forensics.analysis.orchestrator.parallel import (
     IsolatedAuthorAnalysis,
     _run_isolated_author_jobs,
@@ -64,8 +65,7 @@ def test_isolated_refresh_continues_after_worker_failure(
         run_id="run-test",
         max_workers=1,
         probability_trajectory_by_slug={},
-        exploratory=True,
-        allow_pre_phase16_embeddings=False,
+        mode=AnalysisMode(exploratory=True),
     )
 
     assert {item.slug for item in out} == {"ok-a", "ok-b"}

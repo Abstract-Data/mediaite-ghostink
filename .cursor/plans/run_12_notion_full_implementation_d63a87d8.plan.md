@@ -10,7 +10,7 @@ todos:
     status: completed
   - id: task-3-analysis-mode
     content: Introduce AnalysisMode dataclass; thread through CLI/orchestrator/drift/embeddings (~11 files); preserve JSON boundaries
-    status: pending
+    status: completed
   - id: task-4-run-analyze-split
     content: Extract run_analyze stages; remove C901 noqa when clean; optional AnalyzeRequest sub-dataclasses without breaking CLI
     status: pending

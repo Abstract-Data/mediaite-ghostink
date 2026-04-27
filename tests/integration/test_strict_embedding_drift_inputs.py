@@ -8,6 +8,7 @@ import pytest
 from typer.testing import CliRunner
 
 from forensics.analysis.drift import EmbeddingDriftInputsError
+from forensics.analysis.orchestrator import AnalysisMode
 from forensics.analysis.orchestrator.per_author import _load_drift_signals
 from forensics.cli import app
 from forensics.config.settings import AnalysisConfig, ForensicsSettings, ScrapingConfig
@@ -50,8 +51,7 @@ def test_load_drift_signals_insufficient_embeddings_confirmatory(
             sample_author.id,
             paths,
             cfg,
-            exploratory=False,
-            allow_pre_phase16_embeddings=False,
+            mode=AnalysisMode(),
         )
 
 
@@ -69,8 +69,7 @@ def test_load_drift_signals_exploratory_allows_empty_embeddings(
         sample_author.id,
         paths,
         cfg,
-        exploratory=True,
-        allow_pre_phase16_embeddings=False,
+        mode=AnalysisMode(exploratory=True),
     )
     assert drift is None
     assert baseline == []

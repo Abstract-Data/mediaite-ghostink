@@ -11,6 +11,7 @@ from typing import Annotated
 import typer
 
 from forensics.analysis.drift import EmbeddingDriftInputsError, EmbeddingRevisionGateError
+from forensics.analysis.orchestrator.mode import DEFAULT_ANALYSIS_MODE, AnalysisMode
 from forensics.cli._decorators import examples_epilog, forensics_examples, with_examples
 from forensics.cli._envelope import status
 from forensics.cli._errors import fail
@@ -73,8 +74,7 @@ class AnalyzeContext:
     author_slug: str | None
     max_workers: int | None = None
     compare_pair: tuple[str, str] | None = None
-    exploratory: bool = False
-    allow_pre_phase16_embeddings: bool = False
+    analysis_mode: AnalysisMode = DEFAULT_ANALYSIS_MODE
 
     @classmethod
     def build(
@@ -86,8 +86,7 @@ class AnalyzeContext:
         author: str | None,
         max_workers: int | None = None,
         compare_pair: tuple[str, str] | None = None,
-        exploratory: bool = False,
-        allow_pre_phase16_embeddings: bool = False,
+        analysis_mode: AnalysisMode = DEFAULT_ANALYSIS_MODE,
     ) -> AnalyzeContext:
         return cls(
             db_path=db_path,
@@ -96,8 +95,7 @@ class AnalyzeContext:
             author_slug=author,
             max_workers=max_workers,
             compare_pair=compare_pair,
-            exploratory=exploratory,
-            allow_pre_phase16_embeddings=allow_pre_phase16_embeddings,
+            analysis_mode=analysis_mode,
         )
 
     @property
@@ -120,14 +118,13 @@ class AnalyzeRequest:
     baseline_model: str | None = None
     articles_per_cell: int | None = None
     author: str | None = None
-    exploratory: bool = False
     include_advertorial: bool = False
     residualize_sections: bool = False
     include_shared_bylines: bool = False
     max_workers: int | None = None
     compare_pair: tuple[str, str] | None = None
     parallel_authors: bool = False
-    allow_pre_phase16_embeddings: bool = False
+    analysis_mode: AnalysisMode = DEFAULT_ANALYSIS_MODE
     typer_context: typer.Context | None = None
 
 
@@ -176,7 +173,7 @@ def _run_compare_only_flow(ctx: AnalyzeContext) -> None:
         paths=ctx.paths,
         author_slug=ctx.author_slug,
         compare_pair=ctx.compare_pair,
-        exploratory=ctx.exploratory,
+        mode=ctx.analysis_mode,
     )
     logger.info("analyze: compare-only complete author=%s", ctx.author_slug or "all")
 
@@ -219,8 +216,7 @@ def _run_drift_stage(ctx: AnalyzeContext) -> None:
         ctx.settings,
         paths=ctx.paths,
         author_slug=ctx.author_slug,
-        exploratory=ctx.exploratory,
-        allow_pre_phase16_embeddings=ctx.allow_pre_phase16_embeddings,
+        mode=ctx.analysis_mode,
     )
 
 
@@ -233,8 +229,7 @@ def _run_full_analysis_stage(ctx: AnalyzeContext) -> None:
         author_slug=ctx.author_slug,
         max_workers=ctx.max_workers,
         compare_pair=ctx.compare_pair,
-        exploratory=ctx.exploratory,
-        allow_pre_phase16_embeddings=ctx.allow_pre_phase16_embeddings,
+        mode=ctx.analysis_mode,
     )
 
 
@@ -277,8 +272,7 @@ def _run_parallel_author_refresh_stage(ctx: AnalyzeContext) -> None:
         ctx.settings,
         author_slug=ctx.author_slug,
         max_workers=ctx.max_workers,
-        exploratory=ctx.exploratory,
-        allow_pre_phase16_embeddings=ctx.allow_pre_phase16_embeddings,
+        mode=ctx.analysis_mode,
     )
     logger.info(
         "analyze: parallel author refresh complete refreshed=%d author=%s",
@@ -448,8 +442,7 @@ def run_analyze(request: AnalyzeRequest) -> None:  # noqa: C901
         author=request.author,
         max_workers=request.max_workers,
         compare_pair=request.compare_pair,
-        exploratory=request.exploratory,
-        allow_pre_phase16_embeddings=request.allow_pre_phase16_embeddings,
+        analysis_mode=request.analysis_mode,
     )
     analysis_dir = ctx.paths.analysis_dir
 
@@ -488,7 +481,7 @@ def run_analyze(request: AnalyzeRequest) -> None:  # noqa: C901
         logger.info("corpus hash verified (%s)", message)
 
     preregistration = verify_preregistration(settings)
-    if preregistration.status != "ok" and not request.exploratory:
+    if preregistration.status != "ok" and not request.analysis_mode.exploratory:
         meta = {
             "run_timestamp": datetime.now(UTC).isoformat(),
             "last_processed_author": request.author,
@@ -496,7 +489,7 @@ def run_analyze(request: AnalyzeRequest) -> None:  # noqa: C901
             "preregistration_status": preregistration.status,
             "preregistration_message": preregistration.message,
             "exploratory": False,
-            "allow_pre_phase16_embeddings": request.allow_pre_phase16_embeddings,
+            "allow_pre_phase16_embeddings": request.analysis_mode.allow_pre_phase16_embeddings,
         }
         _write_run_metadata(analysis_dir, rid="preregistration-blocked", meta=meta)
         raise fail(
@@ -556,8 +549,7 @@ def run_analyze(request: AnalyzeRequest) -> None:  # noqa: C901
         "authors_in_run": ([request.author] if request.author else []),
         "preregistration_status": preregistration.status,
         "preregistration_message": preregistration.message,
-        "exploratory": request.exploratory,
-        "allow_pre_phase16_embeddings": request.allow_pre_phase16_embeddings,
+        **request.analysis_mode.run_metadata_subset(),
     }
     _write_run_metadata(analysis_dir, rid=rid, meta=meta)
 
@@ -645,14 +637,16 @@ def analyze(
             baseline_model=baseline_model,
             articles_per_cell=articles_per_cell,
             author=author,
-            exploratory=exploratory,
             include_advertorial=include_advertorial,
             residualize_sections=residualize_sections,
             include_shared_bylines=include_shared_bylines,
             max_workers=max_workers,
             compare_pair=parsed_pair,
             parallel_authors=parallel_authors,
-            allow_pre_phase16_embeddings=allow_pre_phase16_embeddings,
+            analysis_mode=AnalysisMode(
+                exploratory=exploratory,
+                allow_pre_phase16_embeddings=allow_pre_phase16_embeddings,
+            ),
             typer_context=ctx,
         )
     )

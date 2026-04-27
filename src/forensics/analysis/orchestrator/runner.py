@@ -11,6 +11,7 @@ from forensics.analysis.orchestrator.comparison import (
     _run_target_control_comparisons,
     warn_comparison_report_empty_targets,
 )
+from forensics.analysis.orchestrator.mode import DEFAULT_ANALYSIS_MODE, AnalysisMode
 from forensics.analysis.orchestrator.parallel import (
     _resolve_max_workers,
     _run_full_analysis_per_authors,
@@ -41,8 +42,7 @@ def run_full_analysis(
     compare_pair: tuple[str, str] | None = None,
     timings_out: AnalysisTimings | None = None,
     mp_context: str | None = None,
-    exploratory: bool = False,
-    allow_pre_phase16_embeddings: bool = False,
+    mode: AnalysisMode = DEFAULT_ANALYSIS_MODE,
 ) -> dict[str, AnalysisResult]:
     """Run per-author analysis, comparisons, and shared artifacts under ``paths``.
 
@@ -78,8 +78,7 @@ def run_full_analysis(
         prob_map,
         workers,
         mp_context,
-        exploratory=exploratory,
-        allow_pre_phase16_embeddings=allow_pre_phase16_embeddings,
+        mode=mode,
     )
 
     sensitivity_summary = _run_section_residualized_sensitivity(
@@ -88,8 +87,7 @@ def run_full_analysis(
         slugs,
         results,
         probability_trajectory_by_slug=prob_map,
-        exploratory=exploratory,
-        allow_pre_phase16_embeddings=allow_pre_phase16_embeddings,
+        mode=mode,
     )
 
     t_compare = time.perf_counter()
@@ -104,7 +102,7 @@ def run_full_analysis(
         results,
         paths=paths,
         config=config,
-        exploratory=exploratory,
+        mode=mode,
     )
     compare_seconds = time.perf_counter() - t_compare
 

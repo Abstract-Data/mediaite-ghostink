@@ -19,6 +19,7 @@ from forensics.analysis.orchestrator.comparison import (
     _run_target_control_comparisons,
     warn_comparison_report_empty_targets,
 )
+from forensics.analysis.orchestrator.mode import DEFAULT_ANALYSIS_MODE, AnalysisMode
 from forensics.analysis.orchestrator.per_author import (
     _apply_global_test_gates,
     _run_per_author_analysis,
@@ -39,9 +40,9 @@ from forensics.utils.provenance import (
 logger = logging.getLogger(__name__)
 
 
-def _embedding_fail_should_propagate(exploratory: bool, exc: BaseException) -> bool:
+def _embedding_fail_should_propagate(mode: AnalysisMode, exc: BaseException) -> bool:
     """Confirmatory runs surface embedding drift failures instead of swallowing them."""
-    return (not exploratory) and isinstance(
+    return (not mode.exploratory) and isinstance(
         exc,
         (EmbeddingDriftInputsError, EmbeddingRevisionGateError),
     )
@@ -88,8 +89,7 @@ def _per_author_worker(
     paths: AnalysisArtifactPaths,
     config: ForensicsSettings,
     prob_map: dict[str, ProbabilityTrajectory],
-    exploratory: bool,
-    allow_pre_phase16_embeddings: bool,
+    mode: AnalysisMode,
 ) -> tuple[str, AnalysisResult | None, dict[str, float]]:
     """ProcessPool worker: opens its own ``Repository`` (SQLite is not fork-safe).
 
@@ -111,8 +111,7 @@ def _per_author_worker(
             config,
             probability_trajectory_by_slug=prob_map,
             stage_timings=stage_timings,
-            exploratory=exploratory,
-            allow_pre_phase16_embeddings=allow_pre_phase16_embeddings,
+            mode=mode,
         )
     if per_author is None:
         logger.info("analysis: slug=%s skipped (missing author or features)", slug)
@@ -150,8 +149,7 @@ def _isolated_author_worker(
     config: ForensicsSettings,
     prob_map: dict[str, ProbabilityTrajectory],
     run_id: str,
-    exploratory: bool,
-    allow_pre_phase16_embeddings: bool,
+    mode: AnalysisMode,
 ) -> IsolatedAuthorAnalysis | None:
     """Run one author into ``data/analysis/parallel/<run_id>/<slug>/``."""
     isolated_paths = _isolated_author_paths(paths, run_id, slug)
@@ -164,8 +162,7 @@ def _isolated_author_worker(
             config,
             probability_trajectory_by_slug=prob_map,
             stage_timings=stage_timings,
-            exploratory=exploratory,
-            allow_pre_phase16_embeddings=allow_pre_phase16_embeddings,
+            mode=mode,
         )
     if per_author is None:
         logger.info("analysis-refresh: slug=%s skipped (missing author or features)", slug)
@@ -244,8 +241,7 @@ def _run_full_analysis_per_authors(
     workers: int,
     mp_context: str | None,
     *,
-    exploratory: bool,
-    allow_pre_phase16_embeddings: bool,
+    mode: AnalysisMode,
 ) -> tuple[dict[str, AnalysisResult], dict[str, dict[str, float]]]:
     """Serial or parallel per-author analysis, global test gating, artifact writes."""
     results: dict[str, AnalysisResult] = {}
@@ -263,8 +259,7 @@ def _run_full_analysis_per_authors(
                     config,
                     probability_trajectory_by_slug=prob_map,
                     stage_timings=stage_timings,
-                    exploratory=exploratory,
-                    allow_pre_phase16_embeddings=allow_pre_phase16_embeddings,
+                    mode=mode,
                 )
                 per_author_timings[slug] = stage_timings
                 if per_author is None:
@@ -316,8 +311,7 @@ def _run_full_analysis_per_authors(
                     paths,
                     config,
                     prob_map,
-                    exploratory,
-                    allow_pre_phase16_embeddings,
+                    mode,
                 ): slug
                 for slug in slugs
             }
@@ -326,7 +320,7 @@ def _run_full_analysis_per_authors(
                 try:
                     returned_slug, assembled, stage_timings = future.result()
                 except Exception as exc:  # noqa: BLE001 - log + continue per-author
-                    if _embedding_fail_should_propagate(exploratory, exc):
+                    if _embedding_fail_should_propagate(mode, exc):
                         raise
                     logger.error(
                         "analysis: worker crashed for slug=%s (%s)",
@@ -411,8 +405,7 @@ def _run_isolated_author_serial_jobs(
     *,
     run_id: str,
     probability_trajectory_by_slug: dict[str, ProbabilityTrajectory],
-    exploratory: bool,
-    allow_pre_phase16_embeddings: bool,
+    mode: AnalysisMode,
 ) -> list[IsolatedAuthorAnalysis]:
     isolated_outputs: list[IsolatedAuthorAnalysis] = []
     for slug in slugs:
@@ -423,11 +416,10 @@ def _run_isolated_author_serial_jobs(
                 config,
                 probability_trajectory_by_slug,
                 run_id,
-                exploratory,
-                allow_pre_phase16_embeddings,
+                mode,
             )
         except Exception as exc:  # noqa: BLE001 — mirror full-analysis worker policy
-            if _embedding_fail_should_propagate(exploratory, exc):
+            if _embedding_fail_should_propagate(mode, exc):
                 raise
             logger.exception(
                 "isolated refresh worker failed",
@@ -450,8 +442,7 @@ def _run_isolated_author_jobs(
     run_id: str,
     max_workers: int,
     probability_trajectory_by_slug: dict[str, ProbabilityTrajectory],
-    exploratory: bool,
-    allow_pre_phase16_embeddings: bool,
+    mode: AnalysisMode,
 ) -> list[IsolatedAuthorAnalysis]:
     if not slugs:
         return []
@@ -463,8 +454,7 @@ def _run_isolated_author_jobs(
             slugs,
             run_id=run_id,
             probability_trajectory_by_slug=probability_trajectory_by_slug,
-            exploratory=exploratory,
-            allow_pre_phase16_embeddings=allow_pre_phase16_embeddings,
+            mode=mode,
         )
     isolated_outputs: list[IsolatedAuthorAnalysis] = []
     ctx = multiprocessing.get_context("spawn")
@@ -477,8 +467,7 @@ def _run_isolated_author_jobs(
                 config,
                 probability_trajectory_by_slug,
                 run_id,
-                exploratory,
-                allow_pre_phase16_embeddings,
+                mode,
             ): slug
             for slug in slugs
         }
@@ -487,7 +476,7 @@ def _run_isolated_author_jobs(
             try:
                 isolated = fut.result()
             except Exception as exc:  # noqa: BLE001 — mirror full-analysis worker policy
-                if _embedding_fail_should_propagate(exploratory, exc):
+                if _embedding_fail_should_propagate(mode, exc):
                     raise
                 logger.exception(
                     "isolated refresh worker failed",
@@ -513,8 +502,7 @@ def run_parallel_author_refresh(
     author_slug: str | None = None,
     max_workers: int | None = None,
     probability_trajectory_by_slug: dict[str, ProbabilityTrajectory] | None = None,
-    exploratory: bool = False,
-    allow_pre_phase16_embeddings: bool = False,
+    mode: AnalysisMode = DEFAULT_ANALYSIS_MODE,
 ) -> dict[str, AnalysisResult]:
     """Refresh stale configured authors through isolated parallel author directories.
 
@@ -542,8 +530,7 @@ def run_parallel_author_refresh(
         run_id=run_id,
         max_workers=workers,
         probability_trajectory_by_slug=prob_map,
-        exploratory=exploratory,
-        allow_pre_phase16_embeddings=allow_pre_phase16_embeddings,
+        mode=mode,
     )
     if not isolated_outputs:
         logger.info("analysis-refresh: no stale author artifacts to refresh")
@@ -585,7 +572,7 @@ def run_parallel_author_refresh(
         results,
         paths=paths,
         config=config,
-        exploratory=exploratory,
+        mode=mode,
     )
     if not comparison_payload.get("targets"):
         warn_comparison_report_empty_targets()

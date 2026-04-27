@@ -257,6 +257,7 @@ def test_run_analyze_records_exploratory_override(
     import importlib
 
     analyze_mod = importlib.import_module("forensics.cli.analyze")
+    from forensics.analysis.orchestrator import AnalysisMode
     from forensics.storage.repository import init_db
 
     data = tmp_path / "data"
@@ -278,7 +279,11 @@ def test_run_analyze_records_exploratory_override(
     monkeypatch.setattr(analyze_mod, "_run_timeseries_stage", lambda *a, **k: None)
     monkeypatch.setattr(analyze_mod, "_run_full_analysis_stage", lambda *a, **k: None)
 
-    analyze_mod.run_analyze(analyze_mod.AnalyzeRequest(exploratory=True))
+    analyze_mod.run_analyze(
+        analyze_mod.AnalyzeRequest(
+            analysis_mode=AnalysisMode(exploratory=True),
+        )
+    )
 
     assert len(calls) == 1
     meta_path = tmp_path / "data" / "analysis" / "run_metadata.json"

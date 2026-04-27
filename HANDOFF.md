@@ -6322,3 +6322,35 @@ Full suite: **1076 passed**, 3 deselected, 1 xfailed (known section_residualize)
 #### GitNexus
 
 Impact/detect_changes not invoked: GitNexus MCP path not verified in this workspace; re-run when available before merge.
+
+---
+
+### Run 12 — TASK-3 AnalysisMode parameter object
+
+**Status:** Complete  
+**Date:** 2026-04-27
+
+#### What was done
+
+- Introduced frozen `AnalysisMode` (`exploratory`, `allow_pre_phase16_embeddings`) in `src/forensics/analysis/orchestrator/mode.py` with `run_metadata_subset()` for stable `run_metadata.json` keys and module-level `DEFAULT_ANALYSIS_MODE` for safe default args.
+- Replaced paired bool parameters with `mode: AnalysisMode` across CLI (`AnalyzeContext`, `AnalyzeRequest`), orchestrator (`runner`, `parallel`, `per_author`, `comparison`, `sensitivity`), `drift` (`validate_embedding_record`, `load_article_embeddings`, `load_drift_summary`, `run_drift_analysis`), and `analysis/comparison.py` (`compare_target_to_controls` and helpers).
+- Typer flags unchanged: callback builds `AnalysisMode(exploratory=..., allow_pre_phase16_embeddings=...)`. Preregistration-blocked metadata still forces `"exploratory": False` while preserving `allow_pre_phase16_embeddings` from the request.
+
+#### Files modified
+
+- `src/forensics/analysis/orchestrator/mode.py` (new), `__init__.py`, `runner.py`, `parallel.py`, `per_author.py`, `comparison.py`, `sensitivity.py`
+- `src/forensics/analysis/drift.py`, `src/forensics/analysis/comparison.py`, `src/forensics/cli/analyze.py`
+- Tests: `test_analyze_compare.py`, `test_comparison_target_controls.py`, `test_drift_summary.py`, `test_pipeline_b_diagnostics.py`, `test_per_author_empty_filter.py`, `test_isolated_refresh_resilience.py`, `test_parallel_parity.py`, `test_pipeline_end_to_end.py`, `test_preregistration.py`, `test_embedding_revision_gate.py`, `test_strict_embedding_drift_inputs.py`
+
+#### Verification
+
+```
+uv run pytest tests/ -q --no-cov
+uv run ruff check src/forensics/analysis/comparison.py src/forensics/analysis/orchestrator/per_author.py tests/integration/test_parallel_parity.py tests/unit/test_comparison_target_controls.py
+```
+
+Full suite: **1076 passed**, 1 xfailed (known), 3 deselected.
+
+#### GitNexus
+
+`gitnexus_impact` / `gitnexus_detect_changes` not run (GitNexus MCP descriptors not present in this session); run upstream impact on edited public entrypoints before merge when available.
