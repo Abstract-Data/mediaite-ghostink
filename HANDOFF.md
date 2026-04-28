@@ -6497,3 +6497,75 @@ uv run pytest tests/integration/test_analysis_config_hash_gate.py tests/unit/tes
 
 - **GitNexus:** `gitnexus_impact` / `gitnexus_detect_changes` were not run (GitNexus MCP server not available in this Cursor session). Run on `classify_direction_concordance`, `_iter_compare_targets`, and `embedding_fail_should_propagate` before merge when enabled.
 - Operators with pre–percentile-default `*_result.json` should follow the new RUNBOOK subsection before compare/report.
+
+---
+
+### Full confirmatory re-run for all 12 configured authors → fresh PDF report
+**Status:** Complete
+**Date:** 2026-04-28
+**Agent/Session:** Claude Code (Opus 4.7, 1M context)
+
+#### What Was Done
+- Re-ran the full forensic pipeline end-to-end for all 12 configured authors and produced a confirmatory-mode PDF report.
+- Diagnosed and patched a manifest-stomping bug in `forensics extract --author <slug>` that would have silently destroyed the manifest under any multi-call workflow.
+- Added per-author manifest shards plus a merge step; verified shards accumulate correctly and the canonical manifest is rebuilt before `forensics analyze`.
+- Recovered from a bash `set -e` gotcha (loop body inside `&&` chain) that left an ostensibly-killed extract loop racing a replacement chain.
+- Captured both failure patterns as Signs in `docs/GUARDRAILS.md`.
+
+#### Files Modified
+- `src/forensics/features/pipeline.py` — write per-author manifest shards (`<slug>_manifest.jsonl`) when `author_slug` is set; legacy single-write path retained for unscoped runs.
+- `scripts/merge_embedding_manifest_shards.py` — new helper; merges shards + canonical (last-wins by `article_id`), atomically rewrites canonical manifest, deletes shards.
+- `docs/GUARDRAILS.md` — appended two Signs (`set -e` for-loop/`&&` interaction; pre-patch manifest-stomping behavior of `extract --author`).
+- `data/reports/Mediaite-writing-analysis-—-technical-report.pdf` — final confirmatory PDF (90 KB, mtime 2026-04-28 01:33:03 CDT).
+- `data/analysis/run_metadata.json`, `comparison_report.json`, all per-author `*_result.json` / `*_changepoints.json` / `*_convergence.json` / `*_hypothesis_tests.json` / `*_drift.json` etc. — fresh artifacts.
+- `data/embeddings/manifest.jsonl` — 49,126 rows / 12 distinct `author_id`s (canonical, post-merge).
+- `data/embeddings_archive_20260428T002003Z/` — auto-archived prior embeddings (revision-pin mismatch).
+- `data/embeddings/manifest.jsonl.pre-revrepin-20260427T191951` — operator-side manifest snapshot (pre-rerun rollback breadcrumb; safe to delete now).
+- `data/logs/path_b_parallel_20260427T220619.log` — main run log; per-author logs at `data/logs/extract_<slug>.log`.
+
+#### Verification Evidence
+```
+$ tail -2 data/logs/path_b_parallel_20260427T220619.log
+Tue Apr 28 01:33:03 CDT 2026
+EXIT=0
+
+$ stat -f '%Sm %z %N' data/reports/*.pdf
+Apr 28 01:33:03 2026 92234 data/reports/Mediaite-writing-analysis-—-technical-report.pdf
+
+$ uv run python -c 'import json; ids=set(); n=0
+> for line in open("data/embeddings/manifest.jsonl"):
+>     line=line.strip()
+>     if line: ids.add(json.loads(line)["author_id"]); n+=1
+> print(f"rows={n} authors={len(ids)}")'
+rows=49126 authors=12
+
+$ jq '{exploratory, allow_pre_phase16_embeddings, preregistration_status, config_hash}' \
+    data/analysis/run_metadata.json
+{
+  "exploratory": false,
+  "allow_pre_phase16_embeddings": false,
+  "preregistration_status": "ok",
+  "config_hash": "6bffd326f0074688514c3d595ad2bc6065725ea17e783489"
+}
+```
+
+Total wallclock: 22:06:19 → 01:33:03 = **3 h 26 min 44 s** (4-way parallel extract via `xargs -P 4` + merge + `forensics analyze --max-workers 4` + Quarto/lualatex PDF render, 3 passes).
+
+#### Decisions Made
+- **Path B over A.** Delivered confirmatory-mode report (`exploratory=false`) instead of taking the faster A-mode shortcut, because the report is preregistration-clean and matches the locked thresholds at 2026-04-26T09:46:47.
+- **Per-author manifest shards over fcntl locking.** Cleaner — each writer owns its own path; the merge step is a single-process operation. Reader (`read_embeddings_manifest`) needed no changes because last-wins-by-`article_id` semantics already match.
+- **Killed alex-griffing's 95-min run mid-extract** to land the patch and restart with parallelism. Net savings on remaining 11 authors outweighed the loss.
+- **4-way parallel** chosen as the sweet spot for an M1 Max (10 cores, 64 GB, single MPS GPU). Measured ~36% wall slowdown per author vs serial baseline (much better than my 30% MPS-contention worst case); effective ~3× speedup.
+- **Skipped re-extracting `ahmad-austin`** — its rows from the (failed) earlier sequential run were already in the canonical manifest and its `batch.npz` was on disk. The merge step preserved them.
+
+#### Unresolved Questions
+- **Section-residualized sensitivity flags** (in `run_metadata.json`): 4 authors have `downgrade_recommended=true` (`ahmad-austin`, `colby-hall`, `isaac-schorr`, `sarah-rumpf`). Their primary findings drop substantially when section composition is residualized, suggesting section bias inflates the raw signal. Worth scrutinizing in the narrative before client delivery.
+- **CLI behavior cleanup (deferred):** `forensics extract` (no `--author` flag) iterates all 505 DB authors via `list_articles_for_extraction(author_id=None)`, while `resolve_author_rows(author_slug=None)` returns only the 12 configured authors. The two are inconsistent. `forensics analyze` already scopes to configured authors when no `--author` is given. Worth a separate PR to align `extract`'s default scope with `analyze`'s — would let a single `forensics extract` call replace the 12 sequential `--author` invocations.
+- **Manifest-shard cleanup is destructive.** `merge_embedding_manifest_shards.py` deletes shards after merge. If a multi-author run is interrupted between extract and merge, partial state requires manual cleanup. Consider keeping shards under `data/embeddings/_shards/` with a configurable retention policy.
+
+#### Risks & Next Steps
+- **`pipeline.py` patch needs a unit test.** Currently no test asserts that scoped extract writes shards rather than the canonical manifest. Suggested: add to `tests/test_parquet_embeddings_duckdb.py` or a new `tests/unit/test_extract_manifest_shards.py` covering (a) shard-only write when `author_slug` is set, (b) canonical write when `author_slug` is `None` (legacy path), (c) merge script idempotency on no-shards.
+- **GitNexus impact analysis was not run** on the patched `extract_all_features` symbol or the new merge script (per the project's GitNexus rule). Run before any subsequent edits to `pipeline.py`.
+- **GUARDRAILS Sign: confirm `set -e` claim.** I asserted the bash POSIX/bash-specific behavior from observed evidence (the OLD chain continued past a killed inner command). The exact set-of-conditions where bash suppresses `set -e` inside compound commands is more nuanced than the Sign captures — if a future operator encounters edge cases, the canonical reference is `bash(1)` and POSIX 2.14.1.4. Keep the Sign as a heuristic.
+- **`data/embeddings_archive_20260428T002003Z/` and `data/embeddings/manifest.jsonl.pre-revrepin-20260427T191951`** can be deleted once the new artifacts are blessed. Combined ~hundreds of MB.
+- **Operator hint:** If you ever re-run extract for a subset of authors after this point, use `forensics extract --author <slug>` (the patch makes that safe) followed by `uv run python scripts/merge_embedding_manifest_shards.py` before `forensics analyze`. Or, for a full corpus, run `forensics extract` (no flag) — that path still uses the legacy single-write semantics, which are correct when there's only one writer for the whole manifest.

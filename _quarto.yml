@@ -59,3 +59,20 @@ format:
     toc: true
     number-sections: true
     documentclass: report
+    papersize: letter
+    geometry:
+      - margin=1in
+    fontsize: 11pt
+    fig-format: png
+    fig-dpi: 200
+    fig-pos: "H"
+    fig-align: center
+    fig-width: 6.5
+    fig-height: 4
+    classoption:
+      - oneside
+    include-in-header:
+      text: |
+        \usepackage{float}
+        \floatplacement{figure}{H}
+        \floatplacement{table}{H}
