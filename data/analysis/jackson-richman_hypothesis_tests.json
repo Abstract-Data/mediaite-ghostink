@@ -1,0 +1,218 @@
+[
+  {
+    "author_id": "f47f9034-0aa5-516d-9c0b-f1ef69c57a0b",
+    "confidence_interval_95": [
+      -0.0010346949828447755,
+      -0.00034993637814443576
+    ],
+    "corrected_p_value": 0.20144687698418312,
+    "degenerate": false,
+    "effect_size_cohens_d": -0.0946432952123966,
+    "feature_name": "ai_marker_frequency",
+    "n_nan_dropped": 0,
+    "n_post": 268,
+    "n_pre": 2106,
+    "raw_p_value": 0.10072343849209156,
+    "significant": false,
+    "skipped_reason": null,
+    "test_name": "mann_whitney_ai_marker_frequency"
+  },
+  {
+    "author_id": "f47f9034-0aa5-516d-9c0b-f1ef69c57a0b",
+    "confidence_interval_95": [
+      -0.0010346949828447755,
+      -0.00034993637814443576
+    ],
+    "corrected_p_value": 0.00035571894371716484,
+    "degenerate": false,
+    "effect_size_cohens_d": -0.0946432952123966,
+    "feature_name": "ai_marker_frequency",
+    "n_nan_dropped": 0,
+    "n_post": 268,
+    "n_pre": 2106,
+    "raw_p_value": 4.4464867964645605e-05,
+    "significant": false,
+    "skipped_reason": null,
+    "test_name": "welch_t_ai_marker_frequency"
+  },
+  {
+    "author_id": "f47f9034-0aa5-516d-9c0b-f1ef69c57a0b",
+    "confidence_interval_95": [
+      0.0,
+      0.0
+    ],
+    "corrected_p_value": NaN,
+    "degenerate": true,
+    "effect_size_cohens_d": 0.0,
+    "feature_name": "hedging_frequency",
+    "n_nan_dropped": 0,
+    "n_post": 268,
+    "n_pre": 2106,
+    "raw_p_value": 1.0,
+    "significant": false,
+    "skipped_reason": null,
+    "test_name": "mann_whitney_hedging_frequency"
+  },
+  {
+    "author_id": "f47f9034-0aa5-516d-9c0b-f1ef69c57a0b",
+    "confidence_interval_95": [
+      0.0,
+      0.0
+    ],
+    "corrected_p_value": NaN,
+    "degenerate": true,
+    "effect_size_cohens_d": 0.0,
+    "feature_name": "hedging_frequency",
+    "n_nan_dropped": 0,
+    "n_post": 268,
+    "n_pre": 2106,
+    "raw_p_value": NaN,
+    "significant": false,
+    "skipped_reason": null,
+    "test_name": "welch_t_hedging_frequency"
+  },
+  {
+    "author_id": "f47f9034-0aa5-516d-9c0b-f1ef69c57a0b",
+    "confidence_interval_95": [
+      -0.0037172279578879643,
+      0.005524871834953903
+    ],
+    "corrected_p_value": 0.8899738337787757,
+    "degenerate": false,
+    "effect_size_cohens_d": 0.009651184028004401,
+    "feature_name": "mattr",
+    "n_nan_dropped": 0,
+    "n_post": 268,
+    "n_pre": 2106,
+    "raw_p_value": 0.7787405476499442,
+    "significant": false,
+    "skipped_reason": null,
+    "test_name": "mann_whitney_mattr"
+  },
+  {
+    "author_id": "f47f9034-0aa5-516d-9c0b-f1ef69c57a0b",
+    "confidence_interval_95": [
+      -0.0037172279578879643,
+      0.005524871834953903
+    ],
+    "corrected_p_value": 0.8899738337787757,
+    "degenerate": false,
+    "effect_size_cohens_d": 0.009651184028004401,
+    "feature_name": "mattr",
+    "n_nan_dropped": 0,
+    "n_post": 268,
+    "n_pre": 2106,
+    "raw_p_value": 0.8899738337787757,
+    "significant": false,
+    "skipped_reason": null,
+    "test_name": "welch_t_mattr"
+  },
+  {
+    "author_id": "f47f9034-0aa5-516d-9c0b-f1ef69c57a0b",
+    "confidence_interval_95": [
+      0.0,
+      0.0
+    ],
+    "corrected_p_value": NaN,
+    "degenerate": true,
+    "effect_size_cohens_d": 0.0,
+    "feature_name": "paragraph_length_variance",
+    "n_nan_dropped": 0,
+    "n_post": 268,
+    "n_pre": 2106,
+    "raw_p_value": 1.0,
+    "significant": false,
+    "skipped_reason": null,
+    "test_name": "mann_whitney_paragraph_length_variance"
+  },
+  {
+    "author_id": "f47f9034-0aa5-516d-9c0b-f1ef69c57a0b",
+    "confidence_interval_95": [
+      0.0,
+      0.0
+    ],
+    "corrected_p_value": NaN,
+    "degenerate": true,
+    "effect_size_cohens_d": 0.0,
+    "feature_name": "paragraph_length_variance",
+    "n_nan_dropped": 0,
+    "n_post": 268,
+    "n_pre": 2106,
+    "raw_p_value": NaN,
+    "significant": false,
+    "skipped_reason": null,
+    "test_name": "welch_t_paragraph_length_variance"
+  },
+  {
+    "author_id": "f47f9034-0aa5-516d-9c0b-f1ef69c57a0b",
+    "confidence_interval_95": [
+      -1.7072989482463814,
+      -0.49691798851252816
+    ],
+    "corrected_p_value": 0.003928205401804406,
+    "degenerate": false,
+    "effect_size_cohens_d": -0.21966610899430225,
+    "feature_name": "sent_length_mean",
+    "n_nan_dropped": 0,
+    "n_post": 268,
+    "n_pre": 2106,
+    "raw_p_value": 0.0014730770256766524,
+    "significant": true,
+    "skipped_reason": null,
+    "test_name": "mann_whitney_sent_length_mean"
+  },
+  {
+    "author_id": "f47f9034-0aa5-516d-9c0b-f1ef69c57a0b",
+    "confidence_interval_95": [
+      -1.7072989482463814,
+      -0.49691798851252816
+    ],
+    "corrected_p_value": 0.0020325530028910826,
+    "degenerate": false,
+    "effect_size_cohens_d": -0.21966610899430225,
+    "feature_name": "sent_length_mean",
+    "n_nan_dropped": 0,
+    "n_post": 268,
+    "n_pre": 2106,
+    "raw_p_value": 0.0005081382507227707,
+    "significant": true,
+    "skipped_reason": null,
+    "test_name": "welch_t_sent_length_mean"
+  },
+  {
+    "author_id": "f47f9034-0aa5-516d-9c0b-f1ef69c57a0b",
+    "confidence_interval_95": [
+      -0.01576364582366071,
+      0.003974510966905912
+    ],
+    "corrected_p_value": 0.256711145014826,
+    "degenerate": false,
+    "effect_size_cohens_d": -0.08936091146886231,
+    "feature_name": "ttr",
+    "n_nan_dropped": 0,
+    "n_post": 268,
+    "n_pre": 2106,
+    "raw_p_value": 0.1919946802015401,
+    "significant": false,
+    "skipped_reason": null,
+    "test_name": "mann_whitney_ttr"
+  },
+  {
+    "author_id": "f47f9034-0aa5-516d-9c0b-f1ef69c57a0b",
+    "confidence_interval_95": [
+      -0.01576364582366071,
+      0.003974510966905912
+    ],
+    "corrected_p_value": 0.256711145014826,
+    "degenerate": false,
+    "effect_size_cohens_d": -0.08936091146886231,
+    "feature_name": "ttr",
+    "n_nan_dropped": 0,
+    "n_post": 268,
+    "n_pre": 2106,
+    "raw_p_value": 0.1925333587611195,
+    "significant": false,
+    "skipped_reason": null,
+    "test_name": "welch_t_ttr"
+  }
+]

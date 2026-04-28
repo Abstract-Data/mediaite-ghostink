@@ -1,0 +1,304 @@
+{
+  "author_id": "69ed8494-b553-5100-9bdf-c9d3ac3f13a8",
+  "change_points": [
+    {
+      "author_id": "69ed8494-b553-5100-9bdf-c9d3ac3f13a8",
+      "confidence": 0.9959994728503156,
+      "direction": "increase",
+      "effect_size_cohens_d": 0.41904059981500213,
+      "feature_name": "ai_marker_frequency",
+      "method": "bocpd",
+      "timestamp": "2025-02-14T11:14:16Z"
+    }
+  ],
+  "config_hash": "06424f35c1c156d0",
+  "convergence_windows": [
+    {
+      "convergence_ratio": 1.0,
+      "end_date": "2025-05-15",
+      "families_converging": [
+        "ai_markers"
+      ],
+      "features_converging": [
+        "ai_marker_frequency"
+      ],
+      "n_rankable_per_family": {
+        "ai_markers": 1
+      },
+      "passes_via": [
+        "ratio"
+      ],
+      "pipeline_a_score": 0.4173642165186222,
+      "pipeline_b_score": 0.0,
+      "pipeline_c_score": null,
+      "start_date": "2025-02-14"
+    }
+  ],
+  "drift_scores": null,
+  "era_classification": {
+    "ai_marker_change_points_by_era": {
+      "mar_2023_to_dec_2023": 0,
+      "nov_2022_to_mar_2023": 0,
+      "post_dec_2023": 1,
+      "pre_nov_2022": 0
+    },
+    "dominant_era": "post_dec_2023",
+    "total_ai_marker_change_points": 1
+  },
+  "hypothesis_tests": [
+    {
+      "author_id": "69ed8494-b553-5100-9bdf-c9d3ac3f13a8",
+      "confidence_interval_95": [
+        -0.0006281240459331115,
+        0.010316561093062808
+      ],
+      "corrected_p_value": 0.43614753022367225,
+      "degenerate": false,
+      "effect_size_cohens_d": 0.41904059981500213,
+      "feature_name": "ai_marker_frequency",
+      "n_nan_dropped": 0,
+      "n_post": 63,
+      "n_pre": 1779,
+      "raw_p_value": 0.3808417422217031,
+      "significant": false,
+      "skipped_reason": null,
+      "test_name": "welch_t_ai_marker_frequency"
+    },
+    {
+      "author_id": "69ed8494-b553-5100-9bdf-c9d3ac3f13a8",
+      "confidence_interval_95": [
+        -0.0006281240459331115,
+        0.010316561093062808
+      ],
+      "corrected_p_value": 0.43614753022367225,
+      "degenerate": false,
+      "effect_size_cohens_d": 0.41904059981500213,
+      "feature_name": "ai_marker_frequency",
+      "n_nan_dropped": 0,
+      "n_post": 63,
+      "n_pre": 1779,
+      "raw_p_value": 0.43614753022367225,
+      "significant": false,
+      "skipped_reason": null,
+      "test_name": "mann_whitney_ai_marker_frequency"
+    },
+    {
+      "author_id": "69ed8494-b553-5100-9bdf-c9d3ac3f13a8",
+      "confidence_interval_95": [
+        NaN,
+        NaN
+      ],
+      "corrected_p_value": NaN,
+      "degenerate": false,
+      "effect_size_cohens_d": 0.0,
+      "feature_name": "ai_marker_frequency",
+      "n_nan_dropped": 0,
+      "n_post": -1,
+      "n_pre": -1,
+      "raw_p_value": NaN,
+      "significant": false,
+      "skipped_reason": "invalid_breakpoint_or_short_series",
+      "test_name": "welch_t_ai_marker_frequency"
+    },
+    {
+      "author_id": "69ed8494-b553-5100-9bdf-c9d3ac3f13a8",
+      "confidence_interval_95": [
+        NaN,
+        NaN
+      ],
+      "corrected_p_value": NaN,
+      "degenerate": false,
+      "effect_size_cohens_d": 0.0,
+      "feature_name": "ai_marker_frequency",
+      "n_nan_dropped": 0,
+      "n_post": -1,
+      "n_pre": -1,
+      "raw_p_value": NaN,
+      "significant": false,
+      "skipped_reason": "invalid_breakpoint_or_short_series",
+      "test_name": "mann_whitney_ai_marker_frequency"
+    },
+    {
+      "author_id": "69ed8494-b553-5100-9bdf-c9d3ac3f13a8",
+      "confidence_interval_95": [
+        NaN,
+        NaN
+      ],
+      "corrected_p_value": NaN,
+      "degenerate": false,
+      "effect_size_cohens_d": 0.0,
+      "feature_name": "ttr",
+      "n_nan_dropped": 0,
+      "n_post": -1,
+      "n_pre": -1,
+      "raw_p_value": NaN,
+      "significant": false,
+      "skipped_reason": "invalid_breakpoint_or_short_series",
+      "test_name": "welch_t_ttr"
+    },
+    {
+      "author_id": "69ed8494-b553-5100-9bdf-c9d3ac3f13a8",
+      "confidence_interval_95": [
+        NaN,
+        NaN
+      ],
+      "corrected_p_value": NaN,
+      "degenerate": false,
+      "effect_size_cohens_d": 0.0,
+      "feature_name": "ttr",
+      "n_nan_dropped": 0,
+      "n_post": -1,
+      "n_pre": -1,
+      "raw_p_value": NaN,
+      "significant": false,
+      "skipped_reason": "invalid_breakpoint_or_short_series",
+      "test_name": "mann_whitney_ttr"
+    },
+    {
+      "author_id": "69ed8494-b553-5100-9bdf-c9d3ac3f13a8",
+      "confidence_interval_95": [
+        NaN,
+        NaN
+      ],
+      "corrected_p_value": NaN,
+      "degenerate": false,
+      "effect_size_cohens_d": 0.0,
+      "feature_name": "mattr",
+      "n_nan_dropped": 0,
+      "n_post": -1,
+      "n_pre": -1,
+      "raw_p_value": NaN,
+      "significant": false,
+      "skipped_reason": "invalid_breakpoint_or_short_series",
+      "test_name": "welch_t_mattr"
+    },
+    {
+      "author_id": "69ed8494-b553-5100-9bdf-c9d3ac3f13a8",
+      "confidence_interval_95": [
+        NaN,
+        NaN
+      ],
+      "corrected_p_value": NaN,
+      "degenerate": false,
+      "effect_size_cohens_d": 0.0,
+      "feature_name": "mattr",
+      "n_nan_dropped": 0,
+      "n_post": -1,
+      "n_pre": -1,
+      "raw_p_value": NaN,
+      "significant": false,
+      "skipped_reason": "invalid_breakpoint_or_short_series",
+      "test_name": "mann_whitney_mattr"
+    },
+    {
+      "author_id": "69ed8494-b553-5100-9bdf-c9d3ac3f13a8",
+      "confidence_interval_95": [
+        NaN,
+        NaN
+      ],
+      "corrected_p_value": NaN,
+      "degenerate": false,
+      "effect_size_cohens_d": 0.0,
+      "feature_name": "sent_length_mean",
+      "n_nan_dropped": 0,
+      "n_post": -1,
+      "n_pre": -1,
+      "raw_p_value": NaN,
+      "significant": false,
+      "skipped_reason": "invalid_breakpoint_or_short_series",
+      "test_name": "welch_t_sent_length_mean"
+    },
+    {
+      "author_id": "69ed8494-b553-5100-9bdf-c9d3ac3f13a8",
+      "confidence_interval_95": [
+        NaN,
+        NaN
+      ],
+      "corrected_p_value": NaN,
+      "degenerate": false,
+      "effect_size_cohens_d": 0.0,
+      "feature_name": "sent_length_mean",
+      "n_nan_dropped": 0,
+      "n_post": -1,
+      "n_pre": -1,
+      "raw_p_value": NaN,
+      "significant": false,
+      "skipped_reason": "invalid_breakpoint_or_short_series",
+      "test_name": "mann_whitney_sent_length_mean"
+    },
+    {
+      "author_id": "69ed8494-b553-5100-9bdf-c9d3ac3f13a8",
+      "confidence_interval_95": [
+        NaN,
+        NaN
+      ],
+      "corrected_p_value": NaN,
+      "degenerate": false,
+      "effect_size_cohens_d": 0.0,
+      "feature_name": "paragraph_length_variance",
+      "n_nan_dropped": 0,
+      "n_post": -1,
+      "n_pre": -1,
+      "raw_p_value": NaN,
+      "significant": false,
+      "skipped_reason": "invalid_breakpoint_or_short_series",
+      "test_name": "welch_t_paragraph_length_variance"
+    },
+    {
+      "author_id": "69ed8494-b553-5100-9bdf-c9d3ac3f13a8",
+      "confidence_interval_95": [
+        NaN,
+        NaN
+      ],
+      "corrected_p_value": NaN,
+      "degenerate": false,
+      "effect_size_cohens_d": 0.0,
+      "feature_name": "paragraph_length_variance",
+      "n_nan_dropped": 0,
+      "n_post": -1,
+      "n_pre": -1,
+      "raw_p_value": NaN,
+      "significant": false,
+      "skipped_reason": "invalid_breakpoint_or_short_series",
+      "test_name": "mann_whitney_paragraph_length_variance"
+    },
+    {
+      "author_id": "69ed8494-b553-5100-9bdf-c9d3ac3f13a8",
+      "confidence_interval_95": [
+        NaN,
+        NaN
+      ],
+      "corrected_p_value": NaN,
+      "degenerate": false,
+      "effect_size_cohens_d": 0.0,
+      "feature_name": "hedging_frequency",
+      "n_nan_dropped": 0,
+      "n_post": -1,
+      "n_pre": -1,
+      "raw_p_value": NaN,
+      "significant": false,
+      "skipped_reason": "invalid_breakpoint_or_short_series",
+      "test_name": "welch_t_hedging_frequency"
+    },
+    {
+      "author_id": "69ed8494-b553-5100-9bdf-c9d3ac3f13a8",
+      "confidence_interval_95": [
+        NaN,
+        NaN
+      ],
+      "corrected_p_value": NaN,
+      "degenerate": false,
+      "effect_size_cohens_d": 0.0,
+      "feature_name": "hedging_frequency",
+      "n_nan_dropped": 0,
+      "n_post": -1,
+      "n_pre": -1,
+      "raw_p_value": NaN,
+      "significant": false,
+      "skipped_reason": "invalid_breakpoint_or_short_series",
+      "test_name": "mann_whitney_hedging_frequency"
+    }
+  ],
+  "run_id": "4c377162-bbc0-4a17-8c43-7845ec6f907e",
+  "run_timestamp": "2026-04-25T10:52:45.806405Z"
+}

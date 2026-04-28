@@ -1,0 +1,258 @@
+[
+  {
+    "convergence_ratio": 0.8,
+    "end_date": "2021-04-02",
+    "families_converging": [
+      "ai_markers",
+      "readability",
+      "self_similarity",
+      "sentence_structure"
+    ],
+    "features_converging": [
+      "ai_marker_frequency",
+      "flesch_kincaid",
+      "self_similarity_30d",
+      "sent_length_mean"
+    ],
+    "n_rankable_per_family": {
+      "ai_markers": 1,
+      "lexical_richness": 2,
+      "readability": 2,
+      "self_similarity": 2,
+      "sentence_structure": 2
+    },
+    "passes_via": [
+      "ratio",
+      "ab",
+      "drift_only"
+    ],
+    "pipeline_a_score": 0.5891279089278055,
+    "pipeline_b_score": 0.408440832931592,
+    "pipeline_c_score": null,
+    "start_date": "2021-01-02"
+  },
+  {
+    "convergence_ratio": 0.8,
+    "end_date": "2021-04-06",
+    "families_converging": [
+      "ai_markers",
+      "readability",
+      "self_similarity",
+      "sentence_structure"
+    ],
+    "features_converging": [
+      "ai_marker_frequency",
+      "flesch_kincaid",
+      "self_similarity_30d",
+      "sent_length_mean"
+    ],
+    "n_rankable_per_family": {
+      "ai_markers": 1,
+      "lexical_richness": 2,
+      "readability": 2,
+      "self_similarity": 2,
+      "sentence_structure": 2
+    },
+    "passes_via": [
+      "ratio",
+      "ab",
+      "drift_only"
+    ],
+    "pipeline_a_score": 0.5891279089278055,
+    "pipeline_b_score": 0.407118275040506,
+    "pipeline_c_score": null,
+    "start_date": "2021-01-06"
+  },
+  {
+    "convergence_ratio": 0.8,
+    "end_date": "2021-04-12",
+    "families_converging": [
+      "ai_markers",
+      "readability",
+      "self_similarity",
+      "sentence_structure"
+    ],
+    "features_converging": [
+      "ai_marker_frequency",
+      "flesch_kincaid",
+      "self_similarity_90d",
+      "sent_length_mean"
+    ],
+    "n_rankable_per_family": {
+      "ai_markers": 1,
+      "lexical_richness": 2,
+      "readability": 2,
+      "self_similarity": 2,
+      "sentence_structure": 2
+    },
+    "passes_via": [
+      "ratio",
+      "ab",
+      "drift_only"
+    ],
+    "pipeline_a_score": 0.5891279089278055,
+    "pipeline_b_score": 0.39329995042225413,
+    "pipeline_c_score": null,
+    "start_date": "2021-01-12"
+  },
+  {
+    "convergence_ratio": 0.6,
+    "end_date": "2021-04-29",
+    "families_converging": [
+      "ai_markers",
+      "readability",
+      "sentence_structure"
+    ],
+    "features_converging": [
+      "ai_marker_frequency",
+      "flesch_kincaid",
+      "sent_length_mean"
+    ],
+    "n_rankable_per_family": {
+      "ai_markers": 1,
+      "lexical_richness": 2,
+      "readability": 2,
+      "self_similarity": 2,
+      "sentence_structure": 2
+    },
+    "passes_via": [
+      "ratio",
+      "ab",
+      "drift_only"
+    ],
+    "pipeline_a_score": 0.46961147638265127,
+    "pipeline_b_score": 0.4022937749277963,
+    "pipeline_c_score": null,
+    "start_date": "2021-01-29"
+  },
+  {
+    "convergence_ratio": 0.2,
+    "end_date": "2021-05-02",
+    "families_converging": [
+      "ai_markers"
+    ],
+    "features_converging": [
+      "ai_marker_frequency"
+    ],
+    "n_rankable_per_family": {
+      "ai_markers": 1,
+      "lexical_richness": 2,
+      "readability": 2,
+      "self_similarity": 2,
+      "sentence_structure": 2
+    },
+    "passes_via": [
+      "drift_only"
+    ],
+    "pipeline_a_score": 0.2571541088334294,
+    "pipeline_b_score": 0.42038641893388895,
+    "pipeline_c_score": null,
+    "start_date": "2021-02-01"
+  },
+  {
+    "convergence_ratio": 0.4,
+    "end_date": "2021-06-30",
+    "families_converging": [
+      "ai_markers",
+      "sentence_structure"
+    ],
+    "features_converging": [
+      "ai_marker_frequency",
+      "sent_length_std"
+    ],
+    "n_rankable_per_family": {
+      "ai_markers": 1,
+      "lexical_richness": 2,
+      "readability": 2,
+      "self_similarity": 2,
+      "sentence_structure": 2
+    },
+    "passes_via": [
+      "ab",
+      "drift_only"
+    ],
+    "pipeline_a_score": 0.30523795627023265,
+    "pipeline_b_score": 0.38095238095238093,
+    "pipeline_c_score": null,
+    "start_date": "2021-04-01"
+  },
+  {
+    "convergence_ratio": 0.4,
+    "end_date": "2021-07-14",
+    "families_converging": [
+      "ai_markers",
+      "sentence_structure"
+    ],
+    "features_converging": [
+      "ai_marker_frequency",
+      "sent_length_std"
+    ],
+    "n_rankable_per_family": {
+      "ai_markers": 1,
+      "lexical_richness": 2,
+      "readability": 2,
+      "self_similarity": 2,
+      "sentence_structure": 2
+    },
+    "passes_via": [
+      "ab",
+      "drift_only"
+    ],
+    "pipeline_a_score": 0.30523795627023265,
+    "pipeline_b_score": 0.4932281810343082,
+    "pipeline_c_score": null,
+    "start_date": "2021-04-15"
+  },
+  {
+    "convergence_ratio": 0.4,
+    "end_date": "2021-07-23",
+    "families_converging": [
+      "ai_markers",
+      "sentence_structure"
+    ],
+    "features_converging": [
+      "ai_marker_frequency",
+      "sent_length_std"
+    ],
+    "n_rankable_per_family": {
+      "ai_markers": 1,
+      "lexical_richness": 2,
+      "readability": 2,
+      "self_similarity": 2,
+      "sentence_structure": 2
+    },
+    "passes_via": [
+      "ab",
+      "drift_only"
+    ],
+    "pipeline_a_score": 0.30523795627023265,
+    "pipeline_b_score": 0.48412698412698413,
+    "pipeline_c_score": null,
+    "start_date": "2021-04-24"
+  },
+  {
+    "convergence_ratio": 0.2,
+    "end_date": "2021-08-13",
+    "families_converging": [
+      "sentence_structure"
+    ],
+    "features_converging": [
+      "sent_length_std"
+    ],
+    "n_rankable_per_family": {
+      "ai_markers": 1,
+      "lexical_richness": 2,
+      "readability": 2,
+      "self_similarity": 2,
+      "sentence_structure": 2
+    },
+    "passes_via": [
+      "ab",
+      "drift_only"
+    ],
+    "pipeline_a_score": 0.353321803707036,
+    "pipeline_b_score": 0.505680602305751,
+    "pipeline_c_score": null,
+    "start_date": "2021-05-15"
+  }
+]

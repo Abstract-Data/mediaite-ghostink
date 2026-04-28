@@ -14,6 +14,26 @@ Hybrid **AI writing forensics** pipeline for Mediaite.com: deterministic stages 
 
 Pull requests receive a **CI report** comment (pytest summary and line coverage vs `main`) from [`.github/workflows/ci-report.yml`](.github/workflows/ci-report.yml).
 
+### At a glance
+
+- **What it is:** A deterministic **scrape → extract → analyze → report** pipeline over a WordPress newsroom corpus, with stylometry, embedding drift, optional token-probability signals, and Quarto outputs.
+- **Who it is for:** Forensic reviewers, operators reproducing a locked configuration, and engineers extending the pipeline.
+- **What it is not:** Outputs are **statistical and documentary signals**, not legal findings or definitive attribution of authorship or tool use. See [Responsible use](#responsible-use).
+- **Contributors:** Human workflow and PR expectations are in [`CONTRIBUTING.md`](CONTRIBUTING.md). Automation and agent rules live in [`AGENTS.md`](AGENTS.md).
+
+### Five-minute smoke test
+
+```bash
+git clone git@github.com:Abstract-Data/mediaite-ghostink.git
+cd mediaite-ghostink
+uv sync --extra dev
+uv run python -m spacy download en_core_web_md
+uv run forensics validate
+uv run forensics preflight
+```
+
+Then configure real authors in [`config.toml`](config.toml) (see [Configuration](#configuration)) before any live scrape. For a full run and report, continue with [Typical workflows](#typical-workflows).
+
 ---
 
 ## Table of contents
@@ -428,6 +448,7 @@ uv run forensics report --format html
 | `src/forensics/` | Application package (CLI, scraper, features, analysis, storage, config, models). |
 | `tests/` | Pytest suite (`unit/`, `integration/`, `evals/`, fixtures, Hypothesis tests). |
 | `docs/` | Architecture, testing policy, runbook, ADRs, deployment notes. |
+| `_quarto.yml`, `index.qmd` | Quarto book project config and landing chapter (output under `data/reports/`). |
 | `notebooks/` | Jupyter chapters consumed by Quarto. |
 | `prompts/` | Versioned prompts for agents and pipeline phases. |
 | `scripts/` | Maintenance and one-off utilities. |
@@ -446,7 +467,7 @@ uv run forensics report --format html
 | `data/embeddings/` | Embedding batches used by drift and reports. |
 | `data/analysis/` | Per-author JSON results, run metadata, `corpus_custody.json`. |
 | `data/articles.jsonl` | JSONL export for auditing. |
-| `data/reports/` | Quarto book output (see `quarto.yml` `output-dir`). |
+| `data/reports/` | Quarto book output (see [`_quarto.yml`](_quarto.yml) `project.output-dir`). |
 | `data/probability/` | Phase 9 outputs when enabled. |
 | `data/ai_baseline/` | Phase 10 synthetic baseline artifacts. |
 | `data/survey/`, `data/calibration/` | Survey and calibration run outputs (see runbook). |
@@ -470,7 +491,7 @@ Defined in [`pyproject.toml`](pyproject.toml):
 
 ## Reports (Quarto)
 
-- Project config: [`quarto.yml`](quarto.yml) (book title, chapters under `notebooks/`, output to **`data/reports/`**).
+- Project config: [`_quarto.yml`](_quarto.yml) (book title, chapters under `notebooks/`, output to **`data/reports/`**).
 - **`forensics report`** shells out to **`quarto`**; install separately if missing.
 - **`--verify`** checks corpus hash material under `data/analysis/` (see [`src/forensics/utils/provenance.py`](src/forensics/utils/provenance.py)).
 
@@ -511,10 +532,14 @@ Testing policy and coverage gates are documented in [`docs/TESTING.md`](docs/TES
 | [`docs/DEPLOYMENTS.md`](docs/DEPLOYMENTS.md) | Deployment notes. |
 | [`docs/GUARDRAILS.md`](docs/GUARDRAILS.md) | Recurring failure patterns and mitigations. |
 | [`docs/adr/`](docs/adr/) | Architecture decision records. |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | Pull requests, checks, and handoff expectations. |
+| [`SECURITY.md`](SECURITY.md) | How to report security issues responsibly. |
+| [`LICENSE`](LICENSE) | MIT license (Abstract Data LLC). |
 
 ---
 
 ## Agent and contributor notes
 
 - **[`AGENTS.md`](AGENTS.md)** — Boundaries, commands, embedding pin, data directories, and conventions for automation and humans.
+- **[`CONTRIBUTING.md`](CONTRIBUTING.md)** — Pull requests, local checks, formatting, and how to update `HANDOFF.md` after substantive work.
 - **Governance / hooks:** [`.github/workflows/agents-governance.yml`](.github/workflows/agents-governance.yml) and [`docs/adr/ADR-003-agent-governance-and-hooks.md`](docs/adr/ADR-003-agent-governance-and-hooks.md).

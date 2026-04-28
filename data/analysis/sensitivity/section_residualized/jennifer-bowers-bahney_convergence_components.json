@@ -1,0 +1,116 @@
+{
+  "author_slug": "jennifer-bowers-bahney",
+  "window_components": [
+    {
+      "admitted": true,
+      "ai_signal": 0.0,
+      "convergence_ratio": 1.0,
+      "min_feature_ratio": 0.5,
+      "n_change_points_in_window": 5,
+      "passes_ab": true,
+      "passes_drift_only": true,
+      "passes_ratio": true,
+      "passes_via": [
+        "ratio",
+        "ab",
+        "drift_only"
+      ],
+      "peak_signal": 0.7777777777777778,
+      "pipeline_a_score": 0.8132739776382094,
+      "pipeline_b_score": 0.42652395147671357,
+      "pipeline_c_score": null,
+      "sim_signal": 0.07527012517564939,
+      "window_end": "2023-06-19",
+      "window_start": "2023-03-21"
+    },
+    {
+      "admitted": true,
+      "ai_signal": 0.0,
+      "convergence_ratio": 1.0,
+      "min_feature_ratio": 0.5,
+      "n_change_points_in_window": 5,
+      "passes_ab": true,
+      "passes_drift_only": true,
+      "passes_ratio": true,
+      "passes_via": [
+        "ratio",
+        "ab",
+        "drift_only"
+      ],
+      "peak_signal": 0.7777777777777778,
+      "pipeline_a_score": 0.8132739776382094,
+      "pipeline_b_score": 0.42818430380615713,
+      "pipeline_c_score": null,
+      "sim_signal": 0.07859082983453644,
+      "window_end": "2023-06-22",
+      "window_start": "2023-03-24"
+    },
+    {
+      "admitted": true,
+      "ai_signal": 0.0,
+      "convergence_ratio": 1.0,
+      "min_feature_ratio": 0.5,
+      "n_change_points_in_window": 3,
+      "passes_ab": true,
+      "passes_drift_only": true,
+      "passes_ratio": true,
+      "passes_via": [
+        "ratio",
+        "ab",
+        "drift_only"
+      ],
+      "peak_signal": 0.7777777777777778,
+      "pipeline_a_score": 0.7870175353230591,
+      "pipeline_b_score": 0.42122933852506605,
+      "pipeline_c_score": null,
+      "sim_signal": 0.06468089927235429,
+      "window_end": "2023-06-25",
+      "window_start": "2023-03-27"
+    },
+    {
+      "admitted": true,
+      "ai_signal": 0.0,
+      "convergence_ratio": 0.5,
+      "min_feature_ratio": 0.5,
+      "n_change_points_in_window": 2,
+      "passes_ab": true,
+      "passes_drift_only": true,
+      "passes_ratio": true,
+      "passes_via": [
+        "ratio",
+        "ab",
+        "drift_only"
+      ],
+      "peak_signal": 0.7777777777777778,
+      "pipeline_a_score": 0.9474871153696993,
+      "pipeline_b_score": 0.4209328100340399,
+      "pipeline_c_score": null,
+      "sim_signal": 0.06408784229030196,
+      "window_end": "2023-06-30",
+      "window_start": "2023-04-01"
+    },
+    {
+      "admitted": true,
+      "ai_signal": 0.0,
+      "convergence_ratio": 0.5,
+      "min_feature_ratio": 0.5,
+      "n_change_points_in_window": 2,
+      "passes_ab": true,
+      "passes_drift_only": true,
+      "passes_ratio": true,
+      "passes_via": [
+        "ratio",
+        "ab",
+        "drift_only"
+      ],
+      "peak_signal": 0.7777777777777778,
+      "pipeline_a_score": 0.9474871153696993,
+      "pipeline_b_score": 0.40931780245249805,
+      "pipeline_c_score": null,
+      "sim_signal": 0.040857827127218256,
+      "window_end": "2023-07-10",
+      "window_start": "2023-04-11"
+    }
+  ],
+  "windows_evaluated": 5
+}

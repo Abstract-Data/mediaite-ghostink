@@ -1,0 +1,98 @@
+[
+  {
+    "convergence_ratio": 0.25,
+    "end_date": "2021-07-20",
+    "families_converging": [
+      "self_similarity"
+    ],
+    "features_converging": [
+      "self_similarity_30d"
+    ],
+    "n_rankable_per_family": {
+      "ai_markers": 1,
+      "lexical_richness": 2,
+      "self_similarity": 2,
+      "sentence_structure": 1
+    },
+    "passes_via": [
+      "ab",
+      "drift_only"
+    ],
+    "pipeline_a_score": 1.0,
+    "pipeline_b_score": 0.325,
+    "pipeline_c_score": null,
+    "start_date": "2021-04-21"
+  },
+  {
+    "convergence_ratio": 0.25,
+    "end_date": "2021-07-25",
+    "families_converging": [
+      "self_similarity"
+    ],
+    "features_converging": [
+      "self_similarity_30d"
+    ],
+    "n_rankable_per_family": {
+      "ai_markers": 1,
+      "lexical_richness": 2,
+      "self_similarity": 2,
+      "sentence_structure": 1
+    },
+    "passes_via": [
+      "ab",
+      "drift_only"
+    ],
+    "pipeline_a_score": 1.0,
+    "pipeline_b_score": 0.325,
+    "pipeline_c_score": null,
+    "start_date": "2021-04-26"
+  },
+  {
+    "convergence_ratio": 0.25,
+    "end_date": "2021-07-30",
+    "families_converging": [
+      "self_similarity"
+    ],
+    "features_converging": [
+      "self_similarity_90d"
+    ],
+    "n_rankable_per_family": {
+      "ai_markers": 1,
+      "lexical_richness": 2,
+      "self_similarity": 2,
+      "sentence_structure": 1
+    },
+    "passes_via": [
+      "ab",
+      "drift_only"
+    ],
+    "pipeline_a_score": 0.8754480613292039,
+    "pipeline_b_score": 0.325,
+    "pipeline_c_score": null,
+    "start_date": "2021-05-01"
+  },
+  {
+    "convergence_ratio": 0.25,
+    "end_date": "2021-08-03",
+    "families_converging": [
+      "self_similarity"
+    ],
+    "features_converging": [
+      "self_similarity_90d"
+    ],
+    "n_rankable_per_family": {
+      "ai_markers": 1,
+      "lexical_richness": 2,
+      "self_similarity": 2,
+      "sentence_structure": 1
+    },
+    "passes_via": [
+      "ab",
+      "drift_only"
+    ],
+    "pipeline_a_score": 0.8754480613292039,
+    "pipeline_b_score": 0.35833333333333334,
+    "pipeline_c_score": null,
+    "start_date": "2021-05-05"
+  }
+]

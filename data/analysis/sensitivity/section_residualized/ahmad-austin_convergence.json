@@ -1,0 +1,112 @@
+[
+  {
+    "convergence_ratio": 1.0,
+    "end_date": "2023-06-25",
+    "families_converging": [
+      "self_similarity"
+    ],
+    "features_converging": [
+      "self_similarity_30d"
+    ],
+    "n_rankable_per_family": {
+      "self_similarity": 2
+    },
+    "passes_via": [
+      "ratio",
+      "ab",
+      "drift_only"
+    ],
+    "pipeline_a_score": 1.0,
+    "pipeline_b_score": 0.5518082911776863,
+    "pipeline_c_score": null,
+    "start_date": "2023-03-27"
+  },
+  {
+    "convergence_ratio": 1.0,
+    "end_date": "2023-06-30",
+    "families_converging": [
+      "self_similarity"
+    ],
+    "features_converging": [
+      "self_similarity_30d"
+    ],
+    "n_rankable_per_family": {
+      "self_similarity": 2
+    },
+    "passes_via": [
+      "ratio",
+      "ab",
+      "drift_only"
+    ],
+    "pipeline_a_score": 1.0,
+    "pipeline_b_score": 0.5459950966882501,
+    "pipeline_c_score": null,
+    "start_date": "2023-04-01"
+  },
+  {
+    "convergence_ratio": 1.0,
+    "end_date": "2023-07-09",
+    "families_converging": [
+      "self_similarity"
+    ],
+    "features_converging": [
+      "self_similarity_30d"
+    ],
+    "n_rankable_per_family": {
+      "self_similarity": 2
+    },
+    "passes_via": [
+      "ratio",
+      "ab",
+      "drift_only"
+    ],
+    "pipeline_a_score": 1.0,
+    "pipeline_b_score": 0.5229815744351486,
+    "pipeline_c_score": null,
+    "start_date": "2023-04-10"
+  },
+  {
+    "convergence_ratio": 1.0,
+    "end_date": "2023-07-19",
+    "families_converging": [
+      "self_similarity"
+    ],
+    "features_converging": [
+      "self_similarity_30d"
+    ],
+    "n_rankable_per_family": {
+      "self_similarity": 2
+    },
+    "passes_via": [
+      "ratio",
+      "ab",
+      "drift_only"
+    ],
+    "pipeline_a_score": 1.0,
+    "pipeline_b_score": 0.5071385629492661,
+    "pipeline_c_score": null,
+    "start_date": "2023-04-20"
+  },
+  {
+    "convergence_ratio": 1.0,
+    "end_date": "2023-08-20",
+    "families_converging": [
+      "self_similarity"
+    ],
+    "features_converging": [
+      "self_similarity_90d"
+    ],
+    "n_rankable_per_family": {
+      "self_similarity": 2
+    },
+    "passes_via": [
+      "ratio",
+      "ab",
+      "drift_only"
+    ],
+    "pipeline_a_score": 1.0,
+    "pipeline_b_score": 0.30437602782766704,
+    "pipeline_c_score": null,
+    "start_date": "2023-05-22"
+  }
+]

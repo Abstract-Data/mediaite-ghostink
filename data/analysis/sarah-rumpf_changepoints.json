@@ -1,0 +1,92 @@
+[
+  {
+    "author_id": "14fad988-8d54-5a02-9143-c11837229f57",
+    "confidence": 0.9959996940022547,
+    "direction": "increase",
+    "effect_proxy": 0.9959996940022547,
+    "effect_size_cohens_d": 0.23014996702568793,
+    "feature_name": "formula_opening_score",
+    "method": "bocpd",
+    "timestamp": "2026-04-10T16:16:24Z"
+  },
+  {
+    "author_id": "14fad988-8d54-5a02-9143-c11837229f57",
+    "confidence": 0.5294976087266867,
+    "direction": "decrease",
+    "effect_proxy": 0.5294976087266867,
+    "effect_size_cohens_d": -1.1253877101319623,
+    "feature_name": "self_similarity_30d",
+    "method": "pelt",
+    "timestamp": "2021-01-07T19:02:11Z"
+  },
+  {
+    "author_id": "14fad988-8d54-5a02-9143-c11837229f57",
+    "confidence": 0.5081136321816009,
+    "direction": "increase",
+    "effect_proxy": 0.5081136321816009,
+    "effect_size_cohens_d": 1.032989863970357,
+    "feature_name": "self_similarity_30d",
+    "method": "pelt",
+    "timestamp": "2021-06-20T20:30:17Z"
+  },
+  {
+    "author_id": "14fad988-8d54-5a02-9143-c11837229f57",
+    "confidence": 0.5398459234407534,
+    "direction": "increase",
+    "effect_proxy": 0.5398459234407534,
+    "effect_size_cohens_d": 1.173185137198815,
+    "feature_name": "self_similarity_30d",
+    "method": "pelt",
+    "timestamp": "2021-11-21T20:21:21Z"
+  },
+  {
+    "author_id": "14fad988-8d54-5a02-9143-c11837229f57",
+    "confidence": 0.5174495553297517,
+    "direction": "increase",
+    "effect_proxy": 0.5174495553297517,
+    "effect_size_cohens_d": 1.0723222018443102,
+    "feature_name": "self_similarity_30d",
+    "method": "pelt",
+    "timestamp": "2022-04-07T17:24:40Z"
+  },
+  {
+    "author_id": "14fad988-8d54-5a02-9143-c11837229f57",
+    "confidence": 0.6433983200273704,
+    "direction": "decrease",
+    "effect_proxy": 0.6433983200273704,
+    "effect_size_cohens_d": -1.8042492679135824,
+    "feature_name": "self_similarity_90d",
+    "method": "pelt",
+    "timestamp": "2021-01-07T19:02:11Z"
+  },
+  {
+    "author_id": "14fad988-8d54-5a02-9143-c11837229f57",
+    "confidence": 0.5456440528608217,
+    "direction": "decrease",
+    "effect_proxy": 0.5456440528608217,
+    "effect_size_cohens_d": -1.2009175984081042,
+    "feature_name": "self_similarity_90d",
+    "method": "pelt",
+    "timestamp": "2021-01-23T16:36:33Z"
+  },
+  {
+    "author_id": "14fad988-8d54-5a02-9143-c11837229f57",
+    "confidence": 0.5061623245087699,
+    "direction": "increase",
+    "effect_proxy": 0.5061623245087699,
+    "effect_size_cohens_d": 1.0249568828568623,
+    "feature_name": "self_similarity_90d",
+    "method": "pelt",
+    "timestamp": "2022-01-03T15:14:54Z"
+  },
+  {
+    "author_id": "14fad988-8d54-5a02-9143-c11837229f57",
+    "confidence": 0.5004849518360382,
+    "direction": "increase",
+    "effect_proxy": 0.5004849518360382,
+    "effect_size_cohens_d": 1.0019416905969927,
+    "feature_name": "trigram_entropy",
+    "method": "pelt",
+    "timestamp": "2021-03-28T21:46:29Z"
+  }
+]

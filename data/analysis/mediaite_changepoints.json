@@ -1,0 +1,1901 @@
+[
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.8856389243549563,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.23397263340150704,
+    "feature_name": "ai_marker_frequency",
+    "method": "bocpd",
+    "timestamp": "2021-09-02T14:46:04Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.9277322690059175,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.19266245097185813,
+    "feature_name": "ai_marker_frequency",
+    "method": "bocpd",
+    "timestamp": "2021-11-17T13:30:47Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.9122482185352717,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.0993989663639065,
+    "feature_name": "ai_marker_frequency",
+    "method": "bocpd",
+    "timestamp": "2022-02-02T18:04:52Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.6221544918383914,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.030363638967096505,
+    "feature_name": "ai_marker_frequency",
+    "method": "bocpd",
+    "timestamp": "2022-02-23T17:52:13Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.9490038737087496,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.08506883061744995,
+    "feature_name": "ai_marker_frequency",
+    "method": "bocpd",
+    "timestamp": "2022-04-19T18:04:18Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.9406029832342677,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.06813117245733845,
+    "feature_name": "ai_marker_frequency",
+    "method": "bocpd",
+    "timestamp": "2022-07-21T19:15:14Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.9594396325166628,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.114046788821757,
+    "feature_name": "ai_marker_frequency",
+    "method": "bocpd",
+    "timestamp": "2024-05-14T12:43:37Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.6919330971660855,
+    "direction": "increase",
+    "effect_size_cohens_d": 2.2460481499342424,
+    "feature_name": "bigram_entropy",
+    "method": "pelt",
+    "timestamp": "2021-08-05T09:20:30Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.31185261860669605,
+    "direction": "increase",
+    "effect_size_cohens_d": 1.370709598102007,
+    "feature_name": "bigram_entropy",
+    "method": "bocpd",
+    "timestamp": "2021-09-14T13:51:35Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.5294920891696345,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.1881350974819466,
+    "feature_name": "bigram_entropy",
+    "method": "bocpd",
+    "timestamp": "2022-05-10T13:48:44Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.8090249754506718,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.5890305801655408,
+    "feature_name": "bigram_entropy",
+    "method": "bocpd",
+    "timestamp": "2022-09-19T16:13:22Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.3299912384779255,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.49251779592893197,
+    "feature_name": "bigram_entropy",
+    "method": "pelt",
+    "timestamp": "2022-10-28T12:47:15Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.5319393078355372,
+    "direction": "increase",
+    "effect_size_cohens_d": 1.136475069879676,
+    "feature_name": "bigram_entropy",
+    "method": "pelt",
+    "timestamp": "2025-07-29T09:06:39Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.3250342657632232,
+    "direction": "increase",
+    "effect_size_cohens_d": 1.6276907159899463,
+    "feature_name": "bigram_entropy",
+    "method": "bocpd",
+    "timestamp": "2026-01-27T11:03:13Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.5841947137777813,
+    "direction": "decrease",
+    "effect_size_cohens_d": -1.4049718296885008,
+    "feature_name": "coleman_liau",
+    "method": "pelt",
+    "timestamp": "2021-05-10T15:28:24Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.3618286666973918,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.5669773112886282,
+    "feature_name": "coleman_liau",
+    "method": "pelt",
+    "timestamp": "2021-09-21T15:08:53Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.08375889386804952,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.09141577834425077,
+    "feature_name": "coleman_liau",
+    "method": "pelt",
+    "timestamp": "2021-11-11T15:27:36Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.14116896651513666,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.1643733877923785,
+    "feature_name": "coleman_liau",
+    "method": "pelt",
+    "timestamp": "2021-12-07T16:39:16Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.13822353919964148,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.153064618385853,
+    "feature_name": "coleman_liau",
+    "method": "bocpd",
+    "timestamp": "2022-02-02T18:04:52Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.19325106625162217,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.23954300795133932,
+    "feature_name": "coleman_liau",
+    "method": "pelt",
+    "timestamp": "2022-02-16T18:07:16Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.10454454085978668,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.23831004553296242,
+    "feature_name": "coleman_liau",
+    "method": "bocpd",
+    "timestamp": "2022-02-17T18:23:12Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.2606682187142881,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.3525727221694449,
+    "feature_name": "coleman_liau",
+    "method": "pelt",
+    "timestamp": "2022-05-04T18:33:10Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.5814983043706979,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.33747040454743793,
+    "feature_name": "coleman_liau",
+    "method": "bocpd",
+    "timestamp": "2022-05-10T13:48:44Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.20955146600457308,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.265104503319612,
+    "feature_name": "coleman_liau",
+    "method": "pelt",
+    "timestamp": "2022-05-13T19:40:21Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.381671530004335,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.6172633940129116,
+    "feature_name": "coleman_liau",
+    "method": "pelt",
+    "timestamp": "2022-10-28T12:47:15Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.3866892916607368,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.7038316355790892,
+    "feature_name": "coleman_liau",
+    "method": "bocpd",
+    "timestamp": "2023-11-15T17:07:35Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.27831474722525357,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.3856456068004504,
+    "feature_name": "coleman_liau",
+    "method": "pelt",
+    "timestamp": "2025-07-24T11:42:08Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.4884023583685082,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.9546610825080946,
+    "feature_name": "coleman_liau",
+    "method": "pelt",
+    "timestamp": "2025-07-29T09:06:39Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.28668199832014374,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.40763363272827197,
+    "feature_name": "conjunction_freq",
+    "method": "bocpd",
+    "timestamp": "2023-11-15T17:07:35Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.5763999271515247,
+    "direction": "decrease",
+    "effect_size_cohens_d": -1.3607172521844841,
+    "feature_name": "flesch_kincaid",
+    "method": "pelt",
+    "timestamp": "2021-05-10T15:28:24Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.275366375059664,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.3800077247068638,
+    "feature_name": "flesch_kincaid",
+    "method": "pelt",
+    "timestamp": "2021-10-04T14:38:58Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.026280672621711465,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.026989987651237675,
+    "feature_name": "flesch_kincaid",
+    "method": "pelt",
+    "timestamp": "2021-11-11T15:27:36Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.11752793798914404,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.13318034989270658,
+    "feature_name": "flesch_kincaid",
+    "method": "pelt",
+    "timestamp": "2021-11-17T13:30:47Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.1089682542208922,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.12229446900975634,
+    "feature_name": "flesch_kincaid",
+    "method": "pelt",
+    "timestamp": "2021-12-07T16:39:16Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.009641493732936567,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.009735357117573552,
+    "feature_name": "flesch_kincaid",
+    "method": "pelt",
+    "timestamp": "2022-01-13T16:01:59Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.11298778006521096,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.12738018431529335,
+    "feature_name": "flesch_kincaid",
+    "method": "pelt",
+    "timestamp": "2022-01-27T16:52:34Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.31586235848811023,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.19543843092518343,
+    "feature_name": "flesch_kincaid",
+    "method": "bocpd",
+    "timestamp": "2022-02-02T16:57:52Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.12262126047992745,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.13975864123058357,
+    "feature_name": "flesch_kincaid",
+    "method": "pelt",
+    "timestamp": "2022-02-24T16:45:15Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.13910281429276003,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.13975864123058357,
+    "feature_name": "flesch_kincaid",
+    "method": "bocpd",
+    "timestamp": "2022-02-24T16:45:15Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.06204602739566797,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.06615039672297604,
+    "feature_name": "flesch_kincaid",
+    "method": "pelt",
+    "timestamp": "2022-03-03T17:39:33Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.05238151974566683,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.05527701373194837,
+    "feature_name": "flesch_kincaid",
+    "method": "pelt",
+    "timestamp": "2022-04-20T18:38:48Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.22558228080821074,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.2912927677373352,
+    "feature_name": "flesch_kincaid",
+    "method": "pelt",
+    "timestamp": "2022-07-05T19:00:16Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.28932596990969106,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.4071148763842193,
+    "feature_name": "flesch_kincaid",
+    "method": "pelt",
+    "timestamp": "2022-10-28T12:47:15Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.28919911016311106,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.13607070838460072,
+    "feature_name": "flesch_kincaid",
+    "method": "bocpd",
+    "timestamp": "2024-11-06T01:25:05Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.09995797207180111,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.11105922720286046,
+    "feature_name": "flesch_kincaid",
+    "method": "pelt",
+    "timestamp": "2025-07-24T11:42:08Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.14182521580354115,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.16526378823439494,
+    "feature_name": "flesch_kincaid",
+    "method": "pelt",
+    "timestamp": "2025-07-29T09:06:39Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.9061249376909444,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.2819894896785279,
+    "feature_name": "formula_opening_score",
+    "method": "bocpd",
+    "timestamp": "2021-09-28T15:10:00Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.8797247390966176,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.03865728367861928,
+    "feature_name": "formula_opening_score",
+    "method": "bocpd",
+    "timestamp": "2021-11-10T14:09:39Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.8611410957380328,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.01125387303101194,
+    "feature_name": "formula_opening_score",
+    "method": "bocpd",
+    "timestamp": "2021-12-13T18:45:05Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.3818900603231305,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.1912670309991872,
+    "feature_name": "formula_opening_score",
+    "method": "bocpd",
+    "timestamp": "2022-02-03T15:11:52Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.5095588599860799,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.22131447181735528,
+    "feature_name": "formula_opening_score",
+    "method": "bocpd",
+    "timestamp": "2022-02-23T17:52:13Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.9219673910698953,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.07835069984179262,
+    "feature_name": "formula_opening_score",
+    "method": "bocpd",
+    "timestamp": "2022-04-20T18:38:48Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.8955481132785202,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.07480909869462775,
+    "feature_name": "formula_opening_score",
+    "method": "bocpd",
+    "timestamp": "2022-06-09T18:46:08Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.930117349697232,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.13749624118215295,
+    "feature_name": "formula_opening_score",
+    "method": "bocpd",
+    "timestamp": "2025-03-04T16:05:42Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.8887341009774039,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.4751329019854732,
+    "feature_name": "formula_opening_score",
+    "method": "bocpd",
+    "timestamp": "2026-01-29T09:19:09Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.5359617494480662,
+    "direction": "decrease",
+    "effect_size_cohens_d": -1.1549947634932802,
+    "feature_name": "gunning_fog",
+    "method": "pelt",
+    "timestamp": "2021-05-10T15:28:24Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.3986101902996992,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.6628150059581892,
+    "feature_name": "gunning_fog",
+    "method": "pelt",
+    "timestamp": "2021-08-24T14:26:49Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.2399014319450576,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.31561884474924673,
+    "feature_name": "gunning_fog",
+    "method": "pelt",
+    "timestamp": "2021-10-13T14:02:38Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.12153196226258449,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.13834534330423964,
+    "feature_name": "gunning_fog",
+    "method": "pelt",
+    "timestamp": "2021-10-27T14:22:25Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.07414479302760987,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.08008249288791973,
+    "feature_name": "gunning_fog",
+    "method": "pelt",
+    "timestamp": "2021-11-11T15:27:36Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.15796945002624033,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.1876053666118921,
+    "feature_name": "gunning_fog",
+    "method": "pelt",
+    "timestamp": "2021-11-17T13:30:47Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.03177500398388552,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.03281778937192061,
+    "feature_name": "gunning_fog",
+    "method": "pelt",
+    "timestamp": "2022-01-13T16:01:59Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.07846639573212506,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.08514762279826331,
+    "feature_name": "gunning_fog",
+    "method": "pelt",
+    "timestamp": "2022-01-27T16:52:34Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.15788902691886367,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.16379524609995774,
+    "feature_name": "gunning_fog",
+    "method": "bocpd",
+    "timestamp": "2022-02-02T16:57:52Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.12723823742813883,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.14578805223225202,
+    "feature_name": "gunning_fog",
+    "method": "pelt",
+    "timestamp": "2022-02-24T16:45:15Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.05918562739273936,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.06290893200187767,
+    "feature_name": "gunning_fog",
+    "method": "pelt",
+    "timestamp": "2022-03-03T17:39:33Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.09786530908653673,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.10848192633789804,
+    "feature_name": "gunning_fog",
+    "method": "pelt",
+    "timestamp": "2022-03-30T18:04:13Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.055984939152982305,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.05930513344008496,
+    "feature_name": "gunning_fog",
+    "method": "pelt",
+    "timestamp": "2022-04-20T18:38:48Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.10714869382642069,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.12000732158372392,
+    "feature_name": "gunning_fog",
+    "method": "pelt",
+    "timestamp": "2022-05-04T18:33:10Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.10422399647089489,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.11635051180237214,
+    "feature_name": "gunning_fog",
+    "method": "pelt",
+    "timestamp": "2022-05-24T18:35:42Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.20844863305281355,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.2633418900617243,
+    "feature_name": "gunning_fog",
+    "method": "pelt",
+    "timestamp": "2022-07-05T19:00:16Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.27894836876290385,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.3868632379130976,
+    "feature_name": "gunning_fog",
+    "method": "pelt",
+    "timestamp": "2022-10-28T12:47:15Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.2500032233988171,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.09143630637152482,
+    "feature_name": "gunning_fog",
+    "method": "bocpd",
+    "timestamp": "2024-11-06T01:25:05Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.14346105138685303,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.16748923282372155,
+    "feature_name": "gunning_fog",
+    "method": "pelt",
+    "timestamp": "2025-07-24T11:42:08Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.12697478049162367,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.14544228236971957,
+    "feature_name": "gunning_fog",
+    "method": "pelt",
+    "timestamp": "2025-07-29T09:06:39Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.44809506423095424,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.18783477561587408,
+    "feature_name": "hapax_ratio",
+    "method": "bocpd",
+    "timestamp": "2022-02-02T16:57:52Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.11459046414158558,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.0925440348414335,
+    "feature_name": "hapax_ratio",
+    "method": "bocpd",
+    "timestamp": "2022-04-01T18:06:51Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.45528518129261314,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.05418841688038147,
+    "feature_name": "hapax_ratio",
+    "method": "bocpd",
+    "timestamp": "2022-12-09T16:22:09Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.3685448825793045,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.13080763815414323,
+    "feature_name": "mattr",
+    "method": "bocpd",
+    "timestamp": "2022-02-02T16:57:52Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.1870913456313329,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.1840096235319232,
+    "feature_name": "mattr",
+    "method": "bocpd",
+    "timestamp": "2022-02-24T16:45:15Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.23596479843227863,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.24260997109693477,
+    "feature_name": "mattr",
+    "method": "bocpd",
+    "timestamp": "2022-03-16T17:31:17Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.2530053064652083,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.15129439180234724,
+    "feature_name": "mattr",
+    "method": "bocpd",
+    "timestamp": "2022-06-29T18:33:53Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.25875588137729866,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.14689472130334524,
+    "feature_name": "mattr",
+    "method": "bocpd",
+    "timestamp": "2022-07-13T18:33:29Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.5195049137846982,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.12591633863662863,
+    "feature_name": "mattr",
+    "method": "bocpd",
+    "timestamp": "2022-12-09T16:22:09Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.3472594608747433,
+    "direction": "increase",
+    "effect_size_cohens_d": 1.0576985670283225,
+    "feature_name": "mattr",
+    "method": "bocpd",
+    "timestamp": "2026-01-27T11:03:13Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.14369422165056958,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.16446170152291706,
+    "feature_name": "passive_voice_ratio",
+    "method": "bocpd",
+    "timestamp": "2022-05-06T18:32:49Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.5553908587946874,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.6753648307005923,
+    "feature_name": "passive_voice_ratio",
+    "method": "bocpd",
+    "timestamp": "2024-07-13T23:49:37Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.230038417459054,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.5341012766891976,
+    "feature_name": "passive_voice_ratio",
+    "method": "bocpd",
+    "timestamp": "2026-02-03T15:48:50Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.6541093117116779,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.01692116227742852,
+    "feature_name": "self_similarity_30d",
+    "method": "bocpd",
+    "timestamp": "2021-09-02T14:46:04Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.2585855679115119,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.3230307176965037,
+    "feature_name": "self_similarity_30d",
+    "method": "bocpd",
+    "timestamp": "2021-10-20T14:24:17Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.15488861209182922,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.22275215745353064,
+    "feature_name": "self_similarity_30d",
+    "method": "bocpd",
+    "timestamp": "2022-01-19T17:43:09Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.12902562339529758,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.257559711468688,
+    "feature_name": "self_similarity_30d",
+    "method": "bocpd",
+    "timestamp": "2022-02-02T18:04:52Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.1357604591411441,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.1280648477908935,
+    "feature_name": "self_similarity_30d",
+    "method": "bocpd",
+    "timestamp": "2022-04-20T18:38:48Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.6900910645174065,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.07872549898947896,
+    "feature_name": "self_similarity_30d",
+    "method": "bocpd",
+    "timestamp": "2022-05-10T13:48:44Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.1362506707697587,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.4320402854483127,
+    "feature_name": "self_similarity_30d",
+    "method": "bocpd",
+    "timestamp": "2022-08-02T18:58:56Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.14832716808092333,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.8196271926341908,
+    "feature_name": "self_similarity_30d",
+    "method": "bocpd",
+    "timestamp": "2024-05-14T12:43:37Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.5485497377957866,
+    "direction": "increase",
+    "effect_size_cohens_d": 1.6278991854399665,
+    "feature_name": "self_similarity_30d",
+    "method": "bocpd",
+    "timestamp": "2025-07-29T06:56:08Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.8144644071927856,
+    "direction": "increase",
+    "effect_size_cohens_d": 3.9444982621791995,
+    "feature_name": "self_similarity_30d",
+    "method": "bocpd",
+    "timestamp": "2026-01-28T12:35:13Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.6123650965508685,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.11758711993245403,
+    "feature_name": "self_similarity_90d",
+    "method": "bocpd",
+    "timestamp": "2021-06-09T09:08:34Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.21128316344356504,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.38145243559899467,
+    "feature_name": "self_similarity_90d",
+    "method": "bocpd",
+    "timestamp": "2021-11-09T14:23:24Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.6659976418411816,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.10400107599700555,
+    "feature_name": "self_similarity_90d",
+    "method": "bocpd",
+    "timestamp": "2022-05-10T13:48:44Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.08287541260442707,
+    "direction": "increase",
+    "effect_size_cohens_d": 1.1467056837034721,
+    "feature_name": "self_similarity_90d",
+    "method": "bocpd",
+    "timestamp": "2024-08-14T11:00:32Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.9073537034438056,
+    "direction": "increase",
+    "effect_size_cohens_d": 5.896346473989795,
+    "feature_name": "self_similarity_90d",
+    "method": "bocpd",
+    "timestamp": "2026-01-28T12:35:13Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.562439199378166,
+    "direction": "decrease",
+    "effect_size_cohens_d": -1.2853966776248298,
+    "feature_name": "sent_length_mean",
+    "method": "pelt",
+    "timestamp": "2021-05-10T15:28:24Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.3081323406279863,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.44536312176763426,
+    "feature_name": "sent_length_mean",
+    "method": "pelt",
+    "timestamp": "2021-09-21T15:08:53Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.23666987232019032,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.3100491697341534,
+    "feature_name": "sent_length_mean",
+    "method": "pelt",
+    "timestamp": "2021-10-04T14:38:58Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.0436000518689004,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.04558767694843483,
+    "feature_name": "sent_length_mean",
+    "method": "pelt",
+    "timestamp": "2021-10-27T14:22:25Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.026792242505309455,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.02752982834238826,
+    "feature_name": "sent_length_mean",
+    "method": "pelt",
+    "timestamp": "2021-11-11T15:27:36Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.45614452775000763,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.037837965779292,
+    "feature_name": "sent_length_mean",
+    "method": "bocpd",
+    "timestamp": "2021-11-15T15:22:48Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.1408997197935903,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.16400846681104259,
+    "feature_name": "sent_length_mean",
+    "method": "pelt",
+    "timestamp": "2021-11-17T13:30:47Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.14822944148433345,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.17402508222712545,
+    "feature_name": "sent_length_mean",
+    "method": "pelt",
+    "timestamp": "2021-12-07T16:39:16Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.10194141901244003,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.11351310612759696,
+    "feature_name": "sent_length_mean",
+    "method": "pelt",
+    "timestamp": "2021-12-28T16:45:48Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.11357426224087334,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.12812608817969082,
+    "feature_name": "sent_length_mean",
+    "method": "pelt",
+    "timestamp": "2022-01-13T16:01:59Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.05073594731114523,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.053447665238594275,
+    "feature_name": "sent_length_mean",
+    "method": "pelt",
+    "timestamp": "2022-01-27T16:52:34Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.45866936104162737,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.0209794904443015,
+    "feature_name": "sent_length_mean",
+    "method": "bocpd",
+    "timestamp": "2022-02-02T16:57:52Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.09336582508641757,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.10298070343015353,
+    "feature_name": "sent_length_mean",
+    "method": "pelt",
+    "timestamp": "2022-02-07T17:02:32Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.08034335491855288,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.08736233826858007,
+    "feature_name": "sent_length_mean",
+    "method": "pelt",
+    "timestamp": "2022-02-24T16:45:15Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.11058131913411018,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.12432988143048017,
+    "feature_name": "sent_length_mean",
+    "method": "pelt",
+    "timestamp": "2022-03-15T17:54:02Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.09824348513940398,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.10894679829908588,
+    "feature_name": "sent_length_mean",
+    "method": "pelt",
+    "timestamp": "2022-03-30T18:04:13Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.15230271878204144,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.17966639997147943,
+    "feature_name": "sent_length_mean",
+    "method": "pelt",
+    "timestamp": "2022-04-20T18:38:48Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.12204503901747865,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.1390105921616956,
+    "feature_name": "sent_length_mean",
+    "method": "pelt",
+    "timestamp": "2022-05-04T18:33:10Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.05646771029062189,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.05984714132890437,
+    "feature_name": "sent_length_mean",
+    "method": "pelt",
+    "timestamp": "2022-05-13T19:40:21Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.052752982687160596,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.05569084063923561,
+    "feature_name": "sent_length_mean",
+    "method": "pelt",
+    "timestamp": "2022-05-24T18:35:42Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.010768645910183878,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.010885872011297119,
+    "feature_name": "sent_length_mean",
+    "method": "pelt",
+    "timestamp": "2022-06-14T18:34:19Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.0304582633001642,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.03141511308614648,
+    "feature_name": "sent_length_mean",
+    "method": "pelt",
+    "timestamp": "2022-07-13T18:33:29Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 7.3829043783136695e-06,
+    "direction": "increase",
+    "effect_size_cohens_d": 7.382958885993154e-06,
+    "feature_name": "sent_length_mean",
+    "method": "pelt",
+    "timestamp": "2022-07-26T19:51:54Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.07811552084906645,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.08473460896208142,
+    "feature_name": "sent_length_mean",
+    "method": "pelt",
+    "timestamp": "2022-08-05T18:33:58Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.028476803781713935,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.029311501663122044,
+    "feature_name": "sent_length_mean",
+    "method": "pelt",
+    "timestamp": "2022-08-30T18:43:25Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.1286230802533922,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.14760900517171738,
+    "feature_name": "sent_length_mean",
+    "method": "pelt",
+    "timestamp": "2024-05-14T12:43:37Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.2579183432059457,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.14760900517171738,
+    "feature_name": "sent_length_mean",
+    "method": "bocpd",
+    "timestamp": "2024-05-14T12:43:37Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.30045959696701385,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.4295099977990063,
+    "feature_name": "sent_length_mean",
+    "method": "pelt",
+    "timestamp": "2025-03-04T16:05:42Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.42617126466018995,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.7426802431004432,
+    "feature_name": "sent_length_mean",
+    "method": "pelt",
+    "timestamp": "2025-07-29T09:06:39Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.4833248752882129,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.9354521868220812,
+    "feature_name": "sent_length_mean",
+    "method": "pelt",
+    "timestamp": "2026-01-27T11:03:13Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.19686493860447826,
+    "direction": "decrease",
+    "effect_size_cohens_d": -1.778537926519464,
+    "feature_name": "sent_length_mean",
+    "method": "bocpd",
+    "timestamp": "2026-02-05T10:47:02Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.6116417531054352,
+    "direction": "decrease",
+    "effect_size_cohens_d": -1.5749421004866404,
+    "feature_name": "sent_length_std",
+    "method": "pelt",
+    "timestamp": "2021-05-10T15:28:24Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.1589715954257589,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.18902048320976275,
+    "feature_name": "sent_length_std",
+    "method": "pelt",
+    "timestamp": "2021-08-05T09:20:30Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.007066174442754011,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.007116460594731368,
+    "feature_name": "sent_length_std",
+    "method": "pelt",
+    "timestamp": "2021-08-24T14:26:49Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.05007178117721841,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.05271112088792447,
+    "feature_name": "sent_length_std",
+    "method": "pelt",
+    "timestamp": "2021-10-04T14:38:58Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.11628228120909195,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.13158305954099006,
+    "feature_name": "sent_length_std",
+    "method": "pelt",
+    "timestamp": "2021-11-11T15:27:36Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.762539938434551,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.12859730594568153,
+    "feature_name": "sent_length_std",
+    "method": "bocpd",
+    "timestamp": "2021-11-15T15:22:48Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.04631376589089745,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.048562896510886536,
+    "feature_name": "sent_length_std",
+    "method": "pelt",
+    "timestamp": "2021-11-17T13:30:47Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.03173638808946209,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.03277659895412279,
+    "feature_name": "sent_length_std",
+    "method": "pelt",
+    "timestamp": "2022-01-13T16:01:59Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.028442346278018067,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.029274995847191426,
+    "feature_name": "sent_length_std",
+    "method": "pelt",
+    "timestamp": "2022-01-27T16:52:34Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.018780092175160763,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.019139534395294044,
+    "feature_name": "sent_length_std",
+    "method": "pelt",
+    "timestamp": "2022-02-16T18:07:16Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.018259259232398947,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.018598860650442643,
+    "feature_name": "sent_length_std",
+    "method": "pelt",
+    "timestamp": "2022-02-24T16:45:15Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.17149465927888188,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.018598860650442643,
+    "feature_name": "sent_length_std",
+    "method": "bocpd",
+    "timestamp": "2022-02-24T16:45:15Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.10676558523735469,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.1195269500064269,
+    "feature_name": "sent_length_std",
+    "method": "pelt",
+    "timestamp": "2022-03-03T17:39:33Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.12067100384863136,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.13723077980685505,
+    "feature_name": "sent_length_std",
+    "method": "pelt",
+    "timestamp": "2022-03-15T17:54:02Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.09359339229051741,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.10325762355928846,
+    "feature_name": "sent_length_std",
+    "method": "pelt",
+    "timestamp": "2022-03-30T18:04:13Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.1821297130880841,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.22268777335800116,
+    "feature_name": "sent_length_std",
+    "method": "pelt",
+    "timestamp": "2022-04-08T17:27:14Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.21141509354303858,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.2680942683685222,
+    "feature_name": "sent_length_std",
+    "method": "pelt",
+    "timestamp": "2022-04-20T18:38:48Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.15342889598421025,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.18123568741763782,
+    "feature_name": "sent_length_std",
+    "method": "pelt",
+    "timestamp": "2022-05-13T19:40:21Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.1760756667110647,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.21370368563847011,
+    "feature_name": "sent_length_std",
+    "method": "pelt",
+    "timestamp": "2022-05-24T18:35:42Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.1598539368721193,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.19026922089830411,
+    "feature_name": "sent_length_std",
+    "method": "pelt",
+    "timestamp": "2022-06-14T18:34:19Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.10901999451135724,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.122359642011907,
+    "feature_name": "sent_length_std",
+    "method": "pelt",
+    "timestamp": "2022-07-05T19:00:16Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.10048389843726939,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.11170883796598922,
+    "feature_name": "sent_length_std",
+    "method": "pelt",
+    "timestamp": "2022-07-13T18:33:29Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.15729078001222438,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.18664893688300463,
+    "feature_name": "sent_length_std",
+    "method": "pelt",
+    "timestamp": "2022-08-05T18:33:58Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.117739488201353,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.13345206617183833,
+    "feature_name": "sent_length_std",
+    "method": "pelt",
+    "timestamp": "2022-08-30T18:43:25Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.17204666524676404,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.20779753885288837,
+    "feature_name": "sent_length_std",
+    "method": "pelt",
+    "timestamp": "2022-10-28T12:47:15Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.1465196062037339,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.17167307798602988,
+    "feature_name": "sent_length_std",
+    "method": "pelt",
+    "timestamp": "2024-05-14T12:43:37Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.264488682431543,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.3595983856590025,
+    "feature_name": "sent_length_std",
+    "method": "pelt",
+    "timestamp": "2025-03-04T16:05:42Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.1680657621709138,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.202018085719705,
+    "feature_name": "sent_length_std",
+    "method": "pelt",
+    "timestamp": "2025-07-24T11:42:08Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.2312521373466192,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.3008166247753043,
+    "feature_name": "sent_length_std",
+    "method": "pelt",
+    "timestamp": "2025-07-29T09:06:39Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.5400490038482629,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.7607750874506984,
+    "feature_name": "simpsons_d",
+    "method": "bocpd",
+    "timestamp": "2022-09-19T16:13:22Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.2172596797343031,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.3590216270659819,
+    "feature_name": "simpsons_d",
+    "method": "bocpd",
+    "timestamp": "2026-01-28T12:35:13Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.6942837874298915,
+    "direction": "increase",
+    "effect_size_cohens_d": 2.271007420879502,
+    "feature_name": "trigram_entropy",
+    "method": "pelt",
+    "timestamp": "2021-08-05T09:20:30Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.3357590582230658,
+    "direction": "increase",
+    "effect_size_cohens_d": 1.2727083650055697,
+    "feature_name": "trigram_entropy",
+    "method": "bocpd",
+    "timestamp": "2021-09-15T14:42:51Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.49908840858857184,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.17604891437994252,
+    "feature_name": "trigram_entropy",
+    "method": "bocpd",
+    "timestamp": "2022-05-10T13:48:44Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.8116169323026418,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.5534493713786636,
+    "feature_name": "trigram_entropy",
+    "method": "bocpd",
+    "timestamp": "2022-09-19T16:13:22Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.3141617818660555,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.4580698094090457,
+    "feature_name": "trigram_entropy",
+    "method": "pelt",
+    "timestamp": "2022-10-28T12:47:15Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.530196826067069,
+    "direction": "increase",
+    "effect_size_cohens_d": 1.128550966628335,
+    "feature_name": "trigram_entropy",
+    "method": "pelt",
+    "timestamp": "2025-07-29T09:06:39Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.38569371946023795,
+    "direction": "increase",
+    "effect_size_cohens_d": 1.7191038231098794,
+    "feature_name": "trigram_entropy",
+    "method": "bocpd",
+    "timestamp": "2026-01-28T12:35:13Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.2504011846741112,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.13140011295895204,
+    "feature_name": "ttr",
+    "method": "bocpd",
+    "timestamp": "2022-02-02T16:57:52Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.13570544060829803,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.021357884243010338,
+    "feature_name": "ttr",
+    "method": "bocpd",
+    "timestamp": "2022-02-24T16:45:15Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.12041300542897135,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.13725152572762864,
+    "feature_name": "ttr",
+    "method": "bocpd",
+    "timestamp": "2022-05-13T19:40:21Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.3436080748151291,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.07726140567059027,
+    "feature_name": "ttr",
+    "method": "bocpd",
+    "timestamp": "2022-12-09T16:22:09Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.6697983830855755,
+    "direction": "decrease",
+    "effect_size_cohens_d": -2.0284527657511786,
+    "feature_name": "yules_k",
+    "method": "pelt",
+    "timestamp": "2021-05-10T15:28:24Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.5708741327997081,
+    "direction": "decrease",
+    "effect_size_cohens_d": -1.330318623121491,
+    "feature_name": "yules_k",
+    "method": "pelt",
+    "timestamp": "2021-08-05T09:20:30Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.5382411381988432,
+    "direction": "decrease",
+    "effect_size_cohens_d": -1.165632503725768,
+    "feature_name": "yules_k",
+    "method": "pelt",
+    "timestamp": "2021-08-24T14:26:49Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.3894395792378453,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.6378395421565534,
+    "feature_name": "yules_k",
+    "method": "pelt",
+    "timestamp": "2021-09-21T15:08:53Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.2968451221223779,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.42216179032756584,
+    "feature_name": "yules_k",
+    "method": "pelt",
+    "timestamp": "2021-10-04T14:38:58Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.28584104042896674,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.4002484833357829,
+    "feature_name": "yules_k",
+    "method": "pelt",
+    "timestamp": "2021-10-13T14:02:38Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.1922010894964158,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.23793185036186423,
+    "feature_name": "yules_k",
+    "method": "pelt",
+    "timestamp": "2021-10-27T14:22:25Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.17918791959311034,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.21830565591125803,
+    "feature_name": "yules_k",
+    "method": "pelt",
+    "timestamp": "2021-11-11T15:27:36Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.09475770610422429,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.10467662275966763,
+    "feature_name": "yules_k",
+    "method": "pelt",
+    "timestamp": "2021-12-07T16:39:16Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.06371989186317804,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.06805644091913832,
+    "feature_name": "yules_k",
+    "method": "pelt",
+    "timestamp": "2021-12-28T16:45:48Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.05475558168880657,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.0579274319192858,
+    "feature_name": "yules_k",
+    "method": "pelt",
+    "timestamp": "2022-01-13T16:01:59Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.013347369604315892,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.013527931911520982,
+    "feature_name": "yules_k",
+    "method": "pelt",
+    "timestamp": "2022-01-27T16:52:34Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.06510873708586054,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.06964311216569807,
+    "feature_name": "yules_k",
+    "method": "pelt",
+    "timestamp": "2022-02-07T17:02:32Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.027186951531960806,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.027946738147451987,
+    "feature_name": "yules_k",
+    "method": "pelt",
+    "timestamp": "2022-02-16T18:07:16Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.02749540127709342,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.028272772502259,
+    "feature_name": "yules_k",
+    "method": "pelt",
+    "timestamp": "2022-02-24T16:45:15Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.018481124422291172,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.018829107500773667,
+    "feature_name": "yules_k",
+    "method": "pelt",
+    "timestamp": "2022-03-03T17:39:33Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.012572446989169412,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.012732525997308798,
+    "feature_name": "yules_k",
+    "method": "pelt",
+    "timestamp": "2022-03-15T17:54:02Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.057526998087541664,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.06103835120030851,
+    "feature_name": "yules_k",
+    "method": "pelt",
+    "timestamp": "2022-03-30T18:04:13Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.06207683997145126,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.06618542180956674,
+    "feature_name": "yules_k",
+    "method": "pelt",
+    "timestamp": "2022-04-08T17:27:14Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.10644587751729065,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.11912639071210869,
+    "feature_name": "yules_k",
+    "method": "pelt",
+    "timestamp": "2022-04-20T18:38:48Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.14109313870673634,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.1642705921504587,
+    "feature_name": "yules_k",
+    "method": "pelt",
+    "timestamp": "2022-05-04T18:33:10Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.13957053620758245,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.16221031715070888,
+    "feature_name": "yules_k",
+    "method": "pelt",
+    "timestamp": "2022-05-13T19:40:21Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.1887209147926252,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.23262144708733049,
+    "feature_name": "yules_k",
+    "method": "pelt",
+    "timestamp": "2022-05-24T18:35:42Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.23064701080186195,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.299793481068105,
+    "feature_name": "yules_k",
+    "method": "pelt",
+    "timestamp": "2022-06-14T18:34:19Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.2936573459559309,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.41574346993578193,
+    "feature_name": "yules_k",
+    "method": "pelt",
+    "timestamp": "2022-07-13T18:33:29Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.31281242553331884,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.45520675454018383,
+    "feature_name": "yules_k",
+    "method": "pelt",
+    "timestamp": "2022-07-26T19:51:54Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.3530475905598321,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.5457087498373139,
+    "feature_name": "yules_k",
+    "method": "pelt",
+    "timestamp": "2022-08-05T18:33:58Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.38335358815861265,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.6216748866078186,
+    "feature_name": "yules_k",
+    "method": "pelt",
+    "timestamp": "2022-08-30T18:43:25Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.5246891371740685,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.758637731259739,
+    "feature_name": "yules_k",
+    "method": "bocpd",
+    "timestamp": "2022-09-19T16:13:22Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.3954237465114726,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.6540510716883065,
+    "feature_name": "yules_k",
+    "method": "pelt",
+    "timestamp": "2022-10-28T12:47:15Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.27935620265842087,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.38764810533158367,
+    "feature_name": "yules_k",
+    "method": "pelt",
+    "timestamp": "2024-05-14T12:43:37Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.1265438318051017,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.14487714027667775,
+    "feature_name": "yules_k",
+    "method": "pelt",
+    "timestamp": "2025-07-24T11:42:08Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.36457575790463326,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.5737517295569539,
+    "feature_name": "yules_k",
+    "method": "pelt",
+    "timestamp": "2025-07-29T09:06:39Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.26317171974924697,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.35716832103632873,
+    "feature_name": "yules_k",
+    "method": "pelt",
+    "timestamp": "2026-01-27T11:03:13Z"
+  },
+  {
+    "author_id": "1f65480c-ed47-5b54-903a-13e19a1850ac",
+    "confidence": 0.21601721227153772,
+    "direction": "decrease",
+    "effect_size_cohens_d": -0.35513537411318635,
+    "feature_name": "yules_k",
+    "method": "bocpd",
+    "timestamp": "2026-01-28T12:35:13Z"
+  }
+]

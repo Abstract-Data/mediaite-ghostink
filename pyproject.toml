@@ -3,6 +3,7 @@ name = "mediaite-ghostink"
 version = "0.1.0"
 description = "Forensic pipeline for scrape -> extract -> analyze -> report workflows."
 readme = "README.md"
+license = { file = "LICENSE" }
 requires-python = ">=3.13,<3.14"
 dependencies = [
   "typer>=0.15.0",
@@ -35,6 +36,9 @@ dependencies = [
   "nbclient>=0.10.4",
   "connectorx>=0.4.5",
 ]
+
+[project.urls]
+Repository = "https://github.com/Abstract-Data/mediaite-ghostink"
 
 [project.optional-dependencies]
 probability = [

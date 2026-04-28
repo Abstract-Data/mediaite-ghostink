@@ -1,0 +1,158 @@
+{
+  "author_slug": "isaac-schorr",
+  "window_components": [
+    {
+      "admitted": true,
+      "ai_signal": 0.0,
+      "convergence_ratio": 1.0,
+      "min_feature_ratio": 0.5,
+      "n_change_points_in_window": 6,
+      "passes_ab": true,
+      "passes_drift_only": true,
+      "passes_ratio": true,
+      "passes_via": [
+        "ratio",
+        "ab",
+        "drift_only"
+      ],
+      "peak_signal": 0.975,
+      "pipeline_a_score": 1.0,
+      "pipeline_b_score": 0.5358603213919673,
+      "pipeline_c_score": null,
+      "sim_signal": 0.09672064278393458,
+      "window_end": "2023-03-05",
+      "window_start": "2022-12-05"
+    },
+    {
+      "admitted": true,
+      "ai_signal": 0.0,
+      "convergence_ratio": 1.0,
+      "min_feature_ratio": 0.5,
+      "n_change_points_in_window": 8,
+      "passes_ab": true,
+      "passes_drift_only": true,
+      "passes_ratio": true,
+      "passes_via": [
+        "ratio",
+        "ab",
+        "drift_only"
+      ],
+      "peak_signal": 0.975,
+      "pipeline_a_score": 1.0,
+      "pipeline_b_score": 0.4875,
+      "pipeline_c_score": null,
+      "sim_signal": 0.0,
+      "window_end": "2023-04-01",
+      "window_start": "2023-01-01"
+    },
+    {
+      "admitted": true,
+      "ai_signal": 0.0,
+      "convergence_ratio": 1.0,
+      "min_feature_ratio": 0.5,
+      "n_change_points_in_window": 8,
+      "passes_ab": true,
+      "passes_drift_only": true,
+      "passes_ratio": true,
+      "passes_via": [
+        "ratio",
+        "ab",
+        "drift_only"
+      ],
+      "peak_signal": 0.975,
+      "pipeline_a_score": 1.0,
+      "pipeline_b_score": 0.4875,
+      "pipeline_c_score": null,
+      "sim_signal": 0.0,
+      "window_end": "2023-04-11",
+      "window_start": "2023-01-11"
+    },
+    {
+      "admitted": true,
+      "ai_signal": 0.0,
+      "convergence_ratio": 1.0,
+      "min_feature_ratio": 0.5,
+      "n_change_points_in_window": 7,
+      "passes_ab": true,
+      "passes_drift_only": true,
+      "passes_ratio": true,
+      "passes_via": [
+        "ratio",
+        "ab",
+        "drift_only"
+      ],
+      "peak_signal": 0.975,
+      "pipeline_a_score": 1.0,
+      "pipeline_b_score": 0.4875,
+      "pipeline_c_score": null,
+      "sim_signal": 0.0,
+      "window_end": "2023-04-20",
+      "window_start": "2023-01-20"
+    },
+    {
+      "admitted": true,
+      "ai_signal": 0.0,
+      "convergence_ratio": 0.5,
+      "min_feature_ratio": 0.5,
+      "n_change_points_in_window": 4,
+      "passes_ab": true,
+      "passes_drift_only": true,
+      "passes_ratio": true,
+      "passes_via": [
+        "ratio",
+        "ab",
+        "drift_only"
+      ],
+      "peak_signal": 0.975,
+      "pipeline_a_score": 1.0,
+      "pipeline_b_score": 0.4875,
+      "pipeline_c_score": null,
+      "sim_signal": 0.0,
+      "window_end": "2023-05-03",
+      "window_start": "2023-02-02"
+    },
+    {
+      "admitted": true,
+      "ai_signal": 0.0,
+      "convergence_ratio": 0.5,
+      "min_feature_ratio": 0.5,
+      "n_change_points_in_window": 3,
+      "passes_ab": true,
+      "passes_drift_only": true,
+      "passes_ratio": true,
+      "passes_via": [
+        "ratio",
+        "ab",
+        "drift_only"
+      ],
+      "peak_signal": 0.875,
+      "pipeline_a_score": 1.0,
+      "pipeline_b_score": 0.44362802324640627,
+      "pipeline_c_score": null,
+      "sim_signal": 0.012256046492812546,
+      "window_end": "2023-06-25",
+      "window_start": "2023-03-27"
+    },
+    {
+      "admitted": true,
+      "ai_signal": 0.0,
+      "convergence_ratio": 0.5,
+      "min_feature_ratio": 0.5,
+      "n_change_points_in_window": 1,
+      "passes_ab": false,
+      "passes_drift_only": false,
+      "passes_ratio": true,
+      "passes_via": [
+        "ratio"
+      ],
+      "peak_signal": 0.35,
+      "pipeline_a_score": 0.5143493149230594,
+      "pipeline_b_score": 0.175,
+      "pipeline_c_score": null,
+      "sim_signal": 0.0,
+      "window_end": "2023-09-12",
+      "window_start": "2023-06-14"
+    }
+  ],
+  "windows_evaluated": 7
+}

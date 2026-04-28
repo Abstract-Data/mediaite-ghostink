@@ -1,0 +1,62 @@
+[
+  {
+    "author_id": "14fad988-8d54-5a02-9143-c11837229f57",
+    "confidence": 0.5468706246758768,
+    "direction": "decrease",
+    "effect_proxy": 0.5468706246758768,
+    "effect_size_cohens_d": -1.2068752423845848,
+    "feature_name": "self_similarity_30d",
+    "method": "pelt_section_adjusted",
+    "timestamp": "2021-01-07T19:02:11Z"
+  },
+  {
+    "author_id": "14fad988-8d54-5a02-9143-c11837229f57",
+    "confidence": 0.503803734164561,
+    "direction": "increase",
+    "effect_proxy": 0.503803734164561,
+    "effect_size_cohens_d": 1.0153315710998219,
+    "feature_name": "self_similarity_30d",
+    "method": "pelt_section_adjusted",
+    "timestamp": "2021-06-20T20:30:17Z"
+  },
+  {
+    "author_id": "14fad988-8d54-5a02-9143-c11837229f57",
+    "confidence": 0.5276219424295779,
+    "direction": "increase",
+    "effect_proxy": 0.5276219424295779,
+    "effect_size_cohens_d": 1.1169484568002401,
+    "feature_name": "self_similarity_30d",
+    "method": "pelt_section_adjusted",
+    "timestamp": "2021-11-11T14:14:10Z"
+  },
+  {
+    "author_id": "14fad988-8d54-5a02-9143-c11837229f57",
+    "confidence": 0.5091302181307669,
+    "direction": "increase",
+    "effect_proxy": 0.5091302181307669,
+    "effect_size_cohens_d": 1.037200163741997,
+    "feature_name": "self_similarity_30d",
+    "method": "pelt_section_adjusted",
+    "timestamp": "2022-04-03T21:44:07Z"
+  },
+  {
+    "author_id": "14fad988-8d54-5a02-9143-c11837229f57",
+    "confidence": 0.6566170909082675,
+    "direction": "decrease",
+    "effect_proxy": 0.6566170909082675,
+    "effect_size_cohens_d": -1.9122008507792576,
+    "feature_name": "self_similarity_90d",
+    "method": "pelt_section_adjusted",
+    "timestamp": "2021-01-07T19:02:11Z"
+  },
+  {
+    "author_id": "14fad988-8d54-5a02-9143-c11837229f57",
+    "confidence": 0.5598203643991213,
+    "direction": "decrease",
+    "effect_proxy": 0.5598203643991213,
+    "effect_size_cohens_d": -1.2717997815481037,
+    "feature_name": "self_similarity_90d",
+    "method": "pelt_section_adjusted",
+    "timestamp": "2021-01-23T16:36:33Z"
+  }
+]

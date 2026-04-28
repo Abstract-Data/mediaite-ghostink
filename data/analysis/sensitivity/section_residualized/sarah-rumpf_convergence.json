@@ -1,0 +1,165 @@
+[
+  {
+    "convergence_ratio": 0.25,
+    "end_date": "2021-04-02",
+    "families_converging": [
+      "self_similarity"
+    ],
+    "features_converging": [
+      "self_similarity_90d"
+    ],
+    "n_rankable_per_family": {
+      "ai_markers": 1,
+      "lexical_richness": 2,
+      "self_similarity": 2,
+      "sentence_structure": 1
+    },
+    "passes_via": [
+      "ab",
+      "drift_only"
+    ],
+    "pipeline_a_score": 1.0,
+    "pipeline_b_score": 0.43759539336657016,
+    "pipeline_c_score": null,
+    "start_date": "2021-01-02"
+  },
+  {
+    "convergence_ratio": 0.25,
+    "end_date": "2021-04-07",
+    "families_converging": [
+      "self_similarity"
+    ],
+    "features_converging": [
+      "self_similarity_90d"
+    ],
+    "n_rankable_per_family": {
+      "ai_markers": 1,
+      "lexical_richness": 2,
+      "self_similarity": 2,
+      "sentence_structure": 1
+    },
+    "passes_via": [
+      "ab",
+      "drift_only"
+    ],
+    "pipeline_a_score": 1.0,
+    "pipeline_b_score": 0.36918421974629,
+    "pipeline_c_score": null,
+    "start_date": "2021-01-07"
+  },
+  {
+    "convergence_ratio": 0.25,
+    "end_date": "2021-04-23",
+    "families_converging": [
+      "self_similarity"
+    ],
+    "features_converging": [
+      "self_similarity_90d"
+    ],
+    "n_rankable_per_family": {
+      "ai_markers": 1,
+      "lexical_richness": 2,
+      "self_similarity": 2,
+      "sentence_structure": 1
+    },
+    "passes_via": [
+      "ab",
+      "drift_only"
+    ],
+    "pipeline_a_score": 0.7119794171489823,
+    "pipeline_b_score": 0.3752777225032822,
+    "pipeline_c_score": null,
+    "start_date": "2021-01-23"
+  },
+  {
+    "convergence_ratio": 0.0,
+    "end_date": "2021-05-02",
+    "families_converging": [],
+    "features_converging": [],
+    "n_rankable_per_family": {
+      "ai_markers": 1,
+      "lexical_richness": 2,
+      "self_similarity": 2,
+      "sentence_structure": 1
+    },
+    "passes_via": [
+      "drift_only"
+    ],
+    "pipeline_a_score": 0.0,
+    "pipeline_b_score": 0.37178108710841185,
+    "pipeline_c_score": null,
+    "start_date": "2021-02-01"
+  },
+  {
+    "convergence_ratio": 0.25,
+    "end_date": "2021-09-18",
+    "families_converging": [
+      "self_similarity"
+    ],
+    "features_converging": [
+      "self_similarity_30d"
+    ],
+    "n_rankable_per_family": {
+      "ai_markers": 1,
+      "lexical_richness": 2,
+      "self_similarity": 2,
+      "sentence_structure": 1
+    },
+    "passes_via": [
+      "ab",
+      "drift_only"
+    ],
+    "pipeline_a_score": 0.5115278369352607,
+    "pipeline_b_score": 0.4139007704802647,
+    "pipeline_c_score": null,
+    "start_date": "2021-06-20"
+  },
+  {
+    "convergence_ratio": 0.25,
+    "end_date": "2022-02-09",
+    "families_converging": [
+      "self_similarity"
+    ],
+    "features_converging": [
+      "self_similarity_30d"
+    ],
+    "n_rankable_per_family": {
+      "ai_markers": 1,
+      "lexical_richness": 2,
+      "self_similarity": 2,
+      "sentence_structure": 1
+    },
+    "passes_via": [
+      "ab",
+      "drift_only"
+    ],
+    "pipeline_a_score": 0.5893265143706622,
+    "pipeline_b_score": 0.3253968253968254,
+    "pipeline_c_score": null,
+    "start_date": "2021-11-11"
+  },
+  {
+    "convergence_ratio": 0.25,
+    "end_date": "2022-07-02",
+    "families_converging": [
+      "self_similarity"
+    ],
+    "features_converging": [
+      "self_similarity_30d"
+    ],
+    "n_rankable_per_family": {
+      "ai_markers": 1,
+      "lexical_richness": 2,
+      "self_similarity": 2,
+      "sentence_structure": 1
+    },
+    "passes_via": [
+      "ab",
+      "drift_only"
+    ],
+    "pipeline_a_score": 0.52806994561123,
+    "pipeline_b_score": 0.4523809523809524,
+    "pipeline_c_score": null,
+    "start_date": "2022-04-03"
+  }
+]

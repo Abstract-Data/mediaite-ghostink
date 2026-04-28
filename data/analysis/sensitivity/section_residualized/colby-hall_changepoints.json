@@ -1,0 +1,112 @@
+[
+  {
+    "author_id": "9505b17c-3600-5021-9f46-e0c6700740b1",
+    "confidence": 0.6353510081298541,
+    "direction": "increase",
+    "effect_proxy": 0.6353510081298541,
+    "effect_size_cohens_d": 1.742363265208497,
+    "feature_name": "bigram_entropy",
+    "method": "pelt_section_adjusted",
+    "timestamp": "2026-03-16T07:59:37Z"
+  },
+  {
+    "author_id": "9505b17c-3600-5021-9f46-e0c6700740b1",
+    "confidence": 0.5353930009145154,
+    "direction": "decrease",
+    "effect_proxy": 0.5353930009145154,
+    "effect_size_cohens_d": -1.152356727230462,
+    "feature_name": "self_similarity_30d",
+    "method": "pelt_section_adjusted",
+    "timestamp": "2021-01-07T12:08:29Z"
+  },
+  {
+    "author_id": "9505b17c-3600-5021-9f46-e0c6700740b1",
+    "confidence": 0.6313933387421633,
+    "direction": "increase",
+    "effect_proxy": 0.6313933387421633,
+    "effect_size_cohens_d": 1.7129189597051528,
+    "feature_name": "self_similarity_30d",
+    "method": "pelt_section_adjusted",
+    "timestamp": "2025-10-31T10:19:01Z"
+  },
+  {
+    "author_id": "9505b17c-3600-5021-9f46-e0c6700740b1",
+    "confidence": 0.7728520993597962,
+    "direction": "increase",
+    "effect_proxy": 0.7728520993597962,
+    "effect_size_cohens_d": 3.40241797164559,
+    "feature_name": "self_similarity_30d",
+    "method": "pelt_section_adjusted",
+    "timestamp": "2026-02-25T09:47:00Z"
+  },
+  {
+    "author_id": "9505b17c-3600-5021-9f46-e0c6700740b1",
+    "confidence": 0.8086004743627625,
+    "direction": "increase",
+    "effect_proxy": 0.8086004743627625,
+    "effect_size_cohens_d": 4.224673345822787,
+    "feature_name": "self_similarity_30d",
+    "method": "pelt_section_adjusted",
+    "timestamp": "2026-03-19T09:40:49Z"
+  },
+  {
+    "author_id": "9505b17c-3600-5021-9f46-e0c6700740b1",
+    "confidence": 0.6371724382370315,
+    "direction": "decrease",
+    "effect_proxy": 0.6371724382370315,
+    "effect_size_cohens_d": -1.7561301989877218,
+    "feature_name": "self_similarity_90d",
+    "method": "pelt_section_adjusted",
+    "timestamp": "2021-01-07T12:08:29Z"
+  },
+  {
+    "author_id": "9505b17c-3600-5021-9f46-e0c6700740b1",
+    "confidence": 0.554736832215751,
+    "direction": "decrease",
+    "effect_proxy": 0.554736832215751,
+    "effect_size_cohens_d": -1.2458628342790459,
+    "feature_name": "self_similarity_90d",
+    "method": "pelt_section_adjusted",
+    "timestamp": "2021-01-22T07:58:49Z"
+  },
+  {
+    "author_id": "9505b17c-3600-5021-9f46-e0c6700740b1",
+    "confidence": 0.6173373344772471,
+    "direction": "increase",
+    "effect_proxy": 0.6173373344772471,
+    "effect_size_cohens_d": 1.6132677423179158,
+    "feature_name": "self_similarity_90d",
+    "method": "pelt_section_adjusted",
+    "timestamp": "2025-10-31T10:19:01Z"
+  },
+  {
+    "author_id": "9505b17c-3600-5021-9f46-e0c6700740b1",
+    "confidence": 0.74564732996573,
+    "direction": "increase",
+    "effect_proxy": 0.74564732996573,
+    "effect_size_cohens_d": 2.9315490569266127,
+    "feature_name": "self_similarity_90d",
+    "method": "pelt_section_adjusted",
+    "timestamp": "2026-02-25T09:47:00Z"
+  },
+  {
+    "author_id": "9505b17c-3600-5021-9f46-e0c6700740b1",
+    "confidence": 0.7936981298932602,
+    "direction": "increase",
+    "effect_proxy": 0.7936981298932602,
+    "effect_size_cohens_d": 3.8472658026929376,
+    "feature_name": "self_similarity_90d",
+    "method": "pelt_section_adjusted",
+    "timestamp": "2026-03-31T09:31:44Z"
+  },
+  {
+    "author_id": "9505b17c-3600-5021-9f46-e0c6700740b1",
+    "confidence": 0.630074008778528,
+    "direction": "increase",
+    "effect_proxy": 0.630074008778528,
+    "effect_size_cohens_d": 1.7032434155222882,
+    "feature_name": "trigram_entropy",
+    "method": "pelt_section_adjusted",
+    "timestamp": "2026-03-16T07:59:37Z"
+  }
+]

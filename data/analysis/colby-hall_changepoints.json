@@ -1,0 +1,242 @@
+[
+  {
+    "author_id": "9505b17c-3600-5021-9f46-e0c6700740b1",
+    "confidence": 0.5070180727839575,
+    "direction": "increase",
+    "effect_proxy": 0.5070180727839575,
+    "effect_size_cohens_d": 1.0284719272513287,
+    "feature_name": "bigram_entropy",
+    "method": "pelt",
+    "timestamp": "2025-02-18T14:49:39Z"
+  },
+  {
+    "author_id": "9505b17c-3600-5021-9f46-e0c6700740b1",
+    "confidence": 0.5019068489842353,
+    "direction": "increase",
+    "effect_proxy": 0.5019068489842353,
+    "effect_size_cohens_d": 1.0076565958810986,
+    "feature_name": "bigram_entropy",
+    "method": "pelt",
+    "timestamp": "2025-02-26T12:18:45Z"
+  },
+  {
+    "author_id": "9505b17c-3600-5021-9f46-e0c6700740b1",
+    "confidence": 0.571105598273198,
+    "direction": "increase",
+    "effect_proxy": 0.571105598273198,
+    "effect_size_cohens_d": 1.331576248078383,
+    "feature_name": "bigram_entropy",
+    "method": "pelt",
+    "timestamp": "2025-06-23T16:56:50Z"
+  },
+  {
+    "author_id": "9505b17c-3600-5021-9f46-e0c6700740b1",
+    "confidence": 0.6940813803709216,
+    "direction": "increase",
+    "effect_proxy": 0.6940813803709216,
+    "effect_size_cohens_d": 2.268843201543223,
+    "feature_name": "bigram_entropy",
+    "method": "pelt",
+    "timestamp": "2026-03-16T07:59:37Z"
+  },
+  {
+    "author_id": "9505b17c-3600-5021-9f46-e0c6700740b1",
+    "confidence": 0.5575485773802124,
+    "direction": "increase",
+    "effect_proxy": 0.5575485773802124,
+    "effect_size_cohens_d": 1.2601351219054195,
+    "feature_name": "coleman_liau",
+    "method": "pelt",
+    "timestamp": "2025-09-24T13:29:18Z"
+  },
+  {
+    "author_id": "9505b17c-3600-5021-9f46-e0c6700740b1",
+    "confidence": 0.5509151733601775,
+    "direction": "increase",
+    "effect_proxy": 0.5509151733601775,
+    "effect_size_cohens_d": 1.2267508067067818,
+    "feature_name": "self_similarity_30d",
+    "method": "pelt",
+    "timestamp": "2024-06-14T09:58:52Z"
+  },
+  {
+    "author_id": "9505b17c-3600-5021-9f46-e0c6700740b1",
+    "confidence": 0.5511692461685614,
+    "direction": "increase",
+    "effect_proxy": 0.5511692461685614,
+    "effect_size_cohens_d": 1.2280113193303075,
+    "feature_name": "self_similarity_30d",
+    "method": "pelt",
+    "timestamp": "2024-12-18T08:23:27Z"
+  },
+  {
+    "author_id": "9505b17c-3600-5021-9f46-e0c6700740b1",
+    "confidence": 0.5840107776444283,
+    "direction": "increase",
+    "effect_proxy": 0.5840107776444283,
+    "effect_size_cohens_d": 1.403908433822928,
+    "feature_name": "self_similarity_30d",
+    "method": "pelt",
+    "timestamp": "2025-01-20T07:27:13Z"
+  },
+  {
+    "author_id": "9505b17c-3600-5021-9f46-e0c6700740b1",
+    "confidence": 0.679717041165431,
+    "direction": "increase",
+    "effect_proxy": 0.679717041165431,
+    "effect_size_cohens_d": 2.1222391713838107,
+    "feature_name": "self_similarity_30d",
+    "method": "pelt",
+    "timestamp": "2025-07-09T14:19:15Z"
+  },
+  {
+    "author_id": "9505b17c-3600-5021-9f46-e0c6700740b1",
+    "confidence": 0.7394721803147163,
+    "direction": "increase",
+    "effect_proxy": 0.7394721803147163,
+    "effect_size_cohens_d": 2.8383616813282933,
+    "feature_name": "self_similarity_30d",
+    "method": "pelt",
+    "timestamp": "2025-11-18T13:23:08Z"
+  },
+  {
+    "author_id": "9505b17c-3600-5021-9f46-e0c6700740b1",
+    "confidence": 0.8004580358890819,
+    "direction": "increase",
+    "effect_proxy": 0.8004580358890819,
+    "effect_size_cohens_d": 4.011477182033434,
+    "feature_name": "self_similarity_30d",
+    "method": "pelt",
+    "timestamp": "2026-02-25T09:47:00Z"
+  },
+  {
+    "author_id": "9505b17c-3600-5021-9f46-e0c6700740b1",
+    "confidence": 0.8234742303401241,
+    "direction": "increase",
+    "effect_proxy": 0.8234742303401241,
+    "effect_size_cohens_d": 4.6648952837127835,
+    "feature_name": "self_similarity_30d",
+    "method": "pelt",
+    "timestamp": "2026-03-31T09:31:44Z"
+  },
+  {
+    "author_id": "9505b17c-3600-5021-9f46-e0c6700740b1",
+    "confidence": 0.5858676308720249,
+    "direction": "decrease",
+    "effect_proxy": 0.5858676308720249,
+    "effect_size_cohens_d": -1.4146868840647902,
+    "feature_name": "self_similarity_90d",
+    "method": "pelt",
+    "timestamp": "2021-01-07T12:08:29Z"
+  },
+  {
+    "author_id": "9505b17c-3600-5021-9f46-e0c6700740b1",
+    "confidence": 0.5491807713920223,
+    "direction": "increase",
+    "effect_proxy": 0.5491807713920223,
+    "effect_size_cohens_d": 1.2181840004645799,
+    "feature_name": "self_similarity_90d",
+    "method": "pelt",
+    "timestamp": "2024-09-04T11:04:46Z"
+  },
+  {
+    "author_id": "9505b17c-3600-5021-9f46-e0c6700740b1",
+    "confidence": 0.5482265742045357,
+    "direction": "increase",
+    "effect_proxy": 0.5482265742045357,
+    "effect_size_cohens_d": 1.2134989419513564,
+    "feature_name": "self_similarity_90d",
+    "method": "pelt",
+    "timestamp": "2024-12-18T08:23:27Z"
+  },
+  {
+    "author_id": "9505b17c-3600-5021-9f46-e0c6700740b1",
+    "confidence": 0.6598399221262484,
+    "direction": "increase",
+    "effect_proxy": 0.6598399221262484,
+    "effect_size_cohens_d": 1.939792365555444,
+    "feature_name": "self_similarity_90d",
+    "method": "pelt",
+    "timestamp": "2025-06-23T16:56:50Z"
+  },
+  {
+    "author_id": "9505b17c-3600-5021-9f46-e0c6700740b1",
+    "confidence": 0.7326342446411446,
+    "direction": "increase",
+    "effect_proxy": 0.7326342446411446,
+    "effect_size_cohens_d": 2.740194770485139,
+    "feature_name": "self_similarity_90d",
+    "method": "pelt",
+    "timestamp": "2025-11-18T13:23:08Z"
+  },
+  {
+    "author_id": "9505b17c-3600-5021-9f46-e0c6700740b1",
+    "confidence": 0.7762948400893765,
+    "direction": "increase",
+    "effect_proxy": 0.7762948400893765,
+    "effect_size_cohens_d": 3.4701695767747536,
+    "feature_name": "self_similarity_90d",
+    "method": "pelt",
+    "timestamp": "2026-02-19T10:31:07Z"
+  },
+  {
+    "author_id": "9505b17c-3600-5021-9f46-e0c6700740b1",
+    "confidence": 0.8009293121038323,
+    "direction": "increase",
+    "effect_proxy": 0.8009293121038323,
+    "effect_size_cohens_d": 4.023341259169132,
+    "feature_name": "self_similarity_90d",
+    "method": "pelt",
+    "timestamp": "2026-03-31T09:31:44Z"
+  },
+  {
+    "author_id": "9505b17c-3600-5021-9f46-e0c6700740b1",
+    "confidence": 0.5029374323147505,
+    "direction": "decrease",
+    "effect_proxy": 0.5029374323147505,
+    "effect_size_cohens_d": -1.0118191652549084,
+    "feature_name": "sent_length_mean",
+    "method": "pelt",
+    "timestamp": "2025-08-02T08:01:09Z"
+  },
+  {
+    "author_id": "9505b17c-3600-5021-9f46-e0c6700740b1",
+    "confidence": 0.531673612552392,
+    "direction": "decrease",
+    "effect_proxy": 0.531673612552392,
+    "effect_size_cohens_d": -1.1352629849665918,
+    "feature_name": "sent_length_mean",
+    "method": "pelt",
+    "timestamp": "2025-12-17T10:02:21Z"
+  },
+  {
+    "author_id": "9505b17c-3600-5021-9f46-e0c6700740b1",
+    "confidence": 0.5566484263392847,
+    "direction": "increase",
+    "effect_proxy": 0.5566484263392847,
+    "effect_size_cohens_d": 1.255546296459686,
+    "feature_name": "trigram_entropy",
+    "method": "pelt",
+    "timestamp": "2025-06-23T16:56:50Z"
+  },
+  {
+    "author_id": "9505b17c-3600-5021-9f46-e0c6700740b1",
+    "confidence": 0.6896072046445498,
+    "direction": "increase",
+    "effect_proxy": 0.6896072046445498,
+    "effect_size_cohens_d": 2.221724263460553,
+    "feature_name": "trigram_entropy",
+    "method": "pelt",
+    "timestamp": "2026-03-16T07:59:37Z"
+  },
+  {
+    "author_id": "9505b17c-3600-5021-9f46-e0c6700740b1",
+    "confidence": 0.5068182439480087,
+    "direction": "decrease",
+    "effect_proxy": 0.5068182439480087,
+    "effect_size_cohens_d": -1.0276500250235934,
+    "feature_name": "ttr",
+    "method": "pelt",
+    "timestamp": "2026-03-16T07:59:37Z"
+  }
+]

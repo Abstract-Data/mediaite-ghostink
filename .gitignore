@@ -45,16 +45,36 @@ test-results.xml
 
 # Pipeline & local data (see src/forensics/config — default data_dir is ./data)
 data/raw/*
+# Per-author feature parquets — research deliverables, tracked via Git LFS
+# (see .gitattributes). Subdirs and other artifacts under data/features/ stay
+# ignored.
 data/features/*
-# Embedding batches (per-author *.npz) and manifest — large generated artifacts
-data/embeddings/
+!data/features/*.parquet
+# Embedding batches (per-author *.npz) and the canonical manifest — research
+# deliverables tracked via Git LFS. Transient per-author shards
+# (`<slug>_manifest.jsonl`) and rev-pin backups (`manifest.jsonl.pre-*`) stay
+# ignored by virtue of not being explicitly re-included.
+data/embeddings/**
+!data/embeddings/
+!data/embeddings/manifest.jsonl
+!data/embeddings/*/
+!data/embeddings/*/batch.npz
 # Archive directories created when an embedding model-revision mismatch
 # triggers a full re-embed (timestamped suffix per archive event).
 data/embeddings_archive_*/
+# Per-author analysis artifacts — change-points, drift, hypothesis tests,
+# convergence windows, imputation stats, monthly centroids, time series.
+# Tracked for reproducibility (small JSON via git, parquet/npz via LFS).
 data/analysis/*
+!data/analysis/*.json
+!data/analysis/*.npz
+!data/analysis/*.parquet
 # Phase 15 — keep provenance artifacts committed (profile preservation, etc)
 !data/analysis/provenance/
 !data/analysis/provenance/*
+# Section-residualized sensitivity sub-tree (referenced from run_metadata.json)
+!data/analysis/sensitivity/
+!data/analysis/sensitivity/**
 data/reports/*
 data/pipeline/*
 # Probability-model outputs (per-author Parquet + sidecars)

@@ -1,0 +1,11 @@
+[
+  {
+    "author_id": "69ed8494-b553-5100-9bdf-c9d3ac3f13a8",
+    "confidence": 0.995883120659608,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.4181713797217143,
+    "feature_name": "ai_marker_frequency",
+    "method": "bocpd_section_adjusted",
+    "timestamp": "2025-02-14T11:14:16Z"
+  }
+]

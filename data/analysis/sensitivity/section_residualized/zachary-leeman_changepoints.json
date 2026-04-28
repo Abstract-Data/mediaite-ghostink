@@ -1,0 +1,42 @@
+[
+  {
+    "author_id": "e3c0993a-42ba-5fcb-918e-3847ea6b3171",
+    "confidence": 0.6437256199737206,
+    "direction": "decrease",
+    "effect_proxy": 0.6437256199737206,
+    "effect_size_cohens_d": -1.806825458306146,
+    "feature_name": "self_similarity_30d",
+    "method": "pelt_section_adjusted",
+    "timestamp": "2022-04-07T11:23:36Z"
+  },
+  {
+    "author_id": "e3c0993a-42ba-5fcb-918e-3847ea6b3171",
+    "confidence": 0.5258308917662513,
+    "direction": "decrease",
+    "effect_proxy": 0.5258308917662513,
+    "effect_size_cohens_d": -1.1089522337820357,
+    "feature_name": "self_similarity_30d",
+    "method": "pelt_section_adjusted",
+    "timestamp": "2022-04-25T15:45:00Z"
+  },
+  {
+    "author_id": "e3c0993a-42ba-5fcb-918e-3847ea6b3171",
+    "confidence": 0.682086026103103,
+    "direction": "decrease",
+    "effect_proxy": 0.682086026103103,
+    "effect_size_cohens_d": -2.145505017418048,
+    "feature_name": "self_similarity_90d",
+    "method": "pelt_section_adjusted",
+    "timestamp": "2022-04-07T11:23:36Z"
+  },
+  {
+    "author_id": "e3c0993a-42ba-5fcb-918e-3847ea6b3171",
+    "confidence": 0.5987213714291394,
+    "direction": "decrease",
+    "effect_proxy": 0.5987213714291394,
+    "effect_size_cohens_d": -1.4920340352075665,
+    "feature_name": "self_similarity_90d",
+    "method": "pelt_section_adjusted",
+    "timestamp": "2022-04-25T15:45:00Z"
+  }
+]

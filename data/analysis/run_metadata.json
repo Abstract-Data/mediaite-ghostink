@@ -1,0 +1,136 @@
+{
+  "allow_pre_phase16_embeddings": false,
+  "authors_in_run": [
+    "ahmad-austin",
+    "alex-griffing",
+    "charlie-nash",
+    "colby-hall",
+    "david-gilmour",
+    "isaac-schorr",
+    "jennifer-bowers-bahney",
+    "joe-depaolo",
+    "michael-luciano",
+    "sarah-rumpf",
+    "tommy-christopher",
+    "zachary-leeman"
+  ],
+  "changepoint": false,
+  "comparison_targets": [
+    "colby-hall"
+  ],
+  "completed_at": "2026-04-28T06:32:47.919823+00:00",
+  "config_hash": "6bffd326f0074688514c3d595ad2bc6065725ea17e783489",
+  "convergence_full": true,
+  "drift": false,
+  "exploratory": false,
+  "full_analysis_authors": [
+    "ahmad-austin",
+    "alex-griffing",
+    "charlie-nash",
+    "colby-hall",
+    "david-gilmour",
+    "isaac-schorr",
+    "jennifer-bowers-bahney",
+    "joe-depaolo",
+    "michael-luciano",
+    "sarah-rumpf",
+    "tommy-christopher",
+    "zachary-leeman"
+  ],
+  "last_processed_author": null,
+  "last_scraped_at": "2026-04-25T05:57:12.739568+00:00",
+  "preregistration_message": "Pre-registration intact (locked at 2026-04-26T09:46:47.618380+00:00)",
+  "preregistration_status": "ok",
+  "run_id": "f9c6b2c8-74af-48d6-82da-e574503fd249",
+  "run_timestamp": "2026-04-28T06:16:32.810941+00:00",
+  "section_residualized_sensitivity": {
+    "analysis_dir": "data/analysis/sensitivity/section_residualized",
+    "authors": {
+      "ahmad-austin": {
+        "downgrade_recommended": true,
+        "primary_change_points": 6,
+        "primary_convergence_windows": 6,
+        "section_residualized_change_points": 5,
+        "section_residualized_convergence_windows": 5
+      },
+      "alex-griffing": {
+        "downgrade_recommended": false,
+        "primary_change_points": 5,
+        "primary_convergence_windows": 6,
+        "section_residualized_change_points": 6,
+        "section_residualized_convergence_windows": 7
+      },
+      "charlie-nash": {
+        "downgrade_recommended": false,
+        "primary_change_points": 7,
+        "primary_convergence_windows": 6,
+        "section_residualized_change_points": 7,
+        "section_residualized_convergence_windows": 7
+      },
+      "colby-hall": {
+        "downgrade_recommended": true,
+        "primary_change_points": 24,
+        "primary_convergence_windows": 9,
+        "section_residualized_change_points": 11,
+        "section_residualized_convergence_windows": 5
+      },
+      "david-gilmour": {
+        "downgrade_recommended": false,
+        "primary_change_points": 3,
+        "primary_convergence_windows": 4,
+        "section_residualized_change_points": 4,
+        "section_residualized_convergence_windows": 4
+      },
+      "isaac-schorr": {
+        "downgrade_recommended": true,
+        "primary_change_points": 9,
+        "primary_convergence_windows": 7,
+        "section_residualized_change_points": 5,
+        "section_residualized_convergence_windows": 6
+      },
+      "jennifer-bowers-bahney": {
+        "downgrade_recommended": false,
+        "primary_change_points": 5,
+        "primary_convergence_windows": 5,
+        "section_residualized_change_points": 5,
+        "section_residualized_convergence_windows": 5
+      },
+      "joe-depaolo": {
+        "downgrade_recommended": false,
+        "primary_change_points": 5,
+        "primary_convergence_windows": 3,
+        "section_residualized_change_points": 5,
+        "section_residualized_convergence_windows": 3
+      },
+      "michael-luciano": {
+        "downgrade_recommended": false,
+        "primary_change_points": 3,
+        "primary_convergence_windows": 4,
+        "section_residualized_change_points": 3,
+        "section_residualized_convergence_windows": 4
+      },
+      "sarah-rumpf": {
+        "downgrade_recommended": true,
+        "primary_change_points": 9,
+        "primary_convergence_windows": 8,
+        "section_residualized_change_points": 6,
+        "section_residualized_convergence_windows": 7
+      },
+      "tommy-christopher": {
+        "downgrade_recommended": false,
+        "primary_change_points": 10,
+        "primary_convergence_windows": 10,
+        "section_residualized_change_points": 11,
+        "section_residualized_convergence_windows": 9
+      },
+      "zachary-leeman": {
+        "downgrade_recommended": false,
+        "primary_change_points": 4,
+        "primary_convergence_windows": 4,
+        "section_residualized_change_points": 4,
+        "section_residualized_convergence_windows": 4
+      }
+    }
+  },
+  "timeseries": true
+}

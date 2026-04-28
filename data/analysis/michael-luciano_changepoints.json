@@ -1,0 +1,32 @@
+[
+  {
+    "author_id": "3271fa4d-895f-511a-83e7-8408f811bec3",
+    "confidence": 0.6634274186716898,
+    "direction": "decrease",
+    "effect_proxy": 0.6634274186716898,
+    "effect_size_cohens_d": -1.9711273451135596,
+    "feature_name": "self_similarity_30d",
+    "method": "pelt",
+    "timestamp": "2021-04-26T16:24:49Z"
+  },
+  {
+    "author_id": "3271fa4d-895f-511a-83e7-8408f811bec3",
+    "confidence": 0.7047442751635555,
+    "direction": "decrease",
+    "effect_proxy": 0.7047442751635555,
+    "effect_size_cohens_d": -2.3868945320330215,
+    "feature_name": "self_similarity_90d",
+    "method": "pelt",
+    "timestamp": "2021-04-26T16:24:49Z"
+  },
+  {
+    "author_id": "3271fa4d-895f-511a-83e7-8408f811bec3",
+    "confidence": 0.5952572800813715,
+    "direction": "decrease",
+    "effect_proxy": 0.5952572800813715,
+    "effect_size_cohens_d": -1.4707053414105755,
+    "feature_name": "self_similarity_90d",
+    "method": "pelt",
+    "timestamp": "2021-05-05T21:27:49Z"
+  }
+]

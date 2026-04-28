@@ -1,0 +1,62 @@
+[
+  {
+    "author_id": "ca23dfbb-a8f9-57c7-83a9-d225df4e4685",
+    "confidence": 0.995258040250606,
+    "direction": "decrease",
+    "effect_proxy": 0.995258040250606,
+    "effect_size_cohens_d": -0.21765236050365133,
+    "feature_name": "ai_marker_frequency",
+    "method": "bocpd_section_adjusted",
+    "timestamp": "2022-02-01T15:30:10Z"
+  },
+  {
+    "author_id": "ca23dfbb-a8f9-57c7-83a9-d225df4e4685",
+    "confidence": 0.9959767440182706,
+    "direction": "decrease",
+    "effect_proxy": 0.9959767440182706,
+    "effect_size_cohens_d": -0.2343240301311999,
+    "feature_name": "ai_marker_frequency",
+    "method": "bocpd_section_adjusted",
+    "timestamp": "2022-02-04T18:14:46Z"
+  },
+  {
+    "author_id": "ca23dfbb-a8f9-57c7-83a9-d225df4e4685",
+    "confidence": 0.9959762738006542,
+    "direction": "decrease",
+    "effect_proxy": 0.9959762738006542,
+    "effect_size_cohens_d": -0.24212659763464767,
+    "feature_name": "ai_marker_frequency",
+    "method": "bocpd_section_adjusted",
+    "timestamp": "2022-02-17T19:26:36Z"
+  },
+  {
+    "author_id": "ca23dfbb-a8f9-57c7-83a9-d225df4e4685",
+    "confidence": 0.5644199959638648,
+    "direction": "decrease",
+    "effect_proxy": 0.5644199959638648,
+    "effect_size_cohens_d": -1.2957895007435682,
+    "feature_name": "self_similarity_30d",
+    "method": "pelt_section_adjusted",
+    "timestamp": "2021-11-08T12:40:35Z"
+  },
+  {
+    "author_id": "ca23dfbb-a8f9-57c7-83a9-d225df4e4685",
+    "confidence": 0.501138136837177,
+    "direction": "increase",
+    "effect_proxy": 0.501138136837177,
+    "effect_size_cohens_d": 1.0045629338348743,
+    "feature_name": "self_similarity_30d",
+    "method": "pelt_section_adjusted",
+    "timestamp": "2022-03-10T19:13:10Z"
+  },
+  {
+    "author_id": "ca23dfbb-a8f9-57c7-83a9-d225df4e4685",
+    "confidence": 0.6110696331595139,
+    "direction": "decrease",
+    "effect_proxy": 0.6110696331595139,
+    "effect_size_cohens_d": -1.5711543383037891,
+    "feature_name": "self_similarity_90d",
+    "method": "pelt_section_adjusted",
+    "timestamp": "2021-11-08T12:40:35Z"
+  }
+]

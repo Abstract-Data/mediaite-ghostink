@@ -1,0 +1,92 @@
+{
+  "author_slug": "david-gilmour",
+  "window_components": [
+    {
+      "admitted": true,
+      "ai_signal": 0.0,
+      "convergence_ratio": 1.0,
+      "min_feature_ratio": 0.5,
+      "n_change_points_in_window": 3,
+      "passes_ab": true,
+      "passes_drift_only": true,
+      "passes_ratio": true,
+      "passes_via": [
+        "ratio",
+        "ab",
+        "drift_only"
+      ],
+      "peak_signal": 0.7666666666666667,
+      "pipeline_a_score": 1.0,
+      "pipeline_b_score": 0.4558664856506819,
+      "pipeline_c_score": null,
+      "sim_signal": 0.14506630463469705,
+      "window_end": "2024-01-03",
+      "window_start": "2023-10-05"
+    },
+    {
+      "admitted": true,
+      "ai_signal": 0.0,
+      "convergence_ratio": 1.0,
+      "min_feature_ratio": 0.5,
+      "n_change_points_in_window": 3,
+      "passes_ab": true,
+      "passes_drift_only": true,
+      "passes_ratio": true,
+      "passes_via": [
+        "ratio",
+        "ab",
+        "drift_only"
+      ],
+      "peak_signal": 0.7666666666666667,
+      "pipeline_a_score": 1.0,
+      "pipeline_b_score": 0.4380733074034946,
+      "pipeline_c_score": null,
+      "sim_signal": 0.10947994814032244,
+      "window_end": "2024-01-10",
+      "window_start": "2023-10-12"
+    },
+    {
+      "admitted": true,
+      "ai_signal": 0.0,
+      "convergence_ratio": 1.0,
+      "min_feature_ratio": 0.5,
+      "n_change_points_in_window": 1,
+      "passes_ab": true,
+      "passes_drift_only": true,
+      "passes_ratio": true,
+      "passes_via": [
+        "ratio",
+        "ab",
+        "drift_only"
+      ],
+      "peak_signal": 0.7666666666666667,
+      "pipeline_a_score": 0.6479265565598917,
+      "pipeline_b_score": 0.40159397421973997,
+      "pipeline_c_score": null,
+      "sim_signal": 0.03652128177281326,
+      "window_end": "2024-01-29",
+      "window_start": "2023-10-31"
+    },
+    {
+      "admitted": true,
+      "ai_signal": 0.0,
+      "convergence_ratio": 0.0,
+      "min_feature_ratio": 0.5,
+      "n_change_points_in_window": 0,
+      "passes_ab": false,
+      "passes_drift_only": true,
+      "passes_ratio": false,
+      "passes_via": [
+        "drift_only"
+      ],
+      "peak_signal": 0.7666666666666667,
+      "pipeline_a_score": 0.0,
+      "pipeline_b_score": 0.3961092621139542,
+      "pipeline_c_score": null,
+      "sim_signal": 0.025551857561241672,
+      "window_end": "2024-01-30",
+      "window_start": "2023-11-01"
+    }
+  ],
+  "windows_evaluated": 4
+}
