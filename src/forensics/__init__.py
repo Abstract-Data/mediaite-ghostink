@@ -8,4 +8,8 @@ rather than expecting a deep barrel on ``forensics``.
 
 from forensics.config import ForensicsSettings, get_settings
 
-__all__ = ["ForensicsSettings", "get_settings"]
+# Bumped automatically by release-please on every release PR merge.
+# x-release-please-version
+__version__ = "0.1.0"
+
+__all__ = ["ForensicsSettings", "__version__", "get_settings"]
