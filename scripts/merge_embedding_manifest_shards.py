@@ -15,7 +15,6 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
-from pathlib import Path
 
 from forensics.config import get_project_root
 from forensics.models.features import EmbeddingRecord
@@ -47,18 +46,22 @@ def main(*, dry_run: bool = False) -> int:
             added += 1
         log.info("merge: %s contributed %d row(s)", shard.name, added)
 
-    write_embeddings_manifest(list(by_id.values()), canonical)
-    log.info(
-        "merge: wrote canonical manifest with %d row(s) from %d shard(s)",
-        len(by_id),
-        len(shards),
-    )
-
     if dry_run:
+        log.info(
+            "merge: would write canonical manifest with %d row(s) from %d shard(s)",
+            len(by_id),
+            len(shards),
+        )
         if shards:
             shard_names = ", ".join(s.name for s in shards)
             log.info("merge: would clean up %d shard file(s): %s", len(shards), shard_names)
     else:
+        write_embeddings_manifest(list(by_id.values()), canonical)
+        log.info(
+            "merge: wrote canonical manifest with %d row(s) from %d shard(s)",
+            len(by_id),
+            len(shards),
+        )
         for shard in shards:
             shard.unlink()
         if shards:
@@ -68,6 +71,6 @@ def main(*, dry_run: bool = False) -> int:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Merge embedding manifest shards into canonical manifest.jsonl")
-    parser.add_argument("--dry-run", action="store_true", help="Show what would be done without actually deleting shard files")
+    parser.add_argument("--dry-run", action="store_true", help="Preview what would be merged and cleaned up without writing any files")
     args = parser.parse_args()
     raise SystemExit(main(dry_run=args.dry_run))
