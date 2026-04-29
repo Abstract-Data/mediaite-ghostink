@@ -53,6 +53,11 @@ def _sanitize_and_extract(root: BeautifulSoup | Tag) -> str:
     return normalize_article_text(root.get_text(separator="\n"))
 
 
+def _strip_stray_angle_brackets(text: str) -> str:
+    """Remove ``<`` / ``>`` left in flattened text (e.g. malformed markup fragments)."""
+    return text.replace("<", "").replace(">", "")
+
+
 def extract_article_text(html: str) -> str:
     """Pull main article body text from Mediaite / WordPress HTML."""
     soup = BeautifulSoup(html, "lxml")
@@ -72,7 +77,7 @@ def extract_article_text_from_rest(content_rendered: str) -> str:
     if not content_rendered:
         return ""
     soup = BeautifulSoup(content_rendered, "lxml")
-    return _sanitize_and_extract(soup)
+    return _strip_stray_angle_brackets(_sanitize_and_extract(soup))
 
 
 def _meta_content(soup: BeautifulSoup, *, prop: str | None = None, name: str | None = None) -> str:

@@ -171,6 +171,27 @@ def _run_analyze_stage_embedding_guarded(
 def _run_parallel_author_refresh_stage(ctx: AnalyzeContext) -> None:
     from forensics.analysis.orchestrator import run_parallel_author_refresh
 
+    pipeline_ctx = PipelineContext.resolve()
+    rid = pipeline_ctx.record_audit(
+        "forensics analyze --parallel-authors",
+        optional=False,
+        log=logger,
+    )
+    assert rid is not None
+    analysis_dir = ctx.paths.analysis_dir
+    write_run_metadata(
+        analysis_dir,
+        rid=rid,
+        meta={
+            "run_id": rid,
+            "run_timestamp": datetime.now(UTC).isoformat(),
+            "config_hash": pipeline_ctx.config_hash,
+            "parallel_authors_preflight": True,
+            "last_processed_author": ctx.author_slug,
+            "authors_in_run": ([ctx.author_slug] if ctx.author_slug else []),
+        },
+    )
+
     results = run_parallel_author_refresh(
         ctx.paths,
         ctx.settings,
@@ -248,12 +269,58 @@ def _verify_requested_ai_baseline_vectors(
         )
 
 
+def _serial_stage_flags_set(sf: AnalyzeStageFlags) -> bool:
+    return any(
+        (
+            sf.changepoint,
+            sf.timeseries,
+            sf.drift,
+            sf.ai_baseline,
+            sf.convergence,
+        )
+    )
+
+
+def _conflicting_analyze_flags(sf: AnalyzeStageFlags, *, primary: str) -> list[str]:
+    conflicts = [primary]
+    if primary != "--compare" and sf.compare:
+        conflicts.append("--compare")
+    if primary != "--parallel-authors" and sf.parallel_authors:
+        conflicts.append("--parallel-authors")
+    if sf.changepoint:
+        conflicts.append("--changepoint")
+    if sf.timeseries:
+        conflicts.append("--timeseries")
+    if sf.drift:
+        conflicts.append("--drift")
+    if sf.ai_baseline:
+        conflicts.append("--ai-baseline")
+    if sf.convergence:
+        conflicts.append("--convergence")
+    return conflicts
+
+
 def _compare_only_or_parallel_early_exit(
     request: AnalyzeRequest,
     *,
     ctx: AnalyzeContext,
     sf: AnalyzeStageFlags,
 ) -> bool:
+    if sf.compare and (sf.parallel_authors or _serial_stage_flags_set(sf)):
+        cflags = ", ".join(_conflicting_analyze_flags(sf, primary="--compare"))
+        raise fail(
+            request.typer_context,
+            "analyze",
+            "invalid_stage_flags",
+            (
+                "--compare (compare-only) cannot be combined with other analyze stages. "
+                f"Conflicting flags: {cflags}."
+            ),
+            exit_code=ExitCode.USAGE_ERROR,
+            suggestion=(
+                "Use `forensics analyze compare-only`, or omit --compare for a full pipeline."
+            ),
+        )
     if sf.compare and not (
         sf.parallel_authors
         or sf.changepoint
@@ -264,6 +331,18 @@ def _compare_only_or_parallel_early_exit(
     ):
         _run_compare_only_flow(ctx)
         return True
+    if sf.parallel_authors and (sf.compare or _serial_stage_flags_set(sf)):
+        pflags = ", ".join(_conflicting_analyze_flags(sf, primary="--parallel-authors"))
+        raise fail(
+            request.typer_context,
+            "analyze",
+            "invalid_stage_flags",
+            (
+                "--parallel-authors cannot be combined with other analyze stages. "
+                f"Conflicting flags: {pflags}."
+            ),
+            exit_code=ExitCode.USAGE_ERROR,
+        )
     if sf.parallel_authors:
         _run_analyze_stage_embedding_guarded(
             request,

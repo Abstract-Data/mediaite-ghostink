@@ -104,11 +104,12 @@ def _clean_feature_series(df_author: pl.DataFrame, feature_name: str) -> list[fl
     cache-hit behaviour.
     """
     col = pl.col(feature_name).cast(pl.Float64, strict=False)
-    med_scalar = df_author.select(col.filter(col.is_finite()).median().alias("_m"))["_m"][0]
+    lf = df_author.lazy()
+    med_scalar = lf.select(col.filter(col.is_finite()).median()).collect().item()
     med = 0.0 if med_scalar is None else float(med_scalar)
-    cleaned = df_author.select(
+    cleaned = lf.select(
         pl.when(col.is_finite()).then(col).otherwise(pl.lit(med)).alias("_v")
-    )["_v"]
+    ).collect()["_v"]
     return [float(x) for x in cleaned.to_list()]
 
 

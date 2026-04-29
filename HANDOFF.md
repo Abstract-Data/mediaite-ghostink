@@ -28,7 +28,7 @@ Agents: append a new block below using this template after every multi-step task
 - `path/to/file` — [why]
 
 #### Verification Evidence
-```
+```text
 [paste the commands you ran and a summary of output]
 ```
 
@@ -48,6 +48,43 @@ Agents: append a new block below using this template after every multi-step task
 
 
 > **History:** Older completion blocks live in [`docs/archive/handoff-history.md`](docs/archive/handoff-history.md). When this file grows past roughly 200 lines of log content, archive older blocks there in the same change set.
+
+### Run 13 follow-up — inline review (parser, refresh, analyze CLI, settings, config audit)
+
+**Status:** Complete  
+**Date:** 2026-04-29  
+**Agent/Session:** Cursor agent
+
+#### What was done
+
+- **REST parser:** `extract_article_text_from_rest` now runs `_strip_stray_angle_brackets` after sanitize so malformed fragments (e.g. a lone `<`) do not survive in plain text; satisfies `test_parser_rest_fuzz` idempotence + no-`<`/`>` invariants.
+- **`refresh.py`:** Comment on `__all__` for patch targets; split `_run_isolated_author_parallel_jobs`; refactored `run_parallel_author_refresh` into helpers with docstring; parallel analyze path seeds audit / `run_metadata` like serial paths.
+- **`analyze_dispatch.py`:** `_conflicting_analyze_flags` + validation in `_compare_only_or_parallel_early_exit` for invalid flag mixes (`--compare` with other stages; `--parallel-authors` with serial stages).
+- **`analyze_models.py`:** Docstring on `AnalyzeContext.build`.
+- **`config_cmd.py`:** JSON mode emits `{"status":"ok","diffs":[...],"count":N}` when overrides exist (no prose lines).
+- **`settings.py`:** `mode="before"` mirror: when `survey` has `excluded_sections` and `features` is missing, inject `features` from survey.
+- **`per_author.py`:** Polars LazyFrame pipeline for `_clean_feature_series` (ruff-formatted).
+- **`test_parser_rest_fuzz.py`:** Stronger assertions + sentinel-preservation Hypothesis test.
+
+#### Files modified
+
+- `src/forensics/scraper/parser.py`, `tests/unit/test_parser_rest_fuzz.py`
+- `src/forensics/analysis/orchestrator/refresh.py`, `per_author.py`
+- `src/forensics/cli/analyze_dispatch.py`, `analyze_models.py`, `config_cmd.py`
+- `src/forensics/config/settings.py`
+
+#### Verification
+
+```text
+uv run ruff check . && uv run ruff format .
+uv run pytest tests/ -v --tb=line -q
+```
+
+1095 passed, 4 skipped (TUI), 1 xfailed; coverage 80.44% (meets fail-under).
+
+#### Risks and next steps
+
+- Stripping `<`/`>` in the REST path only removes markup-like characters from **flattened** text; legitimate angle brackets in article prose are rare for this corpus. If needed, narrow to known-malformed patterns only.
 
 ### Run 13 — Code review + refactoring plan (config, CLI, orchestrator)
 
@@ -82,7 +119,7 @@ Agents: append a new block below using this template after every multi-step task
 
 #### Verification
 
-```
+```bash
 uv run ruff format . && uv run ruff check .
 uv run pytest tests/ -q --no-cov
 ```
@@ -115,7 +152,7 @@ All tests passed (4 skipped TUI, 1 xfail section-residualize).
 
 #### Verification
 
-```
+```bash
 uv run ruff check . && uv run ruff format --check .
 uv run pytest tests/ -q
 uv run pytest tests/integration/test_parallel_parity.py -v --no-cov -q
@@ -157,7 +194,7 @@ Full suite: **passed** (1 known xfail); parallel parity: **3 passed**. GitNexus 
 
 #### Verification evidence
 
-```
+```bash
 uv run ruff check . && uv run ruff format --check .
 uv run pytest tests/integration/test_analysis_config_hash_gate.py tests/unit/test_direction_concordance.py tests/unit/test_comparison_target_controls.py tests/unit/test_probability_trajectories.py tests/integration/test_phase17_classification.py -v --no-cov
 ```
@@ -201,7 +238,7 @@ uv run pytest tests/integration/test_analysis_config_hash_gate.py tests/unit/tes
 - `data/logs/path_b_parallel_20260427T220619.log` — main run log; per-author logs at `data/logs/extract_<slug>.log`.
 
 #### Verification Evidence
-```
+```text
 $ tail -2 data/logs/path_b_parallel_20260427T220619.log
 Tue Apr 28 01:33:03 CDT 2026
 EXIT=0
@@ -271,7 +308,7 @@ Total wallclock: 22:06:19 → 01:33:03 = **3 h 26 min 44 s** (4-way parallel ext
 
 #### Verification evidence
 
-```
+```bash
 uv build
 # sdist + wheel OK
 

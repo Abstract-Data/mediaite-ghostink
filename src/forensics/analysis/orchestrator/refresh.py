@@ -227,28 +227,16 @@ def _run_isolated_author_serial_jobs(
     return isolated_outputs
 
 
-def _run_isolated_author_jobs(
+def _run_isolated_author_parallel_jobs(
     paths: AnalysisArtifactPaths,
     config: ForensicsSettings,
     slugs: list[str],
     *,
     run_id: str,
-    max_workers: int,
+    worker_count: int,
     probability_trajectory_by_slug: dict[str, ProbabilityTrajectory],
     mode: AnalysisMode,
 ) -> list[IsolatedAuthorAnalysis]:
-    if not slugs:
-        return []
-    worker_count = min(max(1, max_workers), len(slugs))
-    if worker_count <= 1:
-        return _run_isolated_author_serial_jobs(
-            paths,
-            config,
-            slugs,
-            run_id=run_id,
-            probability_trajectory_by_slug=probability_trajectory_by_slug,
-            mode=mode,
-        )
     isolated_outputs: list[IsolatedAuthorAnalysis] = []
     ctx = multiprocessing.get_context("spawn")
     with ProcessPoolExecutor(max_workers=worker_count, mp_context=ctx) as executor:
@@ -288,41 +276,63 @@ def _run_isolated_author_jobs(
     return sorted(isolated_outputs, key=lambda item: item.slug)
 
 
-def run_parallel_author_refresh(
+def _run_isolated_author_jobs(
+    paths: AnalysisArtifactPaths,
+    config: ForensicsSettings,
+    slugs: list[str],
+    *,
+    run_id: str,
+    max_workers: int,
+    probability_trajectory_by_slug: dict[str, ProbabilityTrajectory],
+    mode: AnalysisMode,
+) -> list[IsolatedAuthorAnalysis]:
+    if not slugs:
+        return []
+    worker_count = min(max(1, max_workers), len(slugs))
+    if worker_count <= 1:
+        return _run_isolated_author_serial_jobs(
+            paths,
+            config,
+            slugs,
+            run_id=run_id,
+            probability_trajectory_by_slug=probability_trajectory_by_slug,
+            mode=mode,
+        )
+    return _run_isolated_author_parallel_jobs(
+        paths,
+        config,
+        slugs,
+        run_id=run_id,
+        worker_count=worker_count,
+        probability_trajectory_by_slug=probability_trajectory_by_slug,
+        mode=mode,
+    )
+
+
+def _prepare_parallel_refresh_inputs(
     paths: AnalysisArtifactPaths,
     config: ForensicsSettings,
     *,
-    author_slug: str | None = None,
-    max_workers: int | None = None,
-    probability_trajectory_by_slug: dict[str, ProbabilityTrajectory] | None = None,
-    mode: AnalysisMode = DEFAULT_ANALYSIS_MODE,
-) -> dict[str, AnalysisResult]:
+    author_slug: str | None,
+    max_workers: int | None,
+    probability_trajectory_by_slug: dict[str, ProbabilityTrajectory] | None,
+) -> tuple[str, list[str], int, dict[str, ProbabilityTrajectory]]:
     run_id = str(uuid4())
     slugs = _stale_author_slugs(paths, config, author_slug)
     workers = _resolve_parallel_refresh_workers(config, max_workers)
-    logger.info(
-        "analysis-refresh: refreshing %d stale author(s) with %d worker(s)",
-        len(slugs),
-        workers,
-    )
     if probability_trajectory_by_slug is None:
         all_slugs = [a.slug for a in config.authors]
         prob_map = build_probability_trajectory_by_slug(paths, all_slugs)
     else:
         prob_map = probability_trajectory_by_slug
-    isolated_outputs = _run_isolated_author_jobs(
-        paths,
-        config,
-        slugs,
-        run_id=run_id,
-        max_workers=workers,
-        probability_trajectory_by_slug=prob_map,
-        mode=mode,
-    )
-    if not isolated_outputs:
-        logger.info("analysis-refresh: no stale author artifacts to refresh")
-        return {}
+    return run_id, slugs, workers, prob_map
 
+
+def _build_gated_refresh_outputs(
+    isolated_outputs: list[IsolatedAuthorAnalysis],
+    paths: AnalysisArtifactPaths,
+    config: ForensicsSettings,
+) -> tuple[dict[str, AnalysisResult], list[IsolatedAuthorAnalysis]]:
     results = {item.slug: item.result for item in isolated_outputs}
     gated_tests_by_slug = _apply_global_test_gates(
         {slug: result.hypothesis_tests for slug, result in results.items()},
@@ -342,16 +352,29 @@ def run_parallel_author_refresh(
             assembled,
             all_tests,
         )
-        refreshed = IsolatedAuthorAnalysis(
-            slug=item.slug,
-            analysis_dir=item.analysis_dir,
-            result=assembled,
-            stage_timings=item.stage_timings,
+        refreshed_outputs.append(
+            IsolatedAuthorAnalysis(
+                slug=item.slug,
+                analysis_dir=item.analysis_dir,
+                result=assembled,
+                stage_timings=item.stage_timings,
+            )
         )
-        refreshed_outputs.append(refreshed)
+    return results, refreshed_outputs
 
+
+def _finalize_parallel_refresh_artifacts(
+    paths: AnalysisArtifactPaths,
+    config: ForensicsSettings,
+    *,
+    results: dict[str, AnalysisResult],
+    refreshed_outputs: list[IsolatedAuthorAnalysis],
+    run_id: str,
+    workers: int,
+    author_slug: str | None,
+    mode: AnalysisMode,
+) -> None:
     _validate_and_promote_isolated_outputs(refreshed_outputs, paths, config)
-
     targets, controls = _resolve_targets_and_controls(config, author_slug)
     comparison_payload = _run_target_control_comparisons(
         targets,
@@ -375,9 +398,79 @@ def run_parallel_author_refresh(
     }
     write_json_artifact(meta_path, meta)
     write_corpus_custody(paths.db_path, paths.analysis_dir)
+
+
+def run_parallel_author_refresh(
+    paths: AnalysisArtifactPaths,
+    config: ForensicsSettings,
+    *,
+    author_slug: str | None = None,
+    max_workers: int | None = None,
+    probability_trajectory_by_slug: dict[str, ProbabilityTrajectory] | None = None,
+    mode: AnalysisMode = DEFAULT_ANALYSIS_MODE,
+) -> dict[str, AnalysisResult]:
+    """Refresh stale per-author analysis artifacts via isolated workdirs, then promote.
+
+    Stale slugs are discovered under ``paths``; each author is re-analyzed in
+    ``data/analysis/parallel/<run_id>/<slug>/``. After global hypothesis gating,
+    outputs are validated and copied to the canonical ``paths.analysis_dir``,
+    then ``comparison_report.json`` and ``run_metadata.json`` are rebuilt.
+
+    Args:
+        paths: Artifact layout (DB + analysis directories).
+        config: Loaded ``ForensicsSettings``.
+        author_slug: Optional single slug; otherwise all configured authors that
+            need refresh.
+        max_workers: Optional override for worker count (else config/CPU heuristics).
+        probability_trajectory_by_slug: Optional pre-built trajectories; if
+            omitted, trajectories are built like :func:`run_full_analysis`.
+        mode: Confirmatory vs exploratory embedding policy.
+
+    Returns:
+        Mapping of author slug to refreshed :class:`AnalysisResult`.
+    """
+    run_id, slugs, workers, prob_map = _prepare_parallel_refresh_inputs(
+        paths,
+        config,
+        author_slug=author_slug,
+        max_workers=max_workers,
+        probability_trajectory_by_slug=probability_trajectory_by_slug,
+    )
+    logger.info(
+        "analysis-refresh: refreshing %d stale author(s) with %d worker(s)",
+        len(slugs),
+        workers,
+    )
+    isolated_outputs = _run_isolated_author_jobs(
+        paths,
+        config,
+        slugs,
+        run_id=run_id,
+        max_workers=workers,
+        probability_trajectory_by_slug=prob_map,
+        mode=mode,
+    )
+    if not isolated_outputs:
+        logger.info("analysis-refresh: no stale author artifacts to refresh")
+        return {}
+
+    results, refreshed_outputs = _build_gated_refresh_outputs(isolated_outputs, paths, config)
+    _finalize_parallel_refresh_artifacts(
+        paths,
+        config,
+        results=results,
+        refreshed_outputs=refreshed_outputs,
+        run_id=run_id,
+        workers=workers,
+        author_slug=author_slug,
+        mode=mode,
+    )
     return results
 
 
+# __all__ keeps leading-underscore names so tests and
+# ``forensics.analysis.orchestrator`` can patch the same entry points that
+# historically lived on ``parallel``; they are not a stable public API.
 __all__ = [
     "IsolatedAuthorAnalysis",
     "_isolated_author_worker",

@@ -216,23 +216,31 @@ class ForensicsSettings(BaseSettings):
             return data
         survey = data.get("survey")
         features = data.get("features")
-        if survey is None or features is None:
+        if survey is None:
             return data
-        if isinstance(survey, dict) and isinstance(features, dict):
-            if "excluded_sections" in survey:
+        if isinstance(survey, dict) and "excluded_sections" in survey:
+            if features is None:
+                return {**data, "features": {"excluded_sections": survey["excluded_sections"]}}
+            if isinstance(features, dict):
                 return {
                     **data,
                     "features": {**features, "excluded_sections": survey["excluded_sections"]},
                 }
             return data
-        if isinstance(survey, SurveyConfig) and isinstance(features, FeaturesConfig):
-            if survey.excluded_sections != features.excluded_sections:
+        if isinstance(survey, SurveyConfig):
+            if features is None:
                 return {
                     **data,
-                    "features": features.model_copy(
-                        update={"excluded_sections": survey.excluded_sections}
-                    ),
+                    "features": FeaturesConfig(excluded_sections=survey.excluded_sections),
                 }
+            if isinstance(features, FeaturesConfig):
+                if survey.excluded_sections != features.excluded_sections:
+                    return {
+                        **data,
+                        "features": features.model_copy(
+                            update={"excluded_sections": survey.excluded_sections}
+                        ),
+                    }
         return data
 
     @computed_field  # type: ignore[prop-decorator]

@@ -72,8 +72,11 @@ def config_audit(
             typer.echo("config audit: analysis section matches defaults (no overrides).")
         raise typer.Exit(int(ExitCode.OK))
 
-    typer.echo(f"config audit: {len(diffs)} non-default analysis field(s):")
-    for item in diffs:
-        typer.echo(f"  {item['path']}: {item['value']!r} (default {item['default']!r})")
+    if fmt == "json":
+        emit({"status": "ok", "diffs": diffs, "count": len(diffs)})
+    else:
+        typer.echo(f"config audit: {len(diffs)} non-default analysis field(s):")
+        for item in diffs:
+            typer.echo(f"  {item['path']}: {item['value']!r} (default {item['default']!r})")
     logger.info("config audit listed %d non-default analysis fields", len(diffs))
     raise typer.Exit(int(ExitCode.OK))

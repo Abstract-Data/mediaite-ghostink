@@ -37,6 +37,16 @@ class AnalyzeContext:
         compare_pair: tuple[str, str] | None = None,
         analysis_mode: AnalysisMode = DEFAULT_ANALYSIS_MODE,
     ) -> AnalyzeContext:
+        """Build an ``AnalyzeContext`` for dispatch (paths from ``root`` + ``db_path``).
+
+        Parameters: ``db_path`` — corpus SQLite path; ``settings`` — loaded config;
+        ``root`` — project root; ``author`` — optional slug (stored as ``author_slug``);
+        ``max_workers`` — parallel author cap; ``compare_pair`` — optional explicit
+        target/control pair; ``analysis_mode`` — exploratory vs confirmatory flags.
+
+        Returns: frozen ``AnalyzeContext`` with ``paths`` from
+        :meth:`AnalysisArtifactPaths.from_project`.
+        """
         return cls(
             db_path=db_path,
             settings=settings,
