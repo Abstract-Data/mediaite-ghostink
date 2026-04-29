@@ -19,6 +19,7 @@ from forensics.config.compat_analysis import (
     _GROUP_ATTRS,
     _lift_flat_analysis_dict,
 )
+from forensics.config.constants import CONFIG_HASH_EXTRA
 
 ChangepointMethod = Literal["pelt", "bocpd", "chow", "cusum"]
 
@@ -30,21 +31,21 @@ class PeltConfig(BaseModel):
 
     changepoint_methods: list[ChangepointMethod] = Field(
         default_factory=lambda: ["pelt", "bocpd"],
-        json_schema_extra={"include_in_config_hash": True},
+        json_schema_extra=CONFIG_HASH_EXTRA,
     )
     min_articles_for_period: int = Field(
         5,
         ge=1,
-        json_schema_extra={"include_in_config_hash": True},
+        json_schema_extra=CONFIG_HASH_EXTRA,
     )
     pelt_penalty: float = Field(
         5.0,
         gt=0.0,
-        json_schema_extra={"include_in_config_hash": True},
+        json_schema_extra=CONFIG_HASH_EXTRA,
     )
     pelt_cost_model: Literal["l2", "l1", "rbf"] = Field(
         "l1",
-        json_schema_extra={"include_in_config_hash": True},
+        json_schema_extra=CONFIG_HASH_EXTRA,
     )
 
 
@@ -55,28 +56,28 @@ class BocpdConfig(BaseModel):
         1 / 250.0,
         gt=0.0,
         le=1.0,
-        json_schema_extra={"include_in_config_hash": True},
+        json_schema_extra=CONFIG_HASH_EXTRA,
     )
-    bocpd_hazard_auto: bool = Field(False, json_schema_extra={"include_in_config_hash": True})
+    bocpd_hazard_auto: bool = Field(False, json_schema_extra=CONFIG_HASH_EXTRA)
     bocpd_expected_changes_per_author: int = Field(
         3,
         ge=1,
-        json_schema_extra={"include_in_config_hash": True},
+        json_schema_extra=CONFIG_HASH_EXTRA,
     )
     bocpd_detection_mode: Literal["p_r0_legacy", "map_reset"] = Field(
         "map_reset",
-        json_schema_extra={"include_in_config_hash": True},
+        json_schema_extra=CONFIG_HASH_EXTRA,
     )
     bocpd_map_drop_ratio: float = Field(
         0.5,
         gt=0.0,
         le=1.0,
-        json_schema_extra={"include_in_config_hash": True},
+        json_schema_extra=CONFIG_HASH_EXTRA,
     )
-    bocpd_min_run_length: int = Field(5, ge=1, json_schema_extra={"include_in_config_hash": True})
+    bocpd_min_run_length: int = Field(5, ge=1, json_schema_extra=CONFIG_HASH_EXTRA)
     bocpd_reset_cooldown: int = Field(3, ge=0)
     bocpd_merge_window: int = Field(2, ge=0)
-    bocpd_student_t: bool = Field(True, json_schema_extra={"include_in_config_hash": True})
+    bocpd_student_t: bool = Field(True, json_schema_extra=CONFIG_HASH_EXTRA)
 
 
 class ConvergenceConfig(BaseModel):
@@ -85,37 +86,37 @@ class ConvergenceConfig(BaseModel):
     convergence_window_days: int = Field(
         90,
         ge=1,
-        json_schema_extra={"include_in_config_hash": True},
+        json_schema_extra=CONFIG_HASH_EXTRA,
     )
     convergence_window_adaptive: bool = Field(
         False,
-        json_schema_extra={"include_in_config_hash": True},
+        json_schema_extra=CONFIG_HASH_EXTRA,
     )
     convergence_window_days_min: int = Field(
         30,
         ge=1,
-        json_schema_extra={"include_in_config_hash": True},
+        json_schema_extra=CONFIG_HASH_EXTRA,
     )
     convergence_window_days_max: int = Field(
         180,
         ge=1,
-        json_schema_extra={"include_in_config_hash": True},
+        json_schema_extra=CONFIG_HASH_EXTRA,
     )
     convergence_min_feature_ratio: float = Field(
         0.50,
         ge=0.0,
         le=1.0,
-        json_schema_extra={"include_in_config_hash": True},
+        json_schema_extra=CONFIG_HASH_EXTRA,
     )
     convergence_cp_source: Literal["raw", "section_adjusted"] = Field(
         "section_adjusted",
-        json_schema_extra={"include_in_config_hash": True},
+        json_schema_extra=CONFIG_HASH_EXTRA,
     )
     convergence_drift_only_pb_threshold: float = Field(
         0.3,
         ge=0.0,
         le=1.0,
-        json_schema_extra={"include_in_config_hash": True},
+        json_schema_extra=CONFIG_HASH_EXTRA,
     )
     convergence_perplexity_drop_ratio: float = 0.92
     convergence_burstiness_drop_ratio: float = 0.94
@@ -135,45 +136,45 @@ class ContentLdaConfig(BaseModel):
     content_lda_max_features: int = 2000
     content_lda_max_df: float = 0.95
     content_lda_max_chars_per_document: int = 96_000
-    content_lda_random_state: int = Field(42, json_schema_extra={"include_in_config_hash": True})
+    content_lda_random_state: int = Field(42, json_schema_extra=CONFIG_HASH_EXTRA)
 
 
 class HypothesisConfig(BaseModel):
     """Multiple testing, bootstrap, and evidence thresholds."""
 
-    significance_threshold: float = Field(0.05, json_schema_extra={"include_in_config_hash": True})
+    significance_threshold: float = Field(0.05, json_schema_extra=CONFIG_HASH_EXTRA)
     multiple_comparison_method: Literal["bonferroni", "benjamini_hochberg"] = Field(
         "benjamini_hochberg",
-        json_schema_extra={"include_in_config_hash": True},
+        json_schema_extra=CONFIG_HASH_EXTRA,
     )
     bootstrap_iterations: int = Field(
         1000,
         ge=1,
-        json_schema_extra={"include_in_config_hash": True},
+        json_schema_extra=CONFIG_HASH_EXTRA,
     )
-    effect_size_threshold: float = Field(0.2, json_schema_extra={"include_in_config_hash": True})
-    hypothesis_bootstrap_seed: int = Field(42, json_schema_extra={"include_in_config_hash": True})
+    effect_size_threshold: float = Field(0.2, json_schema_extra=CONFIG_HASH_EXTRA)
+    hypothesis_bootstrap_seed: int = Field(42, json_schema_extra=CONFIG_HASH_EXTRA)
     fdr_grouping: Literal["author", "family"] = Field(
         "family",
-        json_schema_extra={"include_in_config_hash": True},
+        json_schema_extra=CONFIG_HASH_EXTRA,
     )
     enable_cross_author_correction: bool = Field(
         False,
-        json_schema_extra={"include_in_config_hash": True},
+        json_schema_extra=CONFIG_HASH_EXTRA,
     )
     hypothesis_min_segment_n: int = Field(
         10,
         ge=2,
-        json_schema_extra={"include_in_config_hash": True},
+        json_schema_extra=CONFIG_HASH_EXTRA,
     )
-    enable_ks_test: bool = Field(False, json_schema_extra={"include_in_config_hash": True})
+    enable_ks_test: bool = Field(False, json_schema_extra=CONFIG_HASH_EXTRA)
     pipeline_b_mode: Literal["legacy", "percentile"] = Field(
         "percentile",
-        json_schema_extra={"include_in_config_hash": True},
+        json_schema_extra=CONFIG_HASH_EXTRA,
     )
     section_residualize_features: bool = Field(
         False,
-        json_schema_extra={"include_in_config_hash": True},
+        json_schema_extra=CONFIG_HASH_EXTRA,
     )
 
 
@@ -184,10 +185,10 @@ class EmbeddingStackConfig(BaseModel):
     embedding_model_version: str = "v2.0"
     embedding_model_revision: str = Field(
         "main",
-        json_schema_extra={"include_in_config_hash": True},
+        json_schema_extra=CONFIG_HASH_EXTRA,
     )
-    embedding_vector_dim: int = Field(384, ge=1, json_schema_extra={"include_in_config_hash": True})
-    drift_umap_random_state: int = Field(42, json_schema_extra={"include_in_config_hash": True})
+    embedding_vector_dim: int = Field(384, ge=1, json_schema_extra=CONFIG_HASH_EXTRA)
+    drift_umap_random_state: int = Field(42, json_schema_extra=CONFIG_HASH_EXTRA)
     baseline_embedding_count: int = 20
     baseline_embedding_count_sensitivity: list[int] = Field(default_factory=list)
     feature_extraction_max_failure_ratio: float = 0.25

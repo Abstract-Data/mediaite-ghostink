@@ -8,7 +8,11 @@ affects ``model_validator`` lift and :func:`apply_flat_analysis_overrides` in
 
 from __future__ import annotations
 
+import logging
 from typing import Any
+
+logger = logging.getLogger(__name__)
+_flat_analysis_warned = False
 
 # Flat TOML keys routed into each sub-model (single source for lift + test overrides).
 _PELT_KEYS: frozenset[str] = frozenset(
@@ -101,6 +105,16 @@ for _attr, keys in _GROUP_ATTRS:
 
 def _lift_flat_analysis_dict(data: dict[str, Any]) -> dict[str, Any]:
     """Move legacy flat ``[analysis]`` keys into nested sub-dicts for composition."""
+    global _flat_analysis_warned
+    flat_present = sorted(k for k in data if k in _FLAT_TO_GROUP)
+    if flat_present and not _flat_analysis_warned:
+        _flat_analysis_warned = True
+        logger.warning(
+            "Legacy flat [analysis] keys %s are deprecated; prefer nested tables "
+            "such as [analysis.pelt] (ADR-017). "
+            "Support will be removed after a deprecation window.",
+            flat_present,
+        )
     out = dict(data)
     for attr, keys in _GROUP_ATTRS:
         bucket: dict[str, Any] = {}

@@ -276,8 +276,10 @@ def test_run_analyze_records_exploratory_override(
 
     monkeypatch.setattr(analyze_mod, "verify_preregistration", fake_verify)
     monkeypatch.setattr(analyze_mod, "get_project_root", lambda: tmp_path)
-    monkeypatch.setattr(analyze_mod, "_run_timeseries_stage", lambda *a, **k: None)
-    monkeypatch.setattr(analyze_mod, "_run_full_analysis_stage", lambda *a, **k: None)
+    import forensics.cli.analyze_dispatch as dispatch_mod
+
+    monkeypatch.setattr(dispatch_mod, "_run_timeseries_stage", lambda *a, **k: None)
+    monkeypatch.setattr(dispatch_mod, "_run_full_analysis_stage", lambda *a, **k: None)
 
     analyze_mod.run_analyze(
         analyze_mod.AnalyzeRequest(

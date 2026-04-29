@@ -502,8 +502,10 @@ def test_parallel_refresh_rebuilds_shared_artifacts_after_promotion(
         assert not active_paths.run_metadata_json().exists()
         observed["promoted_before_shared_rebuild"] = True
 
+    import forensics.analysis.orchestrator.refresh as refresh_mod
+
     monkeypatch.setattr(
-        orch_mod,
+        refresh_mod,
         "_validate_and_promote_isolated_outputs",
         wrapped_validate_and_promote,
     )

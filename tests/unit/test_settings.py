@@ -96,10 +96,12 @@ def test_excluded_sections_coherence_explicit_match() -> None:
     )
 
 
-def test_excluded_sections_coherence_mismatch_raises() -> None:
-    with pytest.raises(ValidationError, match="features.excluded_sections must equal"):
-        ForensicsSettings(
-            authors=[_minimal_author()],
-            survey=SurveyConfig(excluded_sections=frozenset({"sponsored"})),
-            features=FeaturesConfig(excluded_sections=frozenset({"crosspost"})),
-        )
+def test_excluded_sections_survey_wins_over_features_mismatch() -> None:
+    """Survey is canonical; features.excluded_sections is overwritten to match."""
+    settings = ForensicsSettings(
+        authors=[_minimal_author()],
+        survey=SurveyConfig(excluded_sections=frozenset({"crosspost"})),
+        features=FeaturesConfig(excluded_sections=frozenset({"sponsored"})),
+    )
+    assert settings.survey.excluded_sections == frozenset({"crosspost"})
+    assert settings.features.excluded_sections == settings.survey.excluded_sections

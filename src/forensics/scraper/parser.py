@@ -53,6 +53,22 @@ def _sanitize_and_extract(root: BeautifulSoup | Tag) -> str:
     return normalize_article_text(root.get_text(separator="\n"))
 
 
+def _strip_stray_angle_brackets(text: str) -> str:
+    """Remove stray/unpaired angle brackets from malformed markup fragments.
+
+    Only removes isolated brackets that don't appear to be part of valid markup
+    or legitimate prose (e.g., comparison operators, quoted technical text).
+    Preserves brackets that are part of tag-like patterns.
+    """
+    # Remove isolated < or > that appear:
+    # - At word boundaries with surrounding whitespace/punctuation
+    # - Not part of tag patterns like <word> or </word>
+    # This preserves legitimate uses like "x < y" or quoted tech syntax
+    text = re.sub(r"(?<![<>\w])<(?![<>/\w])", "", text)  # Isolated <
+    text = re.sub(r"(?<![<>/\w])>(?![<>\w])", "", text)  # Isolated >
+    return text
+
+
 def extract_article_text(html: str) -> str:
     """Pull main article body text from Mediaite / WordPress HTML."""
     soup = BeautifulSoup(html, "lxml")
@@ -72,7 +88,7 @@ def extract_article_text_from_rest(content_rendered: str) -> str:
     if not content_rendered:
         return ""
     soup = BeautifulSoup(content_rendered, "lxml")
-    return _sanitize_and_extract(soup)
+    return _strip_stray_angle_brackets(_sanitize_and_extract(soup))
 
 
 def _meta_content(soup: BeautifulSoup, *, prop: str | None = None, name: str | None = None) -> str:

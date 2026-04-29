@@ -1,4 +1,10 @@
-"""Top-level analysis runner orchestration."""
+"""Top-level analysis runner orchestration.
+
+The CLI builds optional pre-stages (changepoint, timeseries, drift) in
+:mod:`forensics.cli.analyze_dispatch` before calling :func:`run_full_analysis`
+here. Keep ordering and side effects aligned when changing either path
+(RF-ARCH-001).
+"""
 
 from __future__ import annotations
 
