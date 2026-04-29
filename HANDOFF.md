@@ -320,3 +320,76 @@ uv run pytest tests/test_report.py -v --no-cov
 
 - **License:** Root [`LICENSE`](LICENSE) is **MIT** with Abstract Data LLC copyright. If the org requires a different license, replace the file and `pyproject.toml` `license` metadata in one commit.
 - GitNexus `impact` / `detect_changes` not run (no MCP server in this session); run before merge if your workflow requires it.
+
+---
+
+### Peer reviewer setup (Makefile, `forensics peer-setup`, docs)
+
+**Status:** Complete  
+**Date:** 2026-04-29  
+**Agent/Session:** Cursor subagent
+
+#### What was done
+
+- **Makefile:** Peer-oriented targets (`install-reviewer`, `install-baseline`, `install-probability`, `install-all-extras`, `peer-verify`, `peer-verify-network`, `peer-setup`, `peer-hints`); `peer-setup` runs install + validate + `uv run forensics peer-setup`.
+- **CLI:** `src/forensics/cli/peer_setup.py` with `peer_setup_cmd` (`--check-ollama` → `asyncio.run(preflight_check(...))`, PASS/FAIL), `attach_peer_setup(app)` registered from `forensics.cli.__init__`.
+- **Tests:** `tests/unit/test_cli_peer_setup.py` asserts `ollama pull` lines for configured `[baseline] models`.
+- **Docs:** README (five-minute smoke + local setup: `make peer-setup`, spaCy wheel note), `docs/RUNBOOK.md` § Peer reviewers.
+
+#### Files modified
+
+- `Makefile`, `src/forensics/cli/peer_setup.py`, `src/forensics/cli/__init__.py`, `tests/unit/test_cli_peer_setup.py`, `README.md`, `docs/RUNBOOK.md`, `HANDOFF.md`
+- Lint-only fixes encountered during `ruff check .`: `scripts/merge_embedding_manifest_shards.py`, `tests/unit/test_embedding_manifest_routing.py`
+
+#### Verification evidence
+
+```
+uv run ruff check . && uv run ruff format .
+uv run pytest tests/ -v --no-cov
+```
+
+Full suite: **1099 passed**, **3 deselected**, **1 xfailed** (known `test_section_residualize_suppresses_section_mix_only_change_point`), ~110s.
+
+#### Decisions made
+
+- Baseline / Ollama hints print when `settings.baseline.models` is non-empty (defaults include three tags).
+- `peer-setup` Makefile recipe invokes `uv run forensics peer-setup` after deps + validate; `peer-hints` remains a hints-only target.
+
+#### Unresolved questions
+
+- None.
+
+#### Risks & next steps
+
+- GitNexus MCP `gitnexus_impact` not invoked in this session; new symbols are primary (`peer_setup_cmd`, `attach_peer_setup`); `__init__.py` only gained import + `attach_peer_setup(app)` call (duplicate inline `app.command` removed). Run impact/detect_changes before merge if required by team workflow.
+
+---
+
+### Peer-reviewer Makefile and CLI (`peer-setup`)
+
+**Status:** Complete  
+**Date:** 2026-04-29  
+**Agent/Session:** Cursor agent
+
+#### What was done
+
+- **Makefile:** `install-reviewer`, `install-baseline`, `install-probability`, `install-all-extras`, `peer-verify`, `peer-verify-network`, `peer-hints`, `peer-setup` (sync dev+tui → validate → `forensics peer-setup`); top comment for peers.
+- **CLI:** `src/forensics/cli/peer_setup.py` — `forensics peer-setup` prints uv tiers, spaCy/Quarto notes, config-driven `ollama pull` lines; `--check-ollama` uses `baseline.preflight.preflight_check`; rejects `--output json`. Registered via `attach_peer_setup(app)` in `forensics.cli`.
+- **Tests:** `tests/unit/test_cli_peer_setup.py` — baseline models in stdout; JSON output rejected.
+- **Docs:** `README.md` (spaCy wheel, Installation, models table), `docs/RUNBOOK.md` (peer subsection under Ollama).
+
+#### Files modified
+
+- `Makefile`, `src/forensics/cli/peer_setup.py` (new), `src/forensics/cli/__init__.py`, `tests/unit/test_cli_peer_setup.py`, `README.md`, `docs/RUNBOOK.md`, `HANDOFF.md`
+
+#### Verification evidence
+
+```
+uv run ruff check src/forensics/cli/peer_setup.py src/forensics/cli/__init__.py tests/unit/test_cli_peer_setup.py
+uv run pytest tests/unit/test_cli_peer_setup.py tests/unit/test_cli_commands_dump.py -v --no-cov -q
+# 5 passed
+```
+
+#### Risks and next steps
+
+- `make peer-setup` runs `forensics validate`, which fails if `config.toml` still has placeholder authors or other preflight hard-fails; peers should fix config before the meta-target or run `make install-reviewer` + `make peer-hints` separately.
