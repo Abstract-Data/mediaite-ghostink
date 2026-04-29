@@ -70,7 +70,13 @@ def main(*, dry_run: bool = False) -> int:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Merge embedding manifest shards into canonical manifest.jsonl")
-    parser.add_argument("--dry-run", action="store_true", help="Preview what would be merged and cleaned up without writing any files")
+    parser = argparse.ArgumentParser(
+        description="Merge embedding manifest shards into canonical manifest.jsonl",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Preview merge and cleanup without writing any files",
+    )
     args = parser.parse_args()
     raise SystemExit(main(dry_run=args.dry_run))

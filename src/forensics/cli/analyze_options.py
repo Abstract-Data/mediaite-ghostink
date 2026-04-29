@@ -50,6 +50,26 @@ AnalyzeVerifyCorpusFlag = Annotated[
         ),
     ),
 ]
+AnalyzeVerifyRawArchivesFlag = Annotated[
+    bool | None,
+    typer.Option(
+        "--verify-raw-archives/--no-verify-raw-archives",
+        help=(
+            "After scrape: verify raw yearly archives exist and are non-empty. "
+            "When omitted, use [chain_of_custody] verify_raw_archives from config.toml."
+        ),
+    ),
+]
+AnalyzeLogAllGenerationsFlag = Annotated[
+    bool | None,
+    typer.Option(
+        "--log-all-generations/--no-log-all-generations",
+        help=(
+            "With --ai-baseline: log every synthetic generation to disk. "
+            "When omitted, use [chain_of_custody] log_all_generations from config.toml."
+        ),
+    ),
+]
 AnalyzeBaselineModelOption = Annotated[
     str | None,
     typer.Option(

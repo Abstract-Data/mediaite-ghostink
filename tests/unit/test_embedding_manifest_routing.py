@@ -17,7 +17,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from forensics.config.settings import AnalysisConfig, ForensicsSettings, ReportConfig, ScrapingConfig
+from forensics.config.settings import (
+    AnalysisConfig,
+    ForensicsSettings,
+    ReportConfig,
+    ScrapingConfig,
+)
 from forensics.models.features import EmbeddingRecord
 from forensics.paths import AnalysisArtifactPaths
 from forensics.storage.parquet import read_embeddings_manifest, write_embeddings_manifest

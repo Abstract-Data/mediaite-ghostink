@@ -52,7 +52,8 @@ _METADATA_INGEST_RECOVERABLE: tuple[type[BaseException], ...] = (
     OSError,
     ValueError,
     json.JSONDecodeError,
-    sqlite3.Error,
+    sqlite3.IntegrityError,
+    sqlite3.OperationalError,
 )
 
 __all__ = (

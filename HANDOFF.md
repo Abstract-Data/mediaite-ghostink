@@ -49,6 +49,52 @@ Agents: append a new block below using this template after every multi-step task
 
 > **History:** Older completion blocks live in [`docs/archive/handoff-history.md`](docs/archive/handoff-history.md). When this file grows past roughly 200 lines of log content, archive older blocks there in the same change set.
 
+### Run 13 — Code review + refactoring plan (config, CLI, orchestrator)
+
+**Status:** Complete  
+**Date:** 2026-04-29  
+**Agent/Session:** Cursor agent
+
+#### What was done
+
+- **RF-DRY-001:** `CONFIG_HASH_EXTRA` in `src/forensics/config/constants.py`; replaced repeated `json_schema_extra` dicts in `analysis_settings.py` and `settings.py`.
+- **RF-DRY-002 / P3-SEC-001:** `worker_errors.py` with recoverable-exception policy; `parallel.py` / `comparison.py` updated; `RuntimeError` included so isolated-refresh tests still pass.
+- **RF-DRY-003:** `survey.excluded_sections` canonical; `mode="before"` validator on `ForensicsSettings` mirrors into `features` (dict and model init).
+- **P2-ARCH-001:** `--verify-raw-archives/--no-verify-raw-archives`, `--log-all-generations/--no-log-all-generations` on analyze; wired via `AnalyzeCustodyParams`.
+- **P3-SEC-002:** `_METADATA_INGEST_RECOVERABLE` narrowed to `IntegrityError` + `OperationalError` (not all `sqlite3.Error`).
+- **P3-TEST-001:** `tests/unit/test_parser_rest_fuzz.py` for `extract_article_text_from_rest`.
+- **P3-PERF-001:** Polars-native `_clean_feature_series` in `per_author.py`.
+- **RF-COMPLEXITY-001:** `analyze_models.py`, `analyze_dispatch.py`, `analyze_section.py`; trimmed `analyze.py`.
+- **RF-COMPLEXITY-002:** `parallel_shared.py`, `refresh.py`, slim `parallel.py` + lazy `import_module` re-exports for patch surface.
+- **RF-SMELL-002:** Nested `AnalyzeRequest` (`stages`, `baseline`, `custody`); `pipeline.py` and tests updated.
+- **P2-CQ-002:** `forensics analyze run` and `forensics analyze compare-only` subcommands.
+- **P2-CQ-001 / RF-SMELL-003:** `forensics config audit`; flat `[analysis]` deprecation warning in `compat_analysis.py` (once per process); ADR-017 note.
+- **RF-SMELL-001:** `ForensicsSettings` shortcuts `pelt`, `bocpd`, `convergence`, `content_lda`, `hypothesis`, `embedding`.
+- **RF-ARCH-001:** Docstrings in `runner.py` and `analyze_dispatch.py` cross-referencing CLI vs `run_full_analysis`.
+
+#### Files modified (high level)
+
+- `src/forensics/config/` (`constants.py`, `settings.py`, `compat_analysis.py`, `analysis_settings.py`)
+- `src/forensics/cli/` (`analyze.py`, `analyze_models.py`, `analyze_dispatch.py`, `analyze_section.py`, `analyze_options.py`, `config_cmd.py`, `__init__.py`)
+- `src/forensics/analysis/orchestrator/` (`parallel.py`, `parallel_shared.py`, `refresh.py`, `worker_errors.py`, `per_author.py`, `comparison.py`, `runner.py`)
+- `src/forensics/scraper/crawler.py`, `tests/unit/test_parser_rest_fuzz.py`, `tests/unit/test_config_audit.py`, `tests/unit/test_analyze_compare.py`, `tests/test_preregistration.py`, `tests/unit/test_settings.py`, `scripts/merge_embedding_manifest_shards.py` (E501 wrap)
+- `docs/RUNBOOK.md`, `docs/adr/017-analysis-config-change-control.md`, `src/forensics/pipeline.py`
+
+#### Verification
+
+```
+uv run ruff format . && uv run ruff check .
+uv run pytest tests/ -q --no-cov
+```
+
+All tests passed (4 skipped TUI, 1 xfail section-residualize).
+
+#### Risks and next steps
+
+- **Parallel refresh tests** must patch `forensics.analysis.orchestrator.refresh._validate_and_promote_isolated_outputs` (implementation lives in `refresh.py`).
+- **ForensicsSettings** excluded-sections mirroring uses `mode="before"` so pydantic-settings applies the merged dict correctly.
+- Consider migrating internal code to `settings.hypothesis` etc. incrementally; accessors are additive only.
+
 ### Run 12 — TASK-6 / TASK-7 / TASK-8 (patch surface, config compat, parallel dedup + coverage)
 
 **Status:** Complete  

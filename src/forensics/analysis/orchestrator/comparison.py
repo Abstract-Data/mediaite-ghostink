@@ -7,9 +7,10 @@ from collections.abc import Iterator
 from typing import Any
 
 from forensics.analysis.comparison import compare_target_to_controls
-from forensics.analysis.drift import EmbeddingDriftInputsError
-from forensics.analysis.orchestrator.embedding_policy import embedding_fail_should_propagate
 from forensics.analysis.orchestrator.mode import DEFAULT_ANALYSIS_MODE, AnalysisMode
+from forensics.analysis.orchestrator.worker_errors import (
+    comparison_iteration_exception_is_recoverable,
+)
 from forensics.config.settings import ForensicsSettings
 from forensics.models.analysis import AnalysisResult, ChangePoint
 from forensics.paths import AnalysisArtifactPaths
@@ -81,8 +82,8 @@ def _iter_compare_targets(
                 changepoints_memory=changepoints_memory,
                 mode=mode,
             )
-        except (ValueError, OSError, EmbeddingDriftInputsError) as exc:
-            if embedding_fail_should_propagate(mode, exc):
+        except BaseException as exc:
+            if not comparison_iteration_exception_is_recoverable(mode, exc):
                 raise
             logger.warning("%s failed for %s (%s)", log_prefix, tid, exc)
             continue

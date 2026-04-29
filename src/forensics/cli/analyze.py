@@ -3,20 +3,25 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated
 
 import typer
 
-from forensics.analysis.drift import EmbeddingDriftInputsError, EmbeddingRevisionGateError
-from forensics.analysis.orchestrator.mode import DEFAULT_ANALYSIS_MODE, AnalysisMode
+from forensics.analysis.orchestrator.mode import AnalysisMode
 from forensics.cli._decorators import examples_epilog, forensics_examples, with_examples
-from forensics.cli._envelope import status
 from forensics.cli._errors import fail
 from forensics.cli._exit import ExitCode
+from forensics.cli.analyze_dispatch import dispatch_analysis_stages, write_run_metadata
+from forensics.cli.analyze_models import (
+    AnalyzeBaselineParams,
+    AnalyzeContext,
+    AnalyzeCustodyParams,
+    AnalyzeRequest,
+    AnalyzeStageFlags,
+    AnalyzeSubcommandPaths,
+    resolve_analyze_subcommand_context,
+)
 from forensics.cli.analyze_options import (
     AnalyzeAiBaselineFlag,
     AnalyzeAllowPrePhase16EmbeddingsFlag,
@@ -31,24 +36,37 @@ from forensics.cli.analyze_options import (
     AnalyzeExploratoryFlag,
     AnalyzeIncludeAdvertorialFlag,
     AnalyzeIncludeSharedBylinesFlag,
+    AnalyzeLogAllGenerationsFlag,
     AnalyzeMaxWorkersOption,
     AnalyzeParallelAuthorsFlag,
     AnalyzeResidualizeSectionsFlag,
     AnalyzeSkipGenerationFlag,
     AnalyzeTimeseriesFlag,
     AnalyzeVerifyCorpusFlag,
+    AnalyzeVerifyRawArchivesFlag,
 )
-from forensics.cli.state import get_cli_state
+from forensics.cli.analyze_section import register_analyze_section_commands
 from forensics.config import DEFAULT_DB_RELATIVE, get_project_root, get_settings
 from forensics.config.settings import ForensicsSettings
-from forensics.paths import AnalysisArtifactPaths
-from forensics.pipeline_context import PipelineContext
+from forensics.pipeline_context import PipelineContext  # noqa: F401 — tests monkeypatch this
 from forensics.preregistration import VerificationResult, verify_preregistration
-from forensics.storage.json_io import write_json_artifact
 from forensics.storage.repository import Repository
 from forensics.survey.shared_byline import is_shared_byline as _is_shared_byline_heuristic
 
 logger = logging.getLogger(__name__)
+
+__all__ = [
+    "AnalyzeBaselineParams",
+    "AnalyzeContext",
+    "AnalyzeCustodyParams",
+    "AnalyzeRequest",
+    "AnalyzeStageFlags",
+    "AnalyzeSubcommandPaths",
+    "analyze",
+    "analyze_app",
+    "resolve_analyze_subcommand_context",
+    "run_analyze",
+]
 
 _ANALYZE_EXAMPLES = (
     "forensics analyze --author isaac-schorr",
@@ -64,143 +82,67 @@ analyze_app = typer.Typer(
     epilog=examples_epilog(*_ANALYZE_EXAMPLES),
 )
 
-
-@dataclass(frozen=True, slots=True)
-class AnalyzeContext:
-    """Shared paths/settings/slug for analyze stage runners."""
-
-    db_path: Path
-    settings: ForensicsSettings
-    paths: AnalysisArtifactPaths
-    author_slug: str | None
-    max_workers: int | None = None
-    compare_pair: tuple[str, str] | None = None
-    analysis_mode: AnalysisMode = DEFAULT_ANALYSIS_MODE
-
-    @classmethod
-    def build(
-        cls,
-        db_path: Path,
-        settings: ForensicsSettings,
-        *,
-        root: Path,
-        author: str | None,
-        max_workers: int | None = None,
-        compare_pair: tuple[str, str] | None = None,
-        analysis_mode: AnalysisMode = DEFAULT_ANALYSIS_MODE,
-    ) -> AnalyzeContext:
-        return cls(
-            db_path=db_path,
-            settings=settings,
-            paths=AnalysisArtifactPaths.from_project(root, db_path),
-            author_slug=author,
-            max_workers=max_workers,
-            compare_pair=compare_pair,
-            analysis_mode=analysis_mode,
-        )
-
-    @property
-    def root(self) -> Path:
-        return self.paths.project_root
+register_analyze_section_commands(analyze_app)
 
 
-@dataclass(frozen=True, slots=True)
-class AnalyzeSubcommandPaths:
-    """Resolved settings and artifact paths for nested ``analyze`` commands."""
-
-    settings: ForensicsSettings
-    project_root: Path
-    db_path: Path
-    paths: AnalysisArtifactPaths
-    features_dir: Path
-    analysis_dir: Path
-
-
-def _resolve_analyze_subcommand_context(
+def _analyze_request_from_cli(
     *,
-    features_dir: Path | None,
-) -> AnalyzeSubcommandPaths:
-    """Shared preamble for ``section-profile`` / ``section-contrast`` (P3-DRY-007)."""
-    settings = get_settings()
-    project_root = get_project_root()
-    db_path = project_root / DEFAULT_DB_RELATIVE
-    paths = AnalysisArtifactPaths.from_project(project_root, db_path)
-    feat_dir = features_dir if features_dir is not None else paths.features_dir
-    return AnalyzeSubcommandPaths(
-        settings=settings,
-        project_root=project_root,
-        db_path=db_path,
-        paths=paths,
-        features_dir=feat_dir,
-        analysis_dir=paths.analysis_dir,
+    changepoint: bool,
+    timeseries: bool,
+    drift: bool,
+    convergence: bool,
+    compare: bool,
+    ai_baseline: bool,
+    skip_generation: bool,
+    verify_corpus: bool | None,
+    verify_raw_archives: bool | None,
+    log_all_generations: bool | None,
+    baseline_model: str | None,
+    articles_per_cell: int | None,
+    author: str | None,
+    exploratory: bool,
+    include_advertorial: bool,
+    residualize_sections: bool,
+    include_shared_bylines: bool,
+    max_workers: int | None,
+    compare_pair: str | None,
+    parallel_authors: bool,
+    allow_pre_phase16_embeddings: bool,
+    typer_context: typer.Context | None,
+) -> AnalyzeRequest:
+    parsed_pair = _parse_compare_pair(compare_pair)
+    return AnalyzeRequest(
+        stages=AnalyzeStageFlags(
+            changepoint=changepoint,
+            timeseries=timeseries,
+            drift=drift,
+            convergence=convergence,
+            compare=compare,
+            ai_baseline=ai_baseline,
+            parallel_authors=parallel_authors,
+        ),
+        baseline=AnalyzeBaselineParams(
+            skip_generation=skip_generation,
+            baseline_model=baseline_model,
+            articles_per_cell=articles_per_cell,
+        ),
+        custody=AnalyzeCustodyParams(
+            verify_corpus=verify_corpus,
+            verify_raw_archives=verify_raw_archives,
+            log_all_generations=log_all_generations,
+        ),
+        author=author,
+        include_advertorial=include_advertorial,
+        residualize_sections=residualize_sections,
+        include_shared_bylines=include_shared_bylines,
+        max_workers=max_workers,
+        compare_pair=parsed_pair,
+        analysis_mode=AnalysisMode(
+            exploratory=exploratory,
+            allow_pre_phase16_embeddings=allow_pre_phase16_embeddings,
+        ),
+        typer_context=typer_context,
     )
-
-
-@dataclass(frozen=True, slots=True)
-class AnalyzeStageFlags:
-    """Stage toggles grouped for dispatch; :class:`AnalyzeRequest` keeps a flat public API."""
-
-    changepoint: bool = False
-    timeseries: bool = False
-    drift: bool = False
-    convergence: bool = False
-    compare: bool = False
-    ai_baseline: bool = False
-    parallel_authors: bool = False
-
-
-@dataclass(frozen=True, slots=True)
-class AnalyzeBaselineParams:
-    """AI baseline options grouped for dispatch."""
-
-    skip_generation: bool = False
-    baseline_model: str | None = None
-    articles_per_cell: int | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class AnalyzeRequest:
-    """Parameters for :func:`run_analyze` (CLI default callback and programmatic callers)."""
-
-    changepoint: bool = False
-    timeseries: bool = False
-    drift: bool = False
-    convergence: bool = False
-    compare: bool = False
-    ai_baseline: bool = False
-    skip_generation: bool = False
-    verify_corpus: bool | None = None
-    baseline_model: str | None = None
-    articles_per_cell: int | None = None
-    author: str | None = None
-    include_advertorial: bool = False
-    residualize_sections: bool = False
-    include_shared_bylines: bool = False
-    max_workers: int | None = None
-    compare_pair: tuple[str, str] | None = None
-    parallel_authors: bool = False
-    analysis_mode: AnalysisMode = DEFAULT_ANALYSIS_MODE
-    typer_context: typer.Context | None = None
-
-    @property
-    def stage_flags(self) -> AnalyzeStageFlags:
-        return AnalyzeStageFlags(
-            changepoint=self.changepoint,
-            timeseries=self.timeseries,
-            drift=self.drift,
-            convergence=self.convergence,
-            compare=self.compare,
-            ai_baseline=self.ai_baseline,
-            parallel_authors=self.parallel_authors,
-        )
-
-    @property
-    def baseline_params(self) -> AnalyzeBaselineParams:
-        return AnalyzeBaselineParams(
-            skip_generation=self.skip_generation,
-            baseline_model=self.baseline_model,
-            articles_per_cell=self.articles_per_cell,
-        )
 
 
 def _parse_compare_pair(raw: str | None) -> tuple[str, str] | None:
@@ -215,225 +157,6 @@ def _parse_compare_pair(raw: str | None) -> tuple[str, str] | None:
         )
         raise typer.BadParameter(msg)
     return parts[0], parts[1]
-
-
-def _write_run_metadata(
-    analysis_dir: Path,
-    *,
-    rid: str,
-    meta: dict[str, object],
-) -> None:
-    write_json_artifact(analysis_dir / "run_metadata.json", meta)
-
-
-def _run_compare_only_flow(ctx: AnalyzeContext) -> None:
-    from forensics.analysis.orchestrator import run_compare_only
-
-    pipeline_ctx = PipelineContext.resolve()
-    rid = pipeline_ctx.record_audit("forensics analyze --compare", optional=False, log=logger)
-    assert rid is not None
-    analysis_dir = ctx.paths.analysis_dir
-    meta = {
-        "run_id": rid,
-        "run_timestamp": datetime.now(UTC).isoformat(),
-        "config_hash": pipeline_ctx.config_hash,
-        "compare_only": True,
-        "last_processed_author": ctx.author_slug,
-        "authors_in_run": ([ctx.author_slug] if ctx.author_slug else []),
-        "compare_pair": list(ctx.compare_pair) if ctx.compare_pair else None,
-    }
-    _write_run_metadata(analysis_dir, rid=rid, meta=meta)
-    run_compare_only(
-        ctx.settings,
-        paths=ctx.paths,
-        author_slug=ctx.author_slug,
-        compare_pair=ctx.compare_pair,
-        mode=ctx.analysis_mode,
-    )
-    logger.info("analyze: compare-only complete author=%s", ctx.author_slug or "all")
-
-
-def _resolve_mode_flags(
-    *,
-    changepoint: bool,
-    timeseries: bool,
-    drift: bool,
-    convergence: bool,
-    compare: bool,
-    ai_baseline: bool,
-) -> tuple[bool, bool, bool, bool]:
-    explicit = changepoint or timeseries or drift or ai_baseline or convergence or compare
-    if explicit:
-        return changepoint, timeseries, drift, convergence
-    return False, True, False, True
-
-
-def _run_changepoint_stage(ctx: AnalyzeContext) -> None:
-    from forensics.analysis.changepoint import run_changepoint_analysis
-
-    run_changepoint_analysis(
-        ctx.db_path, ctx.settings, project_root=ctx.root, author_slug=ctx.author_slug
-    )
-
-
-def _run_timeseries_stage(ctx: AnalyzeContext) -> None:
-    from forensics.analysis.timeseries import run_timeseries_analysis
-
-    run_timeseries_analysis(
-        ctx.db_path, ctx.settings, project_root=ctx.root, author_slug=ctx.author_slug
-    )
-
-
-def _run_drift_stage(ctx: AnalyzeContext) -> None:
-    from forensics.analysis.drift import run_drift_analysis
-
-    run_drift_analysis(
-        ctx.settings,
-        paths=ctx.paths,
-        author_slug=ctx.author_slug,
-        mode=ctx.analysis_mode,
-    )
-
-
-def _run_full_analysis_stage(ctx: AnalyzeContext) -> None:
-    from forensics.analysis.orchestrator import run_full_analysis
-
-    run_full_analysis(
-        ctx.paths,
-        ctx.settings,
-        author_slug=ctx.author_slug,
-        max_workers=ctx.max_workers,
-        compare_pair=ctx.compare_pair,
-        mode=ctx.analysis_mode,
-    )
-
-
-def _raise_analyze_embedding_failure(
-    typer_context: typer.Context | None,
-    *,
-    cmd: str,
-    exc: BaseException,
-) -> typer.Exit:
-    """Map embedding drift failures to stable CLI exit codes."""
-    if isinstance(exc, EmbeddingRevisionGateError):
-        return fail(
-            typer_context,
-            cmd,
-            "embedding_revision_gate",
-            str(exc),
-            exit_code=ExitCode.CONFLICT,
-        )
-    if isinstance(exc, EmbeddingDriftInputsError):
-        return fail(
-            typer_context,
-            cmd,
-            "embedding_drift_inputs",
-            str(exc),
-            exit_code=ExitCode.AUTH_OR_RESOURCE,
-            suggestion=(
-                "Run feature extraction with embeddings, pass --exploratory for permissive mode, "
-                "or use --allow-pre-phase16-embeddings only when intentionally matching legacy "
-                "vectors."
-            ),
-        )
-    raise RuntimeError(f"unexpected embedding failure: {exc!r}") from exc
-
-
-def _run_analyze_stage_embedding_guarded(
-    request: AnalyzeRequest,
-    *,
-    cmd: str,
-    runner: Callable[[], None],
-) -> None:
-    """Run a stage; map embedding drift failures to stable CLI exit codes."""
-    try:
-        runner()
-    except (EmbeddingDriftInputsError, EmbeddingRevisionGateError) as exc:
-        raise _raise_analyze_embedding_failure(
-            request.typer_context,
-            cmd=cmd,
-            exc=exc,
-        ) from exc
-
-
-def _run_parallel_author_refresh_stage(ctx: AnalyzeContext) -> None:
-    from forensics.analysis.orchestrator import run_parallel_author_refresh
-
-    results = run_parallel_author_refresh(
-        ctx.paths,
-        ctx.settings,
-        author_slug=ctx.author_slug,
-        max_workers=ctx.max_workers,
-        mode=ctx.analysis_mode,
-    )
-    logger.info(
-        "analyze: parallel author refresh complete refreshed=%d author=%s",
-        len(results),
-        ctx.author_slug or "all",
-    )
-
-
-def _run_ai_baseline_stage(
-    ctx: AnalyzeContext,
-    *,
-    skip_generation: bool,
-    articles_per_cell: int | None,
-    baseline_model: str | None,
-    typer_context: typer.Context | None,
-) -> None:
-    from forensics.cli.baseline import run_ai_baseline_command
-
-    try:
-        run_ai_baseline_command(
-            ctx.db_path,
-            ctx.settings,
-            project_root=ctx.root,
-            author_slug=ctx.author_slug,
-            skip_generation=skip_generation,
-            articles_per_cell=articles_per_cell,
-            model_filter=baseline_model,
-        )
-    except ValueError as exc:
-        raise fail(
-            typer_context,
-            "analyze",
-            "ai_baseline_failed",
-            str(exc),
-            exit_code=ExitCode.GENERAL_ERROR,
-        ) from exc
-
-
-def _verify_requested_ai_baseline_vectors(
-    ctx: AnalyzeContext,
-    *,
-    typer_context: typer.Context | None,
-) -> None:
-    from forensics.analysis.drift import load_ai_baseline_embeddings
-
-    slugs = (
-        [ctx.author_slug] if ctx.author_slug else [author.slug for author in ctx.settings.authors]
-    )
-    missing: list[str] = []
-    for slug in slugs:
-        if not ctx.paths.drift_json(slug).is_file():
-            continue
-        if not load_ai_baseline_embeddings(
-            slug,
-            ctx.paths,
-            expected_dim=int(ctx.settings.analysis.embedding.embedding_vector_dim),
-        ):
-            missing.append(slug)
-    if missing:
-        raise fail(
-            typer_context,
-            "analyze",
-            "ai_baseline_vectors_missing",
-            (
-                "ai-baseline requested but drift artifacts have no usable AI baseline vectors: "
-                + ", ".join(missing)
-            ),
-            exit_code=ExitCode.AUTH_OR_RESOURCE,
-        )
 
 
 def _enforce_shared_byline_gate(
@@ -569,7 +292,7 @@ def _gate_preregistration(
         "exploratory": False,
         "allow_pre_phase16_embeddings": request.analysis_mode.allow_pre_phase16_embeddings,
     }
-    _write_run_metadata(analysis_dir, rid="preregistration-blocked", meta=meta)
+    write_run_metadata(analysis_dir, rid="preregistration-blocked", meta=meta)
     raise fail(
         request.typer_context,
         "analyze",
@@ -580,128 +303,6 @@ def _gate_preregistration(
     )
 
 
-def _compare_only_or_parallel_early_exit(
-    request: AnalyzeRequest,
-    *,
-    ctx: AnalyzeContext,
-    sf: AnalyzeStageFlags,
-) -> bool:
-    """Run compare-only or parallel refresh when selected; True if serial pipeline should skip."""
-    if sf.compare and not (
-        sf.parallel_authors
-        or sf.changepoint
-        or sf.timeseries
-        or sf.drift
-        or sf.ai_baseline
-        or sf.convergence
-    ):
-        _run_compare_only_flow(ctx)
-        return True
-    if sf.parallel_authors:
-        _run_analyze_stage_embedding_guarded(
-            request,
-            cmd="analyze.parallel_refresh",
-            runner=lambda: _run_parallel_author_refresh_stage(ctx),
-        )
-        return True
-    return False
-
-
-def _run_serial_analyze_stages(
-    request: AnalyzeRequest,
-    *,
-    ctx: AnalyzeContext,
-    analysis_dir: Path,
-    preregistration: VerificationResult,
-    sf: AnalyzeStageFlags,
-) -> None:
-    """Serial stages: changepoint, timeseries, drift, convergence, optional AI baseline."""
-    do_changepoint, do_timeseries, do_drift, do_full_analysis = _resolve_mode_flags(
-        changepoint=sf.changepoint,
-        timeseries=sf.timeseries,
-        drift=sf.drift,
-        convergence=sf.convergence,
-        compare=sf.compare,
-        ai_baseline=sf.ai_baseline,
-    )
-
-    pipeline_ctx = PipelineContext.resolve()
-    rid = pipeline_ctx.record_audit("forensics analyze", optional=False, log=logger)
-    assert rid is not None
-    meta = {
-        "run_id": rid,
-        "run_timestamp": datetime.now(UTC).isoformat(),
-        "config_hash": pipeline_ctx.config_hash,
-        "changepoint": do_changepoint,
-        "timeseries": do_timeseries,
-        "drift": do_drift,
-        "convergence_full": do_full_analysis,
-        "last_processed_author": request.author,
-        "authors_in_run": ([request.author] if request.author else []),
-        "preregistration_status": preregistration.status,
-        "preregistration_message": preregistration.message,
-        **request.analysis_mode.run_metadata_subset(),
-    }
-    _write_run_metadata(analysis_dir, rid=rid, meta=meta)
-
-    if do_changepoint:
-        _run_changepoint_stage(ctx)
-    if do_timeseries:
-        _run_timeseries_stage(ctx)
-    if do_drift:
-        _run_analyze_stage_embedding_guarded(
-            request,
-            cmd="analyze.drift",
-            runner=lambda: _run_drift_stage(ctx),
-        )
-    if do_full_analysis:
-        _run_analyze_stage_embedding_guarded(
-            request,
-            cmd="analyze.full",
-            runner=lambda: _run_full_analysis_stage(ctx),
-        )
-    if sf.ai_baseline:
-        bp = request.baseline_params
-        _run_ai_baseline_stage(
-            ctx,
-            skip_generation=bp.skip_generation,
-            articles_per_cell=bp.articles_per_cell,
-            baseline_model=bp.baseline_model,
-            typer_context=request.typer_context,
-        )
-        _verify_requested_ai_baseline_vectors(ctx, typer_context=request.typer_context)
-    logger.info(
-        "analyze: completed (changepoint=%s, timeseries=%s, drift=%s, "
-        "full_analysis=%s, ai_baseline=%s, author=%s)",
-        do_changepoint,
-        do_timeseries,
-        do_drift,
-        do_full_analysis,
-        sf.ai_baseline,
-        request.author or "all",
-    )
-
-
-def _dispatch_analysis_stages(
-    request: AnalyzeRequest,
-    *,
-    ctx: AnalyzeContext,
-    analysis_dir: Path,
-    preregistration: VerificationResult,
-) -> None:
-    """Compare-only, parallel refresh, or serial analyze pipeline after preregistration gate."""
-    sf = request.stage_flags
-    if _compare_only_or_parallel_early_exit(request, ctx=ctx, sf=sf):
-        return
-    _run_serial_analyze_stages(
-        request,
-        ctx=ctx,
-        analysis_dir=analysis_dir,
-        preregistration=preregistration,
-        sf=sf,
-    )
-
-
 def run_analyze(request: AnalyzeRequest) -> None:
     """Run analyze stages (callable from Typer and from ``forensics all``)."""
     settings = _apply_per_run_overrides(
@@ -709,6 +310,17 @@ def run_analyze(request: AnalyzeRequest) -> None:
         include_advertorial=request.include_advertorial,
         residualize_sections=request.residualize_sections,
     )
+    coc_updates: dict[str, bool] = {}
+    if request.custody.verify_raw_archives is not None:
+        coc_updates["verify_raw_archives"] = request.custody.verify_raw_archives
+    if request.custody.log_all_generations is not None:
+        coc_updates["log_all_generations"] = request.custody.log_all_generations
+    if coc_updates:
+        settings = settings.model_copy(
+            update={
+                "chain_of_custody": settings.chain_of_custody.model_copy(update=coc_updates),
+            }
+        )
     root = get_project_root()
     db_path = root / DEFAULT_DB_RELATIVE
     if request.author is not None:
@@ -729,7 +341,7 @@ def run_analyze(request: AnalyzeRequest) -> None:
     )
     analysis_dir = ctx.paths.analysis_dir
 
-    verify_corpus = request.verify_corpus
+    verify_corpus = request.custody.verify_corpus
     if verify_corpus is None:
         verify_corpus = settings.chain_of_custody.verify_corpus_hash
 
@@ -743,7 +355,7 @@ def run_analyze(request: AnalyzeRequest) -> None:
     preregistration = verify_preregistration(settings)
     _gate_preregistration(request, preregistration=preregistration, analysis_dir=analysis_dir)
 
-    _dispatch_analysis_stages(
+    dispatch_analysis_stages(
         request,
         ctx=ctx,
         analysis_dir=analysis_dir,
@@ -763,6 +375,8 @@ def analyze(
     ai_baseline: AnalyzeAiBaselineFlag = False,
     skip_generation: AnalyzeSkipGenerationFlag = False,
     verify_corpus: AnalyzeVerifyCorpusFlag = None,
+    verify_raw_archives: AnalyzeVerifyRawArchivesFlag = None,
+    log_all_generations: AnalyzeLogAllGenerationsFlag = None,
     baseline_model: AnalyzeBaselineModelOption = None,
     articles_per_cell: AnalyzeArticlesPerCellOption = None,
     author: AnalyzeAuthorOption = None,
@@ -778,9 +392,8 @@ def analyze(
     """Run analysis pipeline (change-point, drift, convergence, comparison)."""
     if ctx.invoked_subcommand is not None:
         return
-    parsed_pair = _parse_compare_pair(compare_pair)
     run_analyze(
-        AnalyzeRequest(
+        _analyze_request_from_cli(
             changepoint=changepoint,
             timeseries=timeseries,
             drift=drift,
@@ -789,158 +402,122 @@ def analyze(
             ai_baseline=ai_baseline,
             skip_generation=skip_generation,
             verify_corpus=verify_corpus,
+            verify_raw_archives=verify_raw_archives,
+            log_all_generations=log_all_generations,
             baseline_model=baseline_model,
             articles_per_cell=articles_per_cell,
             author=author,
+            exploratory=exploratory,
             include_advertorial=include_advertorial,
             residualize_sections=residualize_sections,
             include_shared_bylines=include_shared_bylines,
             max_workers=max_workers,
-            compare_pair=parsed_pair,
+            compare_pair=compare_pair,
             parallel_authors=parallel_authors,
-            analysis_mode=AnalysisMode(
-                exploratory=exploratory,
-                allow_pre_phase16_embeddings=allow_pre_phase16_embeddings,
-            ),
+            allow_pre_phase16_embeddings=allow_pre_phase16_embeddings,
             typer_context=ctx,
         )
     )
 
 
-_SP_EPILOG, _sp_ex = forensics_examples("forensics analyze section-profile")
-
-
-@analyze_app.command(name="section-profile", epilog=_SP_EPILOG)
-@_sp_ex
-def section_profile_cmd(
-    ctx: typer.Context,
-    output: Annotated[
-        Path | None,
-        typer.Option(
-            "--output",
-            metavar="PATH",
-            help=(
-                "Override the human-readable report path. JSON/CSV side artifacts "
-                "still land in data/analysis/."
-            ),
-        ),
-    ] = None,
-    features_dir: Annotated[
-        Path | None,
-        typer.Option(
-            "--features-dir",
-            metavar="PATH",
-            help="Override the features parquet directory (default: data/features).",
-        ),
-    ] = None,
-) -> None:
-    """Phase 15 J3: newsroom-wide section descriptive report and J5 gate verdict."""
-    from forensics.analysis.section_profile import GATE_OMNIBUS_ALPHA, run_section_profile
-
-    ctx_paths = _resolve_analyze_subcommand_context(features_dir=features_dir)
-
-    result = run_section_profile(
-        ctx_paths.settings,
-        features_dir=ctx_paths.features_dir,
-        analysis_dir=ctx_paths.analysis_dir,
-        report_path=output,
-    )
-    fmt = get_cli_state(ctx).output_format
-    status(f"section-profile: retained {len(result.sections)} sections", output_format=fmt)
-    status(
-        f"  significant families (p<{GATE_OMNIBUS_ALPHA}): "
-        f"{len(result.significant_families)} "
-        f"({', '.join(result.significant_families) or 'none'})",
-        output_format=fmt,
-    )
-    status(
-        f"  max off-diagonal cosine distance: {result.max_off_diagonal_distance:.4f}",
-        output_format=fmt,
-    )
-    status(f"  J5 gate verdict: {result.gate_verdict}", output_format=fmt)
-    if result.artifacts is not None:
-        status(f"  report: {result.artifacts.report_md}", output_format=fmt)
-
-
-_SC_EPILOG, _sc_ex = forensics_examples(
-    "forensics analyze section-contrast --author colby-hall",
+_RUN_EPILOG, _run_ex = forensics_examples(
+    "forensics analyze run --author colby-hall --drift --convergence",
 )
 
 
-@analyze_app.command(name="section-contrast", epilog=_SC_EPILOG)
-@_sc_ex
-def section_contrast_cmd(
+@analyze_app.command(name="run", epilog=_RUN_EPILOG)
+@_run_ex
+def analyze_run(
     ctx: typer.Context,
-    author: Annotated[
-        str | None,
-        typer.Option(
-            "--author",
-            metavar="SLUG",
-            help=(
-                "Limit to one author slug. Default: every configured author "
-                "with a feature parquet under data/features/."
-            ),
-        ),
-    ] = None,
-    features_dir: Annotated[
-        Path | None,
-        typer.Option(
-            "--features-dir",
-            metavar="PATH",
-            help="Override the features parquet directory (default: data/features).",
-        ),
-    ] = None,
+    changepoint: AnalyzeChangepointFlag = False,
+    timeseries: AnalyzeTimeseriesFlag = False,
+    drift: AnalyzeDriftFlag = False,
+    convergence: AnalyzeConvergenceFlag = False,
+    compare: AnalyzeCompareFlag = False,
+    ai_baseline: AnalyzeAiBaselineFlag = False,
+    skip_generation: AnalyzeSkipGenerationFlag = False,
+    verify_corpus: AnalyzeVerifyCorpusFlag = None,
+    verify_raw_archives: AnalyzeVerifyRawArchivesFlag = None,
+    log_all_generations: AnalyzeLogAllGenerationsFlag = None,
+    baseline_model: AnalyzeBaselineModelOption = None,
+    articles_per_cell: AnalyzeArticlesPerCellOption = None,
+    author: AnalyzeAuthorOption = None,
+    exploratory: AnalyzeExploratoryFlag = False,
+    include_advertorial: AnalyzeIncludeAdvertorialFlag = False,
+    residualize_sections: AnalyzeResidualizeSectionsFlag = False,
+    include_shared_bylines: AnalyzeIncludeSharedBylinesFlag = False,
+    max_workers: AnalyzeMaxWorkersOption = None,
+    parallel_authors: AnalyzeParallelAuthorsFlag = False,
+    compare_pair: AnalyzeComparePairOption = None,
+    allow_pre_phase16_embeddings: AnalyzeAllowPrePhase16EmbeddingsFlag = False,
 ) -> None:
-    """Phase 15 J6: per-author section-contrast tests (Welch + MW + per-family BH)."""
-    from forensics.analysis.section_contrast import compute_and_write_section_contrast
-    from forensics.paths import load_feature_frame_for_author, resolve_author_rows
-    from forensics.storage.repository import Repository
-
-    ctx_paths = _resolve_analyze_subcommand_context(features_dir=features_dir)
-
-    with Repository(ctx_paths.db_path) as repo:
-        author_rows = resolve_author_rows(repo, ctx_paths.settings, author_slug=author)
-
-    fmt = get_cli_state(ctx).output_format
-    if not author_rows:
-        status(
-            "section-contrast: no authors resolved (check --author / config.toml)",
-            output_format=fmt,
+    """Explicit entrypoint (same flags as ``forensics analyze`` with no subcommand)."""
+    run_analyze(
+        _analyze_request_from_cli(
+            changepoint=changepoint,
+            timeseries=timeseries,
+            drift=drift,
+            convergence=convergence,
+            compare=compare,
+            ai_baseline=ai_baseline,
+            skip_generation=skip_generation,
+            verify_corpus=verify_corpus,
+            verify_raw_archives=verify_raw_archives,
+            log_all_generations=log_all_generations,
+            baseline_model=baseline_model,
+            articles_per_cell=articles_per_cell,
+            author=author,
+            exploratory=exploratory,
+            include_advertorial=include_advertorial,
+            residualize_sections=residualize_sections,
+            include_shared_bylines=include_shared_bylines,
+            max_workers=max_workers,
+            compare_pair=compare_pair,
+            parallel_authors=parallel_authors,
+            allow_pre_phase16_embeddings=allow_pre_phase16_embeddings,
+            typer_context=ctx,
         )
-        raise fail(
-            ctx,
-            "analyze.section_contrast",
-            "no_authors",
-            "No authors resolved (check --author / config.toml).",
-            exit_code=ExitCode.USAGE_ERROR,
-        )
+    )
 
-    written = 0
-    for author_row in author_rows:
-        df = load_feature_frame_for_author(ctx_paths.features_dir, author_row.slug, author_row.id)
-        if df is None or df.is_empty():
-            status(
-                f"section-contrast: skipped {author_row.slug} (no feature rows)",
-                output_format=fmt,
-            )
-            continue
-        result, path = compute_and_write_section_contrast(
-            df,
-            author_id=author_row.id,
-            author_slug=author_row.slug,
-            analysis_dir=ctx_paths.analysis_dir,
-            alpha=ctx_paths.settings.analysis.hypothesis.significance_threshold,
-            bh_method=ctx_paths.settings.analysis.hypothesis.multiple_comparison_method,
+
+_CO_EPILOG, _co_ex = forensics_examples("forensics analyze compare-only --compare")
+
+
+@analyze_app.command(name="compare-only", epilog=_CO_EPILOG)
+@_co_ex
+def analyze_compare_only(
+    ctx: typer.Context,
+    verify_corpus: AnalyzeVerifyCorpusFlag = None,
+    author: AnalyzeAuthorOption = None,
+    exploratory: AnalyzeExploratoryFlag = False,
+    include_shared_bylines: AnalyzeIncludeSharedBylinesFlag = False,
+    compare_pair: AnalyzeComparePairOption = None,
+    allow_pre_phase16_embeddings: AnalyzeAllowPrePhase16EmbeddingsFlag = False,
+) -> None:
+    """Re-run target/control comparisons only (``--compare`` without other stages)."""
+    run_analyze(
+        _analyze_request_from_cli(
+            changepoint=False,
+            timeseries=False,
+            drift=False,
+            convergence=False,
+            compare=True,
+            ai_baseline=False,
+            skip_generation=False,
+            verify_corpus=verify_corpus,
+            verify_raw_archives=None,
+            log_all_generations=None,
+            baseline_model=None,
+            articles_per_cell=None,
+            author=author,
+            exploratory=exploratory,
+            include_advertorial=False,
+            residualize_sections=False,
+            include_shared_bylines=include_shared_bylines,
+            max_workers=None,
+            compare_pair=compare_pair,
+            parallel_authors=False,
+            allow_pre_phase16_embeddings=allow_pre_phase16_embeddings,
+            typer_context=ctx,
         )
-        written += 1
-        if result.disposition == "insufficient_section_volume":
-            status(
-                f"section-contrast: {author_row.slug} → insufficient_section_volume → {path}",
-                output_format=fmt,
-            )
-        else:
-            status(
-                f"section-contrast: {author_row.slug} → {len(result.pairs)} pair(s) → {path}",
-                output_format=fmt,
-            )
-    status(f"section-contrast: wrote {written} artifact(s)", output_format=fmt)
+    )

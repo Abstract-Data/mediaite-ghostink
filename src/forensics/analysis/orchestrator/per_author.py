@@ -96,18 +96,20 @@ def _write_per_author_json_artifacts(
 
 
 def _clean_feature_series(df_author: pl.DataFrame, feature_name: str) -> list[float]:
-    """Cast to float, median-impute NaN / inf, and return a plain ``list[float]``.
+    """Cast to float, median-impute non-finite values, and return a plain ``list[float]``.
 
     Hoisted out of :func:`_run_hypothesis_tests_for_changepoints` so the per-
     feature cleaning can be cached across multiple change-points on the same
     feature (Phase 15 F2) and so tests can monkeypatch this symbol to assert
     cache-hit behaviour.
     """
-    raw = df_author[feature_name].cast(pl.Float64, strict=False).to_numpy()
-    finite = raw[np.isfinite(raw)]
-    med = float(np.nanmedian(finite)) if finite.size else 0.0
-    clean = np.nan_to_num(raw, nan=med)
-    return [float(x) for x in clean]
+    col = pl.col(feature_name).cast(pl.Float64, strict=False)
+    med_scalar = df_author.select(col.filter(col.is_finite()).median().alias("_m"))["_m"][0]
+    med = 0.0 if med_scalar is None else float(med_scalar)
+    cleaned = df_author.select(
+        pl.when(col.is_finite()).then(col).otherwise(pl.lit(med)).alias("_v")
+    )["_v"]
+    return [float(x) for x in cleaned.to_list()]
 
 
 def _run_hypothesis_tests_for_changepoints(

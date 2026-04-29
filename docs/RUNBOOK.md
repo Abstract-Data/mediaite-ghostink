@@ -134,6 +134,9 @@ Use this before treating any analysis drop as **publication-ready** (client deli
 - **`corpus_hash_v1`:** legacy fingerprint (`ORDER BY id`, all rows) kept for one transition cycle so older verification semantics can be compared; see GUARDRAILS for removal timing (Phase 17).
 - **`verify_corpus_hash`:** dispatches on `schema_version` (missing field → treat as v1).
 - **`forensics analyze` corpus gate:** `--verify-corpus` / `--no-verify-corpus` are explicit overrides. If **neither** is passed, analyze uses `[chain_of_custody] verify_corpus_hash` from `config.toml` (repo default `true`; CI/minimal fixtures often set `false` so tests do not require a pre-seeded `corpus_custody.json`).
+- **Analyze chain-of-custody CLI overrides:** `--verify-raw-archives` / `--no-verify-raw-archives` and `--log-all-generations` / `--no-log-all-generations` mirror `[chain_of_custody]` for a single run (same tri-state pattern as corpus verify).
+- **Analyze subcommands:** `forensics analyze run …` is equivalent to the default callback (explicit entrypoint). `forensics analyze compare-only …` runs compare-only with the same custody/author/`--compare-pair` options as the main command.
+- **Config audit:** `uv run forensics config audit` lists analysis fields that differ from `AnalysisConfig` defaults; add `--json` for machine-readable output.
 - **`[chain_of_custody] verify_raw_archives`:** when `true`, `scrape --archive` logs a post-condition check after each `data/raw/{YYYY}.tar.gz` is written and SQLite paths are rewritten (non-empty archive on disk + rewrite row count).
 - **`[chain_of_custody] log_all_generations`:** when `true`, each baseline article write emits a single `INFO` line (`custody {…}` JSON) from `forensics.baseline.orchestrator` for audit trails.
 
@@ -153,7 +156,7 @@ Fingerprint values are versioned (`dedup_simhash_version`, current = `v2` in cod
 
 ## Pipeline Operations
 
-- Run full pipeline: `uv run forensics all` — implementation: `src/forensics/pipeline.py` (`run_all_pipeline`). It runs **full scrape** (same as bare `forensics scrape` when no scrape flags are set), then extract, then ``run_analyze(AnalyzeRequest(timeseries=True, convergence=True))`` (**not** changepoint/drift unless you change the pipeline), then Quarto report. See [`docs/ARCHITECTURE.md`](ARCHITECTURE.md#forensics-all-end-to-end).
+- Run full pipeline: `uv run forensics all` — implementation: `src/forensics/pipeline.py` (`run_all_pipeline`). It runs **full scrape** (same as bare `forensics scrape` when no scrape flags are set), then extract, then ``run_analyze(AnalyzeRequest(stages=AnalyzeStageFlags(timeseries=True, convergence=True)))`` (**not** changepoint/drift unless you change the pipeline), then Quarto report. See [`docs/ARCHITECTURE.md`](ARCHITECTURE.md#forensics-all-end-to-end).
 - Stage-by-stage (recommended when debugging):
   - `uv run forensics scrape` (use `--discover` / `--metadata` / `--fetch` etc. as needed; see `--help`)
   - `uv run forensics extract`

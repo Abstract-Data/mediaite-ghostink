@@ -32,6 +32,10 @@ routing, and unclear review ownership.
 
 ## Consequences
 
+- **Deprecation (2026-04-29):** loading `config.toml` with legacy flat `[analysis]`
+  keys (lifted via `_lift_flat_analysis_dict`) emits a **one-time per process**
+  `WARNING` directing operators toward nested tables such as `[analysis.pelt]`.
+  Removal of the lift path is gated on a future release after the warning window.
 - Flat-key table edits happen in one module; reviewers watch compat + hash tests.
 - Optional fields like `ContentLdaConfig` knobs remain grouped there; moving
   fields across sub-models remains a **hash-visible** change needing ADR-016

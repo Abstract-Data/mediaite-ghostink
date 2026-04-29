@@ -16,8 +16,16 @@ from pydantic_settings import (
     TomlConfigSettingsSource,
 )
 
-from forensics.config.analysis_settings import AnalysisConfig
-from forensics.config.constants import DEFAULT_EXCLUDED_SECTIONS
+from forensics.config.analysis_settings import (
+    AnalysisConfig,
+    BocpdConfig,
+    ContentLdaConfig,
+    ConvergenceConfig,
+    EmbeddingStackConfig,
+    HypothesisConfig,
+    PeltConfig,
+)
+from forensics.config.constants import CONFIG_HASH_EXTRA, DEFAULT_EXCLUDED_SECTIONS
 
 # Canonical relative location of the SQLite corpus under the project root.
 # Single source of truth for all modules that resolve the DB path.
@@ -62,27 +70,27 @@ class ScrapingConfig(BaseModel):
     max_concurrent: int = 3
     max_retries: int = 3
     # Bulk metadata: pull ``content.rendered`` (100 posts/request); ``fetch_articles`` no-ops.
-    bulk_fetch_mode: bool = Field(False, json_schema_extra={"include_in_config_hash": True})
+    bulk_fetch_mode: bool = Field(False, json_schema_extra=CONFIG_HASH_EXTRA)
     retry_backoff_seconds: float = 5.0
     # ``deduplicate_articles`` Hamming threshold (0 = disable near-dup collapse).
     simhash_threshold: int = Field(
         default=3,
         ge=0,
         le=64,
-        json_schema_extra={"include_in_config_hash": True},
+        json_schema_extra=CONFIG_HASH_EXTRA,
     )
     # Inclusive calendar years for ``wp/v2/posts``; both unset = full history.
     post_year_min: int | None = Field(
         default=None,
         ge=1900,
         le=2100,
-        json_schema_extra={"include_in_config_hash": True},
+        json_schema_extra=CONFIG_HASH_EXTRA,
     )
     post_year_max: int | None = Field(
         default=None,
         ge=1900,
         le=2100,
-        json_schema_extra={"include_in_config_hash": True},
+        json_schema_extra=CONFIG_HASH_EXTRA,
     )
 
     @model_validator(mode="after")
@@ -117,10 +125,9 @@ class FeaturesConfig(BaseModel):
     """Phase 15 — feature-store schema contract."""
 
     # Bump when Parquet schema adds required columns (loader enforces ≥ this).
-    feature_parquet_schema_version: int = Field(
-        2, ge=1, json_schema_extra={"include_in_config_hash": True}
-    )
-    # Sections dropped at extract time; keep aligned with ``SurveyConfig`` (J2).
+    feature_parquet_schema_version: int = Field(2, ge=1, json_schema_extra=CONFIG_HASH_EXTRA)
+    # Sections dropped at extract time — always mirrored from ``SurveyConfig`` (J2)
+    # by :meth:`ForensicsSettings._mirror_survey_excluded_sections_to_features`.
     excluded_sections: frozenset[str] = Field(default=DEFAULT_EXCLUDED_SECTIONS)
 
 
@@ -201,24 +208,63 @@ class ForensicsSettings(BaseSettings):
     chain_of_custody: ChainOfCustodyConfig = Field(default_factory=ChainOfCustodyConfig)
     report: ReportConfig = Field(default_factory=ReportConfig)
 
-    @model_validator(mode="after")
-    def _excluded_sections_match_survey(self) -> ForensicsSettings:
-        """``features.excluded_sections`` must equal ``survey.excluded_sections``."""
-        if self.features.excluded_sections != self.survey.excluded_sections:
-            msg = (
-                "features.excluded_sections must equal survey.excluded_sections "
-                f"(features={sorted(self.features.excluded_sections)!r}, "
-                f"survey={sorted(self.survey.excluded_sections)!r}). "
-                "Align both [features] and [survey] tables in config.toml."
-            )
-            raise ValueError(msg)
-        return self
+    @model_validator(mode="before")
+    @classmethod
+    def _mirror_survey_excluded_sections_to_features_before(cls, data: object) -> object:
+        """``survey.excluded_sections`` is canonical (J2); copy into ``features`` before init."""
+        if not isinstance(data, dict):
+            return data
+        survey = data.get("survey")
+        features = data.get("features")
+        if survey is None or features is None:
+            return data
+        if isinstance(survey, dict) and isinstance(features, dict):
+            if "excluded_sections" in survey:
+                return {
+                    **data,
+                    "features": {**features, "excluded_sections": survey["excluded_sections"]},
+                }
+            return data
+        if isinstance(survey, SurveyConfig) and isinstance(features, FeaturesConfig):
+            if survey.excluded_sections != features.excluded_sections:
+                return {
+                    **data,
+                    "features": features.model_copy(
+                        update={"excluded_sections": survey.excluded_sections}
+                    ),
+                }
+        return data
 
     @computed_field  # type: ignore[prop-decorator]
     @property
     def db_path(self) -> Path:
         """Default SQLite corpus path under the project root."""
         return get_project_root() / DEFAULT_DB_RELATIVE
+
+    # Incremental migration (RF-SMELL-001): prefer these over deep ``settings.analysis.*`` chains.
+    @property
+    def pelt(self) -> PeltConfig:
+        return self.analysis.pelt
+
+    @property
+    def bocpd(self) -> BocpdConfig:
+        return self.analysis.bocpd
+
+    @property
+    def convergence(self) -> ConvergenceConfig:
+        return self.analysis.convergence
+
+    @property
+    def content_lda(self) -> ContentLdaConfig:
+        return self.analysis.content_lda
+
+    @property
+    def hypothesis(self) -> HypothesisConfig:
+        return self.analysis.hypothesis
+
+    @property
+    def embedding(self) -> EmbeddingStackConfig:
+        return self.analysis.embedding
 
     @classmethod
     def settings_customise_sources(
