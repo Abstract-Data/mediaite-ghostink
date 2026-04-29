@@ -83,6 +83,39 @@ class AnalysisArtifactPaths:
     def combined_umap_json(self) -> Path:
         return self.analysis_dir / "combined_umap.json"
 
+    def embedding_manifest(self) -> Path:
+        """Canonical embedding manifest path."""
+        return self.embeddings_dir / "manifest.jsonl"
+
+    def embedding_manifest_shard(self, slug: str) -> Path:
+        """Per-author embedding manifest shard path with containment check.
+
+        Args:
+            slug: Author slug to use in shard filename.
+
+        Returns:
+            Path to the shard file.
+
+        Raises:
+            ValueError: If the resolved path would escape embeddings_dir.
+        """
+        # Sanitize slug to prevent path traversal: strip leading/trailing whitespace,
+        # replace path separators and other unsafe characters with underscores
+        safe_slug = slug.strip().replace("/", "_").replace("\\", "_").replace("..", "_")
+        if not safe_slug or safe_slug in (".", ".."):
+            msg = f"Invalid or unsafe author slug: {slug!r}"
+            raise ValueError(msg)
+
+        shard_path = self.embeddings_dir / f"{safe_slug}_manifest.jsonl"
+        # Verify the resolved path is contained within embeddings_dir
+        try:
+            shard_path.resolve().relative_to(self.embeddings_dir.resolve())
+        except ValueError as exc:
+            msg = f"Shard path {shard_path} escapes embeddings directory {self.embeddings_dir}"
+            raise ValueError(msg) from exc
+
+        return shard_path
+
     def sensitivity_dir(self, name: str) -> Path:
         return self.analysis_dir / "sensitivity" / name
 

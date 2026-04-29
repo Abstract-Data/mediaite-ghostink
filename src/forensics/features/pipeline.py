@@ -521,9 +521,9 @@ def extract_all_features(
             # ``--author`` invocation atomically rewrote the canonical manifest with only its
             # own rows, stomping all other authors' embeddings on multi-call workflows.
             if author_slug is not None:
-                manifest_path = paths.embeddings_dir / f"{author_slug}_manifest.jsonl"
+                manifest_path = paths.embedding_manifest_shard(author_slug)
             else:
-                manifest_path = paths.embeddings_dir / "manifest.jsonl"
+                manifest_path = paths.embedding_manifest()
             write_embeddings_manifest(manifest_records, manifest_path)
 
     logger.info("Feature extraction finished: %d article(s) processed.", processed)
