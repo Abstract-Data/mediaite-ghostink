@@ -26,9 +26,7 @@ Pull requests receive a **CI report** comment (pytest summary and line coverage 
 ```bash
 git clone git@github.com:Abstract-Data/mediaite-ghostink.git
 cd mediaite-ghostink
-uv sync --extra dev
-uv run python -m spacy download en_core_web_md
-uv run forensics validate
+make peer-setup
 uv run forensics preflight
 ```
 
@@ -129,7 +127,7 @@ Settings below default from [`config.toml`](config.toml) and [`src/forensics/con
 
 | Component | Default | Purpose |
 |-----------|---------|---------|
-| **spaCy** | `en_core_web_md` (TOML: `spacy_model`) | Tokenization, linguistic features, and preflight validation. Install with `uv run python -m spacy download en_core_web_md`. |
+| **spaCy** | `en_core_web_md` (TOML: `spacy_model`) | Tokenization, linguistic features, and preflight validation. Default pipeline ships as a **wheel in `pyproject.toml`**; `uv sync` installs it (use `spacy download` only if you change `spacy_model`). |
 | **Sentence Transformers** | `sentence-transformers/all-MiniLM-L6-v2` (`[analysis] embedding_model`) | Dense **384-d** article embeddings for drift, similarity decay, and monthly centroids. `embedding_model_version` is recorded for provenance. |
 | **scikit-learn** | LDA, TF–IDF, etc. | Topic diversity, self-similarity, and related content features (see `src/forensics/features/`). |
 
@@ -188,26 +186,24 @@ Local **Ollama** HTTP API (`baseline.ollama_base_url`); model tags from `baselin
    ```bash
    git clone git@github.com:Abstract-Data/mediaite-ghostink.git
    cd mediaite-ghostink
-   uv sync --extra dev
+   make peer-setup
    ```
 
-3. **Install the spaCy pipeline** (must match `spacy_model` in `config.toml`, default `en_core_web_md`):
+   `make peer-setup` runs `uv sync --extra dev --extra tui`, `uv run forensics validate`, and `uv run forensics peer-setup` (copy-paste `uv sync` tiers, spaCy / Quarto notes, and `ollama pull` lines from `[baseline] models` when present). For hints only after you have synced: `uv run forensics peer-setup`.
 
-   ```bash
-   uv run python -m spacy download en_core_web_md
-   ```
+3. **spaCy pipeline** — Default `en_core_web_md` is installed as a **direct wheel dependency** in [`pyproject.toml`](pyproject.toml) (`en-core-web-md @ https://github.com/explosion/...whl`); `uv sync` / `make peer-setup` brings it in. Use `uv run python -m spacy download <name>` only if you change `spacy_model` in `config.toml`.
 
 4. **Edit [`config.toml`](config.toml)** (see also **[`config.toml.example`](config.toml.example)** for the same template with setup notes) — Replace template authors (`placeholder-target` / `placeholder-control`) with real author rows before any live scrape; the CLI rejects placeholders on discover/metadata/fetch paths.
 
 5. **Optional: Quarto** — Required for `forensics report` and the report step of `forensics all`. [Install Quarto](https://quarto.org/docs/get-started/) so `quarto` is on your `PATH`.
 
-6. **Optional extras**
+6. **Optional extras** (also shown by `forensics peer-setup`)
 
    - `uv sync --extra probability` — Phase 9 token features (`forensics extract --probability`); pulls **torch / transformers** (large download).
    - `uv sync --extra baseline` — Phase 10 Ollama-driven baseline generation (`scripts/generate_baseline.py`, `forensics analyze --ai-baseline`, …).
    - `uv sync --extra tui` — Interactive `forensics setup` wizard (`uv run forensics setup`).
 
-7. **Optional: Ollama** — For baseline generation, install Ollama and pull the model tags listed in `[baseline] models` (see [`docs/RUNBOOK.md`](docs/RUNBOOK.md)).
+7. **Optional: Ollama** — For baseline generation, install Ollama and pull the model tags listed in `[baseline] models` (see [`docs/RUNBOOK.md`](docs/RUNBOOK.md)); `forensics peer-setup` prints one `ollama pull <tag>` per configured tag. Use `forensics peer-setup --check-ollama` to verify reachability (no auto-pull).
 
 8. **Validate before a long run**
 
@@ -365,11 +361,7 @@ flowchart TB
 - **Python 3.13** (see `requires-python` in [`pyproject.toml`](pyproject.toml)).
 - **[uv](https://github.com/astral-sh/uv)** for environments and script execution (`uv run …`).
 - **Quarto** on your `PATH` if you run `forensics report` or the report step of `forensics all` ([download](https://quarto.org/docs/get-started/)).
-- **spaCy English model** for feature work aligned with CI (default **`en_core_web_md`**):
-
-  ```bash
-  uv run python -m spacy download en_core_web_md
-  ```
+- **spaCy English model** for feature work aligned with CI (default **`en_core_web_md`**) — installed with the project via the pinned wheel in `pyproject.toml` when you run `uv sync` / `make peer-setup`. Run `uv run python -m spacy download <name>` only if you point `spacy_model` at another pipeline.
 
 ---
 
@@ -378,7 +370,8 @@ flowchart TB
 ```bash
 git clone git@github.com:Abstract-Data/mediaite-ghostink.git
 cd mediaite-ghostink
-uv sync --extra dev
+make peer-setup
+# or: uv sync --extra dev --extra tui && uv run forensics validate
 ```
 
 Copy [`.env.example`](.env.example) to `.env` when you need optional secrets or observability hooks. Core pipeline configuration remains **`config.toml`** + **`FORENSICS_*`**.

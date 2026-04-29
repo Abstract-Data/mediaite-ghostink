@@ -1,10 +1,37 @@
-.PHONY: help install lint format test coverage clean pipeline scrape extract analyze report quarto-build deploy clean-generated all
+# Peer reviewers use `make peer-setup` (sync dev+tui, validate, then `forensics peer-setup` hints).
+.PHONY: help install install-reviewer install-baseline install-probability install-all-extras \
+	peer-verify peer-verify-network peer-setup peer-hints lint format test coverage clean \
+	pipeline scrape extract analyze report quarto-build deploy clean-generated all
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
-install: ## Install dependencies
+install: ## Install dependencies (minimal; use install-reviewer for dev+tui)
 	uv sync
+
+install-reviewer: ## Python deps for review: dev + tui (no torch / baseline extras)
+	uv sync --extra dev --extra tui
+
+install-baseline: ## Reviewer + Phase 10 baseline (pydantic-ai); still no torch
+	uv sync --extra dev --extra tui --extra baseline
+
+install-probability: ## Reviewer + Phase 9 probability (large torch/transformers download)
+	uv sync --extra dev --extra tui --extra probability
+
+install-all-extras: ## All optional extras (large download; full optional tracks)
+	uv sync --extra dev --extra tui --extra baseline --extra probability
+
+peer-verify: ## Run forensics validate (includes preflight)
+	uv run forensics validate
+
+peer-verify-network: ## Validate plus WordPress/Ollama endpoint probes (warnings only)
+	uv run forensics validate --check-endpoints
+
+peer-hints: ## Print copy-paste setup commands (uv, Ollama pulls from config, etc.)
+	uv run forensics peer-setup
+
+peer-setup: install-reviewer peer-verify ## One-shot peer bootstrap: sync, validate, setup hints
+	uv run forensics peer-setup
 
 lint: ## Run linter (Python sources only; notebooks are executed via Quarto)
 	uv run ruff check src tests scripts

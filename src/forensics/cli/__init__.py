@@ -129,6 +129,7 @@ from forensics.cli.config_cmd import config_app  # noqa: E402
 from forensics.cli.dedup import dedup_app  # noqa: E402
 from forensics.cli.extract import extract  # noqa: E402
 from forensics.cli.migrate import features_app, migrate  # noqa: E402
+from forensics.cli.peer_setup import attach_peer_setup  # noqa: E402
 from forensics.cli.report import report  # noqa: E402
 from forensics.cli.scrape import scrape_app  # noqa: E402
 from forensics.cli.survey import survey_app  # noqa: E402
@@ -140,6 +141,7 @@ app.add_typer(features_app, name="features")
 app.add_typer(analyze_app, name="analyze")
 app.add_typer(config_app, name="config")
 app.add_typer(dedup_app, name="dedup")
+attach_peer_setup(app)
 app.command(
     name="extract",
     epilog=examples_epilog("forensics extract --author colby-hall"),

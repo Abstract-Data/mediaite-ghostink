@@ -4,6 +4,13 @@ Operational quick reference. Agents: append new sections here whenever you disco
 
 ## Local Setup
 
+### Peer reviewers
+
+- **One-shot:** `make peer-setup` — `uv sync --extra dev --extra tui`, `uv run forensics validate`, then `uv run forensics peer-setup` (stdout: `uv sync` tiers, spaCy wheel note, Quarto link, and one `ollama pull <tag>` per `[baseline] models` entry when that list is non-empty).
+- **Hints only:** `uv run forensics peer-setup` (after deps are installed).
+- **Endpoint smoke:** `make peer-verify-network` runs `forensics validate --check-endpoints` (WordPress + Ollama probes as warnings).
+- **Ollama models present:** `uv run forensics peer-setup --check-ollama` runs the baseline preflight against `baseline.ollama_base_url` and prints `PASS` or `FAIL` (does not pull images).
+
 - **Analysis defaults:** With an empty or omitted `[analysis] pipeline_b_mode` in `config.toml`, the nested model default is **`percentile`** (cross-author comparable Pipeline B). Override with `pipeline_b_mode = "legacy"` only when you need the older absolute-cosine behavior.
 
 ### `pipeline_b_mode` and per-author `config_hash` (cohort compatibility)
@@ -204,6 +211,13 @@ Legacy checklists that mention `data/raw/documents.json`, `data/analysis/analysi
 ## Ollama Setup (Phase 10)
 
 Required for AI baseline generation. Not needed for Phases 1-9.
+
+### Peer reviewers (Makefile + CLI)
+
+- **`make peer-setup`** — Installs Python deps with `dev` + `tui` extras, runs `forensics validate` (includes preflight), then **`forensics peer-setup`** for copy-paste `uv sync` tiers and one **`ollama pull …`** line per tag in **`[baseline] models`** (from the active `config.toml`).
+- **`make peer-hints`** — Runs only `forensics peer-setup` (use when deps are already synced).
+- **`make install-reviewer` / `install-baseline` / `install-probability` / `install-all-extras`** — See `make help` for the exact `uv sync` lines.
+- **`forensics peer-setup --check-ollama`** — Probes `baseline.ollama_base_url` `/api/tags` for reachability and that configured models are pulled (does not run `ollama pull` for you).
 
 ```bash
 # Install

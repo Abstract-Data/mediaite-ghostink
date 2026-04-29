@@ -76,7 +76,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Preview merge and cleanup without writing any files",
+        help="Preview merge/cleanup without writing or deleting files",
     )
     args = parser.parse_args()
     raise SystemExit(main(dry_run=args.dry_run))
