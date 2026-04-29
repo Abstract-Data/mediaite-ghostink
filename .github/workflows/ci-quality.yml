@@ -55,5 +55,5 @@ jobs:
         with:
           enable-cache: true
       - run: uv sync --frozen --extra dev
-      - name: Block new type: ignore in src/ or tests/
+      - name: "Block new type: ignore in src/ or tests/"
         run: uv run python scripts/check_no_new_type_ignore.py "origin/${{ github.base_ref }}"
