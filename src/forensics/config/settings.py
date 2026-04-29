@@ -226,12 +226,24 @@ class ForensicsSettings(BaseSettings):
                     **data,
                     "features": {**features, "excluded_sections": survey["excluded_sections"]},
                 }
+            if isinstance(features, FeaturesConfig):
+                return {
+                    **data,
+                    "features": features.model_copy(
+                        update={"excluded_sections": survey["excluded_sections"]}
+                    ),
+                }
             return data
         if isinstance(survey, SurveyConfig):
             if features is None:
                 return {
                     **data,
                     "features": FeaturesConfig(excluded_sections=survey.excluded_sections),
+                }
+            if isinstance(features, dict):
+                return {
+                    **data,
+                    "features": {**features, "excluded_sections": survey.excluded_sections},
                 }
             if isinstance(features, FeaturesConfig):
                 if survey.excluded_sections != features.excluded_sections:

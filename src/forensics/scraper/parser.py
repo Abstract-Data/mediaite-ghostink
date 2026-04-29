@@ -54,8 +54,19 @@ def _sanitize_and_extract(root: BeautifulSoup | Tag) -> str:
 
 
 def _strip_stray_angle_brackets(text: str) -> str:
-    """Remove ``<`` / ``>`` left in flattened text (e.g. malformed markup fragments)."""
-    return text.replace("<", "").replace(">", "")
+    """Remove stray/unpaired angle brackets from malformed markup fragments.
+
+    Only removes isolated brackets that don't appear to be part of valid markup
+    or legitimate prose (e.g., comparison operators, quoted technical text).
+    Preserves brackets that are part of tag-like patterns.
+    """
+    # Remove isolated < or > that appear:
+    # - At word boundaries with surrounding whitespace/punctuation
+    # - Not part of tag patterns like <word> or </word>
+    # This preserves legitimate uses like "x < y" or quoted tech syntax
+    text = re.sub(r'(?<![<>\w])<(?![<>/\w])', '', text)  # Isolated <
+    text = re.sub(r'(?<![<>/\w])>(?![<>\w])', '', text)  # Isolated >
+    return text
 
 
 def extract_article_text(html: str) -> str:

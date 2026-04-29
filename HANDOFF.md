@@ -76,7 +76,7 @@ Agents: append a new block below using this template after every multi-step task
 #### Verification
 
 ```text
-uv run ruff check . && uv run ruff format .
+uv run ruff check . && uv run ruff format --check .
 uv run pytest tests/ -v --tb=line -q
 ```
 
@@ -120,7 +120,7 @@ uv run pytest tests/ -v --tb=line -q
 #### Verification
 
 ```bash
-uv run ruff format . && uv run ruff check .
+uv run ruff check . && uv run ruff format --check .
 uv run pytest tests/ -q --no-cov
 ```
 

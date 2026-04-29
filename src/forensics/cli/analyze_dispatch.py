@@ -56,6 +56,7 @@ def _run_compare_only_flow(ctx: AnalyzeContext) -> None:
         "authors_in_run": ([ctx.author_slug] if ctx.author_slug else []),
         "compare_pair": list(ctx.compare_pair) if ctx.compare_pair else None,
     }
+    meta.update(ctx.analysis_mode.run_metadata_subset())
     write_run_metadata(analysis_dir, rid=rid, meta=meta)
     run_compare_only(
         ctx.settings,
@@ -179,18 +180,16 @@ def _run_parallel_author_refresh_stage(ctx: AnalyzeContext) -> None:
     )
     assert rid is not None
     analysis_dir = ctx.paths.analysis_dir
-    write_run_metadata(
-        analysis_dir,
-        rid=rid,
-        meta={
-            "run_id": rid,
-            "run_timestamp": datetime.now(UTC).isoformat(),
-            "config_hash": pipeline_ctx.config_hash,
-            "parallel_authors_preflight": True,
-            "last_processed_author": ctx.author_slug,
-            "authors_in_run": ([ctx.author_slug] if ctx.author_slug else []),
-        },
-    )
+    meta = {
+        "run_id": rid,
+        "run_timestamp": datetime.now(UTC).isoformat(),
+        "config_hash": pipeline_ctx.config_hash,
+        "parallel_authors_preflight": True,
+        "last_processed_author": ctx.author_slug,
+        "authors_in_run": ([ctx.author_slug] if ctx.author_slug else []),
+    }
+    meta.update(ctx.analysis_mode.run_metadata_subset())
+    write_run_metadata(analysis_dir, rid=rid, meta=meta)
 
     results = run_parallel_author_refresh(
         ctx.paths,
