@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.1.2](https://github.com/Abstract-Data/mediaite-ghostink/compare/v0.1.1...v0.1.2) (2026-04-29)
+
+
+### Features
+
+* Run 13 review — config DRY, analyze refactor, orchestrator refresh ([8c70b25](https://github.com/Abstract-Data/mediaite-ghostink/commit/8c70b25589dd4a68cdcf98117de193a35f6f8b7f))
+
+
+### Bug Fixes
+
+* apply CodeRabbit auto-fixes ([36d96fb](https://github.com/Abstract-Data/mediaite-ghostink/commit/36d96fb5f2acf262aae9250b76d884f8b7e7cffd))
+* resolve CI failures — format parser.py and reduce C901 complexity in settings.py ([2de30e2](https://github.com/Abstract-Data/mediaite-ghostink/commit/2de30e22acdeb35b19f287bb40ef938b1386d84b))
+* REST plain-text strip, refresh split, analyze flag validation ([933fe15](https://github.com/Abstract-Data/mediaite-ghostink/commit/933fe153858d9c066f7765d7d6917819e0953cdd))
+
 ## [0.1.1](https://github.com/Abstract-Data/mediaite-ghostink/compare/v0.1.0...v0.1.1) (2026-04-29)
 
 
