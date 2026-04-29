@@ -1,0 +1,90 @@
+{
+  "author_slug": "zachary-leeman",
+  "window_components": [
+    {
+      "admitted": true,
+      "ai_signal": 0.0,
+      "convergence_ratio": 0.25,
+      "min_feature_ratio": 0.5,
+      "n_change_points_in_window": 4,
+      "passes_ab": true,
+      "passes_drift_only": true,
+      "passes_ratio": false,
+      "passes_via": [
+        "ab",
+        "drift_only"
+      ],
+      "peak_signal": 1.0,
+      "pipeline_a_score": 1.0,
+      "pipeline_b_score": 0.5010571653559219,
+      "pipeline_c_score": null,
+      "sim_signal": 0.0021143307118438983,
+      "window_end": "2022-06-28",
+      "window_start": "2022-03-30"
+    },
+    {
+      "admitted": true,
+      "ai_signal": 0.0,
+      "convergence_ratio": 0.25,
+      "min_feature_ratio": 0.5,
+      "n_change_points_in_window": 4,
+      "passes_ab": true,
+      "passes_drift_only": true,
+      "passes_ratio": false,
+      "passes_via": [
+        "ab",
+        "drift_only"
+      ],
+      "peak_signal": 1.0,
+      "pipeline_a_score": 1.0,
+      "pipeline_b_score": 0.5,
+      "pipeline_c_score": null,
+      "sim_signal": 0.0,
+      "window_end": "2022-06-30",
+      "window_start": "2022-04-01"
+    },
+    {
+      "admitted": true,
+      "ai_signal": 0.0,
+      "convergence_ratio": 0.25,
+      "min_feature_ratio": 0.5,
+      "n_change_points_in_window": 4,
+      "passes_ab": true,
+      "passes_drift_only": true,
+      "passes_ratio": false,
+      "passes_via": [
+        "ab",
+        "drift_only"
+      ],
+      "peak_signal": 1.0,
+      "pipeline_a_score": 1.0,
+      "pipeline_b_score": 0.5033797752723235,
+      "pipeline_c_score": null,
+      "sim_signal": 0.006759550544646945,
+      "window_end": "2022-07-06",
+      "window_start": "2022-04-07"
+    },
+    {
+      "admitted": true,
+      "ai_signal": 0.0,
+      "convergence_ratio": 0.25,
+      "min_feature_ratio": 0.5,
+      "n_change_points_in_window": 2,
+      "passes_ab": true,
+      "passes_drift_only": true,
+      "passes_ratio": false,
+      "passes_via": [
+        "ab",
+        "drift_only"
+      ],
+      "peak_signal": 1.0,
+      "pipeline_a_score": 0.8933126637784271,
+      "pipeline_b_score": 0.5108545995657479,
+      "pipeline_c_score": null,
+      "sim_signal": 0.02170919913149566,
+      "window_end": "2022-07-24",
+      "window_start": "2022-04-25"
+    }
+  ],
+  "windows_evaluated": 4
+}

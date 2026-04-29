@@ -1,0 +1,89 @@
+{
+  "analysis_dir": "data/analysis/sensitivity/section_residualized",
+  "authors": {
+    "ahmad-austin": {
+      "downgrade_recommended": true,
+      "primary_change_points": 6,
+      "primary_convergence_windows": 6,
+      "section_residualized_change_points": 5,
+      "section_residualized_convergence_windows": 5
+    },
+    "alex-griffing": {
+      "downgrade_recommended": false,
+      "primary_change_points": 5,
+      "primary_convergence_windows": 6,
+      "section_residualized_change_points": 6,
+      "section_residualized_convergence_windows": 7
+    },
+    "charlie-nash": {
+      "downgrade_recommended": false,
+      "primary_change_points": 7,
+      "primary_convergence_windows": 6,
+      "section_residualized_change_points": 7,
+      "section_residualized_convergence_windows": 7
+    },
+    "colby-hall": {
+      "downgrade_recommended": true,
+      "primary_change_points": 24,
+      "primary_convergence_windows": 9,
+      "section_residualized_change_points": 11,
+      "section_residualized_convergence_windows": 5
+    },
+    "david-gilmour": {
+      "downgrade_recommended": false,
+      "primary_change_points": 3,
+      "primary_convergence_windows": 4,
+      "section_residualized_change_points": 4,
+      "section_residualized_convergence_windows": 4
+    },
+    "isaac-schorr": {
+      "downgrade_recommended": true,
+      "primary_change_points": 9,
+      "primary_convergence_windows": 7,
+      "section_residualized_change_points": 5,
+      "section_residualized_convergence_windows": 6
+    },
+    "jennifer-bowers-bahney": {
+      "downgrade_recommended": false,
+      "primary_change_points": 5,
+      "primary_convergence_windows": 5,
+      "section_residualized_change_points": 5,
+      "section_residualized_convergence_windows": 5
+    },
+    "joe-depaolo": {
+      "downgrade_recommended": false,
+      "primary_change_points": 5,
+      "primary_convergence_windows": 3,
+      "section_residualized_change_points": 5,
+      "section_residualized_convergence_windows": 3
+    },
+    "michael-luciano": {
+      "downgrade_recommended": false,
+      "primary_change_points": 3,
+      "primary_convergence_windows": 4,
+      "section_residualized_change_points": 3,
+      "section_residualized_convergence_windows": 4
+    },
+    "sarah-rumpf": {
+      "downgrade_recommended": true,
+      "primary_change_points": 9,
+      "primary_convergence_windows": 8,
+      "section_residualized_change_points": 6,
+      "section_residualized_convergence_windows": 7
+    },
+    "tommy-christopher": {
+      "downgrade_recommended": false,
+      "primary_change_points": 10,
+      "primary_convergence_windows": 10,
+      "section_residualized_change_points": 11,
+      "section_residualized_convergence_windows": 9
+    },
+    "zachary-leeman": {
+      "downgrade_recommended": false,
+      "primary_change_points": 4,
+      "primary_convergence_windows": 4,
+      "section_residualized_change_points": 4,
+      "section_residualized_convergence_windows": 4
+    }
+  }
+}

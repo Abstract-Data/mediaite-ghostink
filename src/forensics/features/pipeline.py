@@ -516,7 +516,15 @@ def extract_all_features(
             use_rich_progress=show_rich_progress,
         )
         if not skip_embeddings:
-            write_embeddings_manifest(manifest_records, paths.embeddings_dir / "manifest.jsonl")
+            # Per-author shard when scoped to one slug — merged into canonical manifest by
+            # ``scripts/merge_embedding_manifest_shards.py``. Avoids the prior bug where each
+            # ``--author`` invocation atomically rewrote the canonical manifest with only its
+            # own rows, stomping all other authors' embeddings on multi-call workflows.
+            if author_slug is not None:
+                manifest_path = paths.embeddings_dir / f"{author_slug}_manifest.jsonl"
+            else:
+                manifest_path = paths.embeddings_dir / "manifest.jsonl"
+            write_embeddings_manifest(manifest_records, manifest_path)
 
     logger.info("Feature extraction finished: %d article(s) processed.", processed)
     if failed:

@@ -24,7 +24,7 @@
 - Initialized project task protocol for active and upcoming work.
 - Captured mode, queue, and done criteria for consistent execution.
 ### Files Modified
-- `TASK.md` — created canonical task tracker and completion schema.
+- `docs/TASK.md` — created canonical task tracker and completion schema.
 ### Decisions Made
 - Default context mode is `dev`: optimize for implementation velocity with required validation.
 ### Unresolved Questions

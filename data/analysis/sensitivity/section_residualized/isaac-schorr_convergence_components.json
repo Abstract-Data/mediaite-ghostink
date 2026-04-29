@@ -1,0 +1,138 @@
+{
+  "author_slug": "isaac-schorr",
+  "window_components": [
+    {
+      "admitted": true,
+      "ai_signal": 0.0,
+      "convergence_ratio": 1.0,
+      "min_feature_ratio": 0.5,
+      "n_change_points_in_window": 3,
+      "passes_ab": true,
+      "passes_drift_only": true,
+      "passes_ratio": true,
+      "passes_via": [
+        "ratio",
+        "ab",
+        "drift_only"
+      ],
+      "peak_signal": 0.975,
+      "pipeline_a_score": 1.0,
+      "pipeline_b_score": 0.5358603213919673,
+      "pipeline_c_score": null,
+      "sim_signal": 0.09672064278393458,
+      "window_end": "2023-03-05",
+      "window_start": "2022-12-05"
+    },
+    {
+      "admitted": true,
+      "ai_signal": 0.0,
+      "convergence_ratio": 1.0,
+      "min_feature_ratio": 0.5,
+      "n_change_points_in_window": 5,
+      "passes_ab": true,
+      "passes_drift_only": true,
+      "passes_ratio": true,
+      "passes_via": [
+        "ratio",
+        "ab",
+        "drift_only"
+      ],
+      "peak_signal": 0.975,
+      "pipeline_a_score": 1.0,
+      "pipeline_b_score": 0.4875,
+      "pipeline_c_score": null,
+      "sim_signal": 0.0,
+      "window_end": "2023-04-01",
+      "window_start": "2023-01-01"
+    },
+    {
+      "admitted": true,
+      "ai_signal": 0.0,
+      "convergence_ratio": 1.0,
+      "min_feature_ratio": 0.5,
+      "n_change_points_in_window": 5,
+      "passes_ab": true,
+      "passes_drift_only": true,
+      "passes_ratio": true,
+      "passes_via": [
+        "ratio",
+        "ab",
+        "drift_only"
+      ],
+      "peak_signal": 0.975,
+      "pipeline_a_score": 1.0,
+      "pipeline_b_score": 0.4875,
+      "pipeline_c_score": null,
+      "sim_signal": 0.0,
+      "window_end": "2023-04-11",
+      "window_start": "2023-01-11"
+    },
+    {
+      "admitted": true,
+      "ai_signal": 0.0,
+      "convergence_ratio": 1.0,
+      "min_feature_ratio": 0.5,
+      "n_change_points_in_window": 4,
+      "passes_ab": true,
+      "passes_drift_only": true,
+      "passes_ratio": true,
+      "passes_via": [
+        "ratio",
+        "ab",
+        "drift_only"
+      ],
+      "peak_signal": 0.975,
+      "pipeline_a_score": 1.0,
+      "pipeline_b_score": 0.4875,
+      "pipeline_c_score": null,
+      "sim_signal": 0.0,
+      "window_end": "2023-04-24",
+      "window_start": "2023-01-24"
+    },
+    {
+      "admitted": true,
+      "ai_signal": 0.0,
+      "convergence_ratio": 1.0,
+      "min_feature_ratio": 0.5,
+      "n_change_points_in_window": 2,
+      "passes_ab": true,
+      "passes_drift_only": true,
+      "passes_ratio": true,
+      "passes_via": [
+        "ratio",
+        "ab",
+        "drift_only"
+      ],
+      "peak_signal": 0.875,
+      "pipeline_a_score": 1.0,
+      "pipeline_b_score": 0.4375,
+      "pipeline_c_score": null,
+      "sim_signal": 0.0,
+      "window_end": "2023-06-12",
+      "window_start": "2023-03-14"
+    },
+    {
+      "admitted": true,
+      "ai_signal": 0.0,
+      "convergence_ratio": 1.0,
+      "min_feature_ratio": 0.5,
+      "n_change_points_in_window": 1,
+      "passes_ab": true,
+      "passes_drift_only": true,
+      "passes_ratio": true,
+      "passes_via": [
+        "ratio",
+        "ab",
+        "drift_only"
+      ],
+      "peak_signal": 0.875,
+      "pipeline_a_score": 1.0,
+      "pipeline_b_score": 0.45069396634111636,
+      "pipeline_c_score": null,
+      "sim_signal": 0.02638793268223271,
+      "window_end": "2023-06-21",
+      "window_start": "2023-03-23"
+    }
+  ],
+  "windows_evaluated": 6
+}

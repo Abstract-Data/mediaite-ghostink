@@ -1,0 +1,72 @@
+[
+  {
+    "author_id": "29ed6426-e929-5c4d-b44f-e2186a5c4a7f",
+    "confidence": 0.5475499015668815,
+    "direction": "decrease",
+    "effect_proxy": 0.5475499015668815,
+    "effect_size_cohens_d": -1.2101884903177247,
+    "feature_name": "hapax_ratio",
+    "method": "pelt_section_adjusted",
+    "timestamp": "2023-04-26T22:01:23Z"
+  },
+  {
+    "author_id": "29ed6426-e929-5c4d-b44f-e2186a5c4a7f",
+    "confidence": 0.6593502363613623,
+    "direction": "decrease",
+    "effect_proxy": 0.6593502363613623,
+    "effect_size_cohens_d": -1.935566399103106,
+    "feature_name": "self_similarity_30d",
+    "method": "pelt_section_adjusted",
+    "timestamp": "2023-04-26T22:01:23Z"
+  },
+  {
+    "author_id": "29ed6426-e929-5c4d-b44f-e2186a5c4a7f",
+    "confidence": 0.5782892571540634,
+    "direction": "decrease",
+    "effect_proxy": 0.5782892571540634,
+    "effect_size_cohens_d": -1.3712936342371758,
+    "feature_name": "self_similarity_30d",
+    "method": "pelt_section_adjusted",
+    "timestamp": "2023-05-12T06:25:30Z"
+  },
+  {
+    "author_id": "29ed6426-e929-5c4d-b44f-e2186a5c4a7f",
+    "confidence": 0.7238061680624392,
+    "direction": "decrease",
+    "effect_proxy": 0.7238061680624392,
+    "effect_size_cohens_d": -2.620645663897629,
+    "feature_name": "self_similarity_90d",
+    "method": "pelt_section_adjusted",
+    "timestamp": "2023-04-29T09:48:46Z"
+  },
+  {
+    "author_id": "29ed6426-e929-5c4d-b44f-e2186a5c4a7f",
+    "confidence": 0.6472860017816281,
+    "direction": "decrease",
+    "effect_proxy": 0.6472860017816281,
+    "effect_size_cohens_d": -1.8351582445017713,
+    "feature_name": "self_similarity_90d",
+    "method": "pelt_section_adjusted",
+    "timestamp": "2023-05-10T22:38:35Z"
+  },
+  {
+    "author_id": "29ed6426-e929-5c4d-b44f-e2186a5c4a7f",
+    "confidence": 0.6610397693231079,
+    "direction": "decrease",
+    "effect_proxy": 0.6610397693231079,
+    "effect_size_cohens_d": -1.9501986059043972,
+    "feature_name": "self_similarity_90d",
+    "method": "pelt_section_adjusted",
+    "timestamp": "2023-05-12T06:25:30Z"
+  },
+  {
+    "author_id": "29ed6426-e929-5c4d-b44f-e2186a5c4a7f",
+    "confidence": 0.5014343927600874,
+    "direction": "decrease",
+    "effect_proxy": 0.5014343927600874,
+    "effect_size_cohens_d": -1.0057540782567347,
+    "feature_name": "self_similarity_90d",
+    "method": "pelt_section_adjusted",
+    "timestamp": "2023-06-14T20:17:22Z"
+  }
+]

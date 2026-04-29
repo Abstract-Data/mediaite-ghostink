@@ -40,7 +40,7 @@ Illustrative mapping from “stage” to production modules (names are for navig
 - **Scrape** — `forensics.cli.scrape.dispatch_scrape` → `crawler.discover_authors` / `collect_article_metadata` / `fetcher.fetch_articles`, `dedup.deduplicate_articles`, `export.export_articles_jsonl`, persistence via `storage.repository.Repository`.
 - **Extract** — `forensics.cli.extract` / `features.pipeline.extract_all_features` → Parquet under `data/features/`, embeddings under `data/embeddings/` as implemented by the feature pipeline.
 - **Analyze** — `forensics.cli.analyze.run_analyze` → `analysis.timeseries`, `analysis.changepoint`, `analysis.drift`, `analysis.orchestrator`, etc., depending on CLI flags; writes JSON artifacts under `data/analysis/`. Per [**ADR-009**](adr/ADR-009-analyze-stage-sqlite-reads.md) (**Option A**, accepted), analyze **may** open `storage.repository.Repository` on `data/articles.db` for **author identity only** (mapping configured `slug` values to stable `author_id`, roster helpers, comparison entrypoints). Feature timelines, embeddings, and hypothesis inputs are read from Parquet / NPZ / JSONL artifacts produced by extract and prior stages—not from ad hoc SQL over article bodies for those tensors.
-- **Report** — `forensics.reporting.run_report` → subprocess to `quarto render`, output under `data/reports/` per `quarto.yml`.
+- **Report** — `forensics.reporting.run_report` → subprocess to `quarto render`, output under `data/reports/` per `_quarto.yml`.
 
 ### Analyze stage and SQLite (ADR-009)
 
@@ -88,7 +88,7 @@ Canonical layout (see also [`README.md`](../README.md) **Data layout**):
 - `data/features/{author_slug}.parquet` — per-author feature tables (not a single monolithic `features.parquet`).
 - `data/embeddings/{author_slug}/batch.npz` — embedding batches (see `features.pipeline` docstring).
 - `data/analysis/` — per-author JSON (`*_result.json`, `*_changepoints.json`, `*_hypothesis_tests.json`, …), `run_metadata.json`, `corpus_custody.json` when written.
-- `data/reports/` — Quarto book output directory (`quarto.yml` `project.output-dir`).
+- `data/reports/` — Quarto book output directory (`_quarto.yml` `project.output-dir`).
 
 Older docs sometimes referenced `data/raw/documents.json`, `data/analysis/analysis.json`, or `data/pipeline/summary.json`; those paths are **not** the current contract—prefer the list above and the storage modules under `src/forensics/storage/`.
 

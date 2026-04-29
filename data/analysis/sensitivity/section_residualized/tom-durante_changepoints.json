@@ -1,0 +1,29 @@
+[
+  {
+    "author_id": "9cfa1090-0f79-5b4b-9d62-5a79e79f175a",
+    "confidence": 0.9121482352662154,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.20146233288357074,
+    "feature_name": "formula_opening_score",
+    "method": "bocpd_section_adjusted",
+    "timestamp": "2025-02-28T13:04:56Z"
+  },
+  {
+    "author_id": "9cfa1090-0f79-5b4b-9d62-5a79e79f175a",
+    "confidence": 0.9575621530495609,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.24108810544035134,
+    "feature_name": "formula_opening_score",
+    "method": "bocpd_section_adjusted",
+    "timestamp": "2026-03-24T10:08:42Z"
+  },
+  {
+    "author_id": "9cfa1090-0f79-5b4b-9d62-5a79e79f175a",
+    "confidence": 0.9431125599531736,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.6691406767618158,
+    "feature_name": "formula_opening_score",
+    "method": "bocpd_section_adjusted",
+    "timestamp": "2026-04-14T10:57:12Z"
+  }
+]

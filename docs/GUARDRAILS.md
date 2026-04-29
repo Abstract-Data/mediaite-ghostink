@@ -160,6 +160,18 @@ Each Sign has:
 - Reason: PR #94 review — silent fallback turns a missing author slice into a whole-cohort analysis without an obvious failure mode.
 - Provenance: Agent-learned — PR #94 remediation item 3 (`per_author.py`), 2026-04-26.
 
+**Sign: `set -e` is silently disabled inside a for-loop body whose exit feeds an `&&`/`||` chain**
+- Trigger: A bash chain like `(set -e; for slug in ...; do uv run forensics extract --author "$slug"; done && next-stage)` — failing or killed commands inside the loop body do not abort the script, because `set -e` is suppressed when the enclosing compound command's exit status is being tested by `&&`/`||`/`if`/`while`.
+- Instruction: Separate stages with plain `;` (or newlines) at top level, never `do ... done && next-stage`. If you need fail-fast inside a loop body, check `$?` explicitly after each command and `break`/`exit` on nonzero. When killing a backgrounded chain, verify all descendants died — a SIGTERM to the wrapper does not always cascade.
+- Reason: An ostensibly-killed `forensics extract --author alex-griffing` left the parent loop running; it iterated to `charlie-nash` and silently raced a replacement chain spawned with the same target, creating duplicate concurrent extracts on the same SQLite/parquet/manifest paths.
+- Provenance: Agent-learned — 2026-04-27 Path Bʹ → Path Bʺ recovery during a 12-author re-extract.
+
+**Sign: `forensics extract --author <slug>` historically rewrote `data/embeddings/manifest.jsonl` with only that author's rows**
+- Trigger: Pre-2026-04-28 code in `src/forensics/features/pipeline.py` called `write_embeddings_manifest(manifest_records, paths.embeddings_dir / "manifest.jsonl")` (an atomic full-file replace) with `manifest_records` containing only the author scoped by `--author`. Sequential per-author runs left the canonical manifest with only the *last* slug's rows; analyze then failed `EmbeddingDriftInputsError` for everyone else.
+- Instruction: When scoping pipeline writes to a single author, never call full-file rewrite helpers on shared artifacts. The patch (2026-04-28) writes per-author shards `<slug>_manifest.jsonl` when `author_slug` is set, merged into the canonical manifest by `scripts/merge_embedding_manifest_shards.py` before `forensics analyze`. Multi-call workflows must run that merge step. Parallel writers are safe under this scheme because each invocation owns its own shard path; concurrent writers to the same canonical file would still race.
+- Reason: A 12-author sequential `--author` chain consumed ~4 hours of CPU and would have left only `zachary-leeman`'s rows in the manifest, dooming the downstream `forensics analyze` step.
+- Provenance: Agent-learned — 2026-04-28 Path Bʺ remediation; patch landed in `pipeline.py:518–527` plus new `scripts/merge_embedding_manifest_shards.py`.
+
 ## Known statistical limitations
 
 - **Serial autocorrelation (M-16):** Consecutive articles by the same author

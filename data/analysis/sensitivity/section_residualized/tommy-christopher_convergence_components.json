@@ -1,0 +1,198 @@
+{
+  "author_slug": "tommy-christopher",
+  "window_components": [
+    {
+      "admitted": true,
+      "ai_signal": 0.0,
+      "convergence_ratio": 0.8,
+      "min_feature_ratio": 0.5,
+      "n_change_points_in_window": 8,
+      "passes_ab": true,
+      "passes_drift_only": true,
+      "passes_ratio": true,
+      "passes_via": [
+        "ratio",
+        "ab",
+        "drift_only"
+      ],
+      "peak_signal": 0.7142857142857143,
+      "pipeline_a_score": 0.5891279089278055,
+      "pipeline_b_score": 0.408440832931592,
+      "pipeline_c_score": null,
+      "sim_signal": 0.10259595157746972,
+      "window_end": "2021-04-02",
+      "window_start": "2021-01-02"
+    },
+    {
+      "admitted": true,
+      "ai_signal": 0.0,
+      "convergence_ratio": 0.8,
+      "min_feature_ratio": 0.5,
+      "n_change_points_in_window": 8,
+      "passes_ab": true,
+      "passes_drift_only": true,
+      "passes_ratio": true,
+      "passes_via": [
+        "ratio",
+        "ab",
+        "drift_only"
+      ],
+      "peak_signal": 0.7142857142857143,
+      "pipeline_a_score": 0.5891279089278055,
+      "pipeline_b_score": 0.407118275040506,
+      "pipeline_c_score": null,
+      "sim_signal": 0.09995083579529772,
+      "window_end": "2021-04-06",
+      "window_start": "2021-01-06"
+    },
+    {
+      "admitted": true,
+      "ai_signal": 0.0,
+      "convergence_ratio": 0.8,
+      "min_feature_ratio": 0.5,
+      "n_change_points_in_window": 6,
+      "passes_ab": true,
+      "passes_drift_only": true,
+      "passes_ratio": true,
+      "passes_via": [
+        "ratio",
+        "ab",
+        "drift_only"
+      ],
+      "peak_signal": 0.7142857142857143,
+      "pipeline_a_score": 0.5891279089278055,
+      "pipeline_b_score": 0.39329995042225413,
+      "pipeline_c_score": null,
+      "sim_signal": 0.072314186558794,
+      "window_end": "2021-04-12",
+      "window_start": "2021-01-12"
+    },
+    {
+      "admitted": true,
+      "ai_signal": 0.0,
+      "convergence_ratio": 0.6,
+      "min_feature_ratio": 0.5,
+      "n_change_points_in_window": 6,
+      "passes_ab": true,
+      "passes_drift_only": true,
+      "passes_ratio": true,
+      "passes_via": [
+        "ratio",
+        "ab",
+        "drift_only"
+      ],
+      "peak_signal": 0.7142857142857143,
+      "pipeline_a_score": 0.46961147638265127,
+      "pipeline_b_score": 0.4022937749277963,
+      "pipeline_c_score": null,
+      "sim_signal": 0.09030183556987827,
+      "window_end": "2021-04-29",
+      "window_start": "2021-01-29"
+    },
+    {
+      "admitted": true,
+      "ai_signal": 0.0,
+      "convergence_ratio": 0.2,
+      "min_feature_ratio": 0.5,
+      "n_change_points_in_window": 3,
+      "passes_ab": false,
+      "passes_drift_only": true,
+      "passes_ratio": false,
+      "passes_via": [
+        "drift_only"
+      ],
+      "peak_signal": 0.7619047619047619,
+      "pipeline_a_score": 0.2571541088334294,
+      "pipeline_b_score": 0.42038641893388895,
+      "pipeline_c_score": null,
+      "sim_signal": 0.0788680759630161,
+      "window_end": "2021-05-02",
+      "window_start": "2021-02-01"
+    },
+    {
+      "admitted": true,
+      "ai_signal": 0.0,
+      "convergence_ratio": 0.4,
+      "min_feature_ratio": 0.5,
+      "n_change_points_in_window": 4,
+      "passes_ab": true,
+      "passes_drift_only": true,
+      "passes_ratio": false,
+      "passes_via": [
+        "ab",
+        "drift_only"
+      ],
+      "peak_signal": 0.7619047619047619,
+      "pipeline_a_score": 0.30523795627023265,
+      "pipeline_b_score": 0.38095238095238093,
+      "pipeline_c_score": null,
+      "sim_signal": 0.0,
+      "window_end": "2021-06-30",
+      "window_start": "2021-04-01"
+    },
+    {
+      "admitted": true,
+      "ai_signal": 0.0,
+      "convergence_ratio": 0.4,
+      "min_feature_ratio": 0.5,
+      "n_change_points_in_window": 3,
+      "passes_ab": true,
+      "passes_drift_only": true,
+      "passes_ratio": false,
+      "passes_via": [
+        "ab",
+        "drift_only"
+      ],
+      "peak_signal": 0.9682539682539683,
+      "pipeline_a_score": 0.30523795627023265,
+      "pipeline_b_score": 0.4932281810343082,
+      "pipeline_c_score": null,
+      "sim_signal": 0.01820239381464812,
+      "window_end": "2021-07-14",
+      "window_start": "2021-04-15"
+    },
+    {
+      "admitted": true,
+      "ai_signal": 0.0,
+      "convergence_ratio": 0.4,
+      "min_feature_ratio": 0.5,
+      "n_change_points_in_window": 2,
+      "passes_ab": true,
+      "passes_drift_only": true,
+      "passes_ratio": false,
+      "passes_via": [
+        "ab",
+        "drift_only"
+      ],
+      "peak_signal": 0.9682539682539683,
+      "pipeline_a_score": 0.30523795627023265,
+      "pipeline_b_score": 0.48412698412698413,
+      "pipeline_c_score": null,
+      "sim_signal": 0.0,
+      "window_end": "2021-07-23",
+      "window_start": "2021-04-24"
+    },
+    {
+      "admitted": true,
+      "ai_signal": 0.0,
+      "convergence_ratio": 0.2,
+      "min_feature_ratio": 0.5,
+      "n_change_points_in_window": 1,
+      "passes_ab": true,
+      "passes_drift_only": true,
+      "passes_ratio": false,
+      "passes_via": [
+        "ab",
+        "drift_only"
+      ],
+      "peak_signal": 0.9682539682539683,
+      "pipeline_a_score": 0.353321803707036,
+      "pipeline_b_score": 0.505680602305751,
+      "pipeline_c_score": null,
+      "sim_signal": 0.04310723635753369,
+      "window_end": "2021-08-13",
+      "window_start": "2021-05-15"
+    }
+  ],
+  "windows_evaluated": 9
+}

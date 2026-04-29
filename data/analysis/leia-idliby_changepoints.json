@@ -1,0 +1,56 @@
+[
+  {
+    "author_id": "aef08fbe-efce-5a8e-85cb-f544eb24f9c5",
+    "confidence": 0.9959966226807787,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.6734482881000513,
+    "feature_name": "ai_marker_frequency",
+    "method": "bocpd",
+    "timestamp": "2022-06-14T15:07:16Z"
+  },
+  {
+    "author_id": "aef08fbe-efce-5a8e-85cb-f544eb24f9c5",
+    "confidence": 0.9959524622990981,
+    "direction": "increase",
+    "effect_size_cohens_d": 2.015605418857086,
+    "feature_name": "ai_marker_frequency",
+    "method": "bocpd",
+    "timestamp": "2022-10-04T13:49:58Z"
+  },
+  {
+    "author_id": "aef08fbe-efce-5a8e-85cb-f544eb24f9c5",
+    "confidence": 0.9753556272555876,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.22021659640045155,
+    "feature_name": "formula_opening_score",
+    "method": "bocpd",
+    "timestamp": "2022-05-09T12:28:47Z"
+  },
+  {
+    "author_id": "aef08fbe-efce-5a8e-85cb-f544eb24f9c5",
+    "confidence": 0.9365911706844386,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.2050303823968863,
+    "feature_name": "formula_opening_score",
+    "method": "bocpd",
+    "timestamp": "2022-05-11T13:19:48Z"
+  },
+  {
+    "author_id": "aef08fbe-efce-5a8e-85cb-f544eb24f9c5",
+    "confidence": 0.974106555796434,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.3008937301646807,
+    "feature_name": "formula_opening_score",
+    "method": "bocpd",
+    "timestamp": "2022-05-31T10:58:23Z"
+  },
+  {
+    "author_id": "aef08fbe-efce-5a8e-85cb-f544eb24f9c5",
+    "confidence": 0.9730619753071604,
+    "direction": "increase",
+    "effect_size_cohens_d": 5.6773831924638385,
+    "feature_name": "formula_opening_score",
+    "method": "bocpd",
+    "timestamp": "2022-10-04T13:49:58Z"
+  }
+]

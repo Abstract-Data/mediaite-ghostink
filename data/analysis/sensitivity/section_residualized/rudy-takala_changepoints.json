@@ -1,0 +1,20 @@
+[
+  {
+    "author_id": "b07ee1e2-719d-542f-8858-595083dc6e99",
+    "confidence": 0.9895818981665568,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.24473383154421186,
+    "feature_name": "ai_marker_frequency",
+    "method": "bocpd_section_adjusted",
+    "timestamp": "2021-11-30T15:24:04Z"
+  },
+  {
+    "author_id": "b07ee1e2-719d-542f-8858-595083dc6e99",
+    "confidence": 0.9852149403100023,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.22311724148134993,
+    "feature_name": "formula_opening_score",
+    "method": "bocpd_section_adjusted",
+    "timestamp": "2021-11-29T13:10:47Z"
+  }
+]

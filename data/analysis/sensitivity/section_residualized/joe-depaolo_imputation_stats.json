@@ -1,0 +1,145 @@
+{
+  "author_id": "50c42cb1-0544-52dd-a270-f7aa56b7cf40",
+  "note": "Counts use the feature frame as passed into changepoint analysis (before internal section residualization and per-feature median imputation).",
+  "per_feature": {
+    "ai_marker_frequency": {
+      "n_imputed": 0,
+      "n_inf": 0,
+      "n_nan": 0,
+      "n_values": 2105
+    },
+    "bigram_entropy": {
+      "n_imputed": 0,
+      "n_inf": 0,
+      "n_nan": 0,
+      "n_values": 2105
+    },
+    "coleman_liau": {
+      "n_imputed": 0,
+      "n_inf": 0,
+      "n_nan": 0,
+      "n_values": 2105
+    },
+    "conjunction_freq": {
+      "n_imputed": 0,
+      "n_inf": 0,
+      "n_nan": 0,
+      "n_values": 2105
+    },
+    "first_person_ratio": {
+      "n_imputed": 0,
+      "n_inf": 0,
+      "n_nan": 0,
+      "n_values": 2105
+    },
+    "flesch_kincaid": {
+      "n_imputed": 0,
+      "n_inf": 0,
+      "n_nan": 0,
+      "n_values": 2105
+    },
+    "formula_opening_score": {
+      "n_imputed": 0,
+      "n_inf": 0,
+      "n_nan": 0,
+      "n_values": 2105
+    },
+    "gunning_fog": {
+      "n_imputed": 0,
+      "n_inf": 0,
+      "n_nan": 0,
+      "n_values": 2105
+    },
+    "hapax_ratio": {
+      "n_imputed": 0,
+      "n_inf": 0,
+      "n_nan": 0,
+      "n_values": 2105
+    },
+    "hedging_frequency": {
+      "n_imputed": 0,
+      "n_inf": 0,
+      "n_nan": 0,
+      "n_values": 2105
+    },
+    "mattr": {
+      "n_imputed": 0,
+      "n_inf": 0,
+      "n_nan": 0,
+      "n_values": 2105
+    },
+    "paragraph_length_variance": {
+      "n_imputed": 0,
+      "n_inf": 0,
+      "n_nan": 0,
+      "n_values": 2105
+    },
+    "passive_voice_ratio": {
+      "n_imputed": 0,
+      "n_inf": 0,
+      "n_nan": 0,
+      "n_values": 2105
+    },
+    "self_similarity_30d": {
+      "n_imputed": 5,
+      "n_inf": 0,
+      "n_nan": 5,
+      "n_values": 2105
+    },
+    "self_similarity_90d": {
+      "n_imputed": 5,
+      "n_inf": 0,
+      "n_nan": 5,
+      "n_values": 2105
+    },
+    "sent_length_mean": {
+      "n_imputed": 0,
+      "n_inf": 0,
+      "n_nan": 0,
+      "n_values": 2105
+    },
+    "sent_length_skewness": {
+      "n_imputed": 0,
+      "n_inf": 0,
+      "n_nan": 0,
+      "n_values": 2105
+    },
+    "sent_length_std": {
+      "n_imputed": 0,
+      "n_inf": 0,
+      "n_nan": 0,
+      "n_values": 2105
+    },
+    "simpsons_d": {
+      "n_imputed": 0,
+      "n_inf": 0,
+      "n_nan": 0,
+      "n_values": 2105
+    },
+    "subordinate_clause_depth": {
+      "n_imputed": 0,
+      "n_inf": 0,
+      "n_nan": 0,
+      "n_values": 2105
+    },
+    "trigram_entropy": {
+      "n_imputed": 0,
+      "n_inf": 0,
+      "n_nan": 0,
+      "n_values": 2105
+    },
+    "ttr": {
+      "n_imputed": 0,
+      "n_inf": 0,
+      "n_nan": 0,
+      "n_values": 2105
+    },
+    "yules_k": {
+      "n_imputed": 0,
+      "n_inf": 0,
+      "n_nan": 0,
+      "n_values": 2105
+    }
+  },
+  "section_residualize_features": true
+}

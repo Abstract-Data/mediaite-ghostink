@@ -1,0 +1,102 @@
+[
+  {
+    "convergence_ratio": 1.0,
+    "end_date": "2022-08-07",
+    "families_converging": [
+      "ai_markers"
+    ],
+    "features_converging": [
+      "ai_marker_frequency"
+    ],
+    "n_rankable_per_family": {
+      "ai_markers": 2
+    },
+    "passes_via": [
+      "ratio"
+    ],
+    "pipeline_a_score": 0.6707522204978031,
+    "pipeline_b_score": 0.0,
+    "pipeline_c_score": null,
+    "start_date": "2022-05-09"
+  },
+  {
+    "convergence_ratio": 1.0,
+    "end_date": "2022-08-09",
+    "families_converging": [
+      "ai_markers"
+    ],
+    "features_converging": [
+      "ai_marker_frequency"
+    ],
+    "n_rankable_per_family": {
+      "ai_markers": 2
+    },
+    "passes_via": [
+      "ratio"
+    ],
+    "pipeline_a_score": 0.6707522204978031,
+    "pipeline_b_score": 0.0,
+    "pipeline_c_score": null,
+    "start_date": "2022-05-11"
+  },
+  {
+    "convergence_ratio": 1.0,
+    "end_date": "2022-08-29",
+    "families_converging": [
+      "ai_markers"
+    ],
+    "features_converging": [
+      "ai_marker_frequency"
+    ],
+    "n_rankable_per_family": {
+      "ai_markers": 2
+    },
+    "passes_via": [
+      "ratio"
+    ],
+    "pipeline_a_score": 0.6707522204978031,
+    "pipeline_b_score": 0.0,
+    "pipeline_c_score": null,
+    "start_date": "2022-05-31"
+  },
+  {
+    "convergence_ratio": 1.0,
+    "end_date": "2022-09-12",
+    "families_converging": [
+      "ai_markers"
+    ],
+    "features_converging": [
+      "ai_marker_frequency"
+    ],
+    "n_rankable_per_family": {
+      "ai_markers": 2
+    },
+    "passes_via": [
+      "ratio"
+    ],
+    "pipeline_a_score": 0.6707522204978031,
+    "pipeline_b_score": 0.0,
+    "pipeline_c_score": null,
+    "start_date": "2022-06-14"
+  },
+  {
+    "convergence_ratio": 1.0,
+    "end_date": "2023-01-02",
+    "families_converging": [
+      "ai_markers"
+    ],
+    "features_converging": [
+      "formula_opening_score"
+    ],
+    "n_rankable_per_family": {
+      "ai_markers": 2
+    },
+    "passes_via": [
+      "ratio"
+    ],
+    "pipeline_a_score": 1.0,
+    "pipeline_b_score": 0.0,
+    "pipeline_c_score": null,
+    "start_date": "2022-10-04"
+  }
+]

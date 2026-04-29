@@ -46,6 +46,7 @@ Durable operating rules for every agent in this repo.
 - **Minimal diffs, small commits.** Ship fixes surgically; do not refactor adjacent code unless asked.
 - **Add tests for behavior changes.** TDD per `docs/TESTING.md`; property-based tests via Hypothesis for hashing/normalization utilities.
 - **Update session boundary files:** append a block to `HANDOFF.md` at the end of every multi-step task; log new operational knowledge in `docs/RUNBOOK.md`; append a Sign to `docs/GUARDRAILS.md` on any failure pattern that recurs 3+ times.
+- **HANDOFF size:** Keep root `HANDOFF.md` lean (recent completion blocks only). When the completion log grows past roughly **200 lines**, archive older blocks to [`docs/archive/handoff-history.md`](docs/archive/handoff-history.md) in the same change set and leave a short pointer in `HANDOFF.md`.
 
 ---
 

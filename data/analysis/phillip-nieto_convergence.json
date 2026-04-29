@@ -1,0 +1,22 @@
+[
+  {
+    "convergence_ratio": 1.0,
+    "end_date": "2025-05-15",
+    "families_converging": [
+      "ai_markers"
+    ],
+    "features_converging": [
+      "ai_marker_frequency"
+    ],
+    "n_rankable_per_family": {
+      "ai_markers": 1
+    },
+    "passes_via": [
+      "ratio"
+    ],
+    "pipeline_a_score": 0.4173642165186222,
+    "pipeline_b_score": 0.0,
+    "pipeline_c_score": null,
+    "start_date": "2025-02-14"
+  }
+]

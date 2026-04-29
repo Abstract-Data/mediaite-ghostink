@@ -1,0 +1,11 @@
+[
+  {
+    "author_id": "63bb081c-bd26-5a55-9bd3-8c8721f5389d",
+    "confidence": 0.9942810442872982,
+    "direction": "increase",
+    "effect_size_cohens_d": 0.20063441537043653,
+    "feature_name": "formula_opening_score",
+    "method": "bocpd_section_adjusted",
+    "timestamp": "2023-12-12T13:27:24Z"
+  }
+]

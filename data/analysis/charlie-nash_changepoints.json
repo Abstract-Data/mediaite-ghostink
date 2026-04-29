@@ -1,0 +1,72 @@
+[
+  {
+    "author_id": "29ed6426-e929-5c4d-b44f-e2186a5c4a7f",
+    "confidence": 0.5478532842467035,
+    "direction": "decrease",
+    "effect_proxy": 0.5478532842467035,
+    "effect_size_cohens_d": -1.21167148883069,
+    "feature_name": "hapax_ratio",
+    "method": "pelt",
+    "timestamp": "2023-04-26T22:01:23Z"
+  },
+  {
+    "author_id": "29ed6426-e929-5c4d-b44f-e2186a5c4a7f",
+    "confidence": 0.6743986427649873,
+    "direction": "decrease",
+    "effect_proxy": 0.6743986427649873,
+    "effect_size_cohens_d": -2.071240269057661,
+    "feature_name": "self_similarity_30d",
+    "method": "pelt",
+    "timestamp": "2023-04-29T09:48:46Z"
+  },
+  {
+    "author_id": "29ed6426-e929-5c4d-b44f-e2186a5c4a7f",
+    "confidence": 0.56217509997755,
+    "direction": "decrease",
+    "effect_proxy": 0.56217509997755,
+    "effect_size_cohens_d": -1.2840181084920566,
+    "feature_name": "self_similarity_30d",
+    "method": "pelt",
+    "timestamp": "2023-05-10T22:38:35Z"
+  },
+  {
+    "author_id": "29ed6426-e929-5c4d-b44f-e2186a5c4a7f",
+    "confidence": 0.5786154925509172,
+    "direction": "decrease",
+    "effect_proxy": 0.5786154925509172,
+    "effect_size_cohens_d": -1.3731294870180606,
+    "feature_name": "self_similarity_30d",
+    "method": "pelt",
+    "timestamp": "2023-05-12T06:25:30Z"
+  },
+  {
+    "author_id": "29ed6426-e929-5c4d-b44f-e2186a5c4a7f",
+    "confidence": 0.7207225725114048,
+    "direction": "decrease",
+    "effect_proxy": 0.7207225725114048,
+    "effect_size_cohens_d": -2.5806689032927186,
+    "feature_name": "self_similarity_90d",
+    "method": "pelt",
+    "timestamp": "2023-04-29T09:48:46Z"
+  },
+  {
+    "author_id": "29ed6426-e929-5c4d-b44f-e2186a5c4a7f",
+    "confidence": 0.6462830484742267,
+    "direction": "decrease",
+    "effect_proxy": 0.6462830484742267,
+    "effect_size_cohens_d": -1.827119242338986,
+    "feature_name": "self_similarity_90d",
+    "method": "pelt",
+    "timestamp": "2023-05-10T22:38:35Z"
+  },
+  {
+    "author_id": "29ed6426-e929-5c4d-b44f-e2186a5c4a7f",
+    "confidence": 0.6602967332513667,
+    "direction": "decrease",
+    "effect_proxy": 0.6602967332513667,
+    "effect_size_cohens_d": -1.943745609429066,
+    "feature_name": "self_similarity_90d",
+    "method": "pelt",
+    "timestamp": "2023-05-12T06:25:30Z"
+  }
+]

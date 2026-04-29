@@ -1,0 +1,62 @@
+[
+  {
+    "author_id": "361c4822-8951-5046-87b1-7d2ff05a63e4",
+    "confidence": 0.7694711084957994,
+    "direction": "decrease",
+    "effect_proxy": 0.7694711084957994,
+    "effect_size_cohens_d": -3.337851075737198,
+    "feature_name": "self_similarity_30d",
+    "method": "pelt",
+    "timestamp": "2023-04-10T17:10:00Z"
+  },
+  {
+    "author_id": "361c4822-8951-5046-87b1-7d2ff05a63e4",
+    "confidence": 0.7161518387298134,
+    "direction": "decrease",
+    "effect_proxy": 0.7161518387298134,
+    "effect_size_cohens_d": -2.5230103148286016,
+    "feature_name": "self_similarity_30d",
+    "method": "pelt",
+    "timestamp": "2023-04-20T15:31:17Z"
+  },
+  {
+    "author_id": "361c4822-8951-5046-87b1-7d2ff05a63e4",
+    "confidence": 0.7971730676380913,
+    "direction": "decrease",
+    "effect_proxy": 0.7971730676380913,
+    "effect_size_cohens_d": -3.9303117113445105,
+    "feature_name": "self_similarity_90d",
+    "method": "pelt",
+    "timestamp": "2023-04-10T17:10:00Z"
+  },
+  {
+    "author_id": "361c4822-8951-5046-87b1-7d2ff05a63e4",
+    "confidence": 0.759937093258966,
+    "direction": "decrease",
+    "effect_proxy": 0.759937093258966,
+    "effect_size_cohens_d": -3.1655748219309134,
+    "feature_name": "self_similarity_90d",
+    "method": "pelt",
+    "timestamp": "2023-04-20T15:31:17Z"
+  },
+  {
+    "author_id": "361c4822-8951-5046-87b1-7d2ff05a63e4",
+    "confidence": 0.6631817963206448,
+    "direction": "decrease",
+    "effect_proxy": 0.6631817963206448,
+    "effect_size_cohens_d": -1.968960670997408,
+    "feature_name": "self_similarity_90d",
+    "method": "pelt",
+    "timestamp": "2023-05-22T10:39:55Z"
+  },
+  {
+    "author_id": "361c4822-8951-5046-87b1-7d2ff05a63e4",
+    "confidence": 0.9084206400339624,
+    "direction": "increase",
+    "effect_proxy": 0.9084206400339624,
+    "effect_size_cohens_d": 0.24100808868759563,
+    "feature_name": "sent_length_std",
+    "method": "bocpd",
+    "timestamp": "2025-06-16T14:16:42Z"
+  }
+]
