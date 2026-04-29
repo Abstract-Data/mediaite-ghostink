@@ -64,8 +64,8 @@ def _strip_stray_angle_brackets(text: str) -> str:
     # - At word boundaries with surrounding whitespace/punctuation
     # - Not part of tag patterns like <word> or </word>
     # This preserves legitimate uses like "x < y" or quoted tech syntax
-    text = re.sub(r'(?<![<>\w])<(?![<>/\w])', '', text)  # Isolated <
-    text = re.sub(r'(?<![<>/\w])>(?![<>\w])', '', text)  # Isolated >
+    text = re.sub(r"(?<![<>\w])<(?![<>/\w])", "", text)  # Isolated <
+    text = re.sub(r"(?<![<>/\w])>(?![<>\w])", "", text)  # Isolated >
     return text
 
 

@@ -189,6 +189,30 @@ class ReportConfig(BaseModel):
         return v
 
 
+def _get_survey_excluded_sections(survey: object) -> list[str] | None:
+    """Return ``excluded_sections`` from a survey dict or ``SurveyConfig``, else ``None``."""
+    if isinstance(survey, dict):
+        return survey.get("excluded_sections")  # type: ignore[return-value]
+    if isinstance(survey, SurveyConfig):
+        return survey.excluded_sections
+    return None
+
+
+def _patch_features_excluded_sections(
+    data: dict[str, object],
+    features: object,
+    sections: list[str],
+) -> dict[str, object]:
+    """Return *data* with ``features.excluded_sections`` replaced by *sections*."""
+    if features is None:
+        return {**data, "features": {"excluded_sections": sections}}
+    if isinstance(features, dict):
+        return {**data, "features": {**features, "excluded_sections": sections}}
+    if isinstance(features, FeaturesConfig):
+        return {**data, "features": features.model_copy(update={"excluded_sections": sections})}
+    return data
+
+
 class ForensicsSettings(BaseSettings):
     """Application settings: TOML first, then environment variable overrides."""
 
@@ -215,45 +239,12 @@ class ForensicsSettings(BaseSettings):
         if not isinstance(data, dict):
             return data
         survey = data.get("survey")
-        features = data.get("features")
         if survey is None:
             return data
-        if isinstance(survey, dict) and "excluded_sections" in survey:
-            if features is None:
-                return {**data, "features": {"excluded_sections": survey["excluded_sections"]}}
-            if isinstance(features, dict):
-                return {
-                    **data,
-                    "features": {**features, "excluded_sections": survey["excluded_sections"]},
-                }
-            if isinstance(features, FeaturesConfig):
-                return {
-                    **data,
-                    "features": features.model_copy(
-                        update={"excluded_sections": survey["excluded_sections"]}
-                    ),
-                }
+        sections = _get_survey_excluded_sections(survey)
+        if sections is None:
             return data
-        if isinstance(survey, SurveyConfig):
-            if features is None:
-                return {
-                    **data,
-                    "features": FeaturesConfig(excluded_sections=survey.excluded_sections),
-                }
-            if isinstance(features, dict):
-                return {
-                    **data,
-                    "features": {**features, "excluded_sections": survey.excluded_sections},
-                }
-            if isinstance(features, FeaturesConfig):
-                if survey.excluded_sections != features.excluded_sections:
-                    return {
-                        **data,
-                        "features": features.model_copy(
-                            update={"excluded_sections": survey.excluded_sections}
-                        ),
-                    }
-        return data
+        return _patch_features_excluded_sections(data, data.get("features"), sections)
 
     @computed_field  # type: ignore[prop-decorator]
     @property
