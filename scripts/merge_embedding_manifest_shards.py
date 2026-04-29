@@ -12,24 +12,28 @@ extracts complete, before ``forensics analyze`` consumes the canonical manifest.
 
 from __future__ import annotations
 
+import argparse
 import logging
 import sys
 from pathlib import Path
 
+from forensics.config import get_project_root
+from forensics.models.features import EmbeddingRecord
 from forensics.storage.parquet import read_embeddings_manifest, write_embeddings_manifest
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 log = logging.getLogger("merge_manifest")
 
 
-def main() -> int:
-    emb_dir = Path("data/embeddings")
+def main(*, dry_run: bool = False) -> int:
+    project_root = get_project_root()
+    emb_dir = project_root / "data" / "embeddings"
     canonical = emb_dir / "manifest.jsonl"
     if not emb_dir.is_dir():
         print(f"error: {emb_dir} not found", file=sys.stderr)
         return 1
 
-    by_id: dict[str, object] = {}
+    by_id: dict[str, EmbeddingRecord] = {}
     if canonical.is_file():
         for rec in read_embeddings_manifest(canonical):
             by_id[rec.article_id] = rec
@@ -50,12 +54,20 @@ def main() -> int:
         len(shards),
     )
 
-    for shard in shards:
-        shard.unlink()
-    if shards:
-        log.info("merge: cleaned up %d shard file(s)", len(shards))
+    if dry_run:
+        if shards:
+            shard_names = ", ".join(s.name for s in shards)
+            log.info("merge: would clean up %d shard file(s): %s", len(shards), shard_names)
+    else:
+        for shard in shards:
+            shard.unlink()
+        if shards:
+            log.info("merge: cleaned up %d shard file(s)", len(shards))
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    parser = argparse.ArgumentParser(description="Merge embedding manifest shards into canonical manifest.jsonl")
+    parser.add_argument("--dry-run", action="store_true", help="Show what would be done without actually deleting shard files")
+    args = parser.parse_args()
+    raise SystemExit(main(dry_run=args.dry_run))
