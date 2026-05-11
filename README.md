@@ -484,9 +484,10 @@ Defined in [`pyproject.toml`](pyproject.toml):
 
 ## Reports (Quarto)
 
-- Project config: [`_quarto.yml`](_quarto.yml) (book title, chapters under `notebooks/`, output to **`data/reports/`**).
+- Project config: [`_quarto.yml`](_quarto.yml) (book title, chapters under `notebooks/`, output to **`data/reports/`** for local runs).
 - **`forensics report`** shells out to **`quarto`**; install separately if missing.
 - **`--verify`** checks corpus hash material under `data/analysis/` (see [`src/forensics/utils/provenance.py`](src/forensics/utils/provenance.py)).
+- **Hosted report:** the bound Quarto book is embedded under [`https://abstract-data.github.io/mediaite-ghostink/report/`](https://abstract-data.github.io/mediaite-ghostink/report/) (entry [`…/report/index.html`](https://abstract-data.github.io/mediaite-ghostink/report/index.html) if the directory URL does not resolve), alongside the operator documentation site (Astro Starlight under [`website/`](website/), deployed by [`.github/workflows/deploy-docs.yml`](.github/workflows/deploy-docs.yml)). For a local docs preview, run `make docs-quarto` first so `website/public/report/` exists. This supersedes the prior Cloudflare Pages deploy of `data/reports/`.
 
 ---
 
@@ -517,14 +518,23 @@ Testing policy and coverage gates are documented in [`docs/TESTING.md`](docs/TES
 
 ## Documentation
 
+The canonical operator markdown lives under [`docs/`](docs/) and is also
+published — alongside the auto-generated CLI reference, the Python API
+reference, the ADRs, and the embedded Quarto report — at
+[`https://abstract-data.github.io/mediaite-ghostink/`](https://abstract-data.github.io/mediaite-ghostink/).
+The site is built from [`website/`](website/) and deployed by
+[`.github/workflows/deploy-docs.yml`](.github/workflows/deploy-docs.yml).
+Run `make docs-dev` for a local preview.
+
 | Document | Contents |
 |----------|----------|
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Runtime flow, modules, storage, feature and analysis methods. |
 | [`docs/TESTING.md`](docs/TESTING.md) | Test layout, commands, coverage rules. |
-| [`docs/RUNBOOK.md`](docs/RUNBOOK.md) | Operational runbook (survey, calibration, export, baseline, preflight). |
+| [`docs/RUNBOOK.md`](docs/RUNBOOK.md) | Operational runbook (survey, calibration, export, baseline, preflight, docs site). |
 | [`docs/DEPLOYMENTS.md`](docs/DEPLOYMENTS.md) | Deployment notes. |
 | [`docs/GUARDRAILS.md`](docs/GUARDRAILS.md) | Recurring failure patterns and mitigations. |
 | [`docs/adr/`](docs/adr/) | Architecture decision records. |
+| [`website/`](website/) | Astro Starlight documentation site (Bun + `@abstractdata/starlight-theme`). |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Pull requests, checks, and handoff expectations. |
 | [`SECURITY.md`](SECURITY.md) | How to report security issues responsibly. |
 | [`LICENSE`](LICENSE) | MIT license (Abstract Data LLC). |

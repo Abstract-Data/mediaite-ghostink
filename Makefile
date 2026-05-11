@@ -1,7 +1,8 @@
 # Peer reviewers use `make peer-setup` (sync dev+tui, validate, then `forensics peer-setup` hints).
 .PHONY: help install install-reviewer install-baseline install-probability install-all-extras \
 	peer-verify peer-verify-network peer-setup peer-hints lint format test coverage clean \
-	pipeline scrape extract analyze report quarto-build deploy clean-generated all
+	pipeline scrape extract analyze report quarto-build deploy clean-generated all \
+	docs-versions docs-cli docs-python docs-quarto docs-dev docs-build docs-clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -82,6 +83,36 @@ clean-generated: ## Remove extracted features, embeddings, analysis JSON, report
 	rm -rf data/embeddings/*.npy
 	rm -rf data/analysis/*.json
 	rm -rf data/reports/*
+
+# Documentation site (Astro Starlight under website/)
+
+docs-versions: ## Resolve release tags into the autodoc configs (CI does this automatically)
+	cd website && bun run sync-versions
+
+docs-cli: docs-versions ## Regenerate Typer CLI reference (per-version via worktrees when tags exist)
+	@command -v uv >/dev/null 2>&1 || { echo "uv not on PATH"; exit 1; }
+	cd website && bun run docs:cli
+
+docs-python: docs-versions ## Regenerate Python API reference via pydoc-markdown (per-version via worktrees when tags exist)
+	@command -v pydoc-markdown >/dev/null 2>&1 || { \
+	  echo "pydoc-markdown not on PATH. Install with: pipx install pydoc-markdown"; \
+	  exit 1; \
+	}
+	cd website && bun run docs:python
+
+docs-quarto: ## Render the Quarto book into website/public/report (evergreen — always main)
+	quarto render --output-dir website/public/report
+
+docs-dev: docs-cli ## Run the docs site locally (http://localhost:4321/mediaite-ghostink/)
+	cd website && bun install && bun run dev
+
+docs-build: docs-cli docs-quarto ## Build the docs site for deploy (versioned CLI + Python API + evergreen report)
+	cd website && bun install --frozen-lockfile && bun run docs:python && bun run build
+
+docs-clean: ## Remove generated docs content (synced, ADRs, CLI, API, embedded report)
+	rm -rf website/src/content/docs/synced website/src/content/docs/adr
+	rm -rf website/src/content/docs/cli website/src/content/docs/api
+	rm -rf website/public/report website/dist website/.astro
 
 # Quality gates
 check: lint format-check test ## Run all quality checks

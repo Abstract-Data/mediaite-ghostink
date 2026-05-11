@@ -49,6 +49,197 @@ Agents: append a new block below using this template after every multi-step task
 
 > **History:** Older completion blocks live in [`docs/archive/handoff-history.md`](docs/archive/handoff-history.md). When this file grows past roughly 200 lines of log content, archive older blocks there in the same change set.
 
+### Hybrid documentation versioning (Option C) — Python API + CLI per release tag
+
+**Status:** Complete
+**Date:** 2026-05-10
+**Agent/Session:** Cursor agent (Claude Opus 4.7)
+
+#### What was done
+
+Implemented hybrid documentation versioning: Python API + Typer CLI reference are now built per-release-tag and surfaced through Starlight's `<VersionPicker>`, while operator docs, ADRs, getting-started, the landing page, and the embedded Quarto report remain evergreen (always reflect `main`). The default release is also aliased at the un-versioned URL so inbound links (`/api/forensics_pipeline/`, `/cli/forensics-preflight/`) keep resolving without redirects.
+
+- **New: `website/scripts/sync-versions.mjs`** — single source of truth for which tags ship. Reads `.release-please-manifest.json` for the current version, cross-references `git tag --list 'v*.*.*'`, sorts by semver, keeps the most recent 5 (override via `KEEP_VERSIONS=N` or `--keep N`), marks the manifest version as `default`, and writes `versions[]` into both autodoc configs. Falls back to single-version (main) mode and removes stale `versions[]` if no tags exist (bootstrap-safe).
+- **New: `website/scripts/build-cli-docs.mjs`** — per-version CLI orchestrator that mirrors `build-python-docs.mjs`. For each tag: `git worktree add --detach` → `uv sync --frozen --extra dev` → `uv run --directory <wt> python <REPO_ROOT>/scripts/generate_cli_docs.py --out <outDir>/<safeTag> --version <tag> [--version-default]`. Worktrees cleaned on exit/SIGINT. The default version is re-rendered with `--version-segment ""` and copied (top-level `.md` only — never wipes subdirs) into the un-versioned output dir to alias the default URL.
+- **New: `website/scripts/cli-autodoc.json`** — mirror of `python-autodoc.json` for the CLI orchestrator. Specifies `outputDir`, `urlBasePrefix`, `repoUrl`, `repoBranch`, `generatorScript`, and `uvExtras: ["dev"]`. `versions[]` populated dynamically by `sync-versions.mjs`.
+- **Modified: `scripts/generate_cli_docs.py`** — added `--version`, `--version-label`, `--version-default`, and `--version-segment` flags. Writes `version:`, `versionLabel:`, `versionDefault: true` frontmatter and `sidebar.hidden: true` on versioned-subdir pages (default version's un-versioned alias stays sidebar-visible). Rewrites cross-page links (subcommand tables, `cli/index.md`) to honor `version_segment`, and points `editUrl` at the version tag rather than `main` so "Edit this page" goes to the released code. New `safe_tag()` helper mirrors `safeTag()` from the JS orchestrator. Backward compatible: no `--version` flag → unchanged behavior.
+- **Modified: `website/scripts/build-python-docs.mjs`** — added `sidebar.hidden: true` to versioned-subdir page frontmatter (without it the sidebar would show every module N+1 times). Fixed the "Older version" banner link target: now correctly prepends `cfg.urlBasePrefix` and points at the *un-versioned* default-aliased URL (`/mediaite-ghostink/api/forensics_pipeline/`) instead of the versioned subdir, satisfying `starlight-links-validator` and giving readers the latest canonical page.
+- **Modified: `website/package.json`** — added `sync-versions` and `docs:cli` scripts. Existing `dev` and `build` unchanged so `bun run dev` keeps Just Working in single-version repos.
+- **New: `website/src/components/SocialIcons.astro`** — top-level project override of Starlight's `SocialIcons` slot that renders TWO `<VersionPicker>` instances (one for `/api`, one for `/cli`) plus the default theme social icons. Required because the theme's existing `SocialIcons` override ships only ONE picker bound to a single `apiBase`. Each picker is render-gated by its own URL prefix so at most one is visible on any given page.
+- **Modified: `website/astro.config.mjs`** — wired the new `SocialIcons` override at the top level (`components: { SocialIcons: './src/components/SocialIcons.astro' }`) so it takes precedence over the theme's plugin-level override.
+- **Modified: `Makefile`** — added `docs-versions` phony target (`bun run sync-versions`); `docs-cli` and `docs-python` now depend on `docs-versions` and shell out to the new orchestrators; `docs-quarto` description updated to note evergreen status; `docs-build` description updated to note versioned CLI + Python API + evergreen report.
+- **Modified: `.github/workflows/deploy-docs.yml`** — added `fetch-depth: 0` to the checkout step (REQUIRED — shallow clones can't materialize tag commits for `git worktree`), inserted `bun run sync-versions` after `bun install`, replaced the single CLI generator step with `bun run docs:cli` (which now orchestrates per-tag worktrees), and extended the smoke test to verify all evergreen paths, all default-aliased paths, AND per-version subdir paths (resolves current `safeTag` from the release-please manifest so the assertion tracks releases without manual edits).
+- **Modified: `docs/RUNBOOK.md`** — expanded the "CI / hosting cutover" section to 11 explicit build steps including the worktree-based versioning machinery, plus a new "Versioned documentation (Option C)" subsection covering how versions are resolved, how per-version pages get built, the frontmatter contract (`version:`, `versionLabel:`, `versionDefault:`, `sidebar.hidden:`), and a diagnosis quick-reference table for the common failure modes.
+
+#### Files modified
+
+- `website/scripts/sync-versions.mjs` *(new)*
+- `website/scripts/build-cli-docs.mjs` *(new)*
+- `website/scripts/cli-autodoc.json` *(new)*
+- `website/src/components/SocialIcons.astro` *(new)*
+- `scripts/generate_cli_docs.py`
+- `website/scripts/build-python-docs.mjs`
+- `website/package.json`
+- `website/astro.config.mjs`
+- `Makefile`
+- `.github/workflows/deploy-docs.yml`
+- `docs/RUNBOOK.md`
+
+#### Verification evidence
+
+```text
+$ make docs-clean && make docs-build
+... (157 page(s) built in 5.94s) ...
+03:46:46 ✓ Completed.
+03:46:46 [@astrojs/check] Getting diagnostics for Astro files in /Users/.../website...
+Result (157 files):
+- 0 errors
+- 0 warnings
+- 0 hints
+03:46:54 [check] All internal links are valid.    ← starlight-links-validator
+03:46:54 [build] Complete!
+
+# Smoke test (mirrors deploy-docs.yml exactly)
+$ CURRENT_SAFE_TAG=$(node -e 'const m=require("../.release-please-manifest.json"); process.stdout.write(m["."].replace(/[^a-zA-Z0-9_-]/g,"-"));')
+$ echo "default tag = $CURRENT_SAFE_TAG"
+default tag = 0-1-2
+$ for p in dist/index.html dist/getting-started/index.html \
+         dist/cli/index.html dist/cli/forensics/index.html \
+         dist/cli/forensics-preflight/index.html \
+         dist/synced/architecture/index.html dist/synced/runbook/index.html \
+         dist/adr/index.html dist/api/forensics/index.html \
+         dist/api/forensics_pipeline/index.html dist/report/index.html \
+         dist/sitemap-index.xml \
+         "dist/cli/${CURRENT_SAFE_TAG}" \
+         "dist/cli/${CURRENT_SAFE_TAG}/forensics-preflight/index.html" \
+         "dist/api/${CURRENT_SAFE_TAG}" \
+         "dist/api/${CURRENT_SAFE_TAG}/forensics_pipeline/index.html"; do
+    [ -e "$p" ] && echo "OK $p" || echo "MISS $p"
+done
+... (all 16 paths OK) ...
+missing = 0
+
+# Sample versioned page frontmatter
+$ head -10 website/src/content/docs/api/0-1-2/forensics_pipeline.md
+---
+title: forensics.pipeline
+description: "End-to-end pipeline orchestration (scrape → extract → analyze → report)."
+version: "v0.1.2"
+versionLabel: "0.1.2"
+versionDefault: true
+sidebar:
+  hidden: true
+---
+
+# Lint
+$ uv run ruff check scripts/generate_cli_docs.py && uv run ruff format --check scripts/generate_cli_docs.py
+All checks passed!
+1 file already formatted
+```
+
+`bun run sync-versions` resolved 3 tags (`v0.1.2` default, `v0.1.1`, `v0.1.0`). Total `make docs-build` wall time ~6 min on a warm `uv` cache (per-tag `uv sync --frozen` dominates; subsequent runs are faster).
+
+#### Decisions made
+
+- **Default version aliased at un-versioned URL, not redirected.** Re-rendering the default version with `--version-segment ""` (CLI) / a second `version: null` build (API) into the bare output dir keeps the URL shape stable for inbound links. The alternative — a redirect from `/api/<page>/` to `/api/<safeTag>/<page>/` — would have polluted analytics and broken `starlight-links-validator`'s pages set.
+- **Keep last 5 versions by default.** Configurable via `KEEP_VERSIONS=N` or `--keep N`. Per-tag worktree + `uv sync` is the slowest part of the build; 5 is the point where wall time stays under 10 min on a warm cache while still covering enough history to be useful.
+- **Tag-list as source of truth, manifest only for default selection.** If `release-please-manifest.json` declares a version that isn't tagged locally yet (common in CI right after a release-please commit lands but before tag fetch), the orchestrator falls back to the newest tag and logs a warning instead of failing.
+- **One orchestrator per docs surface, not a shared generic.** The Python and CLI generators have different shapes (`pydoc-markdown` vs. a custom Typer walker), different per-tag dependency requirements, and different default-alias rules. A shared orchestrator would have needed enough switches that it'd be harder to read than two near-identical scripts.
+- **Versioned pages are `sidebar.hidden: true`, reachable only via the picker.** Otherwise the sidebar shows every module/command N+1 times (once per version + the default alias). The default alias remains sidebar-visible — it's the canonical "latest" entry.
+- **Failed `uv sync --frozen` for old tags downgrades to a warning, not a hard fail.** Older lockfiles can resolve to wheels yanked from PyPI; in that case the orchestrator logs and skips, so a single dead historical version doesn't tank the whole build. The default version is always in the kept window so the latest never has this risk.
+
+#### Unresolved questions
+
+- **Should we surface a banner on aliased default pages saying "you're viewing v0.1.2 / latest"?** Currently the alias copies omit version frontmatter entirely (so they don't trip the "stale version" banner). A future enhancement could re-add a soft "viewing latest (v0.1.2)" banner to set expectations, but that's a UX call, not a correctness gap.
+- **Quarto report versioning is deliberately out of scope.** It's evergreen by design — the investigation report describes a state of work, not a software release. If we later need pinned-historical reports, the manifest-driven pattern here would extend naturally with `--out website/public/report/<safeTag>` plus a banner.
+
+#### Risks & next steps
+
+- **Risk: CI worktree-add fails on first run.** Mitigation: `fetch-depth: 0` is now pinned in the deploy workflow. Anyone copying that workflow to another repo MUST copy that line — shallow clones break `git worktree add <tmp> <tag>` silently from the user's perspective (the orchestrator catches it and logs).
+- **Risk: a future `release-please` config change that drops `include-v-in-tag: true`.** The orchestrator's `git tag --list 'v*.*.*'` filter is the contract; if tags become `0.1.3` instead of `v0.1.3`, sync-versions will silently see zero matches and fall back to single-version mode. Belt-and-braces: pin `include-v-in-tag: true` in `release-please-config.json` and don't change it.
+- **Next step: wait for the next release tag to land, watch one CI run end-to-end** to confirm the per-tag worktree path resolves on GitHub Actions runners (different `uv` cache state, different `git` config). If it works, no follow-up. If `uv sync --frozen` fails inside a worktree because of a wheel-cache layout, the fix is `uv sync --frozen --refresh` inside the orchestrator — but don't preemptively make that change; it doubles per-tag build time.
+- **Operational note:** to widen the kept-versions window from 5 to N, set `KEEP_VERSIONS=N` in the workflow env, or add `--keep N` to `bun run sync-versions` in `docs-versions` target. No code changes needed.
+
+---
+
+### Docs CI/CD hardening — Python API in pipeline + smoke tests
+
+**Status:** Complete
+**Date:** 2026-05-10
+**Agent/Session:** Cursor agent (Claude Opus 4.7)
+
+#### What was done
+
+- **`.github/workflows/deploy-docs.yml`** rewritten to match `make docs-build` end-to-end:
+  - Added `pipx install pydoc-markdown` step so the Python API reference is generated in CI (previously the workflow skipped `bun run docs:python`, which left `/api/*` empty on production).
+  - Added explicit `Generate Python API reference` step (`bun run docs:python`) between `bun install --frozen-lockfile` and `bun run build`, matching the local Makefile order.
+  - Added a post-build smoke-test step that hard-asserts the canonical entry points exist in `website/dist/` (`/`, `/getting-started/`, `/cli/`, `/cli/forensics/`, `/cli/forensics-preflight/`, `/synced/architecture/`, `/synced/runbook/`, `/adr/`, `/api/forensics/`, `/api/forensics_pipeline/`, `/report/`, `sitemap-index.xml`). A regression in any generator (sync-docs, CLI generator, pydoc-markdown, Quarto) now hard-fails the workflow before Pages sees it.
+  - Aligned with the repo's existing CI pattern: `astral-sh/setup-uv@v4` + `enable-cache: true` + `uv sync --frozen --extra dev` (was `@v5` without freeze).
+  - Broadened path filters: `src/forensics/**` (not just `cli/`), plus `pyproject.toml` and `uv.lock` (so dependency changes that affect generated reference docs re-deploy).
+  - Allowed `workflow_dispatch` from `main` to also publish (previously dispatch built but never deployed).
+  - Split concurrency: build job uses `deploy-docs-${{ github.ref }}` with `cancel-in-progress` only for PRs; deploy job pins the shared GitHub-recommended `pages` group with `cancel-in-progress: false` so a live deploy is never interrupted mid-flight.
+- **`website/scripts/python-autodoc.json`**: fixed `searchPath` from `../../src` → `../src` (the script resolves relative to `website/`, so the prior value pointed at `/Users/.../PyCharmProjects/src`, outside the repo). Added `urlBasePrefix: "/mediaite-ghostink"` so the build-python-docs script can emit base-prefixed Starlight URLs.
+- **`website/scripts/build-python-docs.mjs`**: the auto-generated `## Submodules` section on package landing pages previously emitted relative `./<safeName>.md` links, which `starlight-links-validator` rejects (default `errorOnRelativeLinks: true`). Patched to emit absolute base-prefixed Starlight URLs (`/mediaite-ghostink/api/<safeName>/`), honoring `cfg.urlBasePrefix` and version directories when versions are configured.
+- **`Makefile`**: `docs-python` now precheck-fails with an actionable message (`Install with: pipx install pydoc-markdown`) when `pydoc-markdown` is not on `PATH`, matching the CI dependency exactly.
+- **`docs/RUNBOOK.md`**: documented the 9-step CI build pipeline (uv sync → pydoc-markdown → Quarto setup → Bun setup → CLI gen → Quarto render → bun install → Python API → astro build + smoke-test), the broadened path triggers, and the concurrency split.
+
+#### Files modified
+
+- `.github/workflows/deploy-docs.yml`
+- `Makefile`
+- `website/scripts/build-python-docs.mjs`
+- `website/scripts/python-autodoc.json`
+- `docs/RUNBOOK.md`
+
+#### Verification
+
+```text
+# Cold rebuild mirroring CI exactly
+make docs-clean && make docs-build
+# → [build] 58 page(s) built in 8.08s
+# → ✓ All internal links are valid.
+
+# Workflow smoke-test block (12/12 OK)
+for f in website/dist/index.html website/dist/getting-started/index.html \
+         website/dist/cli/index.html website/dist/cli/forensics/index.html \
+         website/dist/cli/forensics-preflight/index.html \
+         website/dist/synced/architecture/index.html \
+         website/dist/synced/runbook/index.html website/dist/adr/index.html \
+         website/dist/api/forensics/index.html \
+         website/dist/api/forensics_pipeline/index.html \
+         website/dist/report/index.html website/dist/sitemap-index.xml; do
+  test -f "$f" && echo "OK $f" || echo "MISS $f"
+done
+# → All 12 entries OK
+
+# Python lint/format on the only Python file in the CI generator path
+uv run ruff check scripts/generate_cli_docs.py    # All checks passed!
+uv run ruff format --check scripts/generate_cli_docs.py   # 1 file already formatted
+
+# Workflow YAML parses
+uv run python -c "import yaml; yaml.safe_load(open('.github/workflows/deploy-docs.yml'))"
+# → YAML OK
+```
+
+#### Decisions made
+
+- **Install `pydoc-markdown` via `pipx`** rather than `uv pip install` because (a) it keeps the docs toolchain out of the project venv, (b) `pipx` is preinstalled on `ubuntu-latest`, and (c) it matches the upstream Abstract Data docs theme's recommended install path (see the script's own banner).
+- **Embed an explicit smoke-test** (12 path checks) rather than relying solely on `astro build` exit code. The Astro build can succeed even if a generator silently produced zero pages (e.g. pydoc-markdown returns 1 per module but the script logs and continues). The smoke-test catches that class of regression deterministically.
+- **Broaden trigger paths to `src/forensics/**`** (not just `cli/`) because pydoc-markdown introspects every documented module; changing any function signature under `src/forensics/` may need a fresh deploy to keep the API reference accurate.
+- **Did not refactor** the rest of the repo's CI; quality/test workflows (`ci.yml`, `ci-tests.yml`, `ci-quality.yml`, `ci-report.yml`, `agents-governance.yml`, `release-please.yml`) are unrelated to docs deployment and already ignore docs-only paths via `paths-ignore: ['**.md', 'docs/**', 'LICENSE']`. Leaving them untouched per scope.
+
+#### Risks & next steps
+
+- **Maintainer follow-ups for the Cloudflare → GitHub Pages migration** (carried over from the prior docs-site handoff and still pending):
+  1. `Settings → Pages → Source: GitHub Actions` on the GitHub repo.
+  2. Watch the first `Deploy Docs` run on `main`, confirm the site renders at `https://abstract-data.github.io/mediaite-ghostink/`.
+  3. Retire the Cloudflare `ai-writing-forensics` Pages project and remove `CF_API_TOKEN` / `CF_ACCOUNT_ID` repo secrets.
+  4. Retire the legacy `make deploy` target (still references `wrangler pages deploy`) in a follow-up change once the CF project is gone.
+- **`bun.lock` is committed** (`workspaces.[\"\"].name = \"website\"`, not the renamed `mediaite-ghostink-website`). Bun's `--frozen-lockfile` checks dependency tree integrity, not the workspace name, so this is fine — but if you ever regenerate the lockfile cleanly the workspace name will update and that should be a non-issue.
+- **First production deploy will be the first time pydoc-markdown runs against the live `src/forensics/` tree on a GitHub runner**. If a module raises at import (e.g. spaCy model not available), the CLI step would still pass but the Python API step would fail loudly. The smoke-test would then catch any drop in expected pages.
+
+---
+
 ### Run 13 follow-up — inline review (parser, refresh, analyze CLI, settings, config audit)
 
 **Status:** Complete  
@@ -393,3 +584,77 @@ uv run pytest tests/unit/test_cli_peer_setup.py tests/unit/test_cli_commands_dum
 #### Risks and next steps
 
 - `make peer-setup` runs `forensics validate`, which fails if `config.toml` still has placeholder authors or other preflight hard-fails; peers should fix config before the meta-target or run `make install-reviewer` + `make peer-hints` separately.
+
+---
+
+### Documentation site (Astro Starlight + Bun) — `website/` integration
+
+**Status:** Complete
+**Date:** 2026-05-10
+**Agent/Session:** Cursor agent
+
+#### What was done
+
+- **Scaffold:** Ran `bun create @abstractdata/docs website` at the repo root. Pulled in the Abstract Data Starlight theme (`@abstractdata/starlight-theme@0.3.5`), Bun-first `package.json`, pydoc-markdown autodoc orchestrator, and the bundled `abstract-data-setup` skill. Cleaned the scaffold's embedded `.git`, `.DS_Store`, and tmp `.fuse_hidden*` files. `bunx abstract-data-install-skills` ran cleanly (all 11 skill markers detected as already present — kept existing).
+- **Astro config:** Set `site: 'https://abstract-data.github.io'`, `base: '/mediaite-ghostink'`, `trailingSlash: 'always'`; rewrote sidebar to expose Get Started / Operator docs (synced) / CLI reference / Python API / Decision records / Forensic report; configured `editLink`, `lastUpdated`, and `starlightLinksValidator` with `/report/**` excluded.
+- **Sync pipeline:** New [`website/scripts/sync-docs.mjs`](website/scripts/sync-docs.mjs) copies allow-listed `docs/*.md` (ARCHITECTURE, RUNBOOK, TESTING, GUARDRAILS, DEPLOYMENTS, EXIT_CODES) into `src/content/docs/synced/` and all `docs/adr/*.md` into `src/content/docs/adr/`, injecting YAML frontmatter and rewriting internal links to base-prefixed Starlight URLs (off-list paths fall back to absolute GitHub URLs on `main`). Emits a synthesized `adr/index.md` so the sidebar landing resolves.
+- **CLI reference:** New [`scripts/generate_cli_docs.py`](scripts/generate_cli_docs.py) walks `forensics.cli:app` via `typer.main.get_command` and emits one Markdown page per command/subcommand (27 pages) plus an index, all with `editUrl` frontmatter pointing back to `src/forensics/cli/__init__.py`. Slugs are full-name dashed (`forensics-analyze-section-profile`) so the subcommand-table links match the on-disk filenames.
+- **Python API:** Configured [`website/scripts/python-autodoc.json`](website/scripts/python-autodoc.json) to target `forensics`, `forensics.config/models/scraper/features/analysis/reporting/storage/pipeline` (uses the scaffold's pydoc-markdown orchestrator). Output lands at `src/content/docs/api/` (gitignored); regenerated locally via `make docs-python` once `pipx install pydoc-markdown` is on `PATH`.
+- **MDX pages:** Hand-authored [`website/src/content/docs/index.mdx`](website/src/content/docs/index.mdx) (`template: splash`, `<CardGrid>`/`<LinkCard>`/`<Aside>`) and [`website/src/content/docs/getting-started.mdx`](website/src/content/docs/getting-started.mdx) (`<Steps>`, `<Aside>`, `<FileTree>`, `<Tabs>` per acceptance criteria). Deleted the scaffold's placeholder `quickstart.md`.
+- **Makefile:** New targets `docs-cli`, `docs-python`, `docs-quarto`, `docs-dev`, `docs-build`, `docs-clean` chained off the new generators and `bun run` scripts (`website` is Bun-first).
+- **CI cutover:** New [`.github/workflows/deploy-docs.yml`](.github/workflows/deploy-docs.yml) (uv + Quarto + Bun, builds CLI ref + Quarto report + Astro site, uploads `website/dist` as a Pages artifact, deploys on `main` push). Removed the previous Cloudflare-only deploy at `.github/workflows/deploy.yml` plus the dead `website/.github/workflows/{deploy,deploy-cloudflare,deploy-vercel}.yml` files that the scaffold dropped inside `website/`.
+- **Repo docs hygiene:** Updated [`docs/RUNBOOK.md`](docs/RUNBOOK.md) with a "Documentation site (Astro Starlight)" section (commands, hosted URL, maintainer checklist), appended a build-artifacts Sign to [`docs/GUARDRAILS.md`](docs/GUARDRAILS.md), refreshed the README's `## Reports (Quarto)` and `## Documentation` sections to point at `https://abstract-data.github.io/mediaite-ghostink/`.
+
+#### Files modified / added
+
+- `website/**` — full new scaffold (theme, Bun lockfile, `astro.config.mjs`, `package.json`, `scripts/`, `src/`, `.gitignore`, skills, copilot instructions); generated output dirs gitignored.
+- `scripts/generate_cli_docs.py` (new)
+- `.github/workflows/deploy-docs.yml` (new); removed `.github/workflows/deploy.yml`
+- `Makefile` (new `docs-*` targets)
+- `docs/RUNBOOK.md`, `docs/GUARDRAILS.md`, `README.md` (docs site section + Sign + Reports/Docs links)
+
+#### Verification evidence
+
+```
+# 1. Scaffold + bun install (Bun 1.3.3) — already ran during this session.
+
+# 2. sync-docs idempotent
+cd website && node scripts/sync-docs.mjs
+# ✓ synced 6 operator docs + 11 ADRs
+
+# 3. CLI generator deterministic
+cd .. && uv run python scripts/generate_cli_docs.py
+# generate_cli_docs: wrote 27 page(s) to website/src/content/docs/cli
+
+# 4. Full production build
+cd website && bun run build
+# → 49 pages built; "✓ All internal links are valid."; pagefind index OK; sitemap-index.xml created.
+
+# 5. Quarto + CI invariants
+test ! -f .github/workflows/deploy.yml && echo OK
+# OK
+```
+
+#### Decisions made
+
+- **Bun (not npm) as the canonical package manager** because the `@abstractdata/docs` template is Bun-first (`bun.lock` committed, scripts assume `bun run`, theme prefers it). `deploy-docs.yml` uses `oven-sh/setup-bun@v2` and `bun install --frozen-lockfile`.
+- **Generators produce base-prefixed internal links** (`/mediaite-ghostink/...`). `starlight-links-validator@0.16` joins the configured `base` to the validator's page lookup, so unprefixed `/cli/...` URLs reported as invalid. Hand-authored MDX uses the same convention.
+- **`docs/cli/` is skipped at the repo root**; the CLI generator writes directly into `website/src/content/docs/cli/`. The repo's canonical CLI source remains `src/forensics/cli/`, and the generated reference is reproducible from it.
+- **ADR/sync separation:** ADRs land in `src/content/docs/adr/` (not under `synced/`) so the "Decision records" sidebar entry doesn't duplicate them inside "Operator docs."
+- **Quarto sources untouched:** `_quarto.yml`, `index.qmd`, `notebooks/`, `src/forensics/analysis/`, and `config.toml` were not modified, per the spec's scope boundary.
+
+#### Maintainer checklist (Cloudflare → GitHub Pages cutover)
+
+1. **Enable GitHub Pages** in repo settings: `Settings → Pages → Source: GitHub Actions`.
+2. **Run** the `Deploy Docs` workflow once (push to `main` or use `workflow_dispatch`) and confirm the deploy succeeds at `https://abstract-data.github.io/mediaite-ghostink/`.
+3. **Retire** the Cloudflare Pages project `ai-writing-forensics` in the Cloudflare dashboard.
+4. **Remove** the `CF_API_TOKEN` and `CF_ACCOUNT_ID` repo secrets under `Settings → Secrets and variables → Actions`.
+5. **Retire** the legacy `make deploy` target (still calls `wrangler pages deploy`) in a follow-up change once the CF project is gone.
+6. **Optional:** `pipx install pydoc-markdown` on contributor laptops so `make docs-python` populates the Python API section locally.
+
+#### Risks & next steps
+
+- The `@abstractdata/starlight-theme` `<VersionPicker>` logs a "no `version:` frontmatter" warning per page during build because we don't ship versioned API docs. Benign — warnings only, no build failure. Can be silenced later by adding a `versions[]` block to `python-autodoc.json` if/when we tag releases.
+- `starlight-links-validator` is base-aware but requires hand-written internal links to include the base prefix. Future contributors should follow the convention or use Starlight's slug-based linking; the existing generators encode this in one place each.
+- Quarto rendering is wired into the deploy workflow but skipped in local `make docs-dev`. Run `make docs-quarto` (or `make docs-build`) when iterating on the report.
+- GitNexus impact analysis was not invoked; the changes are additive (new scripts, new workflow, gitignored generated content). Pre-merge, run `gitnexus_detect_changes` to confirm the scope.

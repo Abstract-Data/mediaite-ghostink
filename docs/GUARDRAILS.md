@@ -172,6 +172,12 @@ Each Sign has:
 - Reason: A 12-author sequential `--author` chain consumed ~4 hours of CPU and would have left only `zachary-leeman`'s rows in the manifest, dooming the downstream `forensics analyze` step.
 - Provenance: Agent-learned — 2026-04-28 Path Bʺ remediation; patch landed in `pipeline.py:518–527` plus new `scripts/merge_embedding_manifest_shards.py`.
 
+**Sign: Documentation site build artifacts must never be committed**
+- Trigger: A diff stages files under `website/dist/`, `website/.astro/`, `website/public/report/`, `website/src/content/docs/synced/`, `website/src/content/docs/adr/`, `website/src/content/docs/cli/`, or `website/src/content/docs/api/`. These directories are populated at build time by [`scripts/sync-docs.mjs`](../website/scripts/sync-docs.mjs), [`scripts/generate_cli_docs.py`](../scripts/generate_cli_docs.py), `bun run docs:python` (pydoc-markdown), and `quarto render`.
+- Instruction: Keep every path above in [`website/.gitignore`](../website/.gitignore). Local rebuilds may regenerate these directories without surfacing in `git status` — that is intentional. Canonical operator markdown lives under `docs/`; canonical CLI behavior lives in `src/forensics/cli/`; the Quarto report lives under `notebooks/` + `_quarto.yml`. Edit the canonical source, then rebuild — never edit the synced copy.
+- Reason: Synced / generated docs duplicate canonical sources. Committing them turns the docs build into a divergent fork (silent drift between `docs/RUNBOOK.md` and `website/src/content/docs/synced/runbook.md`) and bloats clones.
+- Provenance: Agent-learned — 2026-05-10 Astro Starlight site cutover.
+
 ## Known statistical limitations
 
 - **Serial autocorrelation (M-16):** Consecutive articles by the same author

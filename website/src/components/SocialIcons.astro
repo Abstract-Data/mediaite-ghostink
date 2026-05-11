@@ -1,0 +1,29 @@
+---
+/**
+ * Project override for Starlight's <SocialIcons /> slot.
+ *
+ * The Abstract Data theme already provides a SocialIcons override that
+ * renders one <VersionPicker apiBase={config.apiBase} /> plus the version
+ * chip (see node_modules/@abstractdata/starlight-theme/.../SocialIcons.astro).
+ * That ships a SINGLE picker, but Option C (hybrid versioning) needs TWO:
+ *   - one watching `/api` pages (Python API)
+ *   - one watching `/cli` pages (Typer CLI reference)
+ *
+ * This override is wired via the top-level `components` map in
+ * `astro.config.mjs`, which Starlight resolves after plugin overrides — so
+ * it wins precedence and we render both pickers ourselves. We keep the
+ * theme's default SocialIcons behaviour (GitHub icon etc.) by importing
+ * `@astrojs/starlight/components/SocialIcons.astro` directly.
+ *
+ * Each VersionPicker is render-gated by its own URL prefix check, so on a
+ * given page at most one picker is visible — never both.
+ */
+import type { Props } from '@astrojs/starlight/props';
+import Default from '@astrojs/starlight/components/SocialIcons.astro';
+import VersionPicker from '@abstractdata/starlight-theme/components/VersionPicker.astro';
+---
+
+<VersionPicker apiBase="/api" />
+<VersionPicker apiBase="/cli" />
+
+<Default {...Astro.props} />

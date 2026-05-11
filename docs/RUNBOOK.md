@@ -691,3 +691,189 @@ Import surface remains `from forensics.analysis.orchestrator import ...`.
 - **Parallel analyze promotion (I-06):** After a successful `--parallel-authors` promotion, `data/analysis/parallel/<run>/parallel_promotion_complete.json` records completion metadata for debugging “partial promote” issues.
 - **Disk preflight (I-05):** Helpers live in `forensics.utils.disk` (`free_disk_bytes`, `ensure_min_free_disk_bytes`); wire into preflight/CLI where you need a hard stop before large writes.
 - **Config fingerprint (I-01):** Scraper-affecting fields and analysis seeds (LDA/UMAP/bootstrap, etc.) participate in `compute_model_config_hash` / `scraper_signal_digest`; re-lock preregistration if you change those and run confirmatory analysis.
+
+## Documentation site (Astro Starlight)
+
+The operator + API + ADR documentation lives under [`website/`](../website/)
+and ships as a single static site at
+`https://abstract-data.github.io/mediaite-ghostink/`. The embedded Quarto
+forensic report is rendered into `website/public/report/` at build time and
+served as static HTML at `/mediaite-ghostink/report/index.html` (the sidebar and
+in-site links use that path so Vite dev and static hosting agree; a bare
+`/mediaite-ghostink/report/` URL may 404 in local dev but usually resolves on
+GitHub Pages).
+
+This site **supersedes** the prior Cloudflare Pages deploy of the Quarto book
+(`.github/workflows/deploy.yml` was removed when the Starlight site landed).
+
+### Local commands
+
+```bash
+make docs-cli      # regenerate Typer CLI reference under website/src/content/docs/cli
+make docs-python   # regenerate Python API reference via pydoc-markdown (needs pydoc-markdown on PATH)
+make docs-quarto   # render the Quarto book into website/public/report
+make docs-dev      # start the local Starlight dev server (default http://localhost:4321/mediaite-ghostink/ — next free port if 4321 is taken)
+make docs-build    # full production build: CLI + Quarto + API + Astro
+make docs-clean    # remove generated content (synced, ADRs, CLI, API, embedded report)
+```
+
+`bun` is the package manager (Abstract Data docs theme convention). The
+template-provided `scripts/build-python-docs.mjs` requires `pydoc-markdown`
+on `PATH` — install with `pipx install pydoc-markdown`.
+
+### Sync pipeline
+
+- [`website/scripts/sync-docs.mjs`](../website/scripts/sync-docs.mjs) copies
+  the canonical operator markdown out of `docs/` into the Starlight content
+  collection. Allow-listed top-level files (`ARCHITECTURE.md`, `RUNBOOK.md`,
+  `TESTING.md`, `GUARDRAILS.md`, `DEPLOYMENTS.md`, `EXIT_CODES.md`) land
+  under `website/src/content/docs/synced/`; every `docs/adr/*.md` lands
+  under `website/src/content/docs/adr/`. The script injects YAML
+  frontmatter (`title`, `description`, `editUrl`) and rewrites internal
+  links to base-prefixed Starlight URLs (or to absolute GitHub URLs for
+  off-list files).
+- [`scripts/generate_cli_docs.py`](../scripts/generate_cli_docs.py) walks
+  the Typer `forensics` app and emits one page per command/subcommand.
+- All generated content is **gitignored**.
+
+### CI / hosting cutover
+
+The deploy workflow is
+[`.github/workflows/deploy-docs.yml`](../.github/workflows/deploy-docs.yml).
+It runs on every push to `main` and on PRs touching `website/`, `docs/`,
+`notebooks/`, `_quarto.yml`, `index.qmd`, `src/forensics/**`, the CLI
+docs generator, `pyproject.toml`, `uv.lock`, or the workflow itself.
+PRs run the build job only; deploys only happen on `main` pushes
+(or explicit `workflow_dispatch` from `main`).
+
+The build job mirrors `make docs-build` end-to-end:
+
+1. **Checkout with `fetch-depth: 0`** — required so the per-tag worktrees
+   (Option C versioned docs) can resolve historic release commits. Shallow
+   clones produce `worktree add` failures.
+2. `uv sync --frozen --extra dev` (with uv cache).
+3. `pipx install pydoc-markdown` so `bun run docs:python` can shell out.
+4. `quarto-actions/setup@v2` then `oven-sh/setup-bun@v2`.
+5. `bun install --frozen-lockfile` in `website/`.
+6. `bun run sync-versions` — reads `.release-please-manifest.json` plus
+   `git tag --list 'v*.*.*'`, keeps the most recent 5 by semver, marks
+   the manifest version as `default`, and writes the resolved `versions[]`
+   into `website/scripts/python-autodoc.json` and
+   `website/scripts/cli-autodoc.json`.
+7. `bun run docs:cli` — per-version CLI reference. For each
+   `versions[]` entry the orchestrator (`website/scripts/build-cli-docs.mjs`):
+   creates a `git worktree` pinned at the tag, runs `uv sync --frozen
+   --extra dev` inside it, then invokes the current main copy of
+   `scripts/generate_cli_docs.py` from that worktree's venv (`uv run
+   --directory <wt>`). The default version is also emitted at the
+   un-versioned URL (`/cli/forensics-preflight/` etc.) by re-running the
+   generator with `--version-segment ""`.
+8. `quarto render --output-dir website/public/report` (embedded report —
+   evergreen, always reflects `main`, not versioned).
+9. `bun run docs:python` — per-version Python API reference. Same
+   worktree-per-tag pattern as CLI, via `build-python-docs.mjs`.
+10. `bun run build` (`sync-docs` + `astro check` + `astro build`).
+11. A smoke-test step asserts the canonical entry points exist in
+    `website/dist/`. It resolves the current default safe-tag from the
+    manifest (`v0.1.2` → `0-1-2`) so the assertion tracks release-please
+    without manual edits, then verifies all of:
+    - Evergreen: `/`, `/getting-started/`, `/synced/architecture/`,
+      `/synced/runbook/`, `/adr/`, `/report/`, `sitemap-index.xml`.
+    - Default-version aliases: `/cli/`, `/cli/forensics/`,
+      `/cli/forensics-preflight/`, `/api/forensics/`,
+      `/api/forensics_pipeline/`.
+    - Per-version subdirs: `/cli/<safeTag>/`, `/cli/<safeTag>/forensics-preflight/`,
+      `/api/<safeTag>/`, `/api/<safeTag>/forensics_pipeline/`.
+    If any generator regresses, CI hard-fails before Pages sees anything.
+
+Concurrency: builds use `deploy-docs-${{ github.ref }}` (cancellable for
+PR ref churn); the deploy job uses the GitHub-recommended shared `pages`
+group with `cancel-in-progress: false` so a live deploy is never
+interrupted by a newer run.
+
+### Versioned documentation (Option C)
+
+The Python API and Typer CLI references are versioned per release tag,
+while operator docs, ADRs, getting-started, the landing page, and the
+embedded Quarto report stay evergreen (always reflect `main`).
+
+**How versions are resolved**
+
+[`website/scripts/sync-versions.mjs`](../website/scripts/sync-versions.mjs)
+is the single source of truth. It reads
+[`.release-please-manifest.json`](../.release-please-manifest.json) to
+discover the current package version, cross-references `git tag --list
+'v*.*.*'`, sorts by semver (descending), keeps the most recent 5, and
+writes the array into both autodoc configs. Re-running it after a new
+release-please bump is the only step needed to surface a new version in
+the docs:
+
+```bash
+make docs-versions           # or: cd website && bun run sync-versions
+make docs-versions ARGS=--dry-run   # preview without writing
+KEEP_VERSIONS=10 make docs-versions # widen the window from 5 to 10
+```
+
+The script is wired into `make docs-cli` and `make docs-python` as a
+prerequisite, so a typical local rebuild just runs `make docs-build` and
+picks up the latest manifest automatically.
+
+**How per-version pages get built**
+
+Both [`website/scripts/build-cli-docs.mjs`](../website/scripts/build-cli-docs.mjs)
+and [`website/scripts/build-python-docs.mjs`](../website/scripts/build-python-docs.mjs)
+follow the same orchestration:
+
+1. For each `versions[]` entry, `git worktree add --detach <tmp> <tag>`.
+2. `uv sync --frozen --extra dev` inside the worktree (uv's global wheel
+   cache makes subsequent syncs fast even with multiple tags).
+3. Invoke the generator from the worktree's venv (`uv run --directory <wt>`),
+   pointing at the current `main` copy of the generator script. This
+   matters because older tags don't necessarily have the `--version`
+   flag or any of the versioning machinery — using `main`'s generator
+   pointed at the tag's *importable code* gives consistent output.
+4. The default version is additionally emitted at the un-versioned URL
+   (`--version-segment ""` for CLI, `version: null` re-build for API) so
+   existing inbound links like `/api/forensics_pipeline/` keep resolving
+   to the latest release without redirects.
+5. Worktrees are removed on exit (`git worktree remove --force`) so a
+   failed build never leaves stale `.git/worktrees/*` entries.
+
+**Frontmatter contract**
+
+Each per-version page gets `version:`, `versionLabel:`,
+`versionDefault: true` (default only), and `sidebar.hidden: true` (so
+the sidebar stays clean — versioned pages are reachable only via the
+`<VersionPicker>` dropdown). The default-aliased copies at root carry
+no version frontmatter so they participate in normal Starlight
+sidebar autogeneration.
+
+`<VersionPicker>` (from `@abstractdata/starlight-theme`) auto-discovers
+the version list at build time by walking `getCollection('docs')` for
+frontmatter `version:` fields, deduping by tag, and pre-selecting the
+entry that carries `versionDefault: true`. There's no second version
+list to maintain — the manifest → `versions[]` flow is the only source.
+The override at [`website/src/components/SocialIcons.astro`](../website/src/components/SocialIcons.astro)
+renders two pickers (one for `/api`, one for `/cli`) because the theme
+ships with a single picker bound to one base URL.
+
+**Diagnosis quick reference**
+
+| Symptom | Likely cause |
+|---|---|
+| `[VersionPicker] Auto-discovery found no pages with version: frontmatter` | `bun run sync-versions` didn't run, or all generators ran in single-version mode (no `versions[]` in the configs). |
+| Sidebar shows `forensics-preflight` N times (one per version) | Generator wasn't emitting `sidebar.hidden: true` on versioned pages — re-run `make docs-cli && make docs-python`. |
+| `starlight-links-validator: invalid link to /api/<tag>/<page>/` | A generator emitted a versioned URL without the `/mediaite-ghostink/` base prefix. Common offender: cross-page link construction that forgot `cfg.urlBasePrefix`. |
+| CI: `git worktree add failed (tag not present)` | `actions/checkout@v4` ran without `fetch-depth: 0`. The deploy workflow already pins it; if you copy the workflow elsewhere, copy that too. |
+| Old tag's worktree fails `uv sync --frozen` | A pinned wheel was yanked from PyPI. The orchestrators downgrade this to a warning and skip the version; only the surviving tags ship in that build. |
+
+Maintainer follow-ups for the Cloudflare → GitHub Pages migration:
+
+1. Enable GitHub Pages in repo settings (`Settings → Pages → Source: GitHub Actions`).
+2. Confirm the first deploy succeeds at `https://abstract-data.github.io/mediaite-ghostink/`.
+3. Retire the Cloudflare Pages project `ai-writing-forensics` in the
+   Cloudflare dashboard once the Pages URL is confirmed live.
+4. Remove the `CF_API_TOKEN` and `CF_ACCOUNT_ID` repo secrets
+   (`Settings → Secrets and variables → Actions`).
+5. The old `make deploy` target (which still runs `wrangler pages deploy`)
+   can be retired in a follow-up change once the CF project is gone.

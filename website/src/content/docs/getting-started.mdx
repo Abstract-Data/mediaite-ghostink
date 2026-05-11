@@ -1,0 +1,127 @@
+---
+title: Quickstart
+description: Five-minute smoke test, prerequisites, and where pipeline outputs land on disk.
+---
+
+import { Steps, Aside, FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
+
+This page walks a new operator from a clean checkout to a passing
+preflight. It mirrors the
+[Five-minute smoke test](https://github.com/Abstract-Data/mediaite-ghostink#five-minute-smoke-test)
+section of the repo `README.md`. For deeper operational guidance, head to the
+[Runbook](/mediaite-ghostink/synced/runbook/) and the
+[CLI reference](/mediaite-ghostink/cli/).
+
+## Prerequisites
+
+- **Python 3.13** managed by [`uv`](https://github.com/astral-sh/uv)
+- **Quarto** on `PATH` (only required for `forensics report` and `forensics all`)
+- **Optional:** `pydoc-markdown` (for regenerating API pages locally) and
+  `spaCy en_core_web_md` (for the full extract stage)
+
+<Aside type="caution">
+Preflight requires real authors in [`config.toml`](https://github.com/Abstract-Data/mediaite-ghostink/blob/main/config.toml).
+The shipped example config keeps exactly one `role = "target"` (Colby Hall) and
+every other configured writer as `role = "control"`. Placeholder slugs trip
+preflight guards — never re-introduce them.
+</Aside>
+
+## Smoke test in five minutes
+
+<Steps>
+
+1. **Clone and enter the repo.**
+
+   ```bash
+   git clone git@github.com:Abstract-Data/mediaite-ghostink.git
+   cd mediaite-ghostink
+   ```
+
+2. **Bootstrap a reviewer environment.**
+
+   <Tabs>
+     <TabItem label="Make target">
+       ```bash
+       make peer-setup
+       ```
+     </TabItem>
+     <TabItem label="Raw `uv`">
+       ```bash
+       uv sync --extra dev --extra tui
+       uv run forensics validate
+       uv run forensics peer-setup
+       ```
+     </TabItem>
+   </Tabs>
+
+3. **Run preflight.**
+
+   ```bash
+   uv run forensics preflight
+   ```
+
+   This exits 0 when configuration, storage paths, optional model availability,
+   and roster guardrails all pass. Any non-zero exit code is documented in
+   [Exit codes](/mediaite-ghostink/synced/exit-codes/).
+
+4. **Browse the CLI surface.**
+
+   ```bash
+   uv run forensics --help
+   ```
+
+   Every subcommand is also documented under
+   [CLI reference](/mediaite-ghostink/cli/) on this site (auto-generated from
+   the Typer app).
+
+</Steps>
+
+## Repository layout
+
+The pipeline writes to `data/` and reads operator-facing prose from `docs/`.
+Source modules live under `src/forensics/`.
+
+<FileTree>
+- mediaite-ghostink/
+  - src/forensics/
+    - scraper/        WordPress REST + HTML
+    - features/       Lexical, structural, content, productivity
+    - analysis/       Change-points, drift, convergence
+    - reporting/      Quarto-aware report stage
+    - cli/            Typer command surface
+  - data/             Pipeline artifacts (gitignored)
+    - raw/            Scraped documents
+    - features/       Parquet feature store
+    - analysis/       Per-author analysis JSON
+    - reports/        Optional local Quarto output
+  - docs/             Canonical operator prose (synced into this site)
+    - adr/            Architecture decision records
+    - ARCHITECTURE.md, RUNBOOK.md, TESTING.md, GUARDRAILS.md, …
+  - notebooks/        Quarto chapters for the bound report
+  - website/          This documentation site
+</FileTree>
+
+## What ships at `/report/`
+
+<Aside type="note">
+The Quarto-rendered forensic report is embedded under
+[/report/index.html](/mediaite-ghostink/report/index.html) on this site. It is
+built by `quarto render --output-dir website/public/report`
+inside CI and copied into the deployed dist tree alongside the Starlight site.
+The report's source notebooks live in
+[`notebooks/`](https://github.com/Abstract-Data/mediaite-ghostink/tree/main/notebooks)
+and are read-only for the documentation pipeline.
+</Aside>
+
+## Next steps
+
+- Read the [Architecture overview](/mediaite-ghostink/synced/architecture/)
+  for stage contracts and data model definitions.
+- Skim the [Guardrails](/mediaite-ghostink/synced/guardrails/) to see the
+  Signs (failure patterns) maintainers and agents should respect.
+- The [Runbook](/mediaite-ghostink/synced/runbook/) collects every
+  operational quick-reference command, environment knob, and recovery
+  procedure.
+- Each architectural decision is captured under
+  [Decision records](/mediaite-ghostink/adr/) — start with ADR-001 for the
+  hybrid methodology rationale.

@@ -1,0 +1,69 @@
+---
+title: mediaite-ghostink
+description: Hybrid forensic pipeline investigating AI writing adoption at Mediaite.com.
+template: splash
+hero:
+  tagline: Deterministic scrape → extract → analyze → report — combining statistical stylometry, embedding drift, and optional probability and AI-baseline tracks.
+  actions:
+    - text: Get started
+      link: /mediaite-ghostink/getting-started/
+      icon: right-arrow
+      variant: primary
+    - text: View on GitHub
+      link: https://github.com/Abstract-Data/mediaite-ghostink
+      icon: external
+      variant: secondary
+---
+
+import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
+
+## What this is
+
+A deterministic four-stage forensic pipeline over a WordPress newsroom corpus.
+It produces statistical and documentary signals — change-points in stylometric
+features, embedding drift, convergence to an "AI baseline" — that reviewers can
+inspect, reproduce, and audit. The outputs are **signals, not legal findings or
+definitive attribution of authorship or tool use**.
+
+<CardGrid>
+  <LinkCard
+    title="Architecture"
+    description="Pipeline design, stage contracts, storage architecture, and data models."
+    href="/mediaite-ghostink/synced/architecture/"
+  />
+  <LinkCard
+    title="Runbook"
+    description="Operational quick reference, debug commands, and environment setup."
+    href="/mediaite-ghostink/synced/runbook/"
+  />
+  <LinkCard
+    title="CLI reference"
+    description="Auto-generated reference for every `forensics` command and subcommand."
+    href="/mediaite-ghostink/cli/"
+  />
+  <LinkCard
+    title="Decision records"
+    description="Architecture decision records covering methodology, storage, and governance."
+    href="/mediaite-ghostink/adr/"
+  />
+</CardGrid>
+
+## Forensic report
+
+:::note[Bound report]
+The full Quarto-rendered forensic report ships at
+[/report/index.html](/mediaite-ghostink/report/index.html) on this site (entry
+point for the Quarto book under `public/report/`). It contains the evidence,
+statistical results, and conclusions for the
+Mediaite.com investigation. Source notebooks live under
+[`notebooks/`](https://github.com/Abstract-Data/mediaite-ghostink/tree/main/notebooks)
+and are governed by [`_quarto.yml`](https://github.com/Abstract-Data/mediaite-ghostink/blob/main/_quarto.yml).
+:::
+
+## Responsible use
+
+This project quantifies stylistic and structural shifts in published text. It
+does **not** identify the author of a piece, prove the use of a specific tool,
+or render a legal verdict. Reviewers should pair every reported signal with
+domain context, editorial records, and corroborating evidence before drawing
+conclusions.

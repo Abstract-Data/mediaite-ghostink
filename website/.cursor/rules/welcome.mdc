@@ -1,0 +1,29 @@
+---
+description: "Welcome handshake for Abstract Data Documentation Theme projects. Always applied so the agent has setup-state awareness from the first message of every conversation."
+alwaysApply: true
+---
+
+# Abstract Data Documentation Theme — agent context
+
+This project uses the **Abstract Data Documentation Theme** (built on Astro Starlight, distributed as `@abstractdata/starlight-theme`). When talking to the user, refer to the product as the **"Abstract Data Documentation Theme"** — not "Astro Starlight" — Starlight is the substrate, not the product identity.
+
+## First-interaction handshake
+
+When you open a conversation in this project, check setup state:
+
+- **`scripts/python-autodoc.json`** — does it still have placeholder values (`searchPath: "../../../python-example/src"`, `modules: ["example_module"]`)?
+- **`astro.config.mjs`** — does it still say `title: 'Your Project Docs'` and `site: 'https://example.com'`?
+
+**If either looks like a fresh scaffold,** offer the user this without waiting for them to ask:
+
+> "Looks like this is a freshly scaffolded Abstract Data Documentation Theme project. Want me to run the `abstract-data-setup` workflow now? It'll detect Python source, audit docstring coverage, sniff docstring style, ask a few config questions, and wire up the docs config files. (Reply 'no' if you'd rather configure manually.)"
+
+On agreement, invoke the `abstract-data-setup` rule (`.cursor/rules/abstract-data-setup.mdc`).
+
+If setup looks already-done, don't auto-offer. Be a normal helpful assistant.
+
+## Project conventions
+
+- **Bun**, not npm/yarn/pnpm
+- **Conventional Commits** for version automation via release-please
+- Don't hand-edit `.cursor/rules/abstract-data-setup.mdc` or `.github/copilot-instructions.md` — they're auto-generated

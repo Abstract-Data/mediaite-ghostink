@@ -1,0 +1,28 @@
+{
+  "name": "mediaite-ghostink-website",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "sync-docs": "node scripts/sync-docs.mjs",
+    "sync-versions": "node scripts/sync-versions.mjs",
+    "dev": "bun run sync-docs && astro dev",
+    "build": "bun run sync-docs && astro check && astro build",
+    "preview": "astro preview",
+    "typecheck": "astro check",
+    "docs:cli": "node scripts/build-cli-docs.mjs",
+    "docs:python": "node scripts/build-python-docs.mjs",
+    "docs:ts": "node scripts/build-ts-docs.mjs"
+  },
+  "dependencies": {
+    "@abstractdata/starlight-theme": "^0.3.5",
+    "@astrojs/starlight": "~0.37.0",
+    "astro": "^5.10.0",
+    "sharp": "^0.33.5",
+    "starlight-links-validator": "^0.16.0"
+  },
+  "devDependencies": {
+    "@astrojs/check": "^0.9.9",
+    "typescript": "^5.6.0"
+  }
+}

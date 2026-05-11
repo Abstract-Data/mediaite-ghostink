@@ -1,0 +1,34 @@
+# build output
+dist/
+.astro/
+.output/
+
+# dependencies
+node_modules/
+
+# bun — bun.lock IS committed (text-based lockfile, needed for reproducible installs)
+.bun/
+
+# logs
+*.log
+npm-debug.log*
+
+# env
+.env
+.env.local
+
+# os
+.DS_Store
+Thumbs.db
+
+# Generated docs content
+# These directories are populated at build time by:
+#   - scripts/sync-docs.mjs   (operator markdown from docs/)
+#   - generate_cli_docs.py    (Typer CLI reference into docs/cli/)
+#   - build-python-docs.mjs   (pydoc-markdown → Python API reference)
+#   - quarto render           (embedded forensic report)
+public/report/
+src/content/docs/synced/
+src/content/docs/adr/
+src/content/docs/cli/
+src/content/docs/api/
