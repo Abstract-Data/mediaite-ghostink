@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.3](https://github.com/Abstract-Data/mediaite-ghostink/compare/v0.1.2...v0.1.3) (2026-05-11)
+
+
+### Features
+
+* **docs:** add Astro/Starlight site hostedarto report ([f62b85e](https://github.com/Abstract-Data/mediaite-ghostink/commit/f62b85ee9184f779d43ec84ce4c6ba4f78363ee2))
+* **docs:** add Astro/Starlight site hostedarto report ([12c1b54](https://github.com/Abstract-Data/mediaite-ghostink/commit/12c1b5468ce52a2e1360506f9cac3288052711fa))
+
+
+### Bug Fixes
+
+* **docs:** render Quarto report as HTML only to PDF build failures ([9f1b3a8](https://github.com/Abstract-Data/mediaite-ghostink/commit/9f1b3a8ac5e1cd0f0ed3790a78c77a38c3232144))
+
 ## [0.1.2](https://github.com/Abstract-Data/mediaite-ghostink/compare/v0.1.1...v0.1.2) (2026-04-29)
 
 
