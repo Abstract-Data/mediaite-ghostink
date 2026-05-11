@@ -117,7 +117,14 @@ jobs:
       - name: Render Quarto report into website/public/report/
         # Evergreen — the report describes the current investigation state,
         # not a versioned artifact.
-        run: quarto render --output-dir website/public/report
+        #
+        # `--to html` is required because `_quarto.yml` declares both `html:`
+        # and `pdf:` formats. Without it, Quarto attempts every declared
+        # format, including PDF, which demands TinyTeX (not installed on the
+        # runner and not needed — the docs site only embeds HTML via
+        # `website/public/report/index.html`). Keep PDF output reachable
+        # locally via `make docs-quarto` for human-readable archives.
+        run: quarto render --to html --output-dir website/public/report
 
       - name: Generate per-version Python API reference (pydoc-markdown)
         working-directory: website
