@@ -1,0 +1,10 @@
+{
+  "$schema": "Configuration for scripts/build-ts-docs.mjs. Adjust to point at your TypeScript project.",
+  "entryPoints": ["../../packages/your-lib/src/index.ts"],
+  "tsconfig": "../../packages/your-lib/tsconfig.json",
+  "outputDir": "src/content/docs/api/ts",
+  "githubPages": false,
+  "skipErrorChecking": true,
+  "repoUrl": "",
+  "repoBranch": "main"
+}

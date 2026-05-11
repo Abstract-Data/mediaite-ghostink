@@ -1,0 +1,28 @@
+{
+  "$schema": "Configuration for scripts/build-cli-docs.mjs. Mirror of python-autodoc.json but for the Typer CLI reference.",
+  "outputDir": "src/content/docs/cli",
+  "urlBasePrefix": "/mediaite-ghostink",
+  "repoUrl": "https://github.com/Abstract-Data/mediaite-ghostink",
+  "repoBranch": "main",
+  "generatorScript": "scripts/generate_cli_docs.py",
+  "uvExtras": [
+    "dev"
+  ],
+  "versions": [
+    {
+      "tag": "v0.1.2",
+      "label": "0.1.2",
+      "default": true
+    },
+    {
+      "tag": "v0.1.1",
+      "label": "0.1.1",
+      "default": false
+    },
+    {
+      "tag": "v0.1.0",
+      "label": "0.1.0",
+      "default": false
+    }
+  ]
+}

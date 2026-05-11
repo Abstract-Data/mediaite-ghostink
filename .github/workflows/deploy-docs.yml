@@ -1,0 +1,205 @@
+name: Deploy Docs
+
+# Builds the Astro Starlight site under `website/` and publishes it to
+# GitHub Pages at https://abstract-data.github.io/mediaite-ghostink/.
+#
+# Build inputs (kept in sync with `make docs-build` and the canonical sources):
+#   - `website/`                    Starlight site + scripts/sync-docs.mjs
+#   - `docs/`                       Operator markdown + ADRs (synced into Starlight)
+#   - `notebooks/` + `_quarto.yml`  Quarto book (rendered into public/report/)
+#   - `index.qmd`                   Quarto book entry
+#   - `src/forensics/cli/**`        Typer CLI surface (CLI reference is auto-generated)
+#   - `scripts/generate_cli_docs.py`
+#   - `scripts/python-autodoc.json` is under website/, covered by `website/**`
+#
+# PRs run the build job only (catches docs regressions early); pushes to main
+# and explicit workflow_dispatch from main also deploy.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "website/**"
+      - "docs/**"
+      - "notebooks/**"
+      - "_quarto.yml"
+      - "index.qmd"
+      - "src/forensics/**"
+      - "scripts/generate_cli_docs.py"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/deploy-docs.yml"
+  pull_request:
+    paths:
+      - "website/**"
+      - "docs/**"
+      - "notebooks/**"
+      - "_quarto.yml"
+      - "index.qmd"
+      - "src/forensics/**"
+      - "scripts/generate_cli_docs.py"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/deploy-docs.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Build can be cancelled when a newer commit arrives on the same ref (PRs and
+# topic branches benefit from this). The deploy job uses the GitHub-recommended
+# shared `pages` group with cancel-in-progress=false so a deploy is never
+# interrupted mid-flight by another workflow run.
+concurrency:
+  group: deploy-docs-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout (full history + tags for versioned docs)
+        # `fetch-depth: 0` is REQUIRED for Option C (hybrid versioning): the
+        # CLI and Python API orchestrators create `git worktree`s pinned at
+        # release tags, and shallow clones won't have those commits.
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+          fetch-depth: 0
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Install Python 3.13
+        run: uv python install 3.13
+
+      - name: Sync Python env
+        run: uv sync --frozen --extra dev
+
+      - name: Install pydoc-markdown (for Python API reference)
+        # `bun run docs:python` shells out to `pydoc-markdown`; install via
+        # pipx so it lives on PATH without polluting the project venv. pipx is
+        # preinstalled on ubuntu-latest runners.
+        run: pipx install pydoc-markdown
+
+      - name: Setup Quarto
+        uses: quarto-dev/quarto-actions/setup@v2
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install website deps (frozen)
+        working-directory: website
+        run: bun install --frozen-lockfile
+
+      - name: Resolve release versions into autodoc configs
+        # Reads `.release-please-manifest.json` + `git tag -l 'v*.*.*'`,
+        # writes the resolved `versions[]` into python-autodoc.json and
+        # cli-autodoc.json. Per-tag generators rely on these.
+        working-directory: website
+        run: bun run sync-versions
+
+      - name: Generate per-version CLI reference (Typer → Markdown)
+        # The orchestrator does `git worktree add` per tag, `uv sync --frozen`
+        # in each worktree, then runs the current main generator against the
+        # tag's venv so `forensics.cli` resolves to that release's code.
+        working-directory: website
+        run: bun run docs:cli
+
+      - name: Render Quarto report into website/public/report/
+        # Evergreen — the report describes the current investigation state,
+        # not a versioned artifact.
+        #
+        # `--to html` is required because `_quarto.yml` declares both `html:`
+        # and `pdf:` formats. Without it, Quarto attempts every declared
+        # format, including PDF, which demands TinyTeX (not installed on the
+        # runner and not needed — the docs site only embeds HTML via
+        # `website/public/report/index.html`). Keep PDF output reachable
+        # locally via `make docs-quarto` for human-readable archives.
+        run: quarto render --to html --output-dir website/public/report
+
+      - name: Generate per-version Python API reference (pydoc-markdown)
+        working-directory: website
+        run: bun run docs:python
+
+      - name: Build documentation site (sync-docs + astro check + astro build)
+        working-directory: website
+        run: bun run build
+
+      - name: Smoke-test build output
+        # Hard-fail the build if any canonical entry points are missing from
+        # `dist/`. This catches sidebar misconfig or generator regressions
+        # (sync-docs, sync-versions, build-cli-docs, build-python-docs, or
+        # Quarto) before a broken site reaches GitHub Pages.
+        #
+        # Versioned paths (Option C):
+        # `dist/cli/<safeTag>/forensics-preflight/index.html` and the
+        # equivalent API page assert the per-tag worktree builds landed.
+        # The bare `dist/cli/<command>/` paths assert the default-version
+        # alias still works so existing inbound links don't break.
+        run: |
+          set -eux
+          # Resolve the current default tag (`v0.1.2` → `0-1-2`) so the
+          # smoke check tracks release-please without manual edits.
+          CURRENT_SAFE_TAG=$(node -e '
+            const m = require("./.release-please-manifest.json");
+            const safe = m["."].replace(/[^a-zA-Z0-9_-]/g, "-");
+            process.stdout.write(safe);
+          ')
+          echo "default safeTag = ${CURRENT_SAFE_TAG}"
+
+          # Evergreen sections
+          test -f website/dist/index.html
+          test -f website/dist/getting-started/index.html
+          test -f website/dist/synced/architecture/index.html
+          test -f website/dist/synced/runbook/index.html
+          test -f website/dist/adr/index.html
+          test -f website/dist/report/index.html
+          test -f website/dist/sitemap-index.xml
+
+          # Default-version aliases at the un-versioned URL
+          test -f website/dist/cli/index.html
+          test -f website/dist/cli/forensics/index.html
+          test -f website/dist/cli/forensics-preflight/index.html
+          test -f website/dist/api/forensics/index.html
+          test -f website/dist/api/forensics_pipeline/index.html
+
+          # Per-version pages (default tag must be present as a subdir)
+          test -d "website/dist/cli/${CURRENT_SAFE_TAG}"
+          test -f "website/dist/cli/${CURRENT_SAFE_TAG}/forensics-preflight/index.html"
+          test -d "website/dist/api/${CURRENT_SAFE_TAG}"
+          test -f "website/dist/api/${CURRENT_SAFE_TAG}/forensics_pipeline/index.html"
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: website/dist
+
+  deploy:
+    name: Deploy
+    needs: build
+    # Only deploy on push/dispatch from main — PR builds upload an artifact
+    # but never publish.
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    concurrency:
+      # GitHub Pages recommends a single shared deploy queue; never cancel an
+      # in-flight deploy.
+      group: pages
+      cancel-in-progress: false
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

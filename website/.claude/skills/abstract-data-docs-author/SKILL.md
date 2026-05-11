@@ -1,0 +1,305 @@
+---
+name: abstract-data-docs-author
+description: Read a project's source code and write substantive narrative documentation alongside the auto-generated API reference. Use when the user says "flesh out the docs", "write better docs", "the API pages are too thin", "enrich the docs", "author the docs", "explain this codebase", "fill out the documentation", "the autodoc pages need more context", or similar phrases inside a project that uses @abstractdata/starlight-theme. Typically invoked by abstract-data-setup after generators have produced bare-signatures pages, but can also be invoked standalone when a user says their docs are too sparse.
+---
+
+# Abstract Data Documentation Theme — Docs Author
+
+Read a project's source code and *write* documentation. Complements the auto-generated mechanical API reference (signatures, type hints, structure produced by pydoc-markdown / TypeDoc) by adding narrative prose, motivation, examples, and cross-references — the things mechanical autodoc can never produce well, especially when the source's docstrings are thin.
+
+This skill **enriches**, never **replaces**, the mechanical autodoc output. Always preserve the auto-generated signatures section. Layer prose above it.
+
+## When to invoke
+
+Run this skill when:
+
+- The user says "flesh out the docs", "write better docs", "the API pages are too thin", "enrich the docs", or similar.
+- The `abstract-data-setup` skill has just finished generating mechanical autodoc pages that read as terse/empty.
+- The user has run `bun run docs:python` (or `docs:ts`) and asks "now make these readable."
+
+If the cwd doesn't have `@abstractdata/starlight-theme` in `package.json` deps, stop and point the user at `bun create @abstractdata/docs`. If `src/content/docs/api/` doesn't exist or is empty, run the setup skill first (or tell the user to).
+
+## Operating principles
+
+1. **Enrich, don't replace.** Always preserve the existing auto-generated content (signatures, type hints, structure). Layer your prose *before* it (as a "Module overview" preface) or *after* it (as "Examples", "Related", "See also" sections). Never delete the mechanical scaffold.
+
+2. **Be honest about uncertainty.** If you're inferring intent from a function name without good context, say so. Phrases like "appears to handle…" are better than confident wrong claims.
+
+3. **Read tests for examples.** If the project has tests, they're the most reliable source of usage patterns. Quote test code (lightly cleaned up) for examples whenever possible — it's true by construction.
+
+4. **Token-budget discipline.** Don't try to read the whole codebase in one pass. Loop module by module, smallest first. Each iteration's context is just one module's source + that module's existing autodoc page. For 30-module projects, that's 30 small conversations, not one giant one.
+
+5. **Idempotent.** If a page already has an "Overview" preface (you wrote one before), refresh it rather than appending a second. Look for marker comments or distinctive heading patterns.
+
+6. **Don't hallucinate features.** If the source code doesn't do something, don't write that it does. The reader will trust your prose; lying is worse than terse pages.
+
+## Workflow
+
+### Phase 1 — Discover the project
+
+Read these files (top-down, bail if absent):
+
+- `package.json` — confirm `@abstractdata/starlight-theme` dep
+- `astro.config.mjs` — confirm Starlight project
+- `scripts/python-autodoc.json` and/or `scripts/ts-autodoc.json` — confirm autodoc has been wired
+- `src/content/docs/api/` — list existing auto-generated pages
+- The source project's `README.md`, `CHANGELOG.md`, `CONTRIBUTING.md` if present
+- Any `docs/adr/` directory or `ARCHITECTURE.md` — important context
+
+Note the source project root (from `searchPath` in `python-autodoc.json` or `entryPoints` in `ts-autodoc.json`). All source reads go relative to that.
+
+### Phase 1.5 — Inventory existing prose
+
+Before profiling or writing anything new, build a manifest of prose that **already exists in the source project**. Most projects have a substantial amount of usable narrative scattered across `README.md`, `CHANGELOG.md`, ADRs, and existing docstrings — rewriting it from scratch wastes tokens and risks contradicting the source's own voice.
+
+For each candidate file, read it once and produce a line-item inventory:
+
+- **`README.md`** — for each `##` section, note: heading, ~10-word summary, candidate destination. Common reuse targets:
+  - "Quick start" / "Installation" / "Getting started" → `src/content/docs/quickstart.md`
+  - "Features" / "What it does" / "Why use this" → `src/content/docs/index.mdx` hero subtitle + `concepts.md` intro
+  - "Architecture" / "How it works" / "Design" → `src/content/docs/concepts.md` body
+  - "Configuration" / "Options" → a guide or the relevant module overview
+  - "Examples" / "Usage" → split across module Example blocks
+  - "Contributing" → leave in repo, link from docs sidebar
+- **`CHANGELOG.md`** — note the most recent 1–3 entries. Don't import wholesale; harvest noteworthy feature additions for the concepts page ("Recent additions") or for module overviews ("Added in v0.4 to address …").
+- **`docs/adr/*.md`** or **`ARCHITECTURE.md`** — for each ADR, note: title, decision, the 1–2 sentence rationale. ADRs are *gold* for the `concepts.md` page — they explain *why* the architecture looks the way it does. Quote the rationale, link out to the ADR for full context.
+- **`CONTRIBUTING.md`** — usually stays in repo; mine for any "How to add a new X" sections that should become how-to guides under `src/content/docs/guides/`.
+- **Existing module docstrings** — even if the autodoc page reads as thin, the source `.py` / `.ts` may have a leading module docstring with usable framing. Note which modules have them (Phase 6 will reuse the wording verbatim where appropriate).
+
+Output the inventory as a brief plan to memory before moving on:
+
+```
+README sections worth lifting:
+  - "## Quick start" → quickstart.md (verbatim, light edit)
+  - "## How it works" → concepts.md intro (paraphrase)
+  - "## Why httpx?" → core/http_scan module overview (paraphrase + link to ADR-007)
+
+CHANGELOG highlights:
+  - v0.4: Added BaseHttpScanModule (link to ADR-007)
+  - v0.3: AI integration via Ollama (concepts.md "Optional integrations" section)
+
+ADRs:
+  - ADR-001 "Use httpx not requests" → quote in concepts.md
+  - ADR-007 "BaseHttpScanModule" → quote in core/http_scan overview
+
+Modules with usable existing docstrings: auditkit.core, auditkit.transport.curl_impersonate
+```
+
+When you reach Phases 5 and 6, **prefer lifting existing prose** (with light cleanup and proper attribution if it's a paraphrase from an ADR) over fabricating new wording. Always offer the user a side-by-side: "README says X, ADR says Y, here's the merged version — keep, edit, or rewrite?"
+
+If the source project has *no* README beyond a one-liner and *no* ADRs, say so up front — the user should know the docs-author run will need to invent more, and that voice will be yours rather than the project's.
+
+### Phase 2 — Profile the project
+
+Spend 1–2 conversation turns building a project profile. Not a deep code read yet — orientation only:
+
+- Read `README.md` (one document) — extract the elevator pitch, the core problem the project solves, the primary user.
+- Read top-level CLI entry points or top-level `index.ts` exports — understand the public surface.
+- Read `pyproject.toml` / `package.json` description fields and keywords.
+- Skim test directory names (don't read full tests yet) — understand testing organization.
+
+Write a **3–5 sentence project profile** to memory. This profile is the lens for every module-level write that follows. Examples:
+
+> "auditkit is a security-audit CLI that scans websites for misconfigurations across 9 categories. It's modular: each scan module inherits from `ScanModule` and runs async via httpx. Heavy use of pydantic for data validation. AI integration via Ollama is optional."
+
+Reuse this voice in every module overview you write.
+
+### Phase 3 — Build the module map
+
+For each existing page in `src/content/docs/api/`:
+
+1. Read the page (current state — may be terse/empty).
+2. Read the corresponding source file from the source project.
+3. Note: file size, public symbols, imports (which other modules does it depend on?), test coverage (is there a `test_<module>.py`?).
+
+Build an in-memory map: `{ pageName, sourcePath, publicSymbols, dependencies, hasTests, currentPageBytes }`. Smallest pages first — they're cheapest to enrich and the user gets early wins.
+
+### Phase 4 — Find usage examples
+
+For each module with tests, locate 1–2 representative test cases. Look for:
+
+- Tests with descriptive names (`test_login_browser_with_valid_credentials`)
+- Tests that exercise the public API directly (not internal helpers)
+- Short tests (under ~20 lines) — easier to inline as examples
+
+Note these locations. You'll quote them in Phase 6.
+
+### Phase 5 — Write narrative pages
+
+Before per-module work, write the high-leverage **narrative pages** that don't exist yet. Check first — if `src/content/docs/concepts.md` (or similar) already has user-written content, leave it alone. Otherwise, draft:
+
+- **`src/content/docs/concepts.md`** — architecture overview. 300–600 words. Source the structure from imports + ADRs + your project profile. Cover: core abstractions, data flow, key types, extension points.
+
+- **`src/content/docs/guides/getting-started.md`** *(if not present)* — distilled from README quickstart. Should be hands-on, end with the user having run a thing.
+
+- **`src/content/docs/guides/<workflow>.md`** — for each repeated test pattern, write a how-to. Examples: "Adding a new scan module", "Configuring authentication", "Writing custom callbacks". One workflow per file.
+
+Don't generate every possible guide — pick the 2–3 most valuable based on the project profile. Quality over quantity.
+
+After writing, update `astro.config.mjs` sidebar to add a "Concepts" / "Guides" group if not present.
+
+### Phase 6 — Module-by-module enrichment loop
+
+For each module page in your map, smallest-first:
+
+1. **Read the source file** (the actual `.py` / `.ts` file, not just docstrings). Understand what it does.
+2. **Detect existing enrichment.** If the page already has a `<!-- abstract-data-docs-author:overview -->` comment marker, you wrote a preface before — refresh it instead of duplicating.
+3. **Write a "Module overview" preface** (150–300 words) covering:
+   - **What this module is** — one-sentence description tied to the project profile
+   - **Why it exists** — what role does it play in the larger system
+   - **When to use it** — typical entry point or trigger
+   - **Key types or functions** — a 3–5 bullet list pointing at the most important public symbols
+4. **Add an "Example" section** quoting a test case (cleaned up if needed). Wrap in a code block with the right language.
+5. **Add a "Related" footer** linking 2–3 sibling modules (from the imports map). Format: `- [`module.name`](/api/module_name/)` — one-line description.
+6. **Inject** the preface above the existing auto-generated content. Keep the example and related sections after.
+7. **Save** with the marker comments so the next run is idempotent:
+
+```markdown
+<!-- abstract-data-docs-author:overview -->
+[your preface]
+<!-- /abstract-data-docs-author:overview -->
+
+[existing auto-generated content untouched]
+
+<!-- abstract-data-docs-author:example -->
+[example section]
+<!-- /abstract-data-docs-author:example -->
+
+<!-- abstract-data-docs-author:related -->
+[related links]
+<!-- /abstract-data-docs-author:related -->
+```
+
+After each module, **stop and confirm with the user** before continuing. Show the diff. Let them approve, edit, or reject. This is mandatory — never bulk-apply prose without per-module review.
+
+### Phase 7 — Cross-reference pass
+
+After all module pages enriched (or as many as the user opted into), do one final pass to cross-reference:
+
+- Inside any page, if you mention another module by name, link it: ``` `auditkit.config.AuditConfig` ``` → `[\`auditkit.config.AuditConfig\`](/api/auditkit_config/#auditconfig-objects)`.
+- Add a "Used by" reverse-lookup section to high-leverage modules — "this is imported by X, Y, Z".
+
+This is the polish pass. Skip if the user is fatigued.
+
+### Phase 8 — Summary
+
+Write a 6–10 line markdown summary covering:
+
+- Modules enriched / skipped
+- Narrative pages written
+- Total prose added (rough word count)
+- Any modules where you got stuck or recommended manual follow-up
+- Suggested next step (e.g., "Run `bun dev` and walk the new pages")
+
+## Templates
+
+Use these as starting points, not rigid forms.
+
+### Module overview template (Python)
+
+```markdown
+**What this is:** [One-sentence description in the project's voice. E.g., "OAuth lifecycle helpers for jre-vidget's YouTube integration."]
+
+**Why it exists:** [What role does it play. E.g., "Isolates browser-based auth from the CLI surface — no Rich, no video logic, no terminal state."]
+
+**When to use it:** [Typical entry point. E.g., "Call `login_browser()` once during onboarding to mint a refresh token. Subsequent runs use `get_credentials()` to refresh on demand."]
+
+**Key surfaces:**
+- `login_browser(client_id, client_secret)` — interactive OAuth flow, returns `AuthConfig`
+- `get_credentials(auth)` — refreshes on demand, returns `google.oauth2.credentials.Credentials`
+- `AuthError` — raised when credentials are missing or unrefreshable
+```
+
+### Class/function preface template
+
+For pages that document a single class or function (rare with pydoc-markdown's per-module output but happens), use:
+
+```markdown
+**Purpose:** [why this exists]
+
+**Key behavior:** [what it does, 2-3 sentences]
+
+**Common usage:**
+```python
+[short example]
+```
+```
+
+### Example block template
+
+```markdown
+## Example
+
+[1-line context: "Logging in for the first time:"]
+
+```python
+[10-15 lines of cleaned test code or synthesized usage]
+```
+
+[1-line outcome: "After this, `auth.refresh_token` is set and persisted via `write_config_safely`."]
+```
+
+## Where dynamic `<head>` / metadata belongs
+
+If during the Phase 5 narrative-page work you find yourself wanting to inject something dynamic into `<head>` — JSON-LD structured data (`Article`, `BreadcrumbList`, `SoftwareSourceCode`), per-page Open Graph image URLs, breadcrumb meta tags, or any computed-from-frontmatter `<meta>` tag — **the right layer is route middleware, not a component override.**
+
+Starlight ≥ 0.32 lets you mutate `Astro.locals.starlightRoute.head` from a function exported by a file referenced as `routeMiddleware:` in `astro.config.mjs`. This is much cleaner than overriding the `<Head>` component because it composes with other plugins, doesn't break when Starlight bumps versions, and lets you read the current page's frontmatter before deciding what to inject.
+
+Sketch:
+
+```ts
+// src/routeData.ts
+import { defineRouteMiddleware } from '@astrojs/starlight/route-data';
+
+export const onRequest = defineRouteMiddleware((context) => {
+  const route = context.locals.starlightRoute;
+  // route.entry.data is the frontmatter; route.headings is the TOC tree.
+  route.head.push({
+    tag: 'script',
+    attrs: { type: 'application/ld+json' },
+    content: JSON.stringify({
+      '@context': 'https://schema.org',
+      '@type': 'Article',
+      headline: route.entry.data.title,
+      description: route.entry.data.description,
+    }),
+  });
+});
+```
+
+```js
+// astro.config.mjs
+starlight({
+  routeMiddleware: './src/routeData.ts',
+  // …
+})
+```
+
+If the user explicitly wants any of these features (JSON-LD, dynamic OG images, breadcrumb meta), point them at this file as the place to wire it. Don't override the `<Head>` component just to inject computed meta — that's an anti-pattern documented in the Starlight migration notes for ≥ 0.33.
+
+## What this skill does NOT do
+
+- **Doesn't rewrite source code.** That's a different operation. If the user wants to add docstrings to the source, that's `abstract-data-setup`'s Phase 4 territory (audit + suggest enrichment), not this skill's.
+- **Doesn't generate API reference from scratch.** That's pydoc-markdown / TypeDoc's job. This skill *layers on top of* that output.
+- **Doesn't guess at private symbols.** Only document the public API surface. Helper functions with leading underscores are skipped.
+- **Doesn't auto-commit.** Writes files, leaves git up to the user.
+
+## Files this skill reads
+
+- The docs project's `package.json`, `astro.config.mjs`, `scripts/python-autodoc.json` / `scripts/ts-autodoc.json`, existing `src/content/docs/api/*.md`.
+- The source project's `README.md`, source files (`.py` / `.ts`), test files, ADRs, `pyproject.toml`/`package.json`.
+
+## Files this skill writes
+
+- `src/content/docs/api/*.md` — enriched (preface + example + related sections injected around existing autodoc).
+- `src/content/docs/concepts.md` — narrative architecture overview (only if not already user-authored).
+- `src/content/docs/guides/*.md` — per-workflow how-to (only if not already user-authored).
+- `astro.config.mjs` — sidebar updates to add new groups for Concepts / Guides.
+
+## Notes for the agent
+
+- **Never bulk-apply.** Always confirm per-module before writing.
+- **Token discipline.** Read one module's source per loop iteration. Don't try to hold the whole codebase in context.
+- **Preserve markers.** The HTML comment markers (`<!-- abstract-data-docs-author:overview -->`) are how the next run finds and refreshes existing prose. Don't strip them.
+- **When stuck:** if you can't form a coherent preface for a module (the source is too thin or too obscure), say so and skip. Don't write nonsense.
+- **The mechanical autodoc is the floor.** Your job is to raise the ceiling.
