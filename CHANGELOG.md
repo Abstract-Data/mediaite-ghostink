@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.4](https://github.com/Abstract-Data/mediaite-ghostink/compare/v0.1.3...v0.1.4) (2026-05-12)
+
+
+### Build
+
+* bump all dependency minimums to latest locked versions, add docs URL ([bee6846](https://github.com/Abstract-Data/mediaite-ghostink/commit/bee68461da331fb027363b7a7bfa255907fa045d))
+
 ## [0.1.3](https://github.com/Abstract-Data/mediaite-ghostink/compare/v0.1.2...v0.1.3) (2026-05-11)
 
 
