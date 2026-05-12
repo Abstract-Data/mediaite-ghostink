@@ -658,3 +658,40 @@ test ! -f .github/workflows/deploy.yml && echo OK
 - `starlight-links-validator` is base-aware but requires hand-written internal links to include the base prefix. Future contributors should follow the convention or use Starlight's slug-based linking; the existing generators encode this in one place each.
 - Quarto rendering is wired into the deploy workflow but skipped in local `make docs-dev`. Run `make docs-quarto` (or `make docs-build`) when iterating on the report.
 - GitNexus impact analysis was not invoked; the changes are additive (new scripts, new workflow, gitignored generated content). Pre-merge, run `gitnexus_detect_changes` to confirm the scope.
+
+---
+
+### Dependency version bumps + docs URL in README
+**Status:** Complete
+**Date:** 2026-05-12
+**Agent/Session:** Copilot cloud agent (Claude Sonnet 4.6)
+
+#### What Was Done
+- Bumped all dependency minimum version pins in `pyproject.toml` to match the currently locked
+  versions in `uv.lock` (reflecting the latest stable releases available as of ~7 days after
+  the previous pinned minimums).
+- Added `Documentation` URL to `[project.urls]` in `pyproject.toml`.
+- Added a `Docs` badge (gh-pages URL) to the README header badge row.
+
+#### Files Modified
+- `pyproject.toml` — bumped `>=` constraints for all main, dev, and optional dependencies; added `Documentation` URL
+- `README.md` — added `[![Docs](...)](https://abstract-data.github.io/mediaite-ghostink/)` badge
+
+#### Verification Evidence
+```text
+# All new constraints satisfied by uv.lock (verified via Python script):
+# typer: locked=0.24.1 >= min=0.24.0  ✓
+# polars: locked=1.40.0 >= min=1.40.0  ✓
+# duckdb: locked=1.5.2 >= min=1.5.0  ✓
+# ... (all 41 packages OK, none FAIL)
+```
+
+#### Decisions Made
+- Used the currently resolved versions in `uv.lock` as the new minimums; no lock update needed.
+- Previous deploy-docs failure (run 25649887514) was a tag-timing race: `v0.1.3` tag was not
+  yet visible when the workflow ran. The tag now exists; subsequent runs should pass.
+
+#### Risks & Next Steps
+- The `uv.lock` is still frozen — only `pyproject.toml` constraints changed. No `uv lock` regeneration
+  needed unless new packages are added.
+- When the next release is cut (v0.1.4), ensure `v0.1.4` tag exists before deploy-docs runs.

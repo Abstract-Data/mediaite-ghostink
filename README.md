@@ -3,6 +3,7 @@
 Hybrid **AI writing forensics** pipeline for Mediaite.com: deterministic stages **scrape → extract → analyze → report**, combining statistical stylometry (change-points, time series, hypothesis tests) with embedding drift and optional token-probability and AI-baseline comparison.
 
 [![CI](https://github.com/Abstract-Data/mediaite-ghostink/actions/workflows/ci.yml/badge.svg)](https://github.com/Abstract-Data/mediaite-ghostink/actions/workflows/ci.yml)
+[![Docs](https://img.shields.io/badge/docs-github%20pages-0075A8?logo=github&logoColor=white)](https://abstract-data.github.io/mediaite-ghostink/)
 [![Python 3.13](https://img.shields.io/badge/python-3.13-3776AB?logo=python&logoColor=white)](https://www.python.org/downloads/release/python-3130/)
 [![uv](https://img.shields.io/badge/uv-package%20manager-5A0FC8?logo=uv&logoColor=white)](https://github.com/astral-sh/uv)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
